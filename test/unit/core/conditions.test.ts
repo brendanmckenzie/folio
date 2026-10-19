@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FieldCondition } from "../../../src/core/conditions";
-import { matches } from "../../../src/core/conditions";
+import { conditionRefusal, matches, readCondition } from "../../../src/core/conditions";
 import type { Json } from "../../../src/core/doc";
 
 // conditional-fields.md's architecture decision 1: a condition is data, never
@@ -156,5 +156,127 @@ describe("matches: unknown shapes", () => {
 
     const emptyObject = {} as unknown as FieldCondition;
     expect(matches(emptyObject, {})).toBe(false);
+  });
+});
+
+describe("matches: includes", () => {
+  it("is true when the answer is an array containing the value", () => {
+    expect(matches({ field: "tags", includes: "b" }, { tags: ["a", "b"] })).toBe(true);
+    expect(matches({ field: "tags", includes: "c" }, { tags: ["a", "b"] })).toBe(false);
+  });
+
+  it("is false for a non-array answer or a missing one", () => {
+    expect(matches({ field: "tags", includes: "a" }, { tags: "a" })).toBe(false);
+    expect(matches({ field: "tags", includes: "a" }, {})).toBe(false);
+  });
+
+  it("leaves eq and in alone: they still compare the whole value", () => {
+    expect(matches({ field: "tags", eq: "a" }, { tags: ["a"] })).toBe(false);
+    expect(matches({ field: "tags", in: ["a"] }, { tags: ["a"] })).toBe(false);
+  });
+});
+
+describe("conditionRefusal", () => {
+  it("accepts every well formed shape", () => {
+    for (const c of [
+      { field: "a", eq: "x" },
+      { field: "a", ne: 3 },
+      { field: "a", in: ["x", 1, true, null] },
+      { field: "a", isSet: false },
+      { field: "a", includes: "x" },
+      { all: [{ field: "a", eq: 1 }, { any: [{ field: "b", isSet: true }] }] },
+      { not: { field: "a", eq: 1 } },
+    ]) {
+      expect(conditionRefusal(c), JSON.stringify(c)).toBeNull();
+    }
+  });
+
+  it("refuses each malformed shape", () => {
+    for (const c of [
+      null,
+      "x",
+      [],
+      {},
+      { field: "a" },
+      { field: 3, eq: 1 },
+      { field: "", eq: 1 },
+      { field: "a", eq: 1, ne: 2 },
+      { field: "a", eq: { nested: true } },
+      { field: "a", in: "x" },
+      { field: "a", in: [{}] },
+      { field: "a", isSet: "yes" },
+      { all: "x" },
+      { all: [], any: [] },
+      { not: 3 },
+      { field: "a", bogus: 1 },
+    ]) {
+      expect(conditionRefusal(c), JSON.stringify(c)).not.toBeNull();
+    }
+  });
+
+  it("bounds depth, size and the length of an in list", () => {
+    let deep: unknown = { field: "a", eq: 1 };
+    for (let i = 0; i < 3; i++) deep = { not: deep };
+    expect(conditionRefusal(deep)).toBeNull();
+    expect(conditionRefusal({ not: deep })).toMatch(/deep/);
+
+    const wide = { all: Array.from({ length: 32 }, () => ({ field: "a", eq: 1 })) };
+    expect(conditionRefusal(wide)).toMatch(/parts/);
+    const ok = { all: Array.from({ length: 30 }, () => ({ field: "a", eq: 1 })) };
+    expect(conditionRefusal(ok)).toBeNull();
+
+    const upTo = (n: number) => Array.from({ length: n }, (_, i) => i);
+    expect(conditionRefusal({ field: "a", in: upTo(100) })).toBeNull();
+    expect(conditionRefusal({ field: "a", in: upTo(101) })).not.toBeNull();
+  });
+});
+
+describe("readCondition", () => {
+  it("rebuilds known nodes key by key", () => {
+    expect(
+      readCondition({
+        all: [
+          { field: "a", eq: "x", extra: 1 },
+          { field: "b", includes: "y" },
+        ],
+        junk: 1,
+      }),
+    ).toEqual({
+      all: [
+        { field: "a", eq: "x" },
+        { field: "b", includes: "y" },
+      ],
+    });
+  });
+
+  it("turns an unrecognised leaf into a node that is never true", () => {
+    const never = readCondition({ field: "a", gt: 3 });
+    expect(never).toEqual({ any: [] });
+    expect(matches(never as FieldCondition, { a: 5 })).toBe(false);
+  });
+
+  it("answers undefined for anything that is not an object", () => {
+    for (const raw of [undefined, null, "x", 3, [], true]) {
+      expect(readCondition(raw)).toBeUndefined();
+    }
+  });
+
+  it("bounds depth instead of recursing without limit", () => {
+    let deep: unknown = { field: "a", eq: 1 };
+    for (let i = 0; i < 50; i++) deep = { not: deep };
+    expect(() => readCondition(deep)).not.toThrow();
+  });
+
+  it("never throws on arbitrary input", () => {
+    const cyclic: Record<string, unknown> = { all: [] };
+    (cyclic.all as unknown[]).push(cyclic);
+    for (const raw of [
+      cyclic,
+      { all: [null, 1, "x"] },
+      { not: undefined },
+      { field: "a", in: [{}] },
+    ]) {
+      expect(() => readCondition(raw)).not.toThrow();
+    }
   });
 });

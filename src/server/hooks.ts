@@ -188,11 +188,13 @@ export interface RedirectsChangedHookPayload<Env> extends HookBase<Env> {
 }
 
 /**
- * A **structural** save on a form: a question added, removed, renamed, retyped,
- * made required, or its option values changed
- * (`../../docs/specs/content-model/forms.md` architecture decision 7). A label,
- * help, placeholder or translation edit fires nothing at all — `shapeOf` is what
- * decides, and `updateForm` is what asks it.
+ * A **structural** save on a form: anything the server enforces moved, which is a
+ * question added, removed, renamed, retyped, made required or conditional, or its
+ * option values, length, pattern or file limits changed
+ * (`../../docs/specs/content-model/forms.md` architecture decision 7, widened by
+ * `form-logic.md` decision 11). A label, help, placeholder, translation, layout or
+ * prefill edit fires nothing at all — `shapeOf` is what decides, and `updateForm` is
+ * what asks it.
  *
  * `redirectsChanged`'s shape: an event for a write that changes published bytes
  * without publishing anything. Folio's own internal hook purges `form:<id>` off

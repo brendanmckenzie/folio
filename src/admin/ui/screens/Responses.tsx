@@ -240,7 +240,10 @@ export function Responses({
       cell: (row) => {
         const text = cellText(field, row);
         return (
-          <span className={text === ABSENT ? css.absent : css.cell} title={text}>
+          <span
+            className={text === ABSENT || row.unasked.includes(field.name) ? css.absent : css.cell}
+            title={text}
+          >
             {text}
           </span>
         );
@@ -593,7 +596,9 @@ function ResponseDrawer({
                   <span className={css.size}>{sizeLabel(line.file.size)}</span>
                 </a>
               ) : (
-                <span className={line.value === ABSENT ? css.absent : undefined}>{line.value}</span>
+                <span className={line.value === ABSENT || line.notAsked ? css.absent : undefined}>
+                  {line.value}
+                </span>
               )}
             </dd>
           </div>

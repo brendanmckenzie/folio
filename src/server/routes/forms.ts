@@ -301,6 +301,10 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         site: scopeOf(c),
       });
     } else if (result.descriptorChanged) {
+      // A save that changed only what a page draws (a label, `beside`, `hold`,
+      // `prefill`, or which unconditional section a question is in) purges without
+      // a version bump: `shapeOf` is everything the server enforces (spec 35
+      // decision 11), and none of those are.
       // `rt.formPurgeCapability` is `undefined` for every real host — the
       // same default `purgeFormLayout` would pick on its own — and set only
       // by a workers test that needs to observe this call at all
@@ -766,6 +770,9 @@ function refererPath(req: Request): string {
  *     `uploadAsset`'s reason: a row naming an object that never landed is worse
  *     than an object with no row, and the second is closed by a compensating
  *     delete on either failure.
+ *  9a. **The engine decides what was asked** (`validateSubmission`, spec 35): an
+ *     answer or a file for a question that was not is dropped here, before
+ *     anything is hashed or written.
  *
  * Nothing about the answer distinguishes a stored row from a collapsed duplicate
  * or from a caught honeypot: all three answer `ok` with a minted id. That is
@@ -902,12 +909,25 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // `required` check for a `file` question is the answer to "did a file
     // arrive", and behind every abuse control because buffering an attachment
     // for a bot is the one cost the honeypot exists to avoid.
-    const uploads = await prepareUploads(form.fields, parts);
-    const { values, errors } = validateSubmission(
+    const prepared = await prepareUploads(form.fields, parts);
+    const { values, errors, unasked } = validateSubmission(
       form.fields,
       body,
-      new Set(uploads.files.map((file) => file.field)),
+      new Set(prepared.files.map((file) => file.field)),
+      form.layout.sections ?? [],
     );
+    // What was not asked is dropped here, before anything is hashed or written: a
+    // file on a question that did not apply is never put to R2, and a too-large one
+    // does not refuse the submission. `prepareUploads` still read every file part
+    // first, because `validateSubmission` needs the uploaded set to answer a `file`
+    // question's `required`; filtering afterwards keeps `validateSubmission` the one
+    // place that decides what was asked.
+    const uploads = {
+      files: prepared.files.filter((file) => !unasked.includes(file.field)),
+      errors: Object.fromEntries(
+        Object.entries(prepared.errors).filter(([field]) => !unasked.includes(field)),
+      ),
+    };
     // The file's own refusal wins: a required question whose CV was too large
     // should say `too_long`, not `required`.
     const refusals = { ...errors, ...uploads.errors };
@@ -949,6 +969,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       inserted = await insertResponse(db, {
         form,
         data: values,
+        unasked,
         // Whatever the descriptor's hidden input said, run back through the
         // runtime's own locale resolution: an undeclared code — or one a submitter
         // invented — is stored as `''`, the source-locale convention `content_index`

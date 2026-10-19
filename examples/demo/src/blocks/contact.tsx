@@ -4,6 +4,8 @@ import {
   defineBlock,
   form,
   formLayout,
+  type Json,
+  prefillAnswers,
   text,
   type ResolvedForm,
   type ResolvedFormField,
@@ -33,6 +35,10 @@ export interface SubmissionState {
   form: string;
   /** `folio_invalid`: the field names the server refused. */
   invalid: readonly string[];
+  /** The page's own query string, for `prefillAnswers`. Present on every page
+   *  render, with `status: ''` when nothing was submitted, so a form can seed its
+   *  inputs from `?area=safari` without a submission having happened. */
+  search: string;
 }
 
 export const SubmissionStatus = createContext<SubmissionState | null>(null);
@@ -72,9 +78,20 @@ function Notice({ form: descriptor }: { form: ResolvedForm }) {
 /** One question, drawn by the host. The descriptor is already localised and
  *  already carries `required`, `pattern`, `min`/`max` and the option labels, so
  *  there is no locale code and no fallback logic anywhere in here. */
-function Question({ field, invalid }: { field: ResolvedFormField; invalid: boolean }) {
+function Question({
+  field,
+  invalid,
+  seed,
+}: {
+  field: ResolvedFormField;
+  invalid: boolean;
+  /** `prefillAnswers`' answer for this question, if any. */
+  seed?: Json;
+}) {
   const id = `f-${field.name}`;
   const bad = invalid || undefined;
+  const seeded = typeof seed === "string" || typeof seed === "number" ? String(seed) : undefined;
+  const chosen = Array.isArray(seed) ? seed : typeof seed === "string" ? [seed] : [];
 
   // Prose between questions: no input, nothing stored. `formLayout` still
   // gives a `statement` a row of its own — it is never `hidden`, so it is
@@ -101,6 +118,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           required={field.required}
           placeholder={field.placeholder}
           maxLength={field.max}
+          defaultValue={seeded}
           aria-invalid={bad}
         />
       ) : field.kind === "select" ? (
@@ -109,6 +127,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           className="form__input"
           name={field.name}
           required={field.required}
+          defaultValue={seeded}
           aria-invalid={bad}
         >
           <option value="">Choose…</option>
@@ -127,6 +146,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
                 name={field.name}
                 value={option.value}
                 required={field.kind === "radio" && field.required}
+                defaultChecked={chosen.includes(option.value)}
               />
               {option.label}
             </label>
@@ -139,6 +159,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           name={field.name}
           value="1"
           required={field.required}
+          defaultChecked={seed === true}
           aria-invalid={bad}
         />
       ) : field.kind === "file" ? (
@@ -163,6 +184,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           required={field.required}
           placeholder={field.placeholder}
           pattern={field.pattern}
+          defaultValue={seeded}
           aria-invalid={bad}
           {...(field.kind === "number"
             ? { min: field.min, max: field.max }
@@ -233,10 +255,16 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
   // `formLayout` (`folio/core`) is the one function that groups a compiled
   // form's flat `fields` into rows and sections, so this host never
   // reimplements the grouping `beside`/`grow` already describe. Called with no
-  // `answers` (this is a server render with no submission to react to yet), so
-  // every cell comes back `shown: true` — the whole of what that argument does
-  // until conditional visibility lands.
+  // `answers` on purpose: this page ships no client script, which is the
+  // no-JavaScript path (`docs/specs/content-model/form-logic.md` decision 7). Every
+  // question and section is present and every cell `shown`, and the descriptor's
+  // `required` is only ever "required unconditionally", so a visitor who cannot
+  // reveal a conditional question is never blocked by one. The server works out
+  // which questions applied. A host with a script would switch to
+  // `formLayout(descriptor, answers)` after mount.
   const view = formLayout(descriptor);
+  // Query-string prefill: only questions the editor opted in (`prefill: 'query'`).
+  const seeds = prefillAnswers(descriptor, { query: state?.search ?? "" });
 
   return (
     <form method={descriptor.method} action={descriptor.action} encType={descriptor.enctype}>
@@ -282,10 +310,13 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
                   key={cell.field.name}
                   field={cell.field}
                   invalid={invalid.has(cell.field.name)}
+                  {...(seeds[cell.field.name] !== undefined
+                    ? { seed: seeds[cell.field.name] as Json }
+                    : {})}
                 />
               ) : (
                 // A `hold`ing cell whose question is not currently asked
-                // (slice 3): an empty, `aria-hidden` slot, never a
+                // (only with `answers`): an empty, `aria-hidden` slot, never a
                 // `visibility: hidden` input — that still posts a value in a
                 // native submission.
                 <div key={cell.field.name} aria-hidden="true" />
@@ -293,9 +324,9 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
             )}
           </div>
         ));
-        // No section this slice — `formLayout` always answers the one
-        // `section: null` group — but a host writing against this shape now
-        // needs no changes once sections are real.
+        // A real section is a `<fieldset>` with a `<legend>`; the questions outside
+        // any section come back as `section: null` groups, which may sit before
+        // and after the real ones.
         return section ? (
           <fieldset key={section.name} className="form__section">
             <legend>{section.label}</legend>
@@ -303,7 +334,7 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
             {body}
           </fieldset>
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: one section, ever, this slice.
+          // biome-ignore lint/suspicious/noArrayIndexKey: a `null` group has no name; its place is its identity.
           <Fragment key={i}>{body}</Fragment>
         );
       })}

@@ -23,7 +23,9 @@
  * `resolve()` (`core/resolve.ts`) to a host's `render` with no server import in
  * between.
  */
+import { conditionRefusal, type FieldCondition, readCondition } from "./conditions";
 import type { Json } from "./doc";
+import { formState } from "./form-logic";
 
 /** The thirteen kinds a question on a form can be. */
 export type FormFieldKind =
@@ -141,8 +143,44 @@ export interface FormField {
    * be the same fact recorded two ways.
    */
   grow?: 2 | 3 | 4;
+  /**
+   * Asked only while this holds (`docs/specs/content-model/form-logic.md`
+   * decision 2). Evaluated against the answers of earlier, asked questions only.
+   */
+  showIf?: FieldCondition;
+  /**
+   * Required whenever asked *and* this holds. Evaluated against every asked
+   * question's answer, so it may name a later one: that is what lets "email or
+   * phone, at least one" be written without a cycle.
+   */
+  requireIf?: FieldCondition;
+  /** The `FormSection` this question belongs to. Members are contiguous. */
+  section?: string;
+  /** Keeps a not-asked question's cell as `shown: false` so its row-mates do not
+   *  widen. Layout. */
+  hold?: true;
+  /** Seeds this question from the page's query parameter of the same name.
+   *  Presentation: the server validates what is posted. */
+  prefill?: "query";
   i18n?: Record<string, FormFieldI18n>;
 }
+
+/** A group of questions under one heading, which can carry its own `showIf`. */
+export interface FormSection {
+  /** Slug, unique among sections. */
+  name: string;
+  label: string;
+  help?: string;
+  showIf?: FieldCondition;
+  i18n?: Record<string, { label?: string; help?: string }>;
+}
+
+/** What `forms.layout` stores. The home for slice 3's `steps` too. */
+export interface FormLayout {
+  sections?: readonly FormSection[];
+}
+
+export const MAX_FORM_SECTIONS = 20;
 
 export const MAX_FORM_FIELDS = 60;
 /** Names beginning with this are Folio's (decision 13). The builder refuses one. */
@@ -292,6 +330,21 @@ function validateOneField(raw: Record<string, unknown>, kind: FormFieldKind): Fo
   if (typeof raw.beside === "boolean") field.beside = raw.beside;
   if (raw.grow === 2 || raw.grow === 3 || raw.grow === 4) field.grow = raw.grow;
 
+  // Logic, narrowed the same way (spec 35 decision 3): nothing here throws, because
+  // `readFields` calls this and a throw is a live form with no questions. The
+  // strict checks are `checkFormLogic`'s, on write only. A `showIf` that is not an
+  // object becomes a never-true node (the question is never asked, so it can
+  // neither block a submission nor store an answer); a `requireIf` that is
+  // malformed is dropped.
+  if (raw.showIf !== undefined) field.showIf = readCondition(raw.showIf) ?? { any: [] };
+  if (kind !== "statement" && raw.requireIf !== undefined) {
+    const requireIf = readCondition(raw.requireIf);
+    if (requireIf) field.requireIf = requireIf;
+  }
+  if (typeof raw.section === "string" && NAME.test(raw.section)) field.section = raw.section;
+  if (raw.hold === true) field.hold = true;
+  if (raw.prefill === "query" && kind !== "file" && kind !== "statement") field.prefill = "query";
+
   if (raw.i18n !== undefined) {
     const i18n = validateFieldI18n(raw.i18n);
     if (i18n) field.i18n = i18n;
@@ -343,19 +396,326 @@ export function validateFormFields(input: unknown): FormField[] {
   return out;
 }
 
+/* ------------------------------------------------------------ layout & logic --- */
+
+function validateSectionI18n(raw: unknown): FormSection["i18n"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: NonNullable<FormSection["i18n"]> = {};
+  for (const [locale, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== "object") continue;
+    const v = value as Record<string, unknown>;
+    const entry: { label?: string; help?: string } = {};
+    if (typeof v.label === "string") entry.label = v.label;
+    if (typeof v.help === "string") entry.help = v.help;
+    if (Object.keys(entry).length > 0) out[locale] = entry;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /**
- * The shape-bearing projection `forms.version` is bumped from (decision 7):
- * name, kind, whether it is required, and its option values — nothing a label,
- * help, placeholder or translation edit would touch. Pure, and comparable by
- * simple string equality against what is stored.
+ * The strict half for `forms.layout` (spec 35 decision 8): names unique and
+ * well-formed, every section labelled, conditions well formed, at most
+ * `MAX_FORM_SECTIONS`. Throws, so the PATCH route and the builder refuse a bad
+ * layout. Which questions belong to which section, and whether that makes sense, is
+ * `checkFormLogic`'s.
  */
-export function shapeOf(fields: readonly FormField[]): string {
+export function validateFormLayout(input: unknown, _fields: readonly FormField[]): FormLayout {
+  if (input === undefined || input === null) return {};
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw new Error("forms: layout must be an object");
+  }
+  const raw = (input as Record<string, unknown>).sections;
+  if (raw === undefined) return {};
+  if (!Array.isArray(raw)) throw new Error("forms: layout sections must be an array");
+  if (raw.length > MAX_FORM_SECTIONS) {
+    throw new Error(`forms: at most ${MAX_FORM_SECTIONS} sections, got ${raw.length}`);
+  }
+  const seen = new Set<string>();
+  const sections: FormSection[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") throw new Error("forms: a section must be an object");
+    const s = item as Record<string, unknown>;
+    if (typeof s.name !== "string" || !NAME.test(s.name)) {
+      throw new Error(`forms: invalid section name ${JSON.stringify(s.name)}`);
+    }
+    if (seen.has(s.name)) throw new Error(`forms: duplicate section name "${s.name}"`);
+    seen.add(s.name);
+    if (typeof s.label !== "string" || s.label === "") {
+      throw new Error(`forms: section "${s.name}" needs a label`);
+    }
+    const section: FormSection = { name: s.name, label: s.label };
+    if (typeof s.help === "string") section.help = s.help;
+    if (s.showIf !== undefined) {
+      const refusal = conditionRefusal(s.showIf);
+      if (refusal) throw new Error(`forms: section "${s.name}": ${refusal}`);
+      const showIf = readCondition(s.showIf);
+      if (showIf) section.showIf = showIf;
+    }
+    const i18n = validateSectionI18n(s.i18n);
+    if (i18n) section.i18n = i18n;
+    sections.push(section);
+  }
+  return sections.length > 0 ? { sections } : {};
+}
+
+/**
+ * The narrowing half, for the read path: never throws, and never empties a form. A
+ * section that is malformed or unnamed is dropped; a `showIf` that is not a usable
+ * condition becomes never-true (like a question's, so what it held is never asked);
+ * a member whose section is unknown, or that has already closed (membership is
+ * contiguous), loses its membership; a section left with no members is dropped.
+ * Returns the fields too, since clearing a membership changes them.
+ */
+export function readFormLayout(
+  input: unknown,
+  fields: readonly FormField[],
+): { layout: FormLayout; fields: FormField[] } {
+  const known = new Map<string, FormSection>();
+  const raw =
+    input && typeof input === "object" && !Array.isArray(input)
+      ? (input as Record<string, unknown>).sections
+      : undefined;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (known.size >= MAX_FORM_SECTIONS) break;
+      if (!item || typeof item !== "object") continue;
+      const s = item as Record<string, unknown>;
+      if (typeof s.name !== "string" || !NAME.test(s.name) || known.has(s.name)) continue;
+      if (typeof s.label !== "string" || s.label === "") continue;
+      const section: FormSection = { name: s.name, label: s.label };
+      if (typeof s.help === "string") section.help = s.help;
+      if (s.showIf !== undefined) section.showIf = readCondition(s.showIf) ?? { any: [] };
+      const i18n = validateSectionI18n(s.i18n);
+      if (i18n) section.i18n = i18n;
+      known.set(s.name, section);
+    }
+  }
+
+  const closed = new Set<string>();
+  const used = new Set<string>();
+  let open: string | undefined;
+  const out = fields.map((f): FormField => {
+    const name = f.section;
+    if (name === open) {
+      if (name !== undefined) used.add(name);
+      return f;
+    }
+    if (open !== undefined) closed.add(open);
+    if (name === undefined || !known.has(name) || closed.has(name)) {
+      open = undefined;
+      if (name === undefined) return f;
+      const { section: _dropped, ...rest } = f;
+      return rest;
+    }
+    open = name;
+    used.add(name);
+    return f;
+  });
+
+  const sections = [...known.values()].filter((s) => used.has(s.name));
+  // A section dropped for having no members can have none to clear; one dropped
+  // for being unknown was cleared above.
+  return { layout: sections.length > 0 ? { sections } : {}, fields: out };
+}
+
+const VALUE_BEARING = (kind: FormFieldKind) => kind !== "file" && kind !== "statement";
+
+type Leaf = Extract<FieldCondition, { field: string }>;
+
+function leavesOf(condition: FieldCondition): Leaf[] {
+  if ("all" in condition) return condition.all.flatMap(leavesOf);
+  if ("any" in condition) return condition.any.flatMap(leavesOf);
+  if ("not" in condition) return leavesOf(condition.not);
+  return "field" in condition ? [condition] : [];
+}
+
+const TEXT_ANSWER_KINDS: ReadonlySet<FormFieldKind> = new Set([
+  "text",
+  "textarea",
+  "email",
+  "tel",
+  "url",
+  "date",
+  "hidden",
+]);
+
+/** Why `leaf` cannot be asked of `source`, or `null`. The table in spec 35's
+ *  Core types, one operator list and one value rule per kind. */
+function leafRefusal(leaf: Leaf, source: FormField): string | null {
+  const op = (["eq", "ne", "in", "isSet", "includes"] as const).find((o) => o in leaf);
+  if (!op) return "has no operator";
+  const values: readonly Json[] =
+    op === "in"
+      ? (leaf as { in: readonly Json[] }).in
+      : op === "isSet"
+        ? []
+        : [(leaf as unknown as Record<string, Json>)[op] as Json];
+  const declared = new Set((source.options ?? []).map((o) => o.value));
+
+  switch (source.kind) {
+    case "select":
+    case "radio":
+      if (op === "includes") return `compares with "${op}", which it cannot answer`;
+      return values.every((v) => typeof v === "string" && declared.has(v))
+        ? null
+        : "compares with an option it does not have";
+    case "checkboxes":
+      if (op !== "includes" && op !== "isSet")
+        return `compares with "${op}", which it cannot answer`;
+      return values.every((v) => typeof v === "string" && declared.has(v))
+        ? null
+        : "compares with an option it does not have";
+    case "checkbox":
+      if (op !== "eq") return `compares with "${op}", which it cannot answer`;
+      return typeof values[0] === "boolean"
+        ? null
+        : "compares with something other than ticked or not";
+    case "number":
+      if (op === "includes") return `compares with "${op}", which it cannot answer`;
+      return values.every((v) => typeof v === "number" && Number.isFinite(v))
+        ? null
+        : "compares with something that is not a number";
+    default:
+      if (!TEXT_ANSWER_KINDS.has(source.kind) || op === "includes") {
+        return `compares with "${op}", which it cannot answer`;
+      }
+      return values.every((v) => typeof v === "string" && v.length <= 120)
+        ? null
+        : "compares with text longer than 120 characters";
+  }
+}
+
+/**
+ * The write-time refusals for conditions and sections (spec 35 decision 3), thrown
+ * as a plain `Error` naming the questions by label and slug for an editor. Run on
+ * every save, and by the builder before it enables Save. **Never on read**: a
+ * dangling reference reads as absent there.
+ */
+export function checkFormLogic(fields: readonly FormField[], layout: FormLayout = {}): void {
+  const indexOf = new Map(fields.map((f, i) => [f.name, i]));
+  const tag = (f: FormField) => `"${f.label}" (${f.name})`;
+
+  const check = (
+    owner: string,
+    condition: FieldCondition,
+    verb: "shown" | "required",
+    ownIndex: number | null,
+    limit: number,
+  ) => {
+    for (const leaf of leavesOf(condition)) {
+      const at = indexOf.get(leaf.field);
+      const source = at === undefined ? undefined : fields[at];
+      if (at === undefined || !source) {
+        throw new Error(
+          `${owner} depends on "${leaf.field}", which is not a question on this form`,
+        );
+      }
+      if (at === ownIndex) throw new Error(`${owner} cannot depend on itself`);
+      if (verb === "shown" && at >= limit) {
+        throw new Error(
+          `${owner} can only be shown based on a question above it, but ${tag(source)} is below it`,
+        );
+      }
+      if (!VALUE_BEARING(source.kind)) {
+        throw new Error(`${owner} cannot depend on ${tag(source)}, which has no answer to compare`);
+      }
+      const reason = leafRefusal(leaf, source);
+      if (reason) throw new Error(`${owner} ${reason} for ${tag(source)}`);
+    }
+  };
+
+  fields.forEach((f, i) => {
+    if (f.showIf) check(`${tag(f)}'s show rule`, f.showIf, "shown", i, i);
+    if (f.requireIf) {
+      if (f.kind === "statement")
+        throw new Error(`${tag(f)} asks nothing, so it cannot be required`);
+      if (f.required) {
+        throw new Error(`${tag(f)} cannot be both always required and required only sometimes`);
+      }
+      check(`${tag(f)}'s required rule`, f.requireIf, "required", i, fields.length);
+    }
+  });
+
+  const sections = layout.sections ?? [];
+  const names = new Set(sections.map((s) => s.name));
+  for (const f of fields) {
+    if (f.section !== undefined && !names.has(f.section)) {
+      throw new Error(`${tag(f)} is in section "${f.section}", which does not exist`);
+    }
+  }
+  for (const section of sections) {
+    const members = fields.flatMap((f, i) => (f.section === section.name ? [i] : []));
+    const first = members[0];
+    const last = members[members.length - 1];
+    if (first === undefined || last === undefined) {
+      throw new Error(`Section "${section.label}" has no questions`);
+    }
+    if (last - first + 1 !== members.length) {
+      throw new Error(`Section "${section.label}" has questions that are not together`);
+    }
+    if (section.showIf) {
+      check(`Section "${section.label}"'s show rule`, section.showIf, "shown", null, first);
+    }
+  }
+}
+
+/**
+ * Which `FormField` keys the server's rules read (`'shape'`) and which only a page
+ * draws (`'presentation'`). Typed over `keyof FormField`, so adding a key is a
+ * type error until somebody classifies it, and a unit test drives `shapeOf` from
+ * this record: it must move for every `'shape'` key and for no `'presentation'`
+ * one. `section` is presentation because membership matters only through the
+ * section's own condition, which `shapeOf` folds into the question's visibility.
+ */
+export const FORM_FIELD_KEYS: Record<keyof FormField, "shape" | "presentation"> = {
+  name: "shape",
+  kind: "shape",
+  label: "presentation",
+  help: "presentation",
+  placeholder: "presentation",
+  required: "shape",
+  max: "shape",
+  min: "shape",
+  pattern: "shape",
+  options: "shape",
+  accept: "shape",
+  maxBytes: "shape",
+  value: "presentation",
+  text: "presentation",
+  beside: "presentation",
+  grow: "presentation",
+  showIf: "shape",
+  requireIf: "shape",
+  section: "presentation",
+  hold: "presentation",
+  prefill: "presentation",
+  i18n: "presentation",
+};
+
+/**
+ * The projection `forms.version` is bumped from: everything the server enforces
+ * (decision 11). Per question: name, kind, `required`, `requireIf`, effective
+ * visibility (its own `showIf` and its section's, as a pair), option values, `min`,
+ * `max`, `pattern`, `accept` and `maxBytes`. Nothing a label, help, placeholder,
+ * translation, layout or prefill edit would touch. Pure, and comparable by simple
+ * string equality against what is stored; never stored itself.
+ */
+export function shapeOf(fields: readonly FormField[], layout: FormLayout = {}): string {
+  const sectionShowIf = new Map((layout.sections ?? []).map((s) => [s.name, s.showIf]));
   return JSON.stringify(
     fields.map((f) => ({
       name: f.name,
       kind: f.kind,
       required: !!f.required,
+      requireIf: f.requireIf,
+      showIf: f.showIf,
+      sectionShowIf: f.section === undefined ? undefined : sectionShowIf.get(f.section),
       options: f.options?.map((o) => o.value),
+      min: f.min,
+      max: f.max,
+      pattern: f.pattern,
+      accept: f.accept,
+      maxBytes: f.maxBytes,
     })),
   );
 }
@@ -378,6 +738,7 @@ export const MAX_ROW_CELLS = 4;
  * The start of the form, a `statement` and a row already at `MAX_ROW_CELLS`
  * all start a fresh one — a `statement` starts a row of one and forces the
  * *next* question into a fresh row too, whatever its own `beside` says.
+ * A change of `section` between consecutive questions starts a fresh row too.
  * `hidden` questions are layout-transparent: they neither join nor break a
  * row and are not counted against the cap, so this narrows a form that has
  * one wedged between two halves of what is visually one row.
@@ -392,19 +753,27 @@ export function rowsOf(fields: readonly FormField[]): number[] {
   let row = -1;
   let cellsInRow = 0;
   let breaksNext = true; // the start of the form breaks a row
+  let prevSection: string | undefined;
   for (const field of fields) {
     if (field.kind === "hidden") {
       rows.push(Math.max(row, 0));
       continue;
     }
     const isStatement = field.kind === "statement";
-    if (isStatement || breaksNext || !field.beside || cellsInRow >= MAX_ROW_CELLS) {
+    if (
+      isStatement ||
+      breaksNext ||
+      !field.beside ||
+      cellsInRow >= MAX_ROW_CELLS ||
+      field.section !== prevSection
+    ) {
       row += 1;
       cellsInRow = 0;
     }
     rows.push(row);
     cellsInRow += 1;
     breaksNext = isStatement;
+    prevSection = field.section;
   }
   return rows;
 }
@@ -466,6 +835,12 @@ export interface ResolvedFormField {
   label: string;
   help?: string;
   placeholder?: string;
+  /** **Unconditionally** required: the stored flag, and neither the question nor
+   *  its section has a `showIf`, and it has no `requireIf`. A host that renders
+   *  `required={field.required}` with no engine can therefore never put a browser
+   *  `required` on a question that might not apply (spec 35 decision 6). A
+   *  conditionally asked question stored as required compiles to `false` plus
+   *  `requireIf: { all: [] }`, which `formState` reads as required whenever asked. */
   required: boolean;
   max?: number;
   min?: number;
@@ -485,6 +860,16 @@ export interface ResolvedFormField {
    *  writes `` `${grow}fr` `` straight onto a grid track with no fallback of
    *  its own to remember. */
   grow: number;
+  /** The section this question is in, by `ResolvedFormSection.name`. */
+  section?: string;
+  /** Asked only while this holds. Emitted only when set. */
+  showIf?: FieldCondition;
+  /** Required whenever asked and this holds. Emitted only when set. */
+  requireIf?: FieldCondition;
+  hold?: true;
+  /** `'query'`: seed this question from the page's query string
+   *  (`prefillAnswers`). */
+  prefill?: "query";
 }
 
 /**
@@ -507,6 +892,8 @@ export interface ResolvedForm {
   /** `open` and the clock, together. */
   open: boolean;
   fields: readonly ResolvedFormField[];
+  /** Always present, `[]` with none. Questions name theirs in `section`. */
+  sections: readonly ResolvedFormSection[];
   /** `_folio_page` when the render knows its path; empty otherwise. */
   hidden: readonly { name: string; value: string }[];
   honeypot: string;
@@ -518,25 +905,24 @@ export interface ResolvedForm {
 
 /* ------------------------------------------------------------- formLayout --- */
 
-/**
- * One section's legend, for the day a form has more than one
- * (`docs/form-layout-approach.md` slice 2). Unused this slice — `formLayout` never
- * produces one — but shaped now so a host that groups on `LayoutSection`
- * today needs no changes when it lands.
- */
+/** One section: its legend, and the condition that shows it. */
 export interface ResolvedFormSection {
   name: string;
   label: string;
   help?: string;
+  showIf?: FieldCondition;
 }
 
-/** One cell of a row. `shown` is always `true` until slice 3's conditions
- *  land; a host renders `!shown` as an empty, `aria-hidden` slot rather than
- *  omitting it, which is what lets a `hold`ing neighbour keep its place. */
+/** One cell of a row. `shown` is `false` only for a `hold`ing question that is not
+ *  asked; a host renders `!shown` as an empty, `aria-hidden` slot rather than
+ *  omitting it, which is what lets a `hold`ing neighbour keep its place.
+ *  `required` is the effective requiredness: the engine's with answers, the
+ *  descriptor's static flag without. */
 export interface LayoutCell {
   field: ResolvedFormField;
   grow: number;
   shown: boolean;
+  required: boolean;
 }
 
 /** One row: a stable `key` (the row's first field's name, unique across the
@@ -546,8 +932,7 @@ export interface LayoutRow {
   cells: readonly LayoutCell[];
 }
 
-/** A section's own rows, or the one `section: null` group every question
- *  belongs to until slice 2 gives some of them a real one. */
+/** A section's own rows. `section` is `null` for the questions outside any. */
 export interface LayoutSection {
   section: ResolvedFormSection | null;
   rows: readonly LayoutRow[];
@@ -569,22 +954,29 @@ export interface FormLayoutView {
  * fetch, no DOM, safe to call from a server render and from a preview bundle
  * alike.
  *
- * `answers` is next slice's: once `showIf` exists, a cell whose question is
- * not asked drops out (unless it `hold`s, staying with `shown: false`), a row
- * with nothing shown is removed, and a section whose own condition fails or
- * that has no rows left is removed too. Until then every cell is `shown` and
- * the parameter changes nothing — accepted now so a host that calls
- * `formLayout(form, answers)` today keeps compiling once slice 3 gives the
- * second argument something to do.
+ * **With no `answers`, everything is present** (spec 35 decision 7): every
+ * question and section, every cell `shown`, `cell.required` the descriptor's static
+ * flag. That is what a visitor with no script needs: they see every question, the
+ * server works out which applied, and nothing they cannot see is required.
+ *
+ * **With `answers`, it evaluates** (`formState`): a cell whose question is not
+ * asked is removed unless it `hold`s, in which case it stays with `shown: false`; a
+ * row with no shown cell is removed; a section whose `showIf` fails, or that has no
+ * rows left, is removed; and `inputs` keeps only asked questions, so an unasked
+ * hidden input does not post. A section with no rows is dropped in both modes.
  */
-export function formLayout(form: ResolvedForm, _answers?: Record<string, Json>): FormLayoutView {
+export function formLayout(form: ResolvedForm, answers?: Record<string, Json>): FormLayoutView {
+  const state = answers === undefined ? null : formState(form, answers);
+  // A descriptor a host cached across a deploy can predate `sections`.
+  const defs = new Map((form.sections ?? []).map((s) => [s.name, s]));
   const inputs: ResolvedFormField[] = [];
-  const rows: LayoutCell[][] = [];
+  const rows: { cells: LayoutCell[]; section: ResolvedFormSection | null }[] = [];
   let openRow: number | null = null;
 
   for (const field of form.fields) {
+    const asked = state === null || state.asked.has(field.name);
     if (field.kind === "hidden") {
-      inputs.push(field);
+      if (asked) inputs.push(field);
       continue;
     }
     // `row`/`grow` are typed as always present, but a descriptor a host cached
@@ -596,21 +988,34 @@ export function formLayout(form: ResolvedForm, _answers?: Record<string, Json>):
     // `openRow` joins), and a missing `grow` falls back to the 1 default.
     const row = typeof field.row === "number" ? field.row : null;
     const grow = typeof field.grow === "number" ? field.grow : 1;
-    const cell: LayoutCell = { field, grow, shown: true };
-    if (row !== null && row === openRow) {
-      rows[rows.length - 1]?.push(cell);
+    const cell: LayoutCell | null =
+      asked || field.hold
+        ? {
+            field,
+            grow,
+            shown: asked,
+            required: state === null ? field.required : state.required.has(field.name),
+          }
+        : null;
+    const section = (field.section !== undefined && defs.get(field.section)) || null;
+    const last = rows[rows.length - 1];
+    if (row !== null && row === openRow && last) {
+      if (cell) last.cells.push(cell);
     } else {
-      rows.push([cell]);
+      rows.push({ cells: cell ? [cell] : [], section });
       openRow = row;
     }
   }
 
-  const layoutRows: LayoutRow[] = rows.map((cells) => ({
-    // `cells` is never empty — every row starts from a `push([cell])` above —
-    // so its first entry is never the hole `noUncheckedIndexedAccess` warns of.
-    key: cells[0]!.field.name,
-    cells,
-  }));
+  const groups: { section: ResolvedFormSection | null; rows: LayoutRow[] }[] = [];
+  for (const row of rows) {
+    if (!row.cells.some((c) => c.shown)) continue;
+    if (row.section && state && !state.sections.has(row.section.name)) continue;
+    const layoutRow: LayoutRow = { key: row.cells[0]!.field.name, cells: row.cells };
+    const group = groups[groups.length - 1];
+    if (group && group.section?.name === row.section?.name) group.rows.push(layoutRow);
+    else groups.push({ section: row.section, rows: [layoutRow] });
+  }
 
-  return { sections: [{ section: null, rows: layoutRows }], inputs };
+  return { sections: groups.length > 0 ? groups : [{ section: null, rows: [] }], inputs };
 }

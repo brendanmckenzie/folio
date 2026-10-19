@@ -1769,10 +1769,11 @@ hook forwards each of them wherever the host already sends things.
 **A form is a row, not a document.** It has no URL, no draft, no version history,
 no place in the page tree and no entry in the content or search index — it is
 closer to a redirect than to a page, and saving the builder changes the live form
-at once. What it does carry is a `version`, bumped whenever the *shape* changes (a
-question added, removed, renamed, retyped, made required, or its option values
-changed) and deliberately not when a label, a help text or a translation is
-edited. Every response stores the version it was validated against, which is what
+at once. What it does carry is a `version`, bumped whenever anything the server
+*enforces* changes (a question added, removed, renamed, retyped, made required or
+conditional, its option values, length limits, pattern, accepted file type or size
+changed, or a section given a condition) and deliberately not when a label, a help
+text, a translation, a layout key or a prefill is edited. Every response stores the version it was validated against, which is what
 makes a two-year-old response readable after the form has moved on.
 
 ### Embedding one
@@ -1863,7 +1864,7 @@ import { formLayout } from 'folio/core'
 
 const view = formLayout(form)
 // view.inputs   — `hidden`-kind questions: position-free, render anywhere
-// view.sections — [{ section: null, rows: [{ key, cells: [{ field, grow, shown }] }] }]
+// view.sections — [{ section: null | { name, label, help?, showIf? }, rows: [{ key, cells: [{ field, grow, shown, required }] }] }]
 ```
 
 A row is the first question plus every following question with `beside`. A
@@ -1873,10 +1874,10 @@ it neither joins nor breaks one, which is why `formLayout` hands it back
 separately in `view.inputs` rather than leaving a stray cell in `view.sections`.
 At most four questions share a row; a fifth `beside` narrows into a row of its
 own instead of a fifth column nobody asked for. `sections` is always the one
-`section: null` group this slice — grouped questions under a real legend are a
-later addition, and a host that iterates `view.sections` now needs no changes
-when that lands, the same way `shown` (always `true` until conditional
-visibility exists) needs none either.
+`section: null` group for questions outside any [section](#sections), and a real
+`ResolvedFormSection` for the ones inside one. `shown` is `false` only for a `hold`ing
+question that is not currently asked, and only when `formLayout` was given answers
+([conditional questions](#conditional-questions), below).
 
 Render each row as a CSS grid track list built from each cell's `grow`, and let
 the host's own breakpoint collapse it — Folio stores proportions, never
@@ -1889,8 +1890,8 @@ always correct**:
 @container form (max-width: 36rem) { .row { grid-template-columns: 1fr; } }
 ```
 
-A cell that is not `shown` (conditional visibility, not yet built) renders an
-empty `aria-hidden` slot, never a `visibility: hidden` input — that still posts
+A cell that is not `shown` (a `hold`ing question that is not currently asked)
+renders an empty `aria-hidden` slot, never a `visibility: hidden` input — that still posts
 a value in a native submission, where an absent element does not. DOM order is
 `form.fields`' own order, so tab order, reading order and visual order agree
 without the host doing anything to make that true.
@@ -1898,6 +1899,98 @@ without the host doing anything to make that true.
 Layout keys are presentational: `beside`/`grow` never touch `shapeOf`, so
 changing them alone never bumps `version` and never fires `formChanged` — but
 saving one still purges the form's cached pages, [below](#two-things-about-the-cache).
+
+### Conditional questions
+
+A question can carry a `showIf` (asked only while it holds) and a `requireIf`
+(required whenever asked, and only while it holds), both the same `FieldCondition`
+block fields already use: `eq`, `ne`, `in`, `isSet`, the combinators `all`, `any` and
+`not`, and `includes`, which is how a `checkboxes` answer is asked about (`eq` and
+`in` compare the whole value, so neither can say "this box is among the ticked ones").
+
+**One engine decides, and the server runs it.** `formState(form, answers)` in
+`folio/core` answers which questions are asked, which are required and which sections
+are shown. It is pure and React-free, so the same function runs on the submit route,
+inside `formLayout` and in your own client code, and a browser is never the
+enforcement. Pass it the compiled `ResolvedForm` you were handed; `answersFrom(form,
+formData)` turns a `FormData` into the answers it wants.
+
+**Evaluation is ordered.** Questions are walked in the form's order. A `showIf` may
+name only questions *above* it, and sees only the answers of questions that were
+themselves asked (a question that was not asked reads as absent, so `ne` against one
+is true: "show B if A is not `x`" shows B when A was itself hidden). A `requireIf` is
+evaluated afterwards against every asked question, so it may name any other question:
+`email.requireIf = { field: 'phone', isSet: false }` and the reverse is "at least one
+of the two", with no cycle. The builder offers exactly the operators a question's kind
+can answer: `select` and `radio` take `eq`, `ne`, `in` and `isSet` over their options;
+`checkboxes` take `includes` and `isSet`; a `checkbox` takes `eq` true or false; a
+`number` takes the four over numbers; the text kinds over short strings. A `file` or a
+`statement` cannot be the source of a rule.
+
+**The no-JavaScript contract.** `formLayout(form)` with no answers shows every
+question and section, every cell `shown`, and `cell.required` is the descriptor's
+`required`, which is **"required unconditionally"** (a question that is only
+conditionally asked or required compiles to `required: false` plus a `requireIf`). So
+a host that renders `required={field.required}` with no script never blocks a visitor
+on a question they could not reveal, and the server works out which questions applied
+from what was posted.
+
+**What the server does.** A required question that was not asked never blocks the
+submission. An answer posted for a question that was not asked is dropped, not
+stored, and so is a file uploaded for it (it is never written to the bucket, and one
+over its size cap does not refuse the submission). The response records the names of
+the questions it was never asked as `unasked` (also on the `submitted` hook's
+`response`), which the responses table shows as `not asked` and the CSV as `(not
+asked)`. That is a third state beside an answer and `—`, which means "no answer
+recorded": a blank optional answer still stores no key.
+
+**A hydrating host** renders `formLayout(form)` on the server and on its first
+client render, then switches to `formLayout(form, answers)` after mount with the
+answers it collects on every change. Folio ships no binding for that yet.
+
+**Accessibility.** Revealing one question after an answer works well for screen
+reader users. GOV.UK's research found that revealing several loose questions tests
+poorly, which is what [sections](#sections) are for: reveal the group, not each
+question.
+
+### Sections
+
+A section is a heading (`label`, optional `help`) over a run of consecutive questions,
+optionally with its own `showIf`. One condition hides the whole group: the questions
+inside are not asked, not required and not stored, and all of them are listed in
+`unasked`. Sections live in the form's `layout` (`forms.layout`, at most 20) and a
+question joins one with `section`. Members are contiguous, so `form.fields` is still the
+one flat array in the form's order and the CSV, `folio_invalid` and the validator never
+learn that sections exist. A section boundary breaks a row.
+
+`formLayout` groups rows under each section (`view.sections[n].section` is the
+`ResolvedFormSection`); render it as a `<fieldset>` with a `<legend>`. A section's
+`showIf` may name only questions above its first member. With answers, a section whose
+condition fails, or that has no rows left, is removed.
+
+A question's `hold` keeps its place as `shown: false` when it is not asked, so its
+row-mates do not widen. It is layout, like `beside` and `grow`.
+
+### Prefill
+
+A question can opt in to the page's query string with `prefill: 'query'`:
+`/contact?area=safari` seeds the `area` question. Only opted-in questions are read,
+so a link cannot put words into any text box on the site's own form.
+
+```tsx
+import { prefillAnswers } from 'folio/core'
+
+const seed = prefillAnswers(form, { query: url.search, values: { email: member.email } })
+// { area: 'safari', email: 'member@example.com' }
+```
+
+A value that is not a declared option, not a number, or not a real day is dropped.
+`values` is your own map (a signed-in member's email), wins over the query, and applies
+to any question because you chose it. `file` and `statement` are never prefilled.
+Seed each input's default value from the result; do not pass prefill to `formLayout`
+on a no-JavaScript render. A prefilled page is its own cache entry per query string
+(`cacheKeyFor`). `utm_*` parameters are stripped from the cache key but not from the
+page URL, so read `utm_*` prefill on the client rather than in a cached server render.
 
 ### The two hidden inputs, which nothing else will tell you about
 

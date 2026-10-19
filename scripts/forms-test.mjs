@@ -496,6 +496,184 @@ check(
   `${download.status} ${download.headers.get("content-type")}`,
 );
 
+/* --- conditional questions, sections and a conditional file ------------- */
+
+// content-model/form-logic.md: one engine decides what was asked, and the submit
+// route runs it on the posted body. Native and JSON transports, the stored
+// `unasked`, and the export's "(not asked)".
+
+const logic = await post("/forms", { label: "E2E Logic" });
+const LOGIC_FIELDS = [
+  {
+    name: "heard",
+    kind: "radio",
+    label: "How did you hear about us?",
+    required: true,
+    options: [
+      { value: "friend", label: "A friend" },
+      { value: "other", label: "Other" },
+    ],
+  },
+  {
+    name: "heard_other",
+    kind: "text",
+    label: "Tell us more",
+    required: true,
+    showIf: { field: "heard", eq: "other" },
+  },
+  { name: "email", kind: "email", label: "Email", requireIf: { field: "phone", isSet: false } },
+  { name: "phone", kind: "tel", label: "Phone", requireIf: { field: "email", isSet: false } },
+  { name: "differs", kind: "checkbox", label: "Postal address differs" },
+  { name: "street", kind: "text", label: "Street", required: true, section: "postal" },
+  { name: "applying", kind: "checkbox", label: "I am applying" },
+  {
+    name: "cv",
+    kind: "file",
+    label: "CV",
+    accept: "documents",
+    maxBytes: 4000,
+    showIf: { field: "applying", eq: true },
+  },
+];
+const LOGIC_LAYOUT = {
+  sections: [{ name: "postal", label: "Postal", showIf: { field: "differs", eq: true } }],
+};
+
+const forward = await patch(`/forms/${logic.id}`, {
+  expectedUpdatedAt: logic.updatedAt,
+  fields: [LOGIC_FIELDS[1], LOGIC_FIELDS[0]],
+});
+const forwardBody = await forward.json();
+check(
+  "a showIf naming a later question is refused with a 400 that names both",
+  forward.status === 400 &&
+    forwardBody.error.message.includes("Tell us more") &&
+    forwardBody.error.message.includes("How did you hear about us?"),
+  `${forward.status} ${forwardBody.error?.message}`,
+);
+
+const logicSaved = await patch(`/forms/${logic.id}`, {
+  expectedUpdatedAt: (await json(`${API}/forms/${logic.id}`)).updatedAt,
+  fields: LOGIC_FIELDS,
+  layout: LOGIC_LAYOUT,
+}).then((r) => r.json());
+check(
+  "the rules and the section save, and a logic change is structural",
+  logicSaved.layout?.sections?.[0]?.name === "postal" && logicSaved.version === 2,
+  `v${logicSaved.version}`,
+);
+
+const resolved = (await json(`${API}/forms/resolved?ids=${logic.id}`))[logic.id];
+check(
+  "the descriptor carries the sections, and a conditionally asked question is not unconditionally required",
+  resolved?.sections?.[0]?.name === "postal" &&
+    resolved.fields.find((f) => f.name === "heard_other")?.required === false &&
+    resolved.fields.find((f) => f.name === "heard")?.required === true,
+);
+
+const statusOf = (res) => new URL(res.headers.get("location"), HTTP).searchParams;
+const logicRows = async () => (await json(`${API}/forms/${logic.id}/responses`)).rows;
+
+// A required question that does not apply never blocks; a crafted answer to it
+// is dropped.
+const friend = await submit(logic.id, {
+  heard: "friend",
+  heard_other: "crafted",
+  email: "ada@example.com",
+  street: "crafted",
+});
+check(
+  "a required question that was not asked does not block a native submission",
+  statusOf(friend).get("folio_status") === "ok",
+  friend.headers.get("location"),
+);
+const [stored] = await logicRows();
+check(
+  "an answer to a question that was not asked is dropped, and the row records what was never asked",
+  stored &&
+    !("heard_other" in stored.data) &&
+    !("street" in stored.data) &&
+    ["heard_other", "street", "cv"].every((n) => stored.unasked.includes(n)),
+  JSON.stringify({ data: stored?.data, unasked: stored?.unasked }),
+);
+
+const otherNative = await submit(logic.id, { heard: "other", email: "ada@example.com" });
+check(
+  "the same question is refused once it applies (native: folio_invalid names it)",
+  statusOf(otherNative).get("folio_status") === "invalid" &&
+    statusOf(otherNative).get("folio_invalid") === "heard_other",
+  otherNative.headers.get("location"),
+);
+const otherJson = await submitJson(logic.id, { heard: "other", email: "ada@example.com" });
+const otherJsonBody = await otherJson.json();
+check(
+  "and over JSON it is a 422 naming only that question",
+  otherJson.status === 422 && Object.keys(otherJsonBody.fields).join() === "heard_other",
+  JSON.stringify(otherJsonBody.fields),
+);
+
+const neither = await submitJson(logic.id, { heard: "friend" });
+const neitherBody = await neither.json();
+check(
+  "email or phone, at least one: neither is refused as required",
+  neither.status === 422 && Object.keys(neitherBody.fields).sort().join() === "email,phone",
+  JSON.stringify(neitherBody.fields),
+);
+const phoneOnly = await submitJson(logic.id, { heard: "friend", phone: "0400 000 000" });
+check(
+  "and either one on its own is stored",
+  phoneOnly.status === 200,
+  `status=${phoneOnly.status}`,
+);
+
+const section = await submitJson(logic.id, { heard: "friend", email: "a@b.co", differs: true });
+const sectionBody = await section.json();
+check(
+  "ticking the box makes the section's required question apply",
+  section.status === 422 && Object.keys(sectionBody.fields).join() === "street",
+  JSON.stringify(sectionBody.fields),
+);
+
+// A file on an excluded question is never stored; a valid one on an asked
+// question is.
+const withCv = async (fields) => {
+  const body = new FormData();
+  for (const [k, v] of Object.entries(fields)) body.set(k, v);
+  body.set(
+    "cv",
+    new Blob(["%PDF-1.4\n% e2e logic\ntrailer\n%%EOF\n"], { type: "application/pdf" }),
+    "cv.pdf",
+  );
+  return realFetch(`${BASE}/f/${logic.id}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { accept: "text/html" },
+    body,
+  });
+};
+const skippedCv = await withCv({ heard: "friend", email: "skip@example.com" });
+const skippedRow = (await logicRows()).find((r) => r.data.email === "skip@example.com");
+check(
+  "a file for a question that was not asked is accepted as a submission and never stored",
+  statusOf(skippedCv).get("folio_status") === "ok" && skippedRow?.files.length === 0,
+  JSON.stringify(skippedRow?.files),
+);
+const keptCv = await withCv({ heard: "friend", email: "keep@example.com", applying: "1" });
+const keptRow = (await logicRows()).find((r) => r.data.email === "keep@example.com");
+check(
+  "and the same file on an asked question is stored",
+  statusOf(keptCv).get("folio_status") === "ok" && keptRow?.files.length === 1,
+  JSON.stringify(keptRow?.files),
+);
+
+const logicCsv = await fetch(`${API}/forms/${logic.id}/responses.csv`).then((r) => r.text());
+check(
+  "the export writes (not asked) against a question the visitor was never shown",
+  logicCsv.includes("(not asked)"),
+);
+
+await fetch(`${API}/forms/${logic.id}`, { method: "DELETE" });
+
 /* --- closing, and deleting ----------------------------------------------- */
 
 const closed = await patch(`/forms/${form.id}`, {

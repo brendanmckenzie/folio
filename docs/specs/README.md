@@ -78,6 +78,7 @@ sequence because the dependency graph is the same one.
 | 32 | [Media library organisation](content-model/media-library.md) | content model | L | — | `0008` | owner, 2026-09-05 |
 | 33 | [Forms and responses](content-model/forms.md) | content model | L | — | `0010` | owner, 2026-09-05 |
 | 34 | [Many brands in one deployment](foundation/multi-brand.md) | foundation | L | — | `0013` (landed) | owner, 2026-09-30 |
+| 35 | [Conditional questions, sections and prefill on forms](content-model/form-logic.md) | content model | L | — | `0014` (landed) | issue #33, slice 1 |
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were
@@ -309,8 +310,10 @@ same day, release pending) took `0011_sites.sql`, which has landed, and claims
 columns `0011` retires. Its build plan is
 [`../multi-site-plan.md`](../multi-site-plan.md). Spec 34 (multi-brand) took
 `0013_site_brands.sql`, one nullable `sites.brand` column; it has landed on the branch,
-is additive and may be applied before `0012` exists. The next free number after those is
-`0014`.
+is additive and may be applied before `0012` exists. Spec 35 (form logic) took
+`0014_form_logic.sql`, two additive columns on `forms` and `form_responses`; it has
+landed and must be applied before the Worker that reads it is deployed. The next free
+number after those is `0015`.
 
 That is the standing rule having run its course rather than an exception to it: a
 claim is a stamp, not a landing, and every one of these restamped at least once as
@@ -321,7 +324,7 @@ make room for 32.
 staging and production databases on 2026-09-06. `0011` (23) is built and lands on `main`
 with spec 23's release; `0012` (23) is claimed for the release after that and does not
 exist yet; `0013` (34) has landed on the branch `multi-brand` and reaches `main` with
-spec 34's release; `0009` is a permanent gap. The next free number after those is `0014`.** Do not derive a number by counting the
+spec 34's release; `0014` (35) has landed; `0009` is a permanent gap. The next free number after those is `0015`.** Do not derive a number by counting the
 landed rows above; take the one your spec's header names, and if it is already on
 disk, stop rather than picking the next one yourself.
 

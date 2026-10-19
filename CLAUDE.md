@@ -200,7 +200,7 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`migrations/`). **There are eleven: `0001`–`0008`, `0010`, `0011` and `0013`.**
+**D1 migrations** (`migrations/`). **There are twelve: `0001`–`0008`, `0010`, `0011`, `0013` and `0014`.**
 `0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
 it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
 landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a permanent
@@ -213,7 +213,10 @@ after**: it drops `users.role` and `users.role_from`, and must not be written or
 applied until the `0011` release is deployed everywhere it will go.
 `0013_site_brands.sql` (spec 34) landed 2026-09-30 ahead of the unwritten `0012` — a
 stand-in `0012` applied after it on a local database, so the order costs nothing.
-Next free is `0014`.
+`0014_form_logic.sql` (spec 35) landed 2026-10-19: two additive columns, `forms.layout`
+(sections) and `form_responses.unasked`, both read by the release that carries them, so
+it must be applied before that Worker is deployed.
+Next free is `0015`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a

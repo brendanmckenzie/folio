@@ -106,7 +106,9 @@ and whether it needs anything from you beyond applying it.
 | `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29-v100) first: it changes what a rollback can do. |
 | `0013_site_brands.sql` | One nullable `sites.brand` column | **Apply it before you deploy, on every deployment with `sites`**: this release's registry read selects the column, so a Worker deployed first fails every registry read with `no such column`. It is additive and safe ahead of the deploy. It changes nothing until you configure `brands`; read [the brands section](#0013-and-turning-brands-on-2026-09-30-v100) before you do. |
 
-`0011` and `0013` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0014`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
+| `0014_form_logic.sql` | `forms.layout` (a form's sections) and `form_responses.unasked` (the questions a response was never asked) | **Apply it before you deploy**: this release's form reads select `forms.layout` and its response reads select `unasked`, so a Worker deployed first fails every form read with `no such column`. Both columns are additive with defaults (`'{}'` and `'[]'`), safe ahead of the deploy, and change nothing for a form until an editor gives it a condition or a section. Read [conditional questions](#conditional-questions-sections-and-prefill-2026-10-19) before you do. |
+
+`0011`, `0013` and `0014` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0015`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -536,6 +538,56 @@ Passkeys bind to the admin host; see [step 1 of turning `sites` on](#turning-sit
 The brand column is then unread, `shared` is a scope again, and nothing stored changes.
 Brand-prefixed migration ids stay in `schema_migrations` and in `stories.schema_id`, so a
 deployment that goes back renames its list to the old ids by hand.
+
+### Conditional questions, sections and prefill (2026-10-19) (v1.1.0)
+
+`0014_form_logic.sql` adds `forms.layout` and `form_responses.unasked`. **Apply it
+before you deploy**, the same rule as `0013`: the release selects both columns, and a
+Worker that reaches a database without them fails every form read with `no such
+column`. Applying it first is safe, because both are additive and default to "no
+sections" and "nothing unasked".
+
+Nothing changes for a form until an editor gives a question a condition, a
+requirement rule, a section or a prefill. What changes in the code regardless:
+
+- **`ResolvedFormField.required` now means "required unconditionally".** A question
+  stored as required that is conditionally asked (its own `showIf`, or its section's)
+  or that has a `requireIf` compiles to `required: false` plus
+  `requireIf: { all: [] }`. For every form that exists today nothing differs. A host
+  that renders `required={field.required}` and has no client logic stays correct,
+  because it can never put a browser `required` on a question that might not apply
+  (which would make a no-JavaScript form unsubmittable). A host that evaluates the
+  rules itself calls `formState(form, answers)` from `folio/core`, which reads the
+  same answer off the descriptor that the server reads off the stored row.
+- **`ResolvedForm.sections` is always present** (`[]` with none), `LayoutCell` gains
+  `required`, and `formLayout(form, answers)` now evaluates when given answers
+  (before, the second argument was accepted and ignored). With no answers it shows
+  everything, which is what a no-JavaScript render wants.
+- **A response records what it was never asked.** `submitted`'s `response` and the
+  response reads gain `unasked: string[]` (`[]` for a form with no logic and for every
+  response stored before `0014`). A question that was not asked is not validated, an
+  answer posted for it is dropped rather than stored, and a file uploaded for it is
+  never written. The responses table reads `not asked` and the CSV `(not asked)`.
+  Blank answers still store no key, so `—` means "no answer recorded".
+- **`version` moves for more edits.** `shapeOf` now covers everything the server
+  enforces, so a first save that changes a question's `max`, `min`, `pattern`,
+  `accept` or `maxBytes` bumps `version` and fires `formChanged`, where before it only
+  purged. Label, help, placeholder, translation, layout, `hold`, `prefill` and which
+  unconditional section a question is in still bump nothing.
+- **`FieldCondition` gains `includes`**, the one way to ask about a `checkboxes`
+  answer. An admin bundle older than this release reads it as unrecognised and hides
+  the field, which is the safe wrong answer that file already chose.
+- **New exports from `folio/core`**: `formState`, `answersFrom`, `prefillAnswers`,
+  `MAX_FORM_SECTIONS` and the types `FormState`, `FormSection`, `FormLayout`.
+- **Prefill is opt-in per question** (`prefill: 'query'`), never on by default. A host
+  that already seeds inputs from the query string by hand keeps working untouched.
+
+**The rollback hazard.** A build from before this release reads a form's questions
+through a validator that does not know the new keys, so it strips them: every
+conditional question becomes unconditional, and one that was "required whenever
+shown" becomes required always, which can block visitors it never applied to. The
+columns stay in the database and the older build ignores them. If you must roll back,
+clear `required` on the conditional questions first, or roll forward instead.
 
 ### A title-only patch no longer moves the page (2026-09-06) (v1.0.0)
 

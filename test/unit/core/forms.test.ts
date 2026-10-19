@@ -9,8 +9,19 @@ import {
   rowsOf,
   shapeOf,
   validateFormFields,
+  checkFormLogic,
+  FORM_FIELD_KEYS,
+  MAX_FORM_SECTIONS,
+  readFormLayout,
+  validateFormLayout,
 } from "../../../src/core/forms";
-import type { FormField, ResolvedForm, ResolvedFormField } from "../../../src/core/forms";
+import type {
+  FormField,
+  FormLayout,
+  FormSection,
+  ResolvedForm,
+  ResolvedFormField,
+} from "../../../src/core/forms";
 
 /**
  * `core/forms.ts`'s pure vocabulary (`docs/specs/content-model/forms.md`
@@ -455,6 +466,7 @@ function resolvedForm(fields: readonly ResolvedFormField[]): ResolvedForm {
     version: 1,
     open: true,
     fields,
+    sections: [],
     hidden: [],
     honeypot: "company_website",
     submitLabel: "Send",
@@ -562,5 +574,522 @@ describe("formLayout", () => {
       ["b"],
       ["c"],
     ]);
+  });
+});
+
+/* ------------------------------------------------- form logic (spec 35) --- */
+
+const radio = (name: string, over: Partial<FormField> = {}): FormField => ({
+  name,
+  kind: "radio",
+  label: name,
+  options: [
+    { value: "a", label: "A" },
+    { value: "other", label: "Other" },
+  ],
+  ...over,
+});
+const txt = (name: string, over: Partial<FormField> = {}): FormField => ({
+  name,
+  kind: "text",
+  label: name,
+  ...over,
+});
+
+describe("validateFormFields: logic keys narrow rather than throw", () => {
+  it("keeps a well formed showIf, requireIf, section, hold and prefill", () => {
+    const [field] = validateFormFields([
+      txt("more", {
+        showIf: { field: "heard", eq: "other" },
+        requireIf: { field: "heard", isSet: true },
+        section: "extra",
+        hold: true,
+        prefill: "query",
+      }),
+    ]) as [FormField];
+    expect(field).toMatchObject({
+      showIf: { field: "heard", eq: "other" },
+      requireIf: { field: "heard", isSet: true },
+      section: "extra",
+      hold: true,
+      prefill: "query",
+    });
+  });
+
+  it("turns a showIf that is not an object into a never-true node", () => {
+    const [field] = validateFormFields([{ ...txt("more"), showIf: "yes please" }]) as [FormField];
+    expect(field.showIf).toEqual({ any: [] });
+  });
+
+  it("drops a malformed requireIf, and any requireIf on a statement", () => {
+    const [a, b] = validateFormFields([
+      { ...txt("a"), requireIf: 42 },
+      {
+        name: "prose",
+        kind: "statement",
+        label: "p",
+        text: "hi",
+        requireIf: { field: "a", isSet: true },
+      },
+    ]) as [FormField, FormField];
+    expect(a.requireIf).toBeUndefined();
+    expect(b.requireIf).toBeUndefined();
+  });
+
+  it("drops a section that is not a slug, hold that is not true, prefill that is not 'query'", () => {
+    const [field] = validateFormFields([
+      { ...txt("a"), section: "Not A Slug", hold: false, prefill: "body" },
+    ]) as [FormField];
+    expect(field.section).toBeUndefined();
+    expect(field.hold).toBeUndefined();
+    expect(field.prefill).toBeUndefined();
+  });
+
+  it("never prefills a file or a statement", () => {
+    const [file, prose] = validateFormFields([
+      { name: "cv", kind: "file", label: "cv", accept: "documents", prefill: "query" },
+      { name: "p", kind: "statement", label: "p", text: "x", prefill: "query" },
+    ]) as [FormField, FormField];
+    expect(file.prefill).toBeUndefined();
+    expect(prose.prefill).toBeUndefined();
+  });
+
+  it("never throws because of a logic or layout key", () => {
+    const hostile = [
+      { ...txt("a"), showIf: { field: "zzz", eq: { nested: true } } },
+      { ...txt("b"), showIf: { not: { not: { not: { not: { not: { field: "a", eq: 1 } } } } } } },
+      { ...txt("c"), section: 12, requireIf: [] },
+    ];
+    const out = validateFormFields(hostile);
+    expect(out.map((f) => f.name)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("validateFormLayout", () => {
+  const fields = [txt("a")];
+
+  it("answers {} for nothing and for an empty list", () => {
+    expect(validateFormLayout(undefined, fields)).toEqual({});
+    expect(validateFormLayout({ sections: [] }, fields)).toEqual({});
+  });
+
+  it("keeps a well formed section, key by key", () => {
+    expect(
+      validateFormLayout(
+        {
+          sections: [
+            {
+              name: "postal",
+              label: "Postal address",
+              help: "Where to send it",
+              showIf: { field: "a", eq: "x" },
+              i18n: { fr: { label: "Adresse" } },
+              junk: 1,
+            },
+          ],
+        },
+        fields,
+      ),
+    ).toEqual({
+      sections: [
+        {
+          name: "postal",
+          label: "Postal address",
+          help: "Where to send it",
+          showIf: { field: "a", eq: "x" },
+          i18n: { fr: { label: "Adresse" } },
+        },
+      ],
+    });
+  });
+
+  it("refuses a bad name, a duplicate, no label, a bad condition and more than the cap", () => {
+    const s = (over: Record<string, unknown> = {}) => ({ name: "s", label: "S", ...over });
+    expect(() => validateFormLayout({ sections: [s({ name: "Bad Name" })] }, fields)).toThrow(
+      /name/,
+    );
+    expect(() => validateFormLayout({ sections: [s(), s()] }, fields)).toThrow(/duplicate/);
+    expect(() => validateFormLayout({ sections: [s({ label: "" })] }, fields)).toThrow(/label/);
+    expect(() =>
+      validateFormLayout({ sections: [s({ showIf: { field: "a" } })] }, fields),
+    ).toThrow();
+    const many = Array.from({ length: MAX_FORM_SECTIONS + 1 }, (_, i) => s({ name: `s${i}` }));
+    expect(() => validateFormLayout({ sections: many }, fields)).toThrow(/at most/);
+    expect(() => validateFormLayout("nope", fields)).toThrow();
+  });
+});
+
+describe("readFormLayout", () => {
+  it("answers {} for anything unparseable and leaves the fields alone", () => {
+    const fields = [txt("a")];
+    for (const raw of [null, "x", 3, [], { sections: "x" }]) {
+      const read = readFormLayout(raw, fields);
+      expect(read.layout).toEqual({});
+      expect(read.fields).toEqual(fields);
+    }
+  });
+
+  it("clears a membership that names no section", () => {
+    const read = readFormLayout({ sections: [] }, [txt("a", { section: "ghost" })]);
+    expect(read.fields[0]?.section).toBeUndefined();
+  });
+
+  it("clears the membership of a section that has already closed", () => {
+    const read = readFormLayout({ sections: [{ name: "s", label: "S" }] }, [
+      txt("a", { section: "s" }),
+      txt("b"),
+      txt("c", { section: "s" }),
+    ]);
+    expect(read.fields.map((f) => f.section)).toEqual(["s", undefined, undefined]);
+    expect(read.layout.sections?.map((s) => s.name)).toEqual(["s"]);
+  });
+
+  it("drops a section with no members, and one that is malformed", () => {
+    const read = readFormLayout(
+      {
+        sections: [{ name: "empty", label: "E" }, { name: "x" }, "junk", { name: "s", label: "S" }],
+      },
+      [txt("a", { section: "s" })],
+    );
+    expect(read.layout.sections?.map((s) => s.name)).toEqual(["s"]);
+  });
+
+  it("reads a section condition it cannot use as never true", () => {
+    const read = readFormLayout({ sections: [{ name: "s", label: "S", showIf: "x" }] }, [
+      txt("a", { section: "s" }),
+    ]);
+    expect(read.layout.sections?.[0]?.showIf).toEqual({ any: [] });
+  });
+
+  it("caps at MAX_FORM_SECTIONS", () => {
+    const sections = Array.from({ length: MAX_FORM_SECTIONS + 5 }, (_, i) => ({
+      name: `s${i}`,
+      label: "S",
+    }));
+    const fields = sections.map((s) => txt(`f_${s.name}`, { section: s.name }));
+    expect(readFormLayout({ sections }, fields).layout.sections).toHaveLength(MAX_FORM_SECTIONS);
+  });
+});
+
+describe("checkFormLogic", () => {
+  const heard = radio("heard");
+  const refusal = (fields: FormField[], layout: FormLayout = {}): string => {
+    try {
+      checkFormLogic(fields, layout);
+    } catch (err) {
+      return (err as Error).message;
+    }
+    return "";
+  };
+
+  it("accepts a rule on an earlier question", () => {
+    expect(refusal([heard, txt("more", { showIf: { field: "heard", eq: "other" } })])).toBe("");
+  });
+
+  it("refuses a showIf naming a later question, naming both", () => {
+    const message = refusal([
+      txt("more", { label: "Tell us more", showIf: { field: "heard", eq: "other" } }),
+      { ...heard, label: "How did you hear" },
+    ]);
+    expect(message).toContain("Tell us more");
+    expect(message).toContain("more");
+    expect(message).toContain("How did you hear");
+    expect(message).toContain("heard");
+  });
+
+  it("refuses an unknown, same, or non-value source", () => {
+    expect(refusal([txt("a", { showIf: { field: "ghost", eq: "x" } })])).toMatch(/ghost/);
+    expect(refusal([txt("a", { showIf: { field: "a", eq: "x" } })])).toMatch(/itself/);
+    expect(refusal([txt("a", { requireIf: { field: "a", isSet: true } })])).toMatch(/itself/);
+    expect(
+      refusal([
+        { name: "cv", kind: "file", label: "cv", accept: "documents" },
+        txt("a", { showIf: { field: "cv", isSet: true } }),
+      ]),
+    ).toMatch(/no answer/);
+    expect(
+      refusal([
+        { name: "p", kind: "statement", label: "p", text: "x" },
+        txt("a", { requireIf: { field: "p", isSet: true } }),
+      ]),
+    ).toMatch(/no answer/);
+  });
+
+  it("lets requireIf name a later question", () => {
+    expect(
+      refusal([
+        txt("email", { requireIf: { field: "phone", isSet: false } }),
+        txt("phone", { requireIf: { field: "email", isSet: false } }),
+      ]),
+    ).toBe("");
+  });
+
+  it("refuses required together with requireIf, and requireIf on a statement", () => {
+    expect(
+      refusal([txt("a"), txt("b", { required: true, requireIf: { field: "a", isSet: true } })]),
+    ).toMatch(/both/);
+    expect(
+      refusal([
+        txt("a"),
+        {
+          name: "p",
+          kind: "statement",
+          label: "p",
+          text: "x",
+          requireIf: { field: "a", isSet: true },
+        },
+      ]),
+    ).toMatch(/cannot be required/);
+  });
+
+  describe("the operator table", () => {
+    const withSource = (source: FormField, condition: Record<string, unknown>) =>
+      refusal([source, txt("t", { showIf: { field: source.name, ...condition } as never })]);
+
+    it("select and radio take eq, ne, in and isSet over declared options", () => {
+      expect(withSource(heard, { eq: "other" })).toBe("");
+      expect(withSource(heard, { ne: "a" })).toBe("");
+      expect(withSource(heard, { in: ["a", "other"] })).toBe("");
+      expect(withSource(heard, { isSet: true })).toBe("");
+      expect(withSource(heard, { eq: "nope" })).toMatch(/option/);
+      expect(withSource(heard, { includes: "a" })).toMatch(/includes/);
+    });
+
+    it("checkboxes take includes and isSet only", () => {
+      const ways: FormField = { ...radio("ways"), kind: "checkboxes" };
+      expect(withSource(ways, { includes: "a" })).toBe("");
+      expect(withSource(ways, { isSet: false })).toBe("");
+      expect(withSource(ways, { eq: "a" })).toMatch(/cannot answer/);
+      expect(withSource(ways, { includes: "nope" })).toMatch(/option/);
+    });
+
+    it("a checkbox takes eq with true or false", () => {
+      const box: FormField = { name: "box", kind: "checkbox", label: "box" };
+      expect(withSource(box, { eq: true })).toBe("");
+      expect(withSource(box, { eq: "yes" })).toMatch(/ticked/);
+      expect(withSource(box, { ne: true })).toMatch(/cannot answer/);
+    });
+
+    it("a number takes finite numbers, a text kind takes short strings", () => {
+      const n: FormField = { name: "n", kind: "number", label: "n" };
+      expect(withSource(n, { eq: 3 })).toBe("");
+      expect(withSource(n, { eq: "3" })).toMatch(/number/);
+      expect(withSource(txt("s"), { eq: "x" })).toBe("");
+      expect(withSource(txt("s"), { eq: 3 })).toMatch(/text/);
+      expect(withSource(txt("s"), { eq: "x".repeat(121) })).toMatch(/120/);
+    });
+  });
+
+  it("refuses a section with no members, one that is not contiguous, and an unknown one", () => {
+    const sec = (name = "s", extra: Partial<FormSection> = {}): FormSection => ({
+      name,
+      label: "Postal",
+      ...extra,
+    });
+    expect(refusal([txt("a")], { sections: [sec()] })).toMatch(/no questions/);
+    expect(
+      refusal([txt("a", { section: "s" }), txt("b"), txt("c", { section: "s" })], {
+        sections: [sec()],
+      }),
+    ).toMatch(/not together/);
+    expect(refusal([txt("a", { section: "ghost" })], {})).toMatch(/does not exist/);
+  });
+
+  it("refuses a section whose showIf names a question at or after its first member", () => {
+    const sec: FormSection = { name: "s", label: "Postal", showIf: { field: "b", eq: "x" } };
+    expect(refusal([txt("a", { section: "s" }), txt("b")], { sections: [sec] })).toMatch(/above/);
+    expect(refusal([txt("b"), txt("a", { section: "s" })], { sections: [sec] })).toBe("");
+  });
+});
+
+describe("shapeOf covers everything the server enforces", () => {
+  const base: Required<FormField> = {
+    name: "q",
+    kind: "text",
+    label: "Q",
+    help: "h",
+    placeholder: "p",
+    required: true,
+    max: 10,
+    min: 1,
+    pattern: "a+",
+    options: [{ value: "a", label: "A" }],
+    accept: "documents",
+    maxBytes: 100,
+    value: "v",
+    text: "t",
+    beside: true,
+    grow: 2,
+    showIf: { field: "o", eq: 1 },
+    requireIf: { field: "o", eq: 2 },
+    section: "s",
+    hold: true,
+    prefill: "query",
+    i18n: { fr: { label: "Q" } },
+  };
+  const drop = (f: FormField, key: keyof FormField): FormField => {
+    const next = { ...f };
+    delete next[key];
+    return next;
+  };
+  /** One change per key. Typed over every key of `FormField`, so a new key fails
+   *  typecheck here until it is given a mutation. */
+  const change: Record<keyof FormField, (f: FormField) => FormField> = {
+    name: (f) => ({ ...f, name: "q2" }),
+    kind: (f) => ({ ...f, kind: "email" }),
+    label: (f) => ({ ...f, label: "Other" }),
+    help: (f) => ({ ...f, help: "other" }),
+    placeholder: (f) => ({ ...f, placeholder: "other" }),
+    required: (f) => drop(f, "required"),
+    max: (f) => ({ ...f, max: 11 }),
+    min: (f) => ({ ...f, min: 2 }),
+    pattern: (f) => ({ ...f, pattern: "b+" }),
+    options: (f) => ({ ...f, options: [{ value: "z", label: "Z" }] }),
+    accept: (f) => ({ ...f, accept: "images" }),
+    maxBytes: (f) => ({ ...f, maxBytes: 200 }),
+    value: (f) => ({ ...f, value: "other" }),
+    text: (f) => ({ ...f, text: "other" }),
+    beside: (f) => drop(f, "beside"),
+    grow: (f) => ({ ...f, grow: 3 }),
+    showIf: (f) => ({ ...f, showIf: { field: "o", eq: 99 } }),
+    requireIf: (f) => ({ ...f, requireIf: { field: "o", eq: 99 } }),
+    // Moves to another, equally unconditional, section.
+    section: (f) => ({ ...f, section: "t" }),
+    hold: (f) => drop(f, "hold"),
+    prefill: (f) => drop(f, "prefill"),
+    i18n: (f) => ({ ...f, i18n: { fr: { label: "Autre" } } }),
+  };
+  const layout: FormLayout = {
+    sections: [
+      { name: "s", label: "S" },
+      { name: "t", label: "T" },
+    ],
+  };
+
+  for (const key of Object.keys(FORM_FIELD_KEYS) as (keyof FormField)[]) {
+    const kind = FORM_FIELD_KEYS[key];
+    it(`${kind === "shape" ? "moves" : "does not move"} for ${key}`, () => {
+      const moved = shapeOf([change[key](base)], layout) !== shapeOf([base], layout);
+      expect(moved).toBe(kind === "shape");
+    });
+  }
+
+  it("moves through a section's condition, and only through it", () => {
+    const fields = [txt("a", { section: "s" })];
+    const plain: FormLayout = { sections: [{ name: "s", label: "S" }] };
+    const conditional: FormLayout = {
+      sections: [{ name: "s", label: "S", showIf: { field: "x", eq: 1 } }],
+    };
+    expect(shapeOf(fields, plain)).toBe(shapeOf([txt("a")], {}));
+    expect(shapeOf(fields, conditional)).not.toBe(shapeOf(fields, plain));
+    expect(shapeOf(fields, { sections: [{ ...plain.sections![0]!, label: "Renamed" }] })).toBe(
+      shapeOf(fields, plain),
+    );
+  });
+});
+
+describe("rowsOf: sections", () => {
+  it("breaks a row at a section boundary even when beside is set", () => {
+    const fields = [
+      txt("a"),
+      txt("b", { beside: true, section: "s" }),
+      txt("c", { beside: true, section: "s" }),
+      txt("d", { beside: true }),
+    ];
+    expect(rowsOf(fields)).toEqual([0, 1, 1, 2]);
+  });
+});
+
+describe("formLayout: answers", () => {
+  const resolved = (
+    fields: ResolvedFormField[],
+    sections: ResolvedForm["sections"] = [],
+  ): ResolvedForm => ({ ...resolvedForm(fields), sections });
+
+  const heardField = rf("heard", 0, {
+    kind: "radio",
+    options: [
+      { value: "a", label: "A" },
+      { value: "other", label: "Other" },
+    ],
+  });
+  const moreField = (extra: Partial<ResolvedFormField> = {}) =>
+    rf("more", 1, { showIf: { field: "heard", eq: "other" }, ...extra });
+
+  it("with no answers every question and section is present, shown, and statically required", () => {
+    const form = resolved(
+      [
+        heardField,
+        moreField({ required: false, requireIf: { all: [] } }),
+        rf("street", 2, { section: "postal", required: true }),
+      ],
+      [{ name: "postal", label: "Postal", showIf: { field: "heard", eq: "x" } }],
+    );
+    const view = formLayout(form);
+    expect(view.sections.map((s) => s.section?.name ?? null)).toEqual([null, "postal"]);
+    const cells = view.sections.flatMap((s) => s.rows.flatMap((r) => r.cells));
+    expect(cells.every((c) => c.shown)).toBe(true);
+    expect(cells.map((c) => c.required)).toEqual([false, false, true]);
+  });
+
+  it("with answers removes a question that is not asked, and its now-empty row", () => {
+    const view = formLayout(resolved([heardField, moreField()]), { heard: "a" });
+    expect(view.sections[0]?.rows.map((r) => r.key)).toEqual(["heard"]);
+    const open = formLayout(resolved([heardField, moreField()]), { heard: "other" });
+    expect(open.sections[0]?.rows.map((r) => r.key)).toEqual(["heard", "more"]);
+  });
+
+  it("with answers keeps a held cell as shown: false, so its row-mates keep their width", () => {
+    const form = resolved([
+      rf("heard", 0, heardField),
+      rf("more", 0, { showIf: { field: "heard", eq: "other" }, hold: true }),
+    ]);
+    const cells = formLayout(form, { heard: "a" }).sections[0]?.rows[0]?.cells ?? [];
+    expect(cells.map((c) => [c.field.name, c.shown])).toEqual([
+      ["heard", true],
+      ["more", false],
+    ]);
+  });
+
+  it("drops a row whose every cell is not asked, holds and all", () => {
+    const form = resolved([
+      heardField,
+      rf("x", 1, { showIf: { field: "heard", eq: "other" }, hold: true }),
+      rf("y", 1, { showIf: { field: "heard", eq: "other" }, hold: true }),
+    ]);
+    expect(formLayout(form, { heard: "a" }).sections[0]?.rows.map((r) => r.key)).toEqual(["heard"]);
+  });
+
+  it("with answers removes a section whose condition fails, and reports effective requiredness", () => {
+    const form = resolved(
+      [
+        rf("differs", 0, { kind: "checkbox" }),
+        rf("street", 1, { section: "postal", required: false, requireIf: { all: [] } }),
+      ],
+      [{ name: "postal", label: "Postal", showIf: { field: "differs", eq: true } }],
+    );
+    const off = formLayout(form, { differs: "false" });
+    expect(off.sections.map((s) => s.section?.name ?? null)).toEqual([null]);
+    const on = formLayout(form, { differs: "1" });
+    expect(on.sections.map((s) => s.section?.name ?? null)).toEqual([null, "postal"]);
+    expect(on.sections[1]?.rows[0]?.cells[0]?.required).toBe(true);
+  });
+
+  it("with answers keeps only asked questions among inputs", () => {
+    const form = resolved([
+      rf("gate", 0, { kind: "checkbox" }),
+      rf("tag", 1, { kind: "hidden", value: "x", showIf: { field: "gate", eq: true } }),
+    ]);
+    expect(formLayout(form).inputs.map((f) => f.name)).toEqual(["tag"]);
+    expect(formLayout(form, { gate: "false" }).inputs).toEqual([]);
+    expect(formLayout(form, { gate: "1" }).inputs.map((f) => f.name)).toEqual(["tag"]);
+  });
+
+  it("copes with a descriptor cached before sections existed", () => {
+    const old = resolvedForm([rf("a", 0, { section: "gone" })]) as Partial<ResolvedForm>;
+    delete old.sections;
+    const view = formLayout(old as ResolvedForm);
+    expect(view.sections).toHaveLength(1);
+    expect(view.sections[0]?.section).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { honeypotName } from "../../../src/core/forms";
-import type { FormField } from "../../../src/core/forms";
+import { checkFormLogic, honeypotName } from "../../../src/core/forms";
+import type { FormField, FormLayout } from "../../../src/core/forms";
 import {
   BLANK_FORM_DRAFT,
   createFormBody,
@@ -21,23 +21,32 @@ import {
   canMoveField,
   closesAtFromInput,
   closesAtInputValue,
+  endSectionAfter,
   fieldKindLabel,
   FIELD_KINDS,
   fieldNameRefusal,
   fieldRows,
   fieldText,
+  logicRefusal,
   moveField,
   moveFieldStep,
   needsOptions,
   normaliseFieldName,
   optionLabel,
+  optionRefusal,
+  pruneSections,
   removeField,
   removeOption,
+  removeRefusal,
+  removeSection,
+  renameField,
   renameWarning,
   showLocaleSwitcher,
+  startSection,
   uniqueFieldName,
   updateField,
   updateOption,
+  updateSection,
   withBeside,
   withFieldText,
   withGrow,
@@ -962,5 +971,213 @@ describe("closesAtInputValue / closesAtFromInput", () => {
   it("formats as the datetime-local shape, zero-padded", () => {
     const ms = new Date(2026, 8, 5, 9, 5, 0, 0).getTime();
     expect(closesAtInputValue(ms)).toBe("2026-09-05T09:05");
+  });
+});
+
+/* ----------------------------------------------- conditions and sections --- */
+
+describe("form logic reducers (spec 35)", () => {
+  const t = (name: string, over: Partial<FormField> = {}): FormField => ({
+    name,
+    kind: "text",
+    label: name,
+    ...over,
+  });
+  const heard: FormField = {
+    name: "heard",
+    kind: "radio",
+    label: "Heard",
+    options: [
+      { value: "a", label: "A" },
+      { value: "other", label: "Other" },
+    ],
+  };
+  const more = t("more", { showIf: { field: "heard", eq: "other" } });
+  const names = (fields: readonly FormField[]) => fields.map((f) => f.name);
+
+  describe("renameField", () => {
+    it("rewrites every reference in questions and sections", () => {
+      const fields = [
+        heard,
+        more,
+        t("req", {
+          requireIf: {
+            all: [
+              { field: "heard", eq: "a" },
+              { field: "more", isSet: true },
+            ],
+          },
+        }),
+        t("inside", { section: "s" }),
+      ];
+      const layout: FormLayout = {
+        sections: [{ name: "s", label: "S", showIf: { not: { field: "heard", eq: "a" } } }],
+      };
+      const out = renameField(fields, layout, "heard", "source");
+      expect(names(out.fields)).toEqual(["source", "more", "req", "inside"]);
+      expect(out.fields[1]?.showIf).toEqual({ field: "source", eq: "other" });
+      expect(out.fields[2]?.requireIf).toEqual({
+        all: [
+          { field: "source", eq: "a" },
+          { field: "more", isSet: true },
+        ],
+      });
+      expect(out.layout.sections?.[0]?.showIf).toEqual({ not: { field: "source", eq: "a" } });
+      expect(logicRefusal(out.fields, out.layout)).toBeNull();
+    });
+
+    it("is a no-op for the same name", () => {
+      const fields = [heard, more];
+      expect(renameField(fields, {}, "heard", "heard").fields).toEqual(fields);
+    });
+  });
+
+  describe("removal is refused while a rule depends on it", () => {
+    it("removeField leaves the list alone and removeRefusal names the dependant", () => {
+      const fields = [heard, more];
+      expect(removeRefusal(fields, {}, "heard")).toContain("more");
+      expect(names(removeField(fields, "heard"))).toEqual(["heard", "more"]);
+      expect(removeRefusal(fields, {}, "more")).toBeNull();
+      expect(names(removeField(fields, "more"))).toEqual(["heard"]);
+    });
+
+    it("counts a section's rule and a requireIf as dependants too", () => {
+      const layout: FormLayout = {
+        sections: [{ name: "s", label: "Postal", showIf: { field: "heard", eq: "a" } }],
+      };
+      expect(removeRefusal([heard, t("x", { section: "s" })], layout, "heard")).toContain("Postal");
+      expect(
+        removeRefusal([heard, t("x", { requireIf: { field: "heard", isSet: true } })], {}, "heard"),
+      ).toContain("x");
+    });
+
+    it("removeOption refuses while a condition compares against that value", () => {
+      const fields = [heard, more];
+      const refused = removeOption(heard, 1, { fields, layout: {} });
+      expect(refused.options).toHaveLength(2);
+      expect(optionRefusal(fields, {}, "heard", "other")).toContain("more");
+      expect(optionRefusal(fields, {}, "heard", "a")).toBeNull();
+      expect(removeOption(heard, 0, { fields, layout: {} }).options).toHaveLength(1);
+      // Without a context it removes, as before.
+      expect(removeOption(heard, 1).options).toHaveLength(1);
+    });
+  });
+
+  describe("moves", () => {
+    it("canMoveField refuses a dependency inversion in both directions", () => {
+      const fields = [heard, more];
+      expect(canMoveField(fields, 1, -1, {})).toBe(false);
+      expect(canMoveField(fields, 0, 1, {})).toBe(false);
+      expect(names(moveFieldStep(fields, 1, -1, {}))).toEqual(["heard", "more"]);
+      // Unrelated questions still move.
+      expect(canMoveField([heard, more, t("free")], 2, -1, {})).toBe(true);
+    });
+
+    it("refuses to move a section member out of its section's run", () => {
+      const fields = [t("a", { section: "s" }), t("b", { section: "s" }), t("c")];
+      const layout: FormLayout = { sections: [{ name: "s", label: "S" }] };
+      // b swapping with c would leave a and c in s with b out... b stays, c enters nothing,
+      // but moving a down past b keeps the run; moving b down past c breaks nothing either.
+      expect(canMoveField(fields, 0, 1, layout)).toBe(true);
+      const split = [t("a", { section: "s" }), t("x"), t("b", { section: "s" })];
+      expect(logicRefusal(split, layout)).toMatch(/not together/);
+    });
+
+    it("lets a form that is already faulty be rearranged", () => {
+      const faulty = [more, heard];
+      expect(canMoveField(faulty, 0, 1, {})).toBe(true);
+    });
+  });
+
+  describe("sections keep membership contiguous", () => {
+    const base = [t("a"), t("b"), t("c"), t("d")];
+
+    it("startSection takes the question to the end of its run", () => {
+      const started = startSection(base, {}, "b");
+      expect(started).not.toBeNull();
+      const out = started as NonNullable<typeof started>;
+      expect(out.fields.map((f) => f.section)).toEqual([
+        undefined,
+        out.section,
+        out.section,
+        out.section,
+      ]);
+      expect(out.layout.sections?.map((s) => s.name)).toEqual([out.section]);
+      expect(logicRefusal(out.fields, out.layout)).toBeNull();
+    });
+
+    it("startSection inside a section splits it, and replaces one it empties", () => {
+      const first = startSection(base, {}, "a") as NonNullable<ReturnType<typeof startSection>>;
+      expect(first.layout.sections).toHaveLength(1);
+
+      const inside = startSection(first.fields, first.layout, "c") as NonNullable<
+        ReturnType<typeof startSection>
+      >;
+      expect(inside.layout.sections).toHaveLength(2);
+      expect(logicRefusal(inside.fields, inside.layout)).toBeNull();
+
+      const second = startSection(first.fields, first.layout, "a") as NonNullable<
+        ReturnType<typeof startSection>
+      >;
+      expect(second.layout.sections?.map((s) => s.name)).toEqual([second.section]);
+    });
+
+    it("endSectionAfter frees the questions below it in the run", () => {
+      const started = startSection(base, {}, "a") as NonNullable<ReturnType<typeof startSection>>;
+      const ended = endSectionAfter(started.fields, "b");
+      expect(ended.map((f) => f.section)).toEqual([
+        started.section,
+        started.section,
+        undefined,
+        undefined,
+      ]);
+    });
+
+    it("removeSection keeps the questions and clears their membership", () => {
+      const started = startSection(base, {}, "b") as NonNullable<ReturnType<typeof startSection>>;
+      const out = removeSection(started.fields, started.layout, started.section);
+      expect(names(out.fields)).toEqual(["a", "b", "c", "d"]);
+      expect(out.fields.every((f) => f.section === undefined)).toBe(true);
+      expect(out.layout).toEqual({});
+    });
+
+    it("updateSection replaces by name, and pruneSections drops an empty one", () => {
+      const layout: FormLayout = {
+        sections: [
+          { name: "s", label: "S" },
+          { name: "t", label: "T" },
+        ],
+      };
+      expect(updateSection(layout, "s", { name: "s", label: "Renamed" }).sections?.[0]?.label).toBe(
+        "Renamed",
+      );
+      expect(
+        pruneSections([t("a", { section: "s" })], layout).sections?.map((s) => s.name),
+      ).toEqual(["s"]);
+    });
+
+    it("fieldRows breaks at a section boundary like rowsOf", () => {
+      const fields = [
+        t("a"),
+        t("b", { beside: true, section: "s" }),
+        t("c", { beside: true, section: "s" }),
+      ];
+      expect(fieldRows(fields)).toEqual([[0], [1, 2]]);
+    });
+  });
+
+  describe("logicRefusal", () => {
+    it("is exactly what checkFormLogic would throw", () => {
+      const fields = [more, heard];
+      expect(() => checkFormLogic(fields, {})).toThrow();
+      let thrown = "";
+      try {
+        checkFormLogic(fields, {});
+      } catch (err) {
+        thrown = (err as Error).message;
+      }
+      expect(logicRefusal(fields, {})).toBe(thrown);
+      expect(logicRefusal([heard, more], {})).toBeNull();
+    });
   });
 });

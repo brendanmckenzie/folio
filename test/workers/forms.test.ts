@@ -1018,6 +1018,7 @@ describe("GET /forms/resolved", () => {
         "name",
         "open",
         "redirectTo",
+        "sections",
         "submitLabel",
         "successMessage",
         "version",
@@ -1080,5 +1081,292 @@ describe("GET /forms/resolved", () => {
     // The whole point of the route: one compiler, two callers. A second
     // implementation in the admin is what this refuses to be.
     expect(json[form.id]).toEqual(rendered);
+  });
+});
+
+/**
+ * Conditional questions, sections and prefill
+ * (`docs/specs/content-model/form-logic.md`, phase 2): the PATCH route's half.
+ * What a *submission* does with them is `form-submit.test.ts`.
+ */
+describe("form logic: saving and reading", () => {
+  const HEARD = {
+    name: "heard",
+    kind: "radio",
+    label: "How did you hear about us?",
+    options: [
+      { value: "friend", label: "A friend" },
+      { value: "other", label: "Other" },
+    ],
+  };
+  const MORE = {
+    name: "heard_other",
+    kind: "text",
+    label: "Tell us more",
+    required: true,
+    showIf: { field: "heard", eq: "other" },
+  };
+
+  const readBack = async (id: string) => (await get<Form>(`/forms/${id}`)).json;
+
+  it("round-trips layout and every new question key", async () => {
+    const form = await makeForm("Logic");
+    const fields = [
+      HEARD,
+      {
+        ...MORE,
+        required: false,
+        requireIf: { field: "heard", isSet: true },
+        hold: true,
+        prefill: "query",
+        section: "extra",
+      },
+    ];
+    const layout = {
+      sections: [
+        {
+          name: "extra",
+          label: "Extra",
+          help: "More detail",
+          showIf: { field: "heard", ne: "friend" },
+          i18n: { fr: { label: "Plus" } },
+        },
+      ],
+    };
+    const saved = await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields,
+      layout,
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.json.layout).toEqual(layout);
+    expect(saved.json.fields[1]).toMatchObject({
+      showIf: MORE.showIf,
+      requireIf: { field: "heard", isSet: true },
+      hold: true,
+      prefill: "query",
+      section: "extra",
+    });
+    expect(await readBack(form.id)).toMatchObject({ layout, fields: saved.json.fields });
+  });
+
+  it("refuses a showIf naming a later question with a 400 naming both, and writes nothing", async () => {
+    const form = await makeForm("Forward");
+    const seeded = await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [HEARD, MORE],
+    });
+    const before = await readBack(form.id);
+
+    const refused = await patch<ErrorBody>(`/forms/${form.id}`, {
+      expectedUpdatedAt: seeded.json.updatedAt,
+      fields: [MORE, HEARD],
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.json.error.code).toBe("bad_request");
+    expect(refused.json.error.message).toContain("Tell us more");
+    expect(refused.json.error.message).toContain("How did you hear about us?");
+
+    const after = await readBack(form.id);
+    expect(after.fields).toEqual(before.fields);
+    expect(after.updatedAt).toBe(before.updatedAt);
+    expect(after.version).toBe(before.version);
+  });
+
+  it("refuses a section that has no members, and a malformed layout", async () => {
+    const form = await makeForm("BadLayout");
+    const empty = await patch<ErrorBody>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [HEARD],
+      layout: { sections: [{ name: "s", label: "Nothing in it" }] },
+    });
+    expect(empty.status).toBe(400);
+    const malformed = await patch<ErrorBody>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      layout: { sections: [{ name: "Not A Slug", label: "x" }] },
+    });
+    expect(malformed.status).toBe(400);
+  });
+
+  it("bumps version and fires formChanged for a logic change", async () => {
+    const form = await makeForm("Bumped");
+    const calls: FormChangedHookPayload<Cloudflare.Env>[] = [];
+    const folio = folioWithHooks({ formChanged: (e) => calls.push(e) });
+    const save = async (expectedUpdatedAt: number, fields: unknown[], layout?: unknown) => {
+      const res = await callHooked(folio, `/folio/api/forms/${form.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ expectedUpdatedAt, fields, ...(layout ? { layout } : {}) }),
+      });
+      expect(res.status).toBe(200);
+      return res.json<Form>();
+    };
+
+    const seeded = await save(form.updatedAt, [HEARD, { ...MORE, showIf: undefined }]);
+    calls.length = 0;
+
+    const conditional = await save(seeded.updatedAt, [HEARD, MORE]);
+    expect(conditional.version).toBe(seeded.version + 1);
+    expect(calls).toHaveLength(1);
+
+    const longer = await save(conditional.updatedAt, [HEARD, { ...MORE, max: 80 }]);
+    // A length limit is enforced by the server, so it is shape (decision 11).
+    expect(longer.version).toBe(conditional.version + 1);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("purges without a bump or an event for hold, prefill and unconditional membership", async () => {
+    const form = await makeForm("Quiet");
+    const hooks: FormChangedHookPayload<Cloudflare.Env>[] = [];
+    const purges: unknown[] = [];
+    const capability: PurgeCapability = async () => async (options) => {
+      purges.push(options);
+      return { success: true, errors: [] };
+    };
+    const folio = createFolio<Cloudflare.Env>({
+      blocks: [hookPage],
+      root: "page",
+      bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
+      basePath: "/folio",
+      auth: "open",
+      hooks: { formChanged: (e) => hooks.push(e) },
+      ...{ formPurgeCapability: capability },
+    });
+    const save = async (expectedUpdatedAt: number, body: Record<string, unknown>) => {
+      const res = await callHooked(folio, `/folio/api/forms/${form.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ expectedUpdatedAt, ...body }),
+      });
+      expect(res.status).toBe(200);
+      return res.json<Form>();
+    };
+
+    const fields = [HEARD, MORE, { name: "street", kind: "text", label: "Street" }];
+    const seeded = await save(form.updatedAt, { fields });
+    hooks.length = 0;
+    purges.length = 0;
+
+    const held = await save(seeded.updatedAt, {
+      fields: [HEARD, { ...MORE, hold: true }, fields[2]],
+    });
+    expect(held.version).toBe(seeded.version);
+    expect(hooks).toHaveLength(0);
+    expect(purges).toEqual([{ tags: [formTag(form.id)] }]);
+
+    purges.length = 0;
+    const prefilled = await save(held.updatedAt, {
+      fields: [{ ...HEARD, prefill: "query" }, { ...MORE, hold: true }, fields[2]],
+    });
+    expect(prefilled.version).toBe(seeded.version);
+    expect(hooks).toHaveLength(0);
+    expect(purges).toEqual([{ tags: [formTag(form.id)] }]);
+
+    purges.length = 0;
+    const sectioned = await save(prefilled.updatedAt, {
+      fields: [
+        { ...HEARD, prefill: "query" },
+        { ...MORE, hold: true },
+        { ...fields[2], section: "address" },
+      ],
+      layout: { sections: [{ name: "address", label: "Address" }] },
+    });
+    // Membership of an unconditional section is layout: nothing the server decides.
+    expect(sectioned.version).toBe(seeded.version);
+    expect(hooks).toHaveLength(0);
+    expect(purges).toEqual([{ tags: [formTag(form.id)] }]);
+  });
+
+  it("making a section conditional bumps the version", async () => {
+    const form = await makeForm("SectionRule");
+    const fields = [HEARD, { name: "street", kind: "text", label: "Street", section: "address" }];
+    const seeded = await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields,
+      layout: { sections: [{ name: "address", label: "Address" }] },
+    });
+    const conditional = await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: seeded.json.updatedAt,
+      fields,
+      layout: {
+        sections: [{ name: "address", label: "Address", showIf: { field: "heard", eq: "other" } }],
+      },
+    });
+    expect(conditional.json.version).toBe(seeded.json.version + 1);
+  });
+
+  describe("reading never empties a form", () => {
+    it("reads every question when the stored layout is not JSON", async () => {
+      const form = await makeForm("Corrupt");
+      const seeded = await patch<Form>(`/forms/${form.id}`, {
+        expectedUpdatedAt: form.updatedAt,
+        fields: [HEARD, MORE],
+      });
+      await env.DB.prepare("update forms set layout = ? where id = ?")
+        .bind("{not json", form.id)
+        .run();
+      const read = await formById(env.DB, form.id, { error: () => {} } as never);
+      expect(read?.fields.map((f) => f.name)).toEqual(["heard", "heard_other"]);
+      expect(read?.layout).toEqual({});
+      expect(seeded.status).toBe(200);
+    });
+
+    it("reads a dangling condition and a membership naming no section without dropping a question", async () => {
+      const form = await makeForm("Dangling");
+      await env.DB.prepare("update forms set fields = ?, layout = ? where id = ?")
+        .bind(
+          JSON.stringify([
+            {
+              name: "a",
+              kind: "text",
+              label: "A",
+              showIf: { field: "gone", eq: "x" },
+              section: "ghost",
+            },
+            { name: "b", kind: "text", label: "B", showIf: "not an object" },
+          ]),
+          JSON.stringify({ sections: "nonsense" }),
+          form.id,
+        )
+        .run();
+      const read = await formById(env.DB, form.id);
+      expect(read?.fields.map((f) => f.name)).toEqual(["a", "b"]);
+      expect(read?.fields[0]?.section).toBeUndefined();
+      expect(read?.fields[0]?.showIf).toEqual({ field: "gone", eq: "x" });
+      expect(read?.fields[1]?.showIf).toEqual({ any: [] });
+      expect(read?.layout).toEqual({});
+    });
+
+    it("lets a label-only save through a form whose stored logic dangles", async () => {
+      const form = await makeForm("Rolled back");
+      await env.DB.prepare("update forms set fields = ? where id = ?")
+        .bind(
+          JSON.stringify([
+            { name: "a", kind: "text", label: "A", showIf: { field: "gone", eq: 1 } },
+          ]),
+          form.id,
+        )
+        .run();
+      const current = await formById(env.DB, form.id);
+      const renamed = await patch<Form>(`/forms/${form.id}`, {
+        expectedUpdatedAt: current?.updatedAt,
+        label: "Renamed",
+      });
+      expect(renamed.status).toBe(200);
+    });
+  });
+
+  it("answers the new keys from GET /forms/resolved", async () => {
+    const form = await makeForm("Resolved");
+    await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [HEARD, { ...MORE, section: "extra" }],
+      layout: { sections: [{ name: "extra", label: "Extra" }] },
+    });
+    const { json } = await get<Record<string, ResolvedForm>>(`/forms/resolved?ids=${form.id}`);
+    const descriptor = json[form.id];
+    expect(descriptor?.sections).toEqual([{ name: "extra", label: "Extra" }]);
+    expect(descriptor?.fields[1]).toMatchObject({ section: "extra", showIf: MORE.showIf });
+    // Required with a showIf: not unconditionally required.
+    expect(descriptor?.fields[1]?.required).toBe(false);
+    expect(descriptor?.fields[1]?.requireIf).toEqual({ all: [] });
   });
 });

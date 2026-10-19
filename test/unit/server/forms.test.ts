@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { FILE_ACCEPT, type FormField } from "../../../src/core/forms";
 import type { LocaleContext } from "../../../src/core/locales";
+import { formState } from "../../../src/core/form-logic";
 import { compileForm, type Form, LOCALE_INPUT, PAGE_INPUT } from "../../../src/server/forms";
+import { FormPatchBody, parseOrThrow } from "../../../src/server/validate";
 
 /**
  * `compileForm` — the descriptor a host's `render` is handed
@@ -35,6 +37,7 @@ function makeForm(over: Partial<Form> = {}): Form {
     name: "contact",
     label: "Contact us",
     fields: [NAME, EMAIL],
+    layout: {},
     version: 3,
     open: true,
     closesAt: null,
@@ -221,6 +224,7 @@ describe("compileForm", () => {
       "name",
       "open",
       "redirectTo",
+      "sections",
       "submitLabel",
       "successMessage",
       "version",
@@ -246,5 +250,195 @@ describe("compileForm", () => {
       grow: 1,
       value: "newsletter",
     });
+  });
+});
+
+describe("compileForm: logic (spec 35)", () => {
+  const heard: FormField = {
+    name: "heard",
+    kind: "radio",
+    label: "Heard",
+    options: [
+      { value: "a", label: "A" },
+      { value: "other", label: "Other" },
+    ],
+  };
+  const showIf = { field: "heard", eq: "other" } as const;
+
+  it("emits the logic keys only when set, and always a sections array", () => {
+    const plain = compileForm(makeForm(), { base: BASE });
+    expect(plain.sections).toEqual([]);
+    expect(Object.keys(plain.fields[0] ?? {}).sort()).toEqual([
+      "grow",
+      "kind",
+      "label",
+      "name",
+      "required",
+      "row",
+    ]);
+
+    const full: FormField = {
+      name: "more",
+      kind: "text",
+      label: "More",
+      section: "extra",
+      showIf,
+      requireIf: { field: "heard", isSet: true },
+      hold: true,
+      prefill: "query",
+    };
+    const compiled = compileForm(
+      makeForm({
+        fields: [heard, full],
+        layout: { sections: [{ name: "extra", label: "Extra" }] },
+      }),
+      { base: BASE },
+    );
+    expect(Object.keys(compiled.fields[1] ?? {}).sort()).toEqual(
+      [
+        "grow",
+        "hold",
+        "kind",
+        "label",
+        "name",
+        "prefill",
+        "requireIf",
+        "required",
+        "row",
+        "section",
+        "showIf",
+      ].sort(),
+    );
+  });
+
+  describe("required is 'required unconditionally' (decision 6)", () => {
+    const compiledOf = (field: FormField, layout: Form["layout"] = {}) =>
+      compileForm(makeForm({ fields: [heard, field], layout }), { base: BASE }).fields[1];
+
+    it("a plain required question compiles exactly as before", () => {
+      const f = compiledOf({ name: "q", kind: "text", label: "Q", required: true });
+      expect(f?.required).toBe(true);
+      expect(f?.requireIf).toBeUndefined();
+    });
+
+    it("required with its own showIf compiles to false plus an always-true requireIf", () => {
+      const f = compiledOf({ name: "q", kind: "text", label: "Q", required: true, showIf });
+      expect(f?.required).toBe(false);
+      expect(f?.requireIf).toEqual({ all: [] });
+      expect(f?.showIf).toEqual(showIf);
+    });
+
+    it("required inside a conditional section compiles the same way", () => {
+      const f = compiledOf(
+        { name: "q", kind: "text", label: "Q", required: true, section: "s" },
+        { sections: [{ name: "s", label: "S", showIf }] },
+      );
+      expect(f?.required).toBe(false);
+      expect(f?.requireIf).toEqual({ all: [] });
+    });
+
+    it("required inside an unconditional section stays required", () => {
+      const f = compiledOf(
+        { name: "q", kind: "text", label: "Q", required: true, section: "s" },
+        { sections: [{ name: "s", label: "S" }] },
+      );
+      expect(f?.required).toBe(true);
+    });
+
+    it("a requireIf alone keeps its own condition and is not required", () => {
+      const requireIf = { field: "heard", isSet: true } as const;
+      const f = compiledOf({ name: "q", kind: "text", label: "Q", requireIf });
+      expect(f?.required).toBe(false);
+      expect(f?.requireIf).toEqual(requireIf);
+    });
+
+    it("the engine reads the same answers off the stored row and the descriptor", () => {
+      const fields: FormField[] = [
+        heard,
+        { name: "q", kind: "text", label: "Q", required: true, showIf },
+        { name: "r", kind: "text", label: "R", requireIf: { field: "heard", eq: "a" } },
+      ];
+      const form = makeForm({ fields });
+      const compiled = compileForm(form, { base: BASE });
+      for (const answers of [{}, { heard: "a" }, { heard: "other" }, { heard: "other", q: "x" }]) {
+        const stored = formState({ fields: form.fields, sections: [] }, answers);
+        const seen = formState(compiled, answers);
+        expect([...seen.asked]).toEqual([...stored.asked]);
+        expect([...seen.required]).toEqual([...stored.required]);
+      }
+    });
+  });
+
+  it("ships sections with label and help through the locale chain, and never i18n", () => {
+    const layout: Form["layout"] = {
+      sections: [
+        {
+          name: "s",
+          label: "Postal",
+          help: "Where we write",
+          showIf,
+          i18n: { fr: { label: "Adresse" } },
+        },
+      ],
+    };
+    const fr: LocaleContext = { code: "fr", fallbacks: ["en"] };
+    const compiled = compileForm(makeForm({ fields: [heard], layout }), { base: BASE, locale: fr });
+    expect(compiled.sections).toEqual([
+      { name: "s", label: "Adresse", help: "Where we write", showIf },
+    ]);
+    const source = compileForm(makeForm({ fields: [heard], layout }), { base: BASE });
+    expect(source.sections[0]?.label).toBe("Postal");
+  });
+});
+
+describe("FormPatchBody keeps every FormField key", () => {
+  // Typed `Required<FormField>`: adding a key to `FormField` fails typecheck here
+  // until the fixture sets it, which is what makes this a guard against
+  // `v.object` stripping a new key without anybody noticing.
+  const everything: Required<FormField> = {
+    name: "q",
+    kind: "text",
+    label: "Q",
+    help: "h",
+    placeholder: "p",
+    required: true,
+    max: 10,
+    min: 1,
+    pattern: "a+",
+    options: [{ value: "a", label: "A" }],
+    accept: "documents",
+    maxBytes: 100,
+    value: "v",
+    text: "t",
+    beside: true,
+    grow: 2,
+    showIf: { field: "heard", eq: "other" },
+    requireIf: { field: "heard", isSet: true },
+    section: "s",
+    hold: true,
+    prefill: "query",
+    i18n: { fr: { label: "Q" } },
+  };
+
+  it("survives parseOrThrow unstripped", () => {
+    const parsed = parseOrThrow(
+      FormPatchBody,
+      { expectedUpdatedAt: 1, fields: [everything] },
+      "body",
+    );
+    expect(parsed.fields?.[0]).toEqual(everything);
+  });
+
+  it("refuses a malformed condition and a malformed layout before anything is parsed", () => {
+    const patch = (over: Record<string, unknown>) =>
+      parseOrThrow(FormPatchBody, { expectedUpdatedAt: 1, ...over }, "body");
+    expect(() => patch({ fields: [{ ...everything, showIf: { field: "x" } }] })).toThrow();
+    expect(() => patch({ fields: [{ ...everything, hold: false }] })).toThrow();
+    expect(() => patch({ fields: [{ ...everything, prefill: "body" }] })).toThrow();
+    expect(() => patch({ layout: { sections: [{ name: "Bad Name", label: "x" }] } })).toThrow();
+    expect(
+      patch({ layout: { sections: [{ name: "s", label: "S", showIf: { field: "a", eq: 1 } }] } })
+        .layout,
+    ).toEqual({ sections: [{ name: "s", label: "S", showIf: { field: "a", eq: 1 } }] });
   });
 });

@@ -19,7 +19,8 @@
  */
 import * as v from "valibot";
 import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from "../core/assets";
-import { MAX_FORM_FIELDS } from "../core/forms";
+import { conditionRefusal, type FieldCondition } from "../core/conditions";
+import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
 import type { DocumentType } from "../core/schema";
 import {
@@ -1817,6 +1818,17 @@ export function fieldNameParam(raw: string | undefined): string {
 const MAX_FORM_OPTIONS = 100;
 
 /**
+ * A `showIf` / `requireIf` body: structurally well formed, with `core/conditions.ts`'s
+ * `conditionRefusal` as the one rule (spec 35 decision 3). Whether it names real
+ * questions, and whether the operator suits them, is `checkFormLogic`'s, which has
+ * the questions to check against.
+ */
+const FORM_CONDITION = v.custom<FieldCondition>(
+  (raw) => conditionRefusal(raw) === null,
+  "must be a valid condition",
+);
+
+/**
  * One question, bounded. Every string cap here exists for the reason this file
  * exists: they bound what reaches `forms.fields` before the write.
  *
@@ -1863,6 +1875,15 @@ const FORM_FIELD = v.object(
     // case unreachable from a well-behaved client.
     beside: v.optional(v.boolean()),
     grow: v.optional(v.picklist([1, 2, 3, 4], "must be 1, 2, 3 or 4")),
+    // Logic (`docs/specs/content-model/form-logic.md`). Every key `FormField` has
+    // must be named here: `v.object` strips the rest, and a stripped logic key is a
+    // save that silently loses its condition. `test/unit/server/forms.test.ts` pins
+    // that with a `Required<FormField>` fixture.
+    showIf: v.optional(FORM_CONDITION),
+    requireIf: v.optional(FORM_CONDITION),
+    section: v.optional(FIELD_NAME),
+    hold: v.optional(v.literal(true)),
+    prefill: v.optional(v.literal("query")),
     i18n: v.optional(
       v.record(
         LOCALE_CODE,
@@ -1892,6 +1913,35 @@ const FORM_FIELDS = v.pipe(
   v.maxLength(MAX_FORM_FIELDS, `must be ${MAX_FORM_FIELDS} fields or fewer`),
 );
 
+/** One section of `forms.layout`: a legend, and a condition that shows the group. */
+const FORM_SECTION = v.object(
+  {
+    name: FIELD_NAME,
+    label: required(200),
+    help: v.optional(bounded(500)),
+    showIf: v.optional(FORM_CONDITION),
+    i18n: v.optional(
+      v.record(
+        LOCALE_CODE,
+        v.object({ label: v.optional(bounded(200)), help: v.optional(bounded(500)) }, OBJECT),
+      ),
+    ),
+  },
+  OBJECT,
+);
+
+const FORM_LAYOUT = v.object(
+  {
+    sections: v.optional(
+      v.pipe(
+        v.array(FORM_SECTION, "must be an array of sections"),
+        v.maxLength(MAX_FORM_SECTIONS, `must be ${MAX_FORM_SECTIONS} sections or fewer`),
+      ),
+    ),
+  },
+  OBJECT,
+);
+
 /**
  * `{ label, name? }`. `name` is capped before `formSlug`, which truncates its
  * own output to 64 — the cap is so an unbounded string is never slugified, not a
@@ -1917,6 +1967,7 @@ export const FormPatchBody = v.object(
     label: v.optional(required(200)),
     name: v.optional(bounded(200)),
     fields: v.optional(FORM_FIELDS),
+    layout: v.optional(FORM_LAYOUT),
     open: v.optional(v.boolean()),
     closesAt: v.optional(v.nullable(v.pipe(v.number(), v.finite()))),
     successMessage: v.optional(bounded(500)),

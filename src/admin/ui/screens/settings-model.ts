@@ -375,6 +375,8 @@ export function conditionText(condition: FieldCondition): string {
     if ("isSet" in condition) {
       return condition.isSet ? `${condition.field} has a value` : `${condition.field} is empty`;
     }
+    if ("includes" in condition)
+      return `${condition.field} includes ${printJson(condition.includes)}`;
   }
   return "an unrecognised condition";
 }

@@ -595,3 +595,56 @@ describe("a file question needs the media binding, and says so", () => {
     expect(await rowCount(form.id)).toBe(0);
   });
 });
+
+/* ---------------------------------- a file on an excluded question (spec 35) --- */
+
+/**
+ * `docs/specs/content-model/form-logic.md` decision 10: a file for a question that
+ * was not asked is dropped before anything is hashed or written, and a refusal for
+ * it (a CV over its cap) does not refuse the submission.
+ */
+describe("a file question with a condition", () => {
+  const APPLYING = { name: "applying", kind: "checkbox", label: "I am applying" };
+  const CONDITIONAL_CV = { ...CV, showIf: { field: "applying", eq: true } };
+
+  it("never puts a file for an unasked question in the bucket", async () => {
+    const form = await makeForm("Conditional CV", [APPLYING, CONDITIONAL_CV]);
+    const before = await bucketKeys();
+
+    const res = await submit(form.id, {}, [{ field: "cv", filename: "cv.pdf", bytes: PDF }]);
+    expect(res.status).toBe(200);
+
+    expect(await bucketKeys()).toEqual(before);
+    expect(await filesOf(form.id)).toEqual([[]]);
+  });
+
+  it("does not refuse the submission for an over-size file on an unasked question", async () => {
+    const form = await makeForm("Conditional big CV", [APPLYING, CONDITIONAL_CV]);
+    const before = await bucketKeys();
+    const huge = bytesOf("%PDF-1.7\n", new Array(CV.maxBytes + 100).fill(65));
+
+    const res = await submit(form.id, {}, [{ field: "cv", filename: "cv.pdf", bytes: huge }]);
+    expect(res.status).toBe(200);
+    expect(await rowCount(form.id)).toBe(1);
+    expect(await bucketKeys()).toEqual(before);
+  });
+
+  it("stores the file once the question is asked, and still refuses it when too large", async () => {
+    const form = await makeForm("Conditional asked CV", [APPLYING, CONDITIONAL_CV]);
+
+    const ok = await submit(form.id, { applying: "1" }, [
+      { field: "cv", filename: "cv.pdf", bytes: PDF },
+    ]);
+    expect(ok.status).toBe(200);
+    const [files] = await filesOf(form.id);
+    expect(files).toHaveLength(1);
+    expect(files?.[0]?.field).toBe("cv");
+
+    const huge = bytesOf("%PDF-1.7\n", new Array(CV.maxBytes + 100).fill(65));
+    const big = await submit(form.id, { applying: "1" }, [
+      { field: "cv", filename: "big.pdf", bytes: huge },
+    ]);
+    expect(big.status).toBe(422);
+    expect(await rowCount(form.id)).toBe(1);
+  });
+});
