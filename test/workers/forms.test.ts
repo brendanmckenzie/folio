@@ -1,6 +1,13 @@
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { defineBlock, outboundRefs, text, toRegistry, toSchemaIndex } from "../../src/core";
+import {
+  defineBlock,
+  outboundRefs,
+  reference,
+  text,
+  toRegistry,
+  toSchemaIndex,
+} from "../../src/core";
 import { formTag } from "../../src/core/cache-tags";
 import type { Doc } from "../../src/core/doc";
 import type { Page } from "../../src/core/pagination";
@@ -777,14 +784,27 @@ const formPage = defineBlock({
     // now, and writing the union member by hand keeps this file's fixture
     // independent of it.
     enquiry: { kind: "form" as const, label: "Enquiry" },
+    related: reference({ label: "Related", types: ["page"] }),
   },
+  render: () => null,
+});
+
+/** A global whose block embeds a form: the footer sign-up. */
+const footerRoot = defineBlock({
+  name: "footerRoot",
+  label: "Footer",
+  fields: { signup: { kind: "form" as const, label: "Sign-up" } },
   render: () => null,
 });
 
 function folioWithForm() {
   return createFolio<Cloudflare.Env>({
-    blocks: [formPage],
-    types: [{ name: "page", label: "Page", kind: "page", root: "page" }],
+    blocks: [formPage, footerRoot],
+    types: [
+      { name: "page", label: "Page", kind: "page", root: "page" },
+      { name: "fxfooter", label: "Footer", kind: "singleton", root: "footerRoot" },
+    ],
+    globals: ["fxfooter"],
     bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
     basePath: "/folio",
     auth: "open",
@@ -869,6 +889,54 @@ describe("resolve(): the descriptor a page renders from", () => {
     // The same posture a `reference` to a deleted document takes: no entry, and
     // `resolveValue` answers `null` so the host's block renders nothing.
     expect(orphaned?.resolution.forms).toBeUndefined();
+  });
+
+  it("compiles a form embedded in a referenced document", async () => {
+    const form = await makeForm("On a card");
+    await insertFormPage("sty_fx_card", "fx-card", form.id);
+    const host = await insertFormPage("sty_fx_host", "fx-host");
+    host.bloks.root0000!.data.related = "sty_fx_card";
+    await env.DB.prepare("update stories set published_doc = ? where id = ?")
+      .bind(JSON.stringify(host), "sty_fx_host")
+      .run();
+
+    const page = await folioWithForm().reader(env).page("fx-host");
+
+    // The host page embeds nothing itself: the id is only known once the
+    // referenced document has been loaded.
+    expect(page?.resolution.docs?.sty_fx_card).toBeDefined();
+    expect(page?.resolution.forms?.[form.id]?.action).toBe(`/folio/f/${form.id}`);
+  });
+
+  it("compiles a form embedded in a global", async () => {
+    const form = await makeForm("Footer sign-up");
+    const footer: Doc = {
+      root: "ftr00001",
+      bloks: {
+        ftr00001: {
+          uid: "ftr00001",
+          type: "footerRoot",
+          parent: null,
+          slot: null,
+          order: "a0",
+          data: { signup: form.id },
+        },
+      },
+    };
+    await env.DB.prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at,
+                            published_doc, published_at)
+       values ('sng_fxfooter', 'fxfooter', null, 'fxfooter', null, 'a0', 'Footer', ?, ?, ?)`,
+    )
+      .bind(Date.now(), JSON.stringify(footer), Date.now())
+      .run();
+    await insertFormPage("sty_fx_plain", "fx-plain");
+
+    const page = await folioWithForm().reader(env).page("fx-plain");
+
+    expect(page?.resolution.globals?.fxfooter).toBeDefined();
+    expect(page?.resolution.forms?.[form.id]?.action).toBe(`/folio/f/${form.id}`);
+    expect(page?.headers["cache-tag"]).toContain(`form:${form.id}`);
   });
 
   it("walks the same edge the usage count reads, so a page renders and is counted", async () => {

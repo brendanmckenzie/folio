@@ -1439,6 +1439,24 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       }
 
       /**
+       * Pass three, forms: the form ids inside the documents pass two pulled in — a
+       * newsletter sign-up in a global footer, a form on a referenced card. Their ids
+       * are not known until pass two returns, so this is the one forms read that
+       * cannot go out alongside pass one. Ids the document's own read already covers
+       * are dropped, and nothing is sent when none remain, which is the ordinary case:
+       * a render with no form in a global or a reference costs exactly what it did.
+       * Same `chain` as the first read, so a form outside the render's scope is still
+       * a deleted one.
+       */
+      const ownFormIds = new Set(doc ? formIds(doc, schema) : []);
+      const nestedFormIds = new Set<string>();
+      for (const pulled of [...Object.values(docs), ...Object.values(globalDocs ?? {})]) {
+        for (const id of formIds(pulled, schema)) if (!ownFormIds.has(id)) nestedFormIds.add(id);
+      }
+      const nestedFormRows =
+        nestedFormIds.size > 0 ? await formsByIds(db, [...nestedFormIds], logger, chain) : [];
+
+      /**
        * The descriptors, compiled from the rows the read above fetched. The action URL
        * is built from this runtime's `base` and the `_folio_page` hidden input from
        * the story's own URL through the host's `route` — so a submission comes back
@@ -1451,7 +1469,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       const formPage =
         opts?.story?.path != null ? route(opts.story.path, active?.code, render?.site) : undefined;
       const forms = Object.fromEntries(
-        (await formRows).map((form) => [
+        [...(await formRows), ...nestedFormRows].map((form) => [
           form.id,
           compileForm(form, {
             base,
