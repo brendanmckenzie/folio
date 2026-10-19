@@ -34,7 +34,7 @@ importers:
         version: 4.0.0
       hono:
         specifier: ^4.12.32
-        version: 4.12.32
+        version: 4.13.7
       valibot:
         specifier: ^1.4.2
         version: 1.4.2(typescript@7.0.2)
@@ -1439,8 +1439,8 @@ packages:
     resolution: {integrity: sha512-4bRh1KzRvKDnFNTlLhzT1RZTpkKhQbQDl9j+7GXszWsvuspYdo29k6OHRf4PwiM6oLb8r/pMWeYiJjkfod5AvQ==}
     engines: {node: '>=20.0.0'}
 
-  hono@4.12.32:
-    resolution: {integrity: sha512-XcuyW9qE2kJn07PkecMOBd5Vq/hMy7mmGw+idz1yblbg9N17ijJODrvPkn7/dwL3Kulj8LcRJ69DLOWf91dRUg==}
+  hono@4.13.7:
+    resolution: {integrity: sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ==}
     engines: {node: '>=16.9.0'}
 
   import-fresh@3.3.1:
@@ -3040,7 +3040,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  hono@4.12.32: {}
+  hono@4.13.7: {}
 
   import-fresh@3.3.1:
     dependencies:
