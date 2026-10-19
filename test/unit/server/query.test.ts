@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { queryKey } from "../../../src/core/query";
 import { queryFromParams } from "../../../src/server/routes/content";
 import { contentSql } from "../../../src/server/query";
+import { D1_BIND_CAP } from "../../../src/server/db";
 import { FolioError } from "../../../src/server/errors";
 
 /**
@@ -520,5 +521,36 @@ describe("queryFromParams with a search", () => {
     // 200 characters is one token after `ftsQuery`'s 64-character screen drops
     // it — an empty page, honestly, rather than a 400 a visitor cannot act on.
     expect(count.text).toContain("0 = 1");
+  });
+});
+
+describe("contentSql: D1's bind cap", () => {
+  const values = (n: number) => Array.from({ length: n }, (_, i) => `v${i}`);
+  const withIn = (n: number, extra: Partial<Parameters<typeof contentSql>[0]> = {}) =>
+    sql({ where: [{ field: "topic", op: "in", value: values(n) }], ...extra });
+
+  // The page statement binds: locale + field + n values, then limit + offset.
+  it("accepts a statement of exactly D1's cap and refuses one more", () => {
+    expect(withIn(D1_BIND_CAP - 4).page.binds).toHaveLength(D1_BIND_CAP);
+    const err = bad(() => withIn(D1_BIND_CAP - 3));
+    expect(err.status).toBe(400);
+    expect(err.message).toContain(String(D1_BIND_CAP + 1));
+  });
+
+  it("does not refuse what fit before: 85 values and no search", () => {
+    expect(withIn(85).page.binds.length).toBeLessThanOrEqual(D1_BIND_CAP);
+  });
+
+  it("counts a search's three extra binds exactly, at the cap and one over", () => {
+    expect(withIn(D1_BIND_CAP - 7, { search: "africa" }).page.binds).toHaveLength(D1_BIND_CAP);
+    expect(bad(() => withIn(D1_BIND_CAP - 6, { search: "africa" })).status).toBe(400);
+  });
+
+  it("counts a non-built-in order's two extra binds", () => {
+    const q = withIn(D1_BIND_CAP - 6, { order: { field: "readingTime", dir: "asc" } });
+    expect(q.page.binds).toHaveLength(D1_BIND_CAP);
+    expect(
+      bad(() => withIn(D1_BIND_CAP - 5, { order: { field: "readingTime", dir: "asc" } })).status,
+    ).toBe(400);
   });
 });

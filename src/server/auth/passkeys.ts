@@ -14,7 +14,7 @@
  * `passkeyForAssertion` is safe to call on whatever a browser sent, and the
  * route's uniform refusal is what stops the *answer* from being an oracle.
  */
-import type { FolioDb } from "../db";
+import { bindChunks, type FolioDb } from "../db";
 import { base64url, fromBase64url } from "./jwt";
 import type { RegisteredCredential } from "./webauthn";
 import { type UserRow, userById } from "./users";
@@ -272,14 +272,19 @@ export async function countPasskeysByUser(
   db: FolioDb,
   userIds: readonly string[],
 ): Promise<Map<string, number>> {
-  if (userIds.length === 0) return new Map();
-  const placeholders = userIds.map(() => "?").join(", ");
-  const { results } = await db
-    .prepare(
-      `select user_id, count(*) as n from passkeys
-       where user_id in (${placeholders}) group by user_id`,
-    )
-    .bind(...userIds)
-    .all<{ user_id: string; n: number }>();
+  // Chunked: the Users list's page size reaches 200. A user's rows all fall in one chunk.
+  const reads = await Promise.all(
+    bindChunks(userIds, 1).map(async (chunk) => {
+      const { results } = await db
+        .prepare(
+          `select user_id, count(*) as n from passkeys
+           where user_id in (${chunk.map(() => "?").join(", ")}) group by user_id`,
+        )
+        .bind(...chunk)
+        .all<{ user_id: string; n: number }>();
+      return results;
+    }),
+  );
+  const results = reads.flat();
   return new Map(results.map((r) => [r.user_id, r.n]));
 }

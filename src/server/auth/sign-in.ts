@@ -43,7 +43,7 @@ import {
   type UserRow,
   userByEmail,
 } from "./users";
-import type { FolioDb } from "../db";
+import { bindChunks, type FolioDb } from "../db";
 import type { FolioLogger } from "../types";
 
 /** Why a sign-in did not happen. The same two words the login page's `?error=`
@@ -394,14 +394,20 @@ function sameGrants(held: RoleGrants, mapped: RoleGrants, role: Role): boolean {
  * the registry holds. One read, only when a mapper named a scope other than `*` —
  * so a deployment with no `sites`, whose mappers answer a bare role, pays nothing.
  */
-async function knownScopes(db: FolioDb, scopes: readonly string[]): Promise<Set<string>> {
+export async function knownScopes(db: FolioDb, scopes: readonly string[]): Promise<Set<string>> {
   const known = new Set<string>(scopes.filter((scope) => scope === "*" || scope === "shared"));
   const rest = scopes.filter((scope) => !known.has(scope));
   if (rest.length === 0) return known;
-  const { results } = await db
-    .prepare(`select id from sites where id in (${rest.map(() => "?").join(", ")})`)
-    .bind(...rest)
-    .all<{ id: string }>();
+  const reads = await Promise.all(
+    bindChunks(rest, 1).map(async (chunk) => {
+      const { results } = await db
+        .prepare(`select id from sites where id in (${chunk.map(() => "?").join(", ")})`)
+        .bind(...chunk)
+        .all<{ id: string }>();
+      return results;
+    }),
+  );
+  const results = reads.flat();
   for (const row of results) known.add(row.id);
   return known;
 }

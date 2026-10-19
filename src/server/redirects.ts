@@ -24,7 +24,7 @@
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
 import { DEFAULT_SITE } from "../core/sites";
 import { isSafeHref } from "../core/values";
-import type { FolioDb } from "./db";
+import { BIND_BUDGET, type FolioDb } from "./db";
 import type { FolioLogger } from "./types";
 
 export interface Redirect {
@@ -244,8 +244,8 @@ export function redirectAtStatement(
  * Each row carries its `path` and `site`, because which one applies is the
  * caller's walk.
  *
- * Unchunked: `paths` is a story's ancestors, as many as it is deep, and the chain
- * is at most three scopes.
+ * Chunked: `paths` is a story's ancestors, as many as it is deep, and each chunk
+ * also carries the chain's binds.
  */
 export async function redirectsAtPaths(
   db: FolioDb,
@@ -254,14 +254,23 @@ export async function redirectsAtPaths(
 ): Promise<(RedirectRow & { site: string; path: string })[]> {
   if (chain.length === 0 || paths.length === 0) return [];
   const scopes = chain.map(() => "?").join(", ");
-  const holes = paths.map(() => "?").join(", ");
-  const { results } = await db
-    .prepare(
-      `select from_path as path, to_path as "to", status, site_id as site from redirects
-       where site_id in (${scopes}) and from_path in (${holes})`,
-    )
-    .bind(...chain, ...paths.map(normalisePath))
-    .all<RedirectRow & { site: string; path: string }>();
+  // The chain's binds come off each chunk's budget; `paths` is a story's depth, unbounded.
+  const size = Math.max(1, BIND_BUDGET - chain.length);
+  const chunks: string[][] = [];
+  for (let at = 0; at < paths.length; at += size) chunks.push(paths.slice(at, at + size));
+  const reads = await Promise.all(
+    chunks.map(async (chunk) => {
+      const { results } = await db
+        .prepare(
+          `select from_path as path, to_path as "to", status, site_id as site from redirects
+           where site_id in (${scopes}) and from_path in (${chunk.map(() => "?").join(", ")})`,
+        )
+        .bind(...chain, ...chunk.map(normalisePath))
+        .all<RedirectRow & { site: string; path: string }>();
+      return results;
+    }),
+  );
+  const results = reads.flat();
   return results;
 }
 

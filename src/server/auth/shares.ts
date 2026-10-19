@@ -40,6 +40,7 @@
 import { clampLimit, decodeCursor, type Page, paginate } from "../../core/pagination";
 import { FolioError } from "../errors";
 import { type Keyset, keysetWhere, orderBy, whereOf } from "../keyset";
+import { MAX_SHARE_COOKIE_TOKENS } from "./cookie";
 import { hashToken, mintId, mintSecret } from "./secrets";
 import type { FolioDb } from "../db";
 
@@ -404,7 +405,7 @@ export async function claimShare(
   site?: string,
 ): Promise<ShareGrant | null> {
   if (presented.length === 0) return null;
-  const hashes = await Promise.all(presented.map(hashToken));
+  const hashes = await Promise.all(presented.slice(0, MAX_SHARE_COOKIE_TOKENS).map(hashToken));
   const holes = hashes.map(() => "?").join(", ");
   const onSite = site === undefined ? "" : " and site_id = ?";
   const where = `token_hash in (${holes}) and story_id = ? and revoked_at is null and expires_at > ?${onSite}`;
@@ -437,7 +438,7 @@ export async function sharedStoriesAt(
   now = Date.now(),
 ): Promise<string[]> {
   if (presented.length === 0) return [];
-  const hashes = await Promise.all(presented.map(hashToken));
+  const hashes = await Promise.all(presented.slice(0, MAX_SHARE_COOKIE_TOKENS).map(hashToken));
   const { results } = await db
     .prepare(
       `select sh.story_id from shares sh join stories st on st.id = sh.story_id
