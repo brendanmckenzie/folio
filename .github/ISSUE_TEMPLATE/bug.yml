@@ -1,0 +1,33 @@
+name: Bug
+description: Something in Folio is broken or wrong
+labels: ["type:bug", "source:github"]
+body:
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: What you did, and what you saw. Include the Folio version or pinned SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: false
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How can it be reproduced?
+      description: A minimal config, request or steps in the editor.
+    validations:
+      required: false
+  - type: dropdown
+    id: impact
+    attributes:
+      label: How bad is it?
+      options:
+        - Blocking me now
+        - Wrong, but I can work around it
+    validations:
+      required: true
