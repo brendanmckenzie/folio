@@ -376,18 +376,24 @@ export async function indexedValuesFor(
   db: FolioDb,
   ids: readonly string[],
 ): Promise<IndexedValues> {
-  if (ids.length === 0) return {};
-  const placeholders = ids.map(() => "?").join(", ");
-  const { results } = await db
-    .prepare(
-      `select story_id as storyId, field, text_value as text, num_value as num
-       from content_index where locale = '' and story_id in (${placeholders})`,
-    )
-    .bind(...ids)
-    .all<{ storyId: string; field: string; text: string | null; num: number | null }>();
-
+  // Chunked: the Data list's page size reaches 200, past D1's 100 binds. Empty in,
+  // empty out, so no length guard (and `in ()` stays unreachable).
   const out: IndexedValues = {};
-  for (const row of results) {
+  // Concurrent: the chunks are independent reads, and an id's rows all fall in one.
+  const reads = await Promise.all(
+    bindChunks(ids, 1).map(async (chunk) => {
+      const placeholders = chunk.map(() => "?").join(", ");
+      const { results } = await db
+        .prepare(
+          `select story_id as storyId, field, text_value as text, num_value as num
+           from content_index where locale = '' and story_id in (${placeholders})`,
+        )
+        .bind(...chunk)
+        .all<{ storyId: string; field: string; text: string | null; num: number | null }>();
+      return results;
+    }),
+  );
+  for (const row of reads.flat()) {
     out[row.storyId] ??= {};
     out[row.storyId]![row.field] = { text: row.text ?? "", num: row.num ?? null };
   }

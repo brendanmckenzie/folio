@@ -1381,7 +1381,10 @@ Operators: `eq`, `ne`, `in`, `contains`, `startsWith`, and `gt`/`gte`/`lt`/`lte`
 numeric bound compares the numeric column; a string bound compares the text one,
 and an ISO date is stored in both, so either spelling of "since March" works. `ne`
 is a `NOT EXISTS`, so "topic is not ai" is true of a document with no topic —
-which is what it means in English. `contains` is a scan and is refused unless
+which is what it means in English. An `in` list cannot be split across statements, and D1
+binds at most 100 parameters per statement, so a query whose filters, type list,
+scope chain, search and paging together would bind more than 100 values is a
+`400 bad_request` naming the count. Anything that fits is accepted. `contains` is a scan and is refused unless
 something else can narrow first; full-text search is FTS5's job and spec 30's
 (`docs/specs/content-model/full-text-search.md`) — see "Search" below.
 

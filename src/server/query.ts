@@ -38,7 +38,7 @@ import type { StoryMeta } from "../core/story";
 import { FolioError } from "./errors";
 import { SINGLE_SITE_CHAIN } from "../core/sites";
 import { servedClause, STORY_COLS, type StoryRow, toStoryMeta } from "./stories";
-import type { FolioDb } from "./db";
+import { D1_BIND_CAP, type FolioDb } from "./db";
 
 /** A statement's text and its binds, kept together so a test can read both. */
 export interface Sql {
@@ -340,6 +340,18 @@ export function contentSql(
     ? "published_doc"
     : `(published_doc is not null) as has_doc,
        json_extract(published_doc, '$.bloks."' || json_extract(published_doc, '$.root') || '"') as root_blok`;
+
+  // An `in` list cannot be chunked, so the only honest limit is D1's own: refuse a
+  // statement exactly when it would carry more binds than D1 accepts, counted from
+  // what it really binds (search adds three, a non-built-in order two, limit and
+  // offset two). A query that fits is never refused.
+  const pageBinds = (searching ? 3 : 0) + orderBinds.length + binds.length + limit.length;
+  if (pageBinds > D1_BIND_CAP) {
+    throw new FolioError(
+      "bad_request",
+      `This query binds ${pageBinds} values and D1 allows ${D1_BIND_CAP}. Narrow the 'in' lists, filters or types`,
+    );
+  }
 
   if (!searching) {
     return {
