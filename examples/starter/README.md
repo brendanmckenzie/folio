@@ -4,7 +4,7 @@ A small, complete Cloudflare project running [Folio](https://github.com/brendanm
 a Worker that mounts the CMS and renders published pages, three blocks, and every
 binding wired up.
 
-This is what `npx github:brendanmckenzie/folio init` scaffolds. It is also a real
+This is what `npx github:brendanmckenzie/folio#v1.0.0 init` scaffolds. It is also a real
 package in the Folio workspace, so it is typechecked on every commit — which is
 the only reason to trust that it works.
 
