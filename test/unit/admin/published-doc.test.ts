@@ -29,6 +29,19 @@ describe("publishedDelta", () => {
     expect(publishedDelta(doc("Home"), null)).toBeNull();
   });
 
+  it("compares across differing roots (a copied database) rather than showing nothing", () => {
+    const live = doc("Changed");
+    const published: Doc = {
+      root: "oldroot1",
+      bloks: {
+        oldroot1: { ...doc("Home").bloks.root0000!, uid: "oldroot1" },
+      },
+    };
+    const delta = publishedDelta(published, live);
+    expect(delta).not.toBeNull();
+    expect(delta?.total).toBe(1);
+  });
+
   it('is a zero-total delta when the draft matches what was published ("Up to date")', () => {
     const delta = publishedDelta(doc("Home"), doc("Home"));
     expect(delta?.total).toBe(0);

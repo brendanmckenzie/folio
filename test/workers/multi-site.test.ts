@@ -1250,11 +1250,32 @@ describe("Layered globals", () => {
 
   it("carries the type’s defaults and preset when the shared layer is first created", async () => {
     const who = await tokenFor("shared");
-    const res = await api("/~shared/api/v1/documents/sng_lsHeader:shared?status=draft", who);
-    expect(res.status).toBe(200);
-    // Shared already had a row from the seed above, so it is asked into a draft
-    // that was never opened: the Durable Object seeds from `seedFor`.
-    const doc = await layered.draft(env, "sng_lsHeader:shared");
+    const id = "sng_lsHeader:shared";
+    // A layer a cold object seeds from its publish (#28), so to see the type's own
+    // seed this one must have none: take the publish away, empty the object, read,
+    // then put both back for the tests after.
+    const kept = await env.DB.prepare(
+      "select published_doc as doc, published_at as at from stories where id = ?",
+    )
+      .bind(id)
+      .first<{ doc: string; at: number }>();
+    await env.DB.prepare(
+      "update stories set published_doc = null, published_at = null where id = ?",
+    )
+      .bind(id)
+      .run();
+    await env.STORY.get(env.STORY.idFromName(id)).purge();
+    let doc: Doc;
+    try {
+      const res = await api(`/~shared/api/v1/documents/${id}?status=draft`, who);
+      expect(res.status).toBe(200);
+      doc = await layered.draft(env, id);
+    } finally {
+      await env.DB.prepare("update stories set published_doc = ?, published_at = ? where id = ?")
+        .bind(kept!.doc, kept!.at, id)
+        .run();
+      await env.STORY.get(env.STORY.idFromName(id)).purge();
+    }
     // The seed writes the row's title into the type's title field.
     expect(rootOf(doc)?.data).toEqual({ title: "lsHeader", cta: "Visit" });
     expect(childOf(doc, "theme")?.data).toEqual({ primary: "", radius: "rounded" });

@@ -387,6 +387,12 @@ are free to go the next time that code is touched.
 - **A host's own routes win at any path.** `folio.handle()` returns `null` for anything
   it does not own. Folio never intercepts, which is why `folio.redirect()` and
   `folio.status()` are things a host calls in its own miss branch.
+- **A draft read of an existing id goes through `initDraft`** (via `draftFor` /
+  `draft`, `runtime.ts`), never a direct `stub.getOrInit(content)`; that call is only
+  for an id created in the same request. A cold object (a row copied in without its
+  Durable Object) seeds from `published_doc`, else the newest version, else blank, at
+  the row's own sync position. A new direct `getOrInit` on an existing id silently
+  reopens #28 and freezes a blank document into the object.
 - **Writes go through the mutation log.** `StoryDO.commit` for programmatic writes,
   `tx` for keystrokes. Writing `published_doc` or the object's `doc` row directly is
   faster and breaks sync, undo, presence and the activity trail — visible only to

@@ -215,8 +215,9 @@ export function requireDb<Env>(config: StoryDOConfig<Env>, env: Env): void {
  * is optional and `StoryStub` (`server/types.ts`) picks it.
  */
 export interface StoryDOInstance<Env> extends DurableObject<Env> {
-  getOrInit(seed: Doc): Promise<Doc>;
-  getOrInitWithSyncId(seed: Doc): Promise<{ doc: Doc; syncId: number }>;
+  getOrInit(seed: Doc, baseline?: number): Promise<Doc>;
+  getOrInitWithSyncId(seed: Doc, baseline?: number): Promise<{ doc: Doc; syncId: number }>;
+  peek(): Promise<{ doc: Doc; syncId: number } | null>;
   head(): Promise<{ syncId: number }>;
   purge(): Promise<void>;
   alarm(): Promise<void>;
@@ -288,8 +289,17 @@ export function createStoryDO<Env>(
     }
 
     /** Creates the document on first touch. Returns the current draft. */
-    async getOrInit(seed: Doc): Promise<Doc> {
-      return (await this.getOrInitWithSyncId(seed)).doc;
+    async getOrInit(seed: Doc, baseline = 0): Promise<Doc> {
+      return (await this.getOrInitWithSyncId(seed, baseline)).doc;
+    }
+
+    /**
+     * The document and log position if this object holds any, else null, and never
+     * a write. This is the "no state" test the cold-start reseed (#28) hangs on:
+     * `head()` cannot be it, because a seeded, never-edited document also reads 0.
+     */
+    async peek(): Promise<{ doc: Doc; syncId: number } | null> {
+      return this.read();
     }
 
     /**
@@ -302,11 +312,46 @@ export function createStoryDO<Env>(
      * criterion). `getOrInit` keeps its existing signature for every other
      * caller and is implemented in terms of this one.
      */
-    async getOrInitWithSyncId(seed: Doc): Promise<{ doc: Doc; syncId: number }> {
+    async getOrInitWithSyncId(seed: Doc, baseline = 0): Promise<{ doc: Doc; syncId: number }> {
       const row = this.read();
       if (row) return row;
-      this.sql.exec("insert into doc (id, json, sync_id) values (1, ?, 0)", JSON.stringify(seed));
-      return { doc: seed, syncId: 0 };
+      if (baseline <= 0) {
+        this.sql.exec("insert into doc (id, json, sync_id) values (1, ?, 0)", JSON.stringify(seed));
+        return { doc: seed, syncId: 0 };
+      }
+      // A seed from a copied row starts the log at the row's own position, so the
+      // next transaction is `baseline + 1` and the badge (`draft_sync_id >
+      // published_sync_id`) keeps reading right. Rather than write sqlite_sequence,
+      // push the AUTOINCREMENT sequence up with sentinel rows that never survive.
+      return this.ctx.storage.transactionSync(() => {
+        const sentinel = (txId: string, id?: number) => {
+          if (id === undefined) {
+            this.sql.exec(
+              "insert into log (tx_id, actor, mutations, at) values (?, 'folio', '[]', ?)",
+              txId,
+              Date.now(),
+            );
+          } else {
+            this.sql.exec(
+              "insert into log (sync_id, tx_id, actor, mutations, at) values (?, ?, 'folio', '[]', ?)",
+              id,
+              txId,
+              Date.now(),
+            );
+          }
+        };
+        sentinel("seed:low");
+        const low = this.sql.exec<{ id: number }>("select max(sync_id) as id from log").one().id;
+        const at = Math.max(baseline, low);
+        if (at > low) sentinel("seed:high", at);
+        this.sql.exec("delete from log where tx_id in ('seed:low', 'seed:high')");
+        this.sql.exec(
+          "insert into doc (id, json, sync_id) values (1, ?, ?)",
+          JSON.stringify(seed),
+          at,
+        );
+        return { doc: seed, syncId: at };
+      });
     }
 
     /**
@@ -613,10 +658,16 @@ export function createStoryDO<Env>(
           const behind = current.syncId - msg.lastSyncId;
           const peers = this.peers(ws);
 
-          if (msg.lastSyncId > 0 && behind >= 0 && behind <= MAX_CATCHUP) {
+          // A catch-up is only honest when the log is contiguous over the gap: a
+          // seeded baseline (#28) or a purge leaves no rows below its position.
+          const missed =
+            msg.lastSyncId > 0 && behind >= 0 && behind <= MAX_CATCHUP
+              ? this.since(msg.lastSyncId)
+              : null;
+          if (missed && missed.length === behind) {
             this.sendTo(ws, {
               type: "catchup",
-              deltas: this.since(msg.lastSyncId),
+              deltas: missed,
               syncId: current.syncId,
               peers,
             });

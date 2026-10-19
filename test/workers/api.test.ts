@@ -1225,6 +1225,69 @@ describe("POST /documents/:id/restore", () => {
     expect(res.status).toBe(404);
   });
 
+  /**
+   * #28: a version copied in from another environment carries that environment's
+   * root uid. The restore must re-root it onto the live draft rather than throw on
+   * `diff`'s same-root precondition, and it must stay one ordinary transaction.
+   */
+  it("restores a version whose root uid differs from the live draft's", async () => {
+    const id = await seed({});
+    const foreign = pageDoc({ title: "From another environment" });
+    const renamed: Doc = { root: "oldroot1", bloks: {} };
+    for (const b of Object.values(foreign.bloks)) {
+      const uid = b.uid === "r0" ? "oldroot1" : b.uid;
+      renamed.bloks[uid] = { ...b, uid, parent: b.parent === "r0" ? "oldroot1" : b.parent };
+    }
+    await env.DB.prepare(
+      `insert into versions (id, story_id, kind, label, title, actor, doc, created_at, schema_id)
+       values ('ver_api_root', ?, 'checkpoint', null, 'About us', null, ?, ?, null)`,
+    )
+      .bind(id, JSON.stringify(renamed), Date.now())
+      .run();
+    const before = (await activityOf(id)).rows.length;
+
+    const res = await restore(id, "ver_api_root");
+    expect(res.status).toBe(200);
+    expect((await json<WriteResult>(res)).transactions).toBe(1);
+
+    const after = await draftOf(id);
+    expect(after.root).toBe("r0");
+    expect(after.bloks.r0!.data.title).toBe("From another environment");
+    expect("oldroot1" in after.bloks).toBe(false);
+    expect(after.bloks.h0!.parent).toBe("r0");
+    expect((await activityOf(id)).rows.length).toBe(before + 1);
+  });
+
+  it("refuses a version whose root block is a different type, as a 409, writing nothing", async () => {
+    const id = await seed({});
+    const other: Doc = {
+      root: "zzroot01",
+      bloks: {
+        zzroot01: {
+          uid: "zzroot01",
+          type: "apiSettings",
+          parent: null,
+          slot: null,
+          order: "a0",
+          data: { tagline: "not a page" },
+        },
+      },
+    };
+    await env.DB.prepare(
+      `insert into versions (id, story_id, kind, label, title, actor, doc, created_at, schema_id)
+       values ('ver_api_type', ?, 'checkpoint', null, 'About us', null, ?, ?, null)`,
+    )
+      .bind(id, JSON.stringify(other), Date.now())
+      .run();
+    const before = await activityOf(id);
+
+    const res = await restore(id, "ver_api_type");
+    expect(res.status).toBe(409);
+    expect((await json<Envelope>(res)).error.code).toBe("conflict");
+    expect((await activityOf(id)).rows).toEqual(before.rows);
+    expect((await draftOf(id)).bloks.r0!.data.title).toBe("About us");
+  });
+
   it("refuses without content:write", async () => {
     const id = await seed({});
     const checkpointed = await call(`${API}/documents/${id}/versions`, {

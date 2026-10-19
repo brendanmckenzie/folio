@@ -16,14 +16,44 @@ export function deepEqual(a: Json, b: Json): boolean {
 }
 
 /**
+ * `target` rewritten onto the root uid `root`, so `diff(live, rerootOnto(v, live.root))`
+ * holds its precondition (#28). It is the *target* that moves, never the live
+ * document: nothing can change a live root, and the live root is what the object
+ * and every connected editor hold.
+ *
+ * Only `uid`, `parent` and the map key name a blok uid; `data`, `i18n` and links
+ * hold values and story ids. The ordinary case (same root) returns `target`
+ * itself and allocates nothing. The root's *type* is not checked here, because
+ * callers report it differently: a version of a different document type must be
+ * refused, or `diff` (which skips a root retype) would let one type's fields
+ * onto another's root.
+ */
+export function rerootOnto(target: Doc, root: string): Doc {
+  if (target.root === root) return target;
+  if (root in target.bloks) {
+    throw new Error(
+      "Cannot restore: this version already contains a block with the live root's uid",
+    );
+  }
+  const bloks: Doc["bloks"] = {};
+  for (const b of Object.values(target.bloks)) {
+    const uid = b.uid === target.root ? root : b.uid;
+    bloks[uid] = { ...b, uid, parent: b.parent === target.root ? root : b.parent };
+  }
+  return { root, bloks };
+}
+
+/**
  * Mutations that turn `from` into `to`.
  *
  * This is what makes restoring a version an ordinary transaction rather than an
  * overwrite: the result goes through the same sync engine as a keystroke, so it
  * reaches other editors, and it is itself undoable.
  *
- * Both documents must share a root uid. They always do for a given story, since
- * the root block is created once and never replaced.
+ * Both documents must share a root uid. They do for any document created through
+ * Folio, since the root block is created once and never replaced. A version that
+ * came from another environment (a copied database, #28) carries that environment's
+ * root, so a caller diffing against a version must `rerootOnto` it first.
  *
  * **`layer: 'bare'` reads a key that is absent as different from one holding
  * `null`** (`multi-site.md` decision 8): in a layer with something below it the

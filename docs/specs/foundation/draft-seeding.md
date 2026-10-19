@@ -3,106 +3,89 @@
 > **Group:** foundation
 > **Build order:** 27, per docs/specs/README.md
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
-> **Last updated:** 2026-08-30
+> **Last updated:** 2026-10-19
 
 ## Summary
 
-A story whose D1 row arrives without its Durable Object — which is what copying a
-database between environments does, every time — gets a **blank draft with a fresh
-root uid** on first editor open. From there every supported write is closed:
+A story whose D1 row arrives without its Durable Object, which is what copying a
+database between environments does every time, used to get a **blank draft with a
+fresh root uid** on first editor open. From there every supported write was closed:
 `diff` refuses documents with different roots, so `POST /documents/:id/restore` and
-`PUT /documents/:id/content` both fail, and the admin's Restore button reports
+`PUT /documents/:id/content` both failed, and the admin's Restore button reported
 `Cannot diff documents with different roots`, which names the mechanism and not the
-cause. The document is unrecoverable through the product.
+cause. The document was unrecoverable through the product.
 
 Found on a live staging environment 2026-08-30, where all twelve documents were in
 this state: `published_doc` and `versions` intact, every draft blank.
 
-This makes `getOrInit` seed from the story's published document when it has one, so
-the case heals itself on first open, and adds a repair path for documents already
-in the broken state.
+Two changes, both built (issue #28):
+
+1. **A cold object seeds from D1.** When a story's object holds no document, its
+   draft is seeded from `published_doc`; if that is null, from the newest `versions`
+   row (migrated on read); if the story has neither, from the blank seed it gets
+   today. The D1 read happens only on that cold branch.
+2. **Restore re-roots its target.** `restoreVersion` rewrites the version's document
+   onto the live draft's root uid before diffing, so a restore across differing roots
+   succeeds. This repairs documents that are already broken on a live deployment: an
+   object seeded blank before this shipped holds state, so point 1 never fires for it.
 
 ## Ground truth
 
-Verified against the tree at `3876cbd`.
+Verified against `main` at `6ecbcc0`.
 
 **the seed (`src/server/runtime.ts`):**
-- `seed(type, title)` (`:487`–`:496`) builds a blank subtree with `blankSubtree` and
-  returns `{ root: root.uid, bloks: … }`. **The root uid is minted, not derived from
-  the story id**, so purging an object and reopening it produces a *third* uid rather
+- `seed(type, title)` builds a blank subtree with `blankSubtree` and returns
+  `{ root: root.uid, bloks: ... }`. **The root uid is minted, not derived from the
+  story id**, so purging an object and reopening it produces a *third* uid rather
   than recovering the first.
-- Three call sites build that seed and hand it straight to the object:
-  `draftFor` (`:506`), `draftForWithSyncId` (`:509`), `draft` (`:513`).
+- Every draft read of an existing id reaches the object through `initDraft` (below),
+  via `draftFor`, `draftForWithSyncId`, `draft`, and the two draft-mode resolve sites
+  that read references and layers on a branded deployment.
 
 **the object (`src/server/story-do.ts`):**
-- `getOrInitWithSyncId(seed: Doc)` (`:303`) is
-  `const row = this.read(); if (row) return row;` then an insert. **The seed is used
-  only when the object has no doc**, so today it is constructed on every draft read
-  and discarded on all but the first.
-- `getOrInit(seed)` (`:289`) delegates to it and exists for every other caller.
-- `head()` (`:316`) is `this.read()?.syncId ?? 0`. **It cannot distinguish "no
-  document" from "a document nobody has edited"** — a freshly seeded doc also reads
-  0 — so it is not a usable "has this been initialised" probe.
-- `purge()` (`:328`) drops the object's state; its own comment notes a following
-  `getOrInit` re-seeds.
-- `StoryStub`'s method union is `types.ts:127`, so any new method is declared there.
+- `getOrInitWithSyncId(seed, baseline = 0)` is `const row = this.read(); if (row)
+  return row;` then an insert. **The seed is used only when the object has no doc.**
+- `head()` is `this.read()?.syncId ?? 0`. **It cannot distinguish "no document" from
+  "a document nobody has edited"**, so it is not a usable "has this been initialised"
+  probe. `peek()` is.
+- `log.sync_id` is `integer primary key autoincrement`; `applyTransaction` takes the
+  new `syncId` from `last_insert_rowid()`.
+- The client refuses a non-contiguous delta (`admin/store.ts`), and hello offers a
+  catch-up whenever `0 < behind <= MAX_CATCHUP`.
 
-**seeding from a real document already exists, in two places:**
-- `documents.ts:85` — `getOrInit(cloneDoc(draft))`, duplicating a document.
-- `routes/api/documents.ts:367` — `getOrInit(seeded)`, creating one with content in a
-  single call rather than seeding blank and committing after (`runtime.ts:196`
-  records that as the reason).
+**the badge:** `draft_sync_id > published_sync_id` reads `changed` (`STATE_EXPR`,
+`server/stories.ts`). Both columns copy with the database; the object's own position
+does not.
 
-  So "the seed is not always blank" is established. This spec adds a third source,
-  it does not introduce the idea.
+**the guard that closes every write (`src/core/diff.ts`):** `diff` throws when
+`from.root !== to.root`. That is correct: two documents with different roots have no
+mutation path between them, because **no mutation can change a root uid** (`root` is
+a field on `Doc`, not a blok). The assumption it rests on, that a story's root never
+changes, holds for a document created through Folio and not for one whose row was
+imported.
 
-**the guard that closes every write (`src/core/diff.ts`):**
-- `:29`–`:30`: `if (from.root !== to.root) throw new Error('Cannot diff documents
-  with different roots')`, under a comment stating the assumption that breaks here:
-  *"Both documents must share a root uid. They always do for a given story, since the
-  root block is created once and never replaced."* True for a document created
-  through Folio; false for one whose row was imported.
-- `writeDocument` (`server/write.ts:175`) is `read the draft, diff, commit`, so both
-  `restore` (`routes/api/documents.ts:625`) and `PUT /content` (`:395`) inherit it.
-- **No mutation can change a root uid.** `root` is a field on `Doc`, not a blok, and
-  the `Mutation` union addresses bloks — so a repair cannot be expressed as a
-  transaction and must be a re-seed.
+**restore:** `restoreVersion` (`src/server/write.ts`) is shared by
+`POST {base}/api/story/:id/restore` and `POST /api/v1/documents/:id/restore` (and MCP's
+`restore_version`). It reads the draft once, takes a "before restore" checkpoint, and
+diffs.
 
-**the escape that exists but nobody finds (`src/core/nested.ts`):**
-- `:313`: `const rootUid = base ? base.root : (uidOf(node, '') ?? newUid())` — a
-  nested payload is rebuilt under the *base* document's root, and `:307`–`:312` only
-  refuses a payload that explicitly names a different one. So `PUT /content` with the
-  root's `uid` omitted already works today. It requires reading core to discover.
-
-**what a caller knows cheaply:**
-- `StoryMeta.publishedAt: number | null` (`core/story.ts:30`) is on the row every
-  `draftFor` caller already holds, so "might this story have a published document"
-  costs nothing.
-- `publishedById`-shaped batch reads exist (`server/stories.ts:1063`); a single-row
-  read by id does not yet and is trivial.
-
-**scale of the change:** ~19 `draftFor` / `rt.draft` call sites across
-`index.tsx`, `pages.tsx`, `runtime.ts`, `mcp/shot.ts`, `routes/stories.ts`,
-`routes/editor.ts`, `routes/migrations.ts` and `routes/api/documents.ts`. **None of
-them changes**, which is the point of putting the decision inside `draftFor`.
+**seeding from real content already exists** for a *new* id: duplicating a document
+and creating one with content both call `getOrInit(content)` directly. Those stay
+direct, because there is nothing in D1 to seed from.
 
 ## Owner decision checkpoints
 
 1. **A repaired document's draft equals its published copy, not its pre-break
-   draft.** There is nothing else it could equal — the pre-break draft never arrived
-   — but it means "unpublished changes" made in the source environment are gone, and
-   the tree's `changed` badge clears. Recommended, and it is the honest answer: what
-   crossed the wire is what can be restored.
+   draft.** Unpublished changes made in the source environment never crossed the
+   wire, so they are gone. A row that arrives `changed` reads `changed` until its next
+   publish (see "The log position").
 
-2. **`reseed` discards the current draft, and is guarded rather than confirmed.**
-   Recommended: refuse unless the draft is structurally blank (root blok, no
-   children), with `force: true` to override. A confirmation dialog would be the
-   usual shape, but this route is reached by an operator repairing an import, not by
-   an editor, and a guard that names what it found is better than a prompt that
-   assumes the caller knows.
+2. **Shape decided 2026-10-19.** Seed from D1 on a cold object, and re-root on
+   restore. A route that purges and re-seeds an existing object, and a deterministic
+   root uid, were both rejected.
 
 ## User stories
 
@@ -116,234 +99,275 @@ without knowing that Durable Objects exist.
 the editor **so that** I can change one line rather than rebuild the page.
 
 ### An operator repairs an environment already in this state
-**As** a developer holding twelve blank drafts **I want** one call per document that
-puts them right **so that** the fix is not a hand-written script against internals.
+**As** a developer holding blank drafts that were seeded before this fix **I want** to
+restore the newest publish from History **so that** the fix is not a hand-written
+script against internals.
 
 ## Architecture decisions
 
-### 1. The seed is chosen by `draftFor`, from the published document when there is one
+### 1. A cold object seeds from `published_doc`, then the newest version, then blank
 
-`draftFor(bindings, story)` becomes: if the object already holds a document, return
-it; otherwise build a seed — the story's `published_doc` when `publishedAt` is set,
-a blank subtree otherwise — and initialise with that.
+The object's `doc` table has no row with `id = 1`: that is `this.read()` returning
+null, and nothing else. The cold path then reads D1 and seeds from it only when **the
+`stories` row exists**.
 
-**This changes behaviour in exactly one case.** A document created through Folio has
-no published copy at seed time (`POST /documents` writes the row and seeds the object
-in the same request), so the published branch is unreachable for it. The only story
-that reaches it is one whose row exists, whose object does not, and which has been
-published — which is precisely the imported case and otherwise impossible.
+- **`published_doc` first.** It is already at the row's `schema_id` (the migration
+  runner migrates it and the draft together), so it needs no migration, and it is
+  exactly what the site serves. The draft equals live.
+- **The newest version second**, ordered `created_at desc, id desc` (the History
+  rail's own order), fetched through `getVersion` with the brand's migrations, so a
+  version written under an older model comes up to the brand's newest migration. This
+  is the branch for a story with no `published_doc`: never published, or unpublished,
+  which nulls `published_doc`.
+- **Blank last**, as today.
+
+Not "newest of the two". A version newer than the publish is a `checkpoint`, a
+snapshot of some draft state. Preferring it would make what the editor opens depend
+on whether somebody happened to checkpoint before the copy, which an operator cannot
+predict. It remains one click away in History.
 
 Rejected: **leaving it blank and documenting the workaround.** The workaround is a
 `PUT /content` with an omitted root uid, discovered by reading `core/nested.ts`. A
-recovery procedure nobody can find from the error message is not a recovery
-procedure.
+recovery procedure nobody can find from the error message is not a recovery procedure.
 
-Rejected: **seeding from the newest `versions` row instead.** It is the same content
-in the ordinary case and worse in two others: a story can be published without a
-version row surviving an import, and a version is *history*, so restoring from it
-silently reinterprets what "the current draft" means.
+Rejected: **seeding from versions only.** Published is what the site serves and needs
+no migration; a version is history.
 
-### 2. The object gains a read that does not seed, so the cold path pays and the warm path does not
+### 2. The object gains `peek`, so the cold path pays and the warm path does not
 
-Today the seed is a `Doc`, so it must be fully constructed before the RPC even
-though `getOrInitWithSyncId` discards it whenever a row exists. Building it from D1
-would therefore put a read on **every draft read** to serve a case that can happen
-once per document, ever.
+`StoryStub` gains `peek(): Promise<{ doc: Doc; syncId: number } | null>`, the
+existing `this.read()`. `initDraft` in `runtime.ts` is peek, then (cold only) one D1
+read, then `getOrInitWithSyncId(source ?? fallback, baseline)`. The warm path is one
+RPC exactly as before (and ships no seed over the wire); the cold path is two RPCs and
+one D1 read (two for a version seed), once per object.
 
-So `StoryStub` gains `peek(): Promise<{ doc: Doc; syncId: number } | null>` — the
-existing `this.read()`, exposed — and `draftFor` becomes peek-then-maybe-init. The
-warm path is one RPC exactly as now; the cold path is two RPCs and one indexed D1
-read, once per document for the life of the site.
+The blank `fallback` stays eagerly computed by each caller, so `seedFor`'s "a layer
+with no registry throws" keeps throwing on every call and not only on a cold one.
 
-Rejected: **passing a lazy `() => Promise<Doc>` over RPC.** Workers RPC can carry a
-function, but it becomes a stub the object calls *back* into the Worker mid-write —
-a second hop, inside the one place in this system that must stay simple, to save an
-RPC on a path taken once.
+Rejected: **a lazy `() => Promise<Doc>` over RPC**, which makes the object call back
+into the Worker mid-write. Rejected: **probing with `head()`**, which reads 0 for a
+seeded, untouched document and would re-seed it on every open.
 
-Rejected: **probing with `head()` first.** It answers 0 both for an object with no
-document and for a seeded one nobody has edited (`story-do.ts:316`), so it cannot
-answer the question being asked. Using it would re-seed an untouched document on
-every open.
+### 3. The race is already handled
 
-### 3. The race is already handled, and the losing seed is discarded
+Two cold reads both `peek` null, both read D1, both call `getOrInitWithSyncId`; the
+object's `read()`-then-insert returns the winner's row to the loser. Both seeds are the
+same document, except a blank fallback, whose random root is the existing race.
 
-Two concurrent cold opens both `peek` null, both build a seed, both call
-`getOrInit`. The second is a no-op: `getOrInitWithSyncId` is
-`const row = this.read(); if (row) return row`, so whichever insert lands first wins
-and the other caller receives the winner's document. No lock, no compare-and-set, and
-the only cost of losing is one wasted D1 read.
+A cold read that read the row before `deleteDocument` and inserts after its purge
+leaves a seeded object behind a deleted row. Today the same interleaving leaves a
+blank one. Neither is reachable, so it is accepted.
 
-Worth stating because the obvious reading of "check then write" is that it needs
-one, and it does not.
+### 4. The log position: a seed from D1 starts at the row's own watermark
 
-### 4. Repairing an already-broken document is a re-seed, not a diff
+Seeding at `sync_id 0` under a copied row breaks the badge: a row that arrives with
+`draft_sync_id 57, published_sync_id 50` would see its first edit write
+`draft_sync_id 1`, and `1 > 50` is false, so a page with real unpublished edits reads
+`live`. A publish without an edit would stamp `published_sync_id 0` under a
+`draft_sync_id 57` and read `changed` forever.
 
-`POST {base}/api/v1/documents/:id/reseed` purges the object and re-initialises it
-through decision 1's path.
+So a cold seed from D1 starts the log at **`baseline = max(draft_sync_id,
+published_sync_id)`**, and the next transaction is `baseline + 1`. A baseline of 0
+(every story created through Folio, every blank seed of a fresh row) is byte-for-byte
+the old code path. To guarantee `baseline + 1` without writing `sqlite_sequence`,
+the object inserts sentinel `log` rows inside `transactionSync` (one autoincremented,
+one at the explicit `sync_id` if that is higher), deletes both, and inserts the doc
+row at that position. The sentinels never survive, so the activity trail, `hasTx` and
+catch-up never see them.
 
-It cannot be a write, and that is structural rather than a limitation of the current
-routes: **a root uid cannot be changed by any mutation.** `root` is a field on `Doc`
-and the `Mutation` union addresses bloks, so there is no transaction that turns a
-document with root A into one with root B. Every diff-based path — `restore`,
-`PUT /content` naming the old root — is therefore permanently closed for these
-documents, and the only move is to replace the object's state.
+**Hello does not offer a catch-up across a gap.** With a baseline the log has no rows
+at or below its position, so a hello at `0 < lastSyncId < position` would have been
+answered "caught up" with no deltas. Hello now sends `catchup` only when `since()`
+returns exactly `behind` rows, else `bootstrap`. Bootstrap is always correct.
 
-Guarded per checkpoint 2: refused unless the draft is structurally blank, `force`
-to override. The refusal names what it found (`"draft has 14 bloks"`), because the
-operator's next question is always whether they are about to lose work.
+A row that arrived `changed` reads `changed` while its draft equals its publish: that
+is the existing "settled" state (`SETTLED_TITLE`), which the admin already explains.
+Clearing it eagerly would take a D1 write on a read path.
 
-Rejected: **relaxing `diff`'s root guard.** It is not a guard that is wrong — two
-documents with different roots genuinely have no mutation path between them, and
-loosening it would produce a diff that cannot be applied.
+### 5. A preview takes the same cold path, and it is not a write
 
-### 5. `diff`'s error names the cause, not the mechanism
+A draft-mode resolve, a `GrantActor` and a share all reach the cold path and seed the
+object. "A preview never writes" is a rule about D1 (layer rows via `ensureSingleton`,
+any `{base}/api` write); the cold path issues one or two D1 reads and the object-local
+insert a preview already performs today with a blank seed, and schedules no watermark
+alarm. Seeding blank on a preview was the bug, not the safe option: it froze the wrong
+document into the object.
 
-`Cannot diff documents with different roots` is accurate and tells its reader
-nothing they can act on. It becomes a message that names the likely cause — a
-document whose row was imported without its object — and the route to take.
+**A deleted story seeds nothing.** The query is anchored on `stories`, so an orphaned
+`versions` row cannot resurrect content, and the draft-mode `known.has` filter that
+stops a deleted reference being asked for its draft at all is untouched. A **new**
+story seeds from the caller's content through a direct `getOrInit`.
 
-The throw stays in `core/diff.ts` because that is where the condition is detected,
-but the *routes* catch it and answer a `FolioError` naming `reseed`, since core
-cannot know that a repair endpoint exists.
+### 6. Restore re-roots its target
+
+`rerootOnto(target, root)` in `src/core/diff.ts`, beside `diff`: same root returns the
+target itself; otherwise `uid`, `parent` and the map key of the old root become the
+live root, and nothing else changes (`data`, `i18n` and links hold values and story
+ids, not blok uids). A collision with an existing block throws. It is the *target* that
+moves, never the live document. **Not added to `folio/engine`**; it is internal, so the
+`exports` surface does not change.
+
+It runs inside `restoreVersion`, on the draft that function read, never a second read.
+A version whose root block is a **different type** is refused `409 conflict` there:
+`diff` skips a root retype and the schema-agnostic object would accept one type's
+fields onto another's root. The admin's version *comparisons* (`useVersions`'s
+"viewing a version" delta and `usePublishedDoc`'s `publishedDelta`) call `rerootOnto`
+before diffing so they show the real difference instead of nothing.
+
+Rejected: **a reseed route that purges and replaces an object.** Re-rooting repairs an
+already-broken document through an ordinary transaction that is recoverable from its
+"before restore" checkpoint, so a route that destroys state is not needed.
+
+Rejected: **relaxing `diff`'s root guard**, and **rewording its error**: with both
+restore paths re-rooting, the only remaining way to hit the throw is a `PUT /content`
+payload naming the old root, which `fromNested` refuses with its own message.
+
+Rejected: **a deterministic root uid derived from the story id.** It changes nothing
+for a copied database, whose `published_doc` and `versions` carry the source
+environment's random root.
 
 ## Wire & schema changes
 
-None. No migration, no `PROTOCOL_VERSION` bump.
-
-### Core types
-
-`StoryStub` (`server/types.ts:127`) gains `'peek'`. `FolioRuntime` is unchanged —
-`draftFor` keeps its signature, which is what keeps all ~19 call sites untouched.
-
-### New or changed routes
-
-| Method | Path | Auth | Answers |
-| --- | --- | --- | --- |
-| `POST` | `{base}/api/v1/documents/:id/reseed` | `MANAGE` | `{ document }`, or 409 naming the draft it refused to discard |
-
-`MANAGE` rather than `EDIT`: this discards content, and the operator repairing an
-import is the person who already holds it.
+None. No migration, no `PROTOCOL_VERSION` bump, no `exports` change, no new
+`createFolio` key. `StoryDO` gains `peek` and a defaulted `baseline` parameter; it is
+the same class, so no Durable Object migration tag.
 
 ## Acceptance criteria
 
-### An imported story heals on first open
+### An imported story opens with its content
 
 ```
 GIVEN a stories row with published_doc and no Durable Object state
 WHEN the editor opens that document
 THEN the draft equals the published document, root uid included
-AND the tree stops reporting it as changed
 AND a subsequent restore or PUT /content succeeds
 ```
 
-### A document created through Folio is unaffected
+### The version fallback
 
 ```
-GIVEN POST /documents creates a document
-WHEN its object is seeded
-THEN the seed is the blank subtree exactly as today
-AND no published_doc read is made
+GIVEN a row with no published_doc and versions
+WHEN its draft is first read
+THEN it is seeded from the newest version, migrated to the brand's newest migration
+```
+
+### Nothing else seeds from D1
+
+```
+GIVEN a new story, a deleted story, or a preview of a cold row
+THEN a new story keeps its caller's content, a deleted story seeds blank,
+AND a preview issues no D1 write
 ```
 
 ### The warm path costs nothing extra
 
 ```
 GIVEN a document whose object already holds a draft
-WHEN draftFor is called
-THEN exactly one RPC is made
-AND no published_doc read is made
+WHEN its draft is read
+THEN no D1 seed read is made, and a later change to published_doc does not change it
 ```
 
-### Repair refuses to discard real work
+### The badge and the log
 
 ```
-GIVEN a document whose draft has content
-WHEN POST /documents/:id/reseed is called without force
-THEN it answers 409 naming how many bloks it found
-WHEN it is called with force: true
-THEN the draft is replaced by the published document
+GIVEN a row seeded at draft_sync_id 57, published_sync_id 50
+THEN the object's position is 57 and its next transaction is 58
+AND publishing without an edit reads live
+AND a hello from inside the gap is answered with a bootstrap
 ```
 
-## Implementation plan
+### Restore across roots
 
-### Phase 1 — `peek`, and the seed decision
+```
+GIVEN a version whose root uid differs from the live draft's
+WHEN it is restored
+THEN it succeeds as one transaction, and the live root is unchanged
+GIVEN a version whose root block is a different type
+THEN it is refused 409 and nothing is written
+```
 
-1. `peek()` on `StoryDO` (the existing `read()`, exposed) and on `StoryStub`.
-2. `draftFor` / `draftForWithSyncId` / `draft` in `runtime.ts` become
-   peek-then-maybe-init, with a `publishedDocById(db, id)` read behind
-   `story.publishedAt !== null`.
-3. No call site changes. That is the acceptance criterion for the phase.
+## Implementation plan (as built)
 
-### Phase 2 — repair
-
-1. `POST /documents/:id/reseed`, `purge()` then the phase 1 path.
-2. The blank-draft guard and `force`.
-
-### Phase 3 — the error
-
-1. `restore` and `putContent` translate the root mismatch into a `FolioError`
-   naming `reseed`.
-2. The admin surfaces it (`useVersions.ts` already renders the message).
-
-### Phase 4 — the record
-
-1. `ROADMAP.md`'s entry becomes a pointer to this spec's outcome.
-2. `AGENTS.md` gains a symptom-table row: *"Editor is empty but the page renders" →
-   the row was imported without its object.*
+1. `story-do.ts`: `peek()`, `getOrInit(seed, baseline)`, the sentinel baseline, the
+   hello contiguity check; `types.ts` adds `peek` to `StoryStub`.
+2. `core/diff.ts`: `rerootOnto`; `diff`'s comment says what holds the root invariant.
+3. `server/versions.ts`: `draftSeedSource(db, id, migrate)`, one statement anchored on
+   `stories`, taking `FolioDb`.
+4. `server/runtime.ts`: `initDraft`, used by `draftFor`, `draftForWithSyncId`, `draft`
+   and the two branded draft-mode resolve sites.
+5. `server/write.ts`: the root-type check and `rerootOnto` inside `restoreVersion`;
+   `useVersions.ts` and `usePublishedDoc.ts` re-root before comparing.
+6. Tests, `docs/handbook.md`, `UPGRADING.md`, `AGENTS.md`, `CLAUDE.md`.
 
 ## Edge cases
 
-- **A story with `publishedAt` set but `published_doc` null** (unpublished, which
-  clears the doc and keeps the timestamp — check this against `unpublish`'s columns
-  during phase 1) → falls back to blank, exactly as today.
-- **A published document under an older `schemaId`** → seeded as stored. It is the
-  same posture `getVersion` deliberately does *not* take (it migrates on read), and
-  the difference is intentional: a draft is live content that the migration runner
-  reaches on its next pass, while a version must stay byte-true.
-- **`reseed` on a document whose object is healthy and whose draft matches
-  published** → the guard sees a non-blank draft and refuses. Correct: the caller has
-  the wrong document.
-- **A record or singleton** (no path) → identical treatment; nothing here is routed.
-- **Two cold opens at once** → decision 3.
+- **`unpublish` clears `published_doc`** (and sets `unpublished_at`), so an
+  unpublished story falls to the version branch, not to blank.
+- **A version under an older `schema_id`** is migrated on seed only up to the *row's*
+  `schema_id`, not to the newest migration. `runMigrations` computes what is due from
+  that column and applies it to the draft, so seeding past it would apply the gap
+  twice and corrupt a non-idempotent `up`. The normal migrate path finishes the job.
+- **A record or singleton** (no path) is treated identically.
+- **A purged object whose sequence is already higher than the baseline** seeds at the
+  higher position, which is a deleted story and harmless.
+- **A story already seeded blank before this fix** is not healed: its object holds
+  state. Restore the newest publish from History.
 
 ## Testing requirements
 
-**Unit (`test/unit/`):**
-- The seed chooser as a pure function: published present → published, absent →
-  blank, `publishedAt` null → blank with no read attempted.
+**Unit:** `rerootOnto` (identity, rename and re-parent, no mutation of input,
+collision throws, `diff` round trip) in `test/unit/core/diff.test.ts`; a
+`publishedDelta` case across differing roots in `test/unit/admin/published-doc.test.ts`.
 
-**Workers (`test/workers/`, real workerd):**
-- **The reproduction, which is the test that matters**: insert a `stories` row with
-  `published_doc` and never touch its object, open the draft, assert it equals the
-  published document *and shares its root uid*. Against today's code this fails.
-- A restore succeeds on that document afterwards — the end-to-end proof that the
-  closed path is open.
-- The warm path makes no `published_doc` read (a binding spy, the shape
-  `draft-mode.test.ts` established).
-- `reseed` refuses a non-blank draft and accepts with `force`.
-- `POST /documents` still seeds blank.
+**Workers (real workerd):** `test/workers/draft-seeding.test.ts` simulates the missing
+object by inserting D1 rows directly: published source, version-only source, migrated
+version, blank fresh row, baseline and badge, publish-without-edit, hello across the
+gap, warm path, concurrent cold opens, a new story, a deleted story, and a preview
+that records no write. `test/workers/api.test.ts` covers restore across roots and the
+409 on a root type change.
 
-**End to end (`scripts/`):**
-- Not needed. The condition is a database state rather than a request sequence, and
-  a workers test can create it exactly.
+**End to end:** not needed beyond the existing sync and history scripts; the condition
+is a database state, which a workers test creates exactly.
 
 ## Dependencies
 
-- None. No other spec touches the seed path.
-- Sequenced independently of 23; it changes no list route.
+None. Sequenced independently of 23; it changes no list route.
 
 ## Out of scope
 
 - **Recovering the pre-break draft.** It never crossed the wire. Checkpoint 1.
 - **Copying Durable Object state between environments.** There is no API for it, and
-  seeding from published makes it unnecessary for this case.
-- **A deterministic root uid derived from the story id**, which would make the
-  mismatch impossible. It would also make every imported document's root collide with
-  a locally-created one of the same id, and it changes `blankSubtree` for every
-  caller to fix a case decision 1 already fixes.
+  seeding from D1 makes it unnecessary.
+- **Healing objects already seeded blank**, beyond the restore procedure.
 
-## Open questions
+## Implementation notes
 
-- Whether `unpublish` clears `published_doc` or only the timestamps decides the first
-  edge case above. Answered by reading `0001_init.sql` and `unpublish` during phase 1;
-  it changes a fallback, not a design.
+Built 2026-10-19 for issue #28.
+
+**What landed:** everything in the plan above, with no D1 migration, wire bump or
+export change. Tests: `test/workers/draft-seeding.test.ts` (12), two restore tests in
+`api.test.ts`, five `rerootOnto` unit tests and one `publishedDelta` test. Each fix was
+broken in turn to confirm the tests fail: disabling the D1 seed fails eight of the
+twelve seeding tests, removing the re-root fails the cross-root restore test, and
+dropping the hello contiguity check fails the gap test.
+
+**Where the plan was wrong:**
+
+- **Restore had moved server-side** (PR #50) after the plan was written. `rerootOnto`
+  and the root-type check live in the shared `restoreVersion`, not in the admin Restore
+  button, and cover `{base}/api/story/:id/restore`, `/api/v1` restore and MCP at once.
+  The admin keeps `rerootOnto` only for its two version comparisons. "Undo a restore"
+  is restoring the "before restore" checkpoint, not Cmd+Z, and `UPGRADING.md` says so.
+- **The hello contiguity test needed a gap of the right shape.** A hello at
+  `lastSyncId 3` against a baseline of 57 is refused by `behind > MAX_CATCHUP`
+  regardless, so it passed with the fix removed; the test uses `lastSyncId 50`, which
+  is inside the catch-up window and over an empty log.
+- **A rename migration empties the old key rather than deleting it**, so the migrated
+  version test asserts the old value is gone, not that the key is absent.
+- **The preview test uses a single-site global**, not a reference. The draft-mode
+  global path calls `ensureSingleton` for an *existing* row (no write) and then
+  `draftFor`, which exercises the same cold path; the branded sites reach it through
+  the same `initDraft`.
+- Superseded and removed: the `POST /documents/:id/reseed` route, its blank-draft guard
+  and `force`, the reworded `diff` error, and the `FolioError` translation of the root
+  mismatch.

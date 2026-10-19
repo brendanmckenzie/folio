@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deepEqual, diff, summariseDiff } from "../../../src/core/diff";
+import { deepEqual, diff, rerootOnto, summariseDiff } from "../../../src/core/diff";
 import { type Blok, type Doc, type Json, subtree } from "../../../src/core/doc";
 import { applyAll } from "../../../src/core/mutations";
 
@@ -733,5 +733,82 @@ describe("diff over locale maps", () => {
     const from = mkDoc([rootBlk({ title: "a" })]);
     const to = mkDoc([rootBlk({ title: "b" })]);
     expect(summariseDiff(diff(from, to))).toMatchObject({ translated: 0, locales: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// rerootOnto (#28)
+// ---------------------------------------------------------------------------
+
+describe("rerootOnto", () => {
+  const foreign = (): Doc => ({
+    root: "old",
+    bloks: {
+      old: {
+        uid: "old",
+        type: "page",
+        parent: null,
+        slot: null,
+        order: "a0",
+        data: { title: "T" },
+      },
+      a: {
+        uid: "a",
+        type: "text",
+        parent: "old",
+        slot: "body",
+        order: "a0",
+        data: { t: "x" },
+        i18n: { fr: { t: "y" } },
+      },
+      b: { uid: "b", type: "text", parent: "a", slot: "kids", order: "a0", data: {} },
+    },
+  });
+
+  it("returns the same document when the roots already agree", () => {
+    const d = foreign();
+    expect(rerootOnto(d, "old")).toBe(d);
+  });
+
+  it("renames the root and re-parents its direct children, touching nothing else", () => {
+    const out = rerootOnto(foreign(), "live");
+    expect(out.root).toBe("live");
+    expect(Object.keys(out.bloks).sort()).toEqual(["a", "b", "live"]);
+    expect(out.bloks.live).toMatchObject({ uid: "live", parent: null, data: { title: "T" } });
+    expect(out.bloks.a!.parent).toBe("live");
+    expect(out.bloks.a!.data).toEqual({ t: "x" });
+    expect(out.bloks.a!.i18n).toEqual({ fr: { t: "y" } });
+    expect(out.bloks.b!.parent).toBe("a");
+  });
+
+  it("does not mutate its input", () => {
+    const d = foreign();
+    rerootOnto(d, "live");
+    expect(d).toEqual(foreign());
+  });
+
+  it("throws when the version already holds a block with the live root's uid", () => {
+    const d = foreign();
+    d.bloks.live = {
+      uid: "live",
+      type: "text",
+      parent: "old",
+      slot: "body",
+      order: "a1",
+      data: {},
+    };
+    expect(() => rerootOnto(d, "live")).toThrow(/live root/);
+  });
+
+  it("makes diff's same-root precondition hold, and the diff round-trips", () => {
+    const live: Doc = {
+      root: "live",
+      bloks: {
+        live: { uid: "live", type: "page", parent: null, slot: null, order: "a0", data: {} },
+      },
+    };
+    expect(() => diff(live, foreign())).toThrow(/different roots/);
+    const target = rerootOnto(foreign(), "live");
+    expect(applyAll(live, diff(live, target))).toEqual(target);
   });
 });

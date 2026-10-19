@@ -32,8 +32,9 @@ import { createRuntime } from "../../src/server/runtime";
  * `https://preview.bravo.example`); `gamma` (in north, **draft**, `gamma.example`,
  * preview `https://preview.gamma.example`); `hotel` (draft, preview only, owns
  * nothing). Every story's row title is its *draft* title and its published
- * document carries a different one, so a page says which it rendered: an object's
- * first draft is seeded from the row (`runtime.ts`' `seed`).
+ * document carries a different one, so a page says which it rendered: `story()`
+ * seeds each object with the draft title, because a cold object would otherwise
+ * seed from the published document (#28).
  */
 
 const ADMIN = "https://cms.example";
@@ -145,6 +146,13 @@ async function story(id: string, site: string, path: string, title: string, fork
       forkedFrom ?? null,
     )
     .run();
+  // The draft is what this fixture says it is. A cold object seeds from the row's
+  // published document (#28), which would make draft and published the same here.
+  await (
+    env.STORY.get(env.STORY.idFromName(id)) as unknown as {
+      getOrInit: (d: Doc) => Promise<Doc>;
+    }
+  ).getOrInit(rootDoc(`${title} draft`));
 }
 
 interface Person {
