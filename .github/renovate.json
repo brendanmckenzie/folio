@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommitTypeAll(chore)",
+    ":dependencyDashboard",
+    "helpers:pinGitHubActionDigests"
+  ],
+  "timezone": "Australia/Melbourne",
+  "schedule": ["before 9am on monday"],
+  "prConcurrentLimit": 6,
+  "prHourlyLimit": 3,
+  "rangeStrategy": "bump",
+  "minimumReleaseAge": "3 days",
+  "platformAutomerge": false,
+  "osvVulnerabilityAlerts": true,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 9am on monday"],
+    "recreateWhen": "always"
+  },
+  "packageRules": [
+    {
+      "description": "Auto-merge non-major npm updates once the ci gate is green.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Group non-major dev dependencies into a single PR.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "dev dependencies (non-major)"
+    },
+    {
+      "description": "Major npm bumps are never auto-merged; label them for review.",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["deps-major"]
+    },
+    {
+      "description": "Keep GitHub Actions current; auto-merge non-major and digest updates.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "Major GitHub Actions bumps are never auto-merged; label them for review.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["deps-major"]
+    }
+  ]
+}
