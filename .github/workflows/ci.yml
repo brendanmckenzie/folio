@@ -6,6 +6,8 @@ name: ci
 # by `gate` (a ruleset requires it), so main is not tested a second time.
 on:
   pull_request:
+    # `edited` so a retitled PR re-runs `pr-title`; a re-run reuses the old payload.
+    types: [opened, synchronize, reopened, edited]
 
 # A newer push to the same PR replaces its in-flight run.
 concurrency:
