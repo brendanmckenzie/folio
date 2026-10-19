@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Field, PropsOf } from "./fields";
 import type { LocaleConfig } from "./locales";
+import type { Resolution } from "./resolve";
 import {
   type BlockSchema,
   defaultType,
@@ -34,8 +35,15 @@ export interface BlockDef<F extends Record<string, Field> = Record<string, Field
    * system cannot tell a record root from any other block (both are `BlockDef`),
    * and inventing a marker to enforce it would buy nothing. A content block with
    * no renderer is a mistake, and it is a visible one.
+   *
+   * The second argument is the page's `Resolution`, for the one thing a prop
+   * cannot carry: a field of a *referenced* document. `reference.data` is raw
+   * stored values, so an asset field on it needs `resolveAsset(value, resolution)`
+   * to become a `src`. It is an argument rather than a prop so it stays out of
+   * the type a block author reads as their fields; a render that ignores it
+   * compiles unchanged.
    */
-  render?: (props: PropsOf<F> & { uid: string }) => ReactNode;
+  render?: (props: PropsOf<F> & { uid: string }, resolution: Resolution) => ReactNode;
 }
 
 export function defineBlock<const F extends Record<string, Field>>(def: BlockDef<F>): BlockDef<F> {

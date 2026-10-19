@@ -1160,6 +1160,23 @@ render: ({ office }) =>
 `content` is **literally null**, not an element that renders nothing, so that `??`
 means what it looks like it means.
 
+`data` holds raw stored values, so an asset field on a referenced document
+(`office.data.photo`) is not yet a URL. `render` takes the page's `Resolution` as
+a second argument for exactly this, and `resolveAsset` turns the value into a
+`src`:
+
+```tsx
+import { resolveAsset } from 'folio/core'
+
+render: ({ office }, resolution) => {
+  const photo = office && resolveAsset(office.data.photo, resolution)
+  return photo ? <img src={photo.src} alt={photo.alt} /> : null
+}
+```
+
+It is an argument and not a prop so it stays out of the type you read your fields
+from; a one-argument `render` is unaffected.
+
 ### `references()` — a hand-picked, ordered list
 
 ```tsx
