@@ -38,24 +38,15 @@ import {
   type BulkRefusal,
   type BulkReport,
   type BulkSelection,
-  type FilterSelection,
-  readBulkCursor,
   writeBulkCursor,
 } from "../core/bulk";
 import { DEFAULT_SITE } from "../core/sites";
 import { isImageAsset } from "../core/values";
-import {
-  type AssetRow,
-  assetById,
-  assetSiteOf,
-  assetsFor,
-  assetsMatching,
-  countAssets,
-  toAssetValue,
-} from "./assets";
+import { type AssetRow, assetById, assetSiteOf, countAssets, toAssetValue } from "./assets";
 import { listTags } from "./asset-tags";
+import { filterBatch, idBatch, readCursor, reasonOf } from "./bulk-walk";
 import { bindChunks, type FolioDb } from "./db";
-import { FolioError, rethrow } from "./errors";
+import { FolioError } from "./errors";
 import { clampText, SERVED_CONTENT_TYPES } from "./validate";
 import type { DescribeInput, DescribeResult, FolioDescribe, FolioLogger } from "./types";
 
@@ -711,8 +702,8 @@ export async function runDescribe(
   if (allowance <= 0) return report;
 
   const { rows, consumed, exhausted, last } = selection.all
-    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance, deps.scopes)
-    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), deps.scopes);
+    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance, deps.scopes ?? null)
+    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), deps.scopes ?? null);
 
   /**
    * **Once per call, and passed into every `describeAsset`.** `describeAsset`
@@ -767,7 +758,11 @@ export async function runDescribe(
       // nine calls of the batch down with it.
       slots[at] = {
         kind: "failed",
-        failure: { id: row.id, title: row.filename, message: reasonOf(err, deps.logger) },
+        failure: {
+          id: row.id,
+          title: row.filename,
+          message: reasonOf(err, "folio: unreportable failure during a describe run", deps.logger),
+        },
       };
     }
   });
@@ -868,97 +863,7 @@ export async function describeOnUpload(deps: DescribeDeps, row: AssetRow): Promi
 
 /* ------------------------------------------------------------- the walk --- */
 
-/**
- * One batch's worth of rows, and the three numbers the cursor needs —
- * `asset-bulk.ts`'s `Batch`, and it means the same thing here.
- */
-interface Batch {
-  rows: (AssetRow | null)[];
-  /** How much of the ceiling this batch used. Not the number of rows read, for
-   * a filter batch that dropped exclusions. */
-  consumed: number;
-  /** Whether the walk has reached the end of what it can read. Reported by the
-   * batch rather than inferred, because the two branches are asked for
-   * different limits and only they know what they asked for. */
-  exhausted: boolean;
-  /** The id to resume after, or null when there is nothing left. */
-  last: string | null;
-}
-
-/**
- * One batch of a captured filter.
- *
- * **The exclusions are applied here, in JavaScript, and not in the `where`** —
- * `asset-bulk.ts`'s `filterBatch` argues it in full: a selection's `exclude` is
- * up to 500 ids, five times `D1_BIND_CAP`, and no chunking rescues a single
- * statement.
- */
-async function filterBatch(
-  db: FolioDb,
-  selection: FilterSelection<AssetFilter>,
-  after: string | null,
-  limit: number,
-  allowance: number,
-  scopes: readonly string[] | undefined,
-): Promise<Batch> {
-  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: scopes ?? null });
-  const excluded = new Set(selection.exclude ?? []);
-  const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id));
-  const acting = kept.length > allowance ? kept.slice(0, allowance) : kept;
-  return {
-    rows: acting,
-    consumed: acting.length,
-    exhausted: rows.length < limit,
-    last: rows.at(-1)?.id ?? null,
-  };
-}
-
-/**
- * One batch of an explicit id list. `consumed` is the *slice* length rather than
- * the row count, because `assetsFor` omits an id with no row behind it and
- * counting rows would read a stale id as the end of the list.
- */
-async function idBatch(
-  db: FolioDb,
-  ids: readonly string[],
-  seen: number,
-  limit: number,
-  scopes: readonly string[] | undefined,
-): Promise<Batch> {
-  const slice = ids.slice(seen, seen + limit);
-  const found = new Map((await assetsFor(db, slice, scopes ?? null)).map((row) => [row.id, row]));
-  return {
-    rows: slice.map((id) => found.get(id) ?? null),
-    consumed: slice.length,
-    exhausted: slice.length < limit,
-    last: slice.at(-1) ?? null,
-  };
-}
-
 /** The id at a job position, for a failure that has no row to name itself with. */
 function idAt(selection: BulkSelection<AssetFilter>, position: number): string {
   return selection.all ? "" : (selection.ids[position] ?? "");
-}
-
-/** `core/bulk.ts`'s codec, with this module's refusal for a cursor that is not
- * one of ours. */
-function readCursor(raw: string): { after: string; seen: number } {
-  const at = readBulkCursor(raw);
-  if (!at) throw new FolioError("bad_request", "Malformed pagination cursor");
-  return at;
-}
-
-/** Why one file could not be described, as text that may travel — `runBulk`'s
- * `reasonOf` and `runAssetBulk`'s, for their reason: a run report is prose
- * rendered straight into a panel, and anything `rethrow` declines to translate
- * is a bug or a platform failure that gets the generic message here and the real
- * one in the log. */
-function reasonOf(err: unknown, logger: FolioLogger = console): string {
-  try {
-    rethrow(err);
-  } catch (translated) {
-    if (translated instanceof FolioError) return translated.message;
-  }
-  logger.error("folio: unreportable failure during a describe run", err);
-  return "Something went wrong.";
 }

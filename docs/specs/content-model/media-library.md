@@ -1775,15 +1775,11 @@ for a non-image, it simply did not pay for it, and a dry run reporting "3 files,
 1 of them free" is the closest thing to a cost estimate that can be had without
 spending anything.
 
-**The batch walk is duplicated from `asset-bulk.ts`, deliberately and with a
-cost.** `filterBatch`, `idBatch`, the cursor read and `reasonOf` are the same
-sixty lines in both files. Decision 6's argument for a second runner covers a
-third — no action to switch on, a concurrency pool instead of a sequential loop,
-a batch ceiling an order of magnitude lower, a report with two fields no bulk
-write has — but the *walk* is genuinely common now that there are two copies of
-it, and a fourth caller should extract it into `server/bulk-walk.ts` rather than
-copy it again. Not done here because `asset-bulk.ts` was not this phase's file
-and a shared helper cannot be introduced from one side.
+**The batch walk was duplicated from `asset-bulk.ts`, deliberately and with a
+cost, until #36.** `filterBatch`, `idBatch`, the cursor read and `reasonOf` were the
+same sixty lines in both files and now live once in `server/bulk-walk.ts`, which
+takes the scope as a chain (or `null` for every scope) and the log line as an
+argument. Decision 6's two runners stand; only the walk is shared.
 
 **Concurrency is a worker pool, and the report is assembled by position.**
 `runAssetBulk` gets a deterministic failure list by being sequential, which is
@@ -1995,13 +1991,4 @@ selection captured with the chip on, not a new run path: `describe.ts`'s
 re-describe, so a file this chip shows leaves the set on its own once it is
 fixed, without anybody unticking it.
 
-**Not done, and it is the one thing this spec asked for that nobody built.**
-*Testing requirements* names `scripts/media-library-test.mjs` — upload, a folder
-tree, filing, tagging, filtering by folder and by two tags, a bulk tag over a
-select-all, a bulk move, and a folder delete that leaves its assets unfiled. No
-phase owned it and none wrote it. Every one of those behaviours is covered by the
-workers suite against real D1 and real R2, so this is not an untested feature; what
-is missing is the one check that exercises them through a live dev server the way a
-browser would, which is what the other twenty `scripts/*-test.mjs` exist for. It is
-a script and a single `./scripts/e2e.sh` run, and it is named here rather than
-quietly dropped.
+**Closed by #36.** `scripts/media-library-test.mjs` now covers upload, a folder tree, filing, tagging, filtering by folder and by two tags, a bulk tag over a select-all, a bulk move and a folder delete that leaves its assets unfiled, through a live dev server.
