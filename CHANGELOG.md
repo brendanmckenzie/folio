@@ -48,6 +48,30 @@ Relative to the last pre-1.0 commits the two live consumers were pinned to.
   gap and `0012` is claimed for the release that drops `users.role`. Apply them
   before the Worker that needs them goes live.
 
+### Behaviour changes to know about
+
+Not breaking in the semver sense: no export, `createFolio()` key or stored shape is
+removed or narrowed, and nothing needs a migration or a host edit. Each changes what
+a running site does, so read them before you bump.
+
+- **Restore goes through the server.** The admin no longer diffs in the browser. A
+  restore, from the admin or from `POST {base}/api/v1/documents/:id/restore`, first
+  saves a "before restore" checkpoint version and fires the `checkpointed` hook for
+  any actor who may restore, so a host with a `checkpointed` handler will now see
+  one per restore. Cmd+Z does not undo a restore (the checkpoint is the way back),
+  and restoring a bare layer unsets the fields it inherits.
+- **A collection filter's `in` list is refused only when the whole statement would
+  exceed D1's 100 bound parameters**, with a `bad_request` naming it. Every other
+  caller-sized bind is now bounded, so a long publish, a wide page render or a large
+  Data list no longer fails on the cap.
+- **Forms inside globals and referenced documents resolve** to a `ResolvedForm`
+  instead of `null`.
+- **`render(props, resolution)`.** A block's `render` receives the page's
+  `Resolution` as a second argument, so it can `resolveAsset` a referenced
+  document's asset. Existing one-argument renders are unaffected.
+- **Dependencies:** `vitest` 4.1.11, `@tiptap/core` 3.30.5 and `hono` 4.13.7, all
+  security updates.
+
 ### Added
 
 - **Multi-site.** A registry of sites and groups, a shared scope every site

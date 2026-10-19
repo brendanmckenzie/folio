@@ -401,12 +401,12 @@ Deferred, each named rather than glossed:
   path — and `describe.ts`'s `stamp` already clears `describe_error` on a
   successful re-describe, so a fixed file leaves the set on its own rather
   than needing to be unticked.
-- **The batch walk is written twice**, in `server/asset-bulk.ts` and
+- **Fixed 2026-10-19 (issue #36).** The walk is extracted to `server/bulk-walk.ts`. What this entry recorded: **The batch walk is written twice**, in `server/asset-bulk.ts` and
   `server/describe.ts` — `filterBatch`, `idBatch`, the cursor read and
   `reasonOf`, some sixty lines. Two runners was decision 6 and is still right;
   two copies of the *walk* is not, and a fourth caller should extract
   `server/bulk-walk.ts` rather than copy it a third time.
-- **No `scripts/media-library-test.mjs`.** The spec's own *Testing requirements*
+- **Fixed 2026-10-19 (issue #36).** `scripts/media-library-test.mjs` exists and runs in `e2e-all.sh`'s glob. What this entry recorded: **No `scripts/media-library-test.mjs`.** The spec's own *Testing requirements*
   name one — upload, a folder tree, filing, tagging, filtering, a bulk tag over a
   select-all, a bulk move, a folder delete — and no phase owned it. Every
   behaviour in it is covered by the workers suite against real D1 and real R2;
@@ -451,11 +451,11 @@ Deferred or uncovered, each named rather than glossed:
   key, so the first bridge frame overwrote the server-rendered one and every form
   rendered as `null` in the pane it was being edited in. `GET
   {base}/api/forms/resolved` is what the admin fetches descriptors from.
-- **A form embedded in a *global* or in a referenced document resolves to
+- **Fixed 2026-10-19 (issue #34).** Forms inside globals and referenced documents resolve. What this entry recorded: **A form embedded in a *global* or in a referenced document resolves to
   `null`.** Form ids come off the rendered document's own walk, and a global's are
   not known until the pass that loads it. The fix is cheap (a third-pass read for
   ids discovered in pass two) and nothing has needed it yet.
-- **Retention is manual, and nothing will remind anyone** (checkpoint 9, chosen
+- **Decided 2026-10-19 (issue #35): it stays manual**, and the handbook's Forms section documents the process. What this entry recorded: **Retention is manual, and nothing will remind anyone** (checkpoint 9, chosen
   against a swept `retentionDays`). Personal data accumulates in `form_responses`
   until somebody deletes it. What Folio adds itself expires anyway — the IP hash
   carries the hour it was made in — and the responses screen shows the age of the
@@ -578,8 +578,10 @@ route, and the tree appends a level at a time.
    batch in one query, so the admin wants `GET /stories?ids=…` and to ask for the
    ids a document actually mentions — exactly what `resolve()` does on the server.
 
-Open decision for the spec: **keyset cursors everywhere, and the UI stops
-promising page numbers.** Keyset matches the redirects precedent, is correct under
+**Decided (issue #39; `pagination.md` decision 1): keyset for the admin's lists,
+page numbers kept for `/api/v1`, and `GET {base}/api/stories?ids=` for resolving a
+batch.** What follows is the argument as it stood before the decision:
+**keyset cursors everywhere, and the UI stops promising page numbers.** Keyset matches the redirects precedent, is correct under
 concurrent writes and needs no `count(*)`; the cost is that "Page 3 of 7" becomes
 "next/previous", which over live content was a lie anyway. A separate cheap
 `count(*)` can still front a header ("24 documents") where one is worth a second
@@ -983,7 +985,7 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
-- **Three more queries still bind a caller-sized list in one statement, and D1's cap
+- **Fixed 2026-10-19 (issue #29).** Every caller-sized bind is now bounded under the cap: the Data list and the other statements that took a list are chunked, and a collection filter is refused with a `bad_request` only when the whole statement would exceed 100 binds, rather than at a fixed value count. Each fix has a test that fails if it is un-chunked. What this entry recorded: **Three more queries still bind a caller-sized list in one statement, and D1's cap
   is exactly 100.** The two that were failing in the field are fixed — `publish`
   (`content-index.ts`'s `indexStatements`, which threw at 21 index rows or 34
   outbound refs and took the whole publish batch with it) and `resolve()`'s
@@ -1056,7 +1058,7 @@ an unsorted flat list, which stops working somewhere around 15.
   gets a `400` naming the revision that would work. That is the accepted cost of the
   decision, recorded so nobody re-opens it as a bug.
 
-- **A draft has no render inside the host's own layout, so "does this look right"
+- **Done 2026-08-30, as spec 25 (issue #31).** `folio.draftAt` and `draftMode` are the decision made and built, described at the end of this entry. What this entry recorded: **A draft has no render inside the host's own layout, so "does this look right"
   is answered against Folio's preview shell.** Spec 24 added `?_folio=draft` — the
   draft with no editing chrome, no marker divs and no bridge — and its
   `preview_document` tool screenshots it. But `folio.handle()` answering that URL
@@ -1098,7 +1100,7 @@ an unsorted flat list, which stops working somewhere around 15.
   unpublished content at the edge under the page's real URL. `draftMode: true` is
   the host's promise that the branch exists, and it flips where a share link lands.
 
-- **The admin still computes a restore in the browser, and the route that would do it
+- **Fixed 2026-10-19 (issue #32).** The admin restores through the server route and the client-side diff is gone. Behaviour that changed with it: a "before restore" checkpoint version is saved first (on `{base}/api/v1` restore too, firing `checkpointed` for any actor who may restore), Cmd+Z no longer undoes a restore, and restoring a bare layer unsets the fields it inherits. What this entry recorded: **The admin still computes a restore in the browser, and the route that would do it
   server-side is already live.** `admin/hooks/useVersions.ts:375` builds
   `diff(live, target)` client-side and posts the mutations; spec 24 shipped
   `POST {base}/api/v1/documents/:id/restore`, which does the same read-diff-commit
@@ -1146,7 +1148,7 @@ an unsorted flat list, which stops working somewhere around 15.
   other plugin's, and Vite concatenates when either side is an array. Anything it
   returns under `build.rollupOptions` should assume a framework got there first.
 
-- **`GET /documents/:id` then `PUT /documents/:id/content` is not a round trip.**
+- **Fixed (issue #27).** `fromNested` round-trips an orphan key that the document already holds unchanged, so a document read back through the API can be written back as it was. What this entry recorded: **`GET /documents/:id` then `PUT /documents/:id/content` is not a round trip.**
   `toNested` emits every stored field, including one the schema no longer declares;
   `fromNested` validates against the schema and refuses it — `body[3].fields.buttonLabel
   is not a field of 'feature'`. So reading a document and writing it straight back
@@ -1199,7 +1201,7 @@ an unsorted flat list, which stops working somewhere around 15.
   almost never, and reading `published_doc` eagerly to build it would put a D1 read on
   the hot path. Wants a spec rather than a patch.
 
-- **A block's `render` gets no `Resolution`**, so it cannot `resolveAsset` a
+- **Done 2026-10-19 (issue #30).** `render(props, resolution)` passes the page's resolution as a second argument, as this entry proposed. What this entry recorded: **A block's `render` gets no `Resolution`**, so it cannot `resolveAsset` a
   *referenced* document's asset field — it works only while such assets use the `url`
   arm. `core/block.ts:38` is the signature:
   `render?: (props: PropsOf<F> & { uid: string }) => ReactNode`. Found by the first
@@ -1250,7 +1252,7 @@ an unsorted flat list, which stops working somewhere around 15.
   that had drifted from its ancestor chain, anywhere on the site. Nothing specified
   that and nothing relied on it; it now repairs the subtree it is rewriting and the
   chain above it.
-- **The table-bodied screens' headings are 4px out from their own cells.** `Access`,
+- **Fixed 2026-10-19 (issue #38).** One table gutter token is consumed by the header, the rows and the cells. What this entry recorded: **The table-bodied screens' headings are 4px out from their own cells.** `Access`,
   `Model` and `Redirects` put a section heading in `ListHeader` — an 8px row gutter —
   above `Table` cells with a 12px gutter, so nothing quite lines up vertically. It is
   the same defect the Settings h1 had at 8px, and it has the same cause:
@@ -1407,7 +1409,7 @@ an unsorted flat list, which stops working somewhere around 15.
 - A collection's `order` takes a single field. One was enough everywhere it was
   looked at, and a second is additive — but it has to be threaded through the
   canonical form, the query string and the SQL, so it is not free.
-- **Sorting a Documents column by an `indexed` field is not offered.** The list
+- **Decided 2026-10-19: won't do (issue #37).** No consumer has asked for it, and the cost below is real: a three-component keyset with sentinel coalescing over `num_value`/`text_value`, a column that is null for unpublished content because index rows are written in the publish batch, and a lookup index that cannot be intersected with `stories.type`. `DocumentSort` in `core/story.ts` still names the shape if it is ever wanted. What this entry recorded: **Sorting a Documents column by an `indexed` field is not offered.** The list
   itself sorts, searches and pages server-side now (`ui-architecture.md` port phase
   3), over three `stories` columns — `ord`, `title`, `coalesce(draft_updated_at,
   updated_at)`. An `indexed` field is the one axis missing, and it is missing for
