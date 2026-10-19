@@ -1632,7 +1632,11 @@ socket and lands in the activity trail, but because the server commits it, it is
 not in the restorer's own undo stack: Cmd+Z does not undo it. Instead, before
 applying, it saves the current draft as a `checkpoint` labelled "before restore"
 (skipped when the draft already equals the newest version), so restoring that row
-is the undo. Reverting a title change plus one added block
+is the undo. The snapshot is part of the restore, so whoever may restore creates it:
+an editor, or a token with `content:write`, writes a checkpoint row and fires the
+`checkpointed` hook without holding `publish`. The admin first waits for its own
+unacknowledged edits to reach the server, so they are in the snapshot, and sends an
+`Idempotency-Key` so a retried restore does not save a second one. Reverting a title change plus one added block
 produces exactly two mutations.
 
 ## Draft mode

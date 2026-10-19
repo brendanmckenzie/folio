@@ -28,6 +28,33 @@ export interface PreviewSource {
 
 const LIVE: PreviewSource = { mode: "live", doc: null };
 
+/**
+ * Resolves once the store has no unacknowledged transactions, or after `ms`.
+ *
+ * A restore diffs the object's draft, not this browser's, so keystrokes still in
+ * flight would otherwise miss the "before restore" checkpoint and could re-apply on
+ * top of the restored content. Bounded so an offline editor's restore is refused by
+ * the server rather than hanging here.
+ */
+export function whenSynced(
+  store: Pick<StoryStore, "subscribe" | "getSnapshot">,
+  ms = 5000,
+): Promise<void> {
+  if (store.getSnapshot().inflight === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let off = () => {};
+    const done = () => {
+      clearTimeout(timer);
+      off();
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    off = store.subscribe(() => {
+      if (store.getSnapshot().inflight === 0) done();
+    });
+  });
+}
+
 /* ------------------------------------------------------------------ paging --- */
 
 /**
@@ -378,8 +405,13 @@ export function useVersions({
     async (version: VersionMeta) => {
       setBusy(true);
       try {
-        const res = await send(`${apiBase}/story/${encodeURIComponent(storyId)}/restore`, "POST", {
-          versionId: version.id,
+        await whenSynced(store);
+        // One key per click: a retried request replays instead of saving a second
+        // "before restore" checkpoint of a half-restored draft.
+        const res = await fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/restore`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+          body: JSON.stringify({ versionId: version.id }),
         });
         await expectOk(res);
         const { changed } = (await res.json()) as { changed: number };
@@ -396,12 +428,15 @@ export function useVersions({
         // replace it with a fetch error about a restore that did happen.
         await afterWrite(reload());
       } catch (e) {
-        notify((e as Error).message);
+        notify(
+          `${(e as Error).message} If any of the restore was applied, the previous draft is ` +
+            'saved in History as "before restore".',
+        );
       } finally {
         setBusy(false);
       }
     },
-    [apiBase, notify, reload, storyId],
+    [apiBase, notify, reload, store, storyId],
   );
 
   const source = useMemo<PreviewSource>(

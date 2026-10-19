@@ -97,7 +97,11 @@ document is a `400`, not a `404`: version ids are globally unique, so the lookup
 succeed and the diff would rewrite this document from a stranger's history. Before
 applying, the current draft is saved as a `checkpoint` labelled `before restore`, unless it
 already equals the newest version or the restore changes nothing, so a restore never
-discards work: it adds at most one version row.
+discards work: it adds at most one version row. That snapshot is part of the restore, so
+any caller who may restore (`content:write`) creates it, and the `checkpointed` hook fires
+for it, attributed to them, without the `publish` scope a direct checkpoint needs. On a
+layer document with something below it, inherited fields are unset rather than written
+as `null`, as `PUT /content` does.
 
 **`POST /documents/:id/duplicate`** takes `{ title?, parentId? }` and no position. To place
 a copy, `PATCH /documents/:id` afterwards — two calls, which is also what dragging a

@@ -175,7 +175,7 @@ function writeActor<Env>(c: Context<FolioEnv<Env>>): WriteActor {
  * does for the seed: a group's layer, and a layer on a site with no group, are the
  * bottom of their chains and are full, which the id alone cannot say.
  */
-async function layerOption<Env>(
+export async function layerOption<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
   story: StoryMeta,
@@ -813,12 +813,14 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           body.versionId,
           { migrations: brand.migrations, schema: brand.schema, typeOf: brand.typeOf },
           writeActor(c),
-          () =>
+          (doc) =>
             checkpoint(brandOf(c).publishDeps(bindings, hookCtx(c)), story, {
               label: "before restore",
               actor: actorString(c.var.actor),
+              doc,
             }),
           key,
+          (await layerOption(c, rt, story)).layer,
         ),
       );
     } catch (e) {

@@ -30,6 +30,7 @@ import {
 } from "../validate";
 import { getVersion, listRecentPublishes, listVersions } from "../versions";
 import { restoreVersion } from "../write";
+import { layerOption } from "./api/documents";
 import { brandOf, draftOf } from "./stories";
 
 export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -117,12 +118,14 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           body.versionId,
           { migrations: brand.migrations, schema: brand.schema, typeOf: brand.typeOf },
           { id: actorString(c.var.actor) ?? "api", name: actorName(c.var.actor) ?? "API" },
-          () =>
+          (doc) =>
             checkpoint(brand.publishDeps(bindings, hookCtx(c)), story, {
               label: "before restore",
               actor: actorString(c.var.actor),
+              doc,
             }),
           key,
+          (await layerOption(c, rt, story)).layer,
         ),
       );
     },
