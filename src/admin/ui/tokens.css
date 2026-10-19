@@ -117,6 +117,10 @@
   --row-h: 28px;
   --rail-w: 15rem;
   --indent: 16px;
+  /* The one left/right gutter of a row-shaped thing: `ListHeader`, a `List` row and
+     every `Table` cell. Three components each picking their own number is how the
+     headings came to sit 4px off their cells (issue #38). */
+  --gutter: var(--space-3);
 
   --radius-sm: 4px;
   --radius-md: 6px;

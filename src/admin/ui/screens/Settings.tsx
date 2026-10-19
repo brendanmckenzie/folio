@@ -84,27 +84,19 @@ export function Settings(props: Props) {
    */
   const data = useSettings(manifest, me.policy, url);
 
-  /*
-   * Wrapped, to cancel the row gutter `ListHeader` carries — see `.head` in the
-   * stylesheet for the measurement. The wrapper rather than a bare `ListHeader`
-   * because every screen names itself the same way and that is worth keeping; what
-   * is wrong is a *row* gutter on a screen whose body has no rows.
-   */
   const header = (
-    <div className={css.head}>
-      <ListHeader
-        actions={
-          <input
-            className={css.search}
-            type="search"
-            value={url.q}
-            placeholder="Filter settings"
-            aria-label="Filter settings"
-            onChange={(e) => onQuery(settingsQuery({ q: e.target.value }))}
-          />
-        }
-      />
-    </div>
+    <ListHeader
+      actions={
+        <input
+          className={css.search}
+          type="search"
+          value={url.q}
+          placeholder="Filter settings"
+          aria-label="Filter settings"
+          onChange={(e) => onQuery(settingsQuery({ q: e.target.value }))}
+        />
+      }
+    />
   );
 
   /*

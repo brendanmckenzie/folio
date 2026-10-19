@@ -23,28 +23,6 @@
   max-width: 1600px;
 }
 
-/*
- * The actions row, with `ListHeader`'s gutter cancelled.
- *
- * `.header` in `List.module.css` carries `padding: 0 var(--space-2)` because its
- * ordinary job is a *section* label above `List` rows, and a row carries the same
- * gutter — so on Content that label (or, before issue #8, the screen's own `h1`)
- * lands exactly on a row's title, which is right. This screen's body is prose,
- * headings and tables, and none of the three has that gutter: the same padding put
- * the filter box 8px short of the tables' right edge, measured at 1440px against
- * the intro paragraph and all seven section headings sitting at x=264.
- *
- * Cancelled from this side rather than in the shared header, because the gutter is
- * correct for the five screens whose body *is* rows. This screen's own title no
- * longer travels through `ListHeader` at all — it moved to the breadcrumb's last
- * crumb (issue #8) — so what this wrapper cancels today is only the actions row's
- * gutter, and the fix reported here landed by other means: the primitive gained no
- * flag, because the register that needed one is gone.
- */
-.head {
-  margin: 0 calc(var(--space-2) * -1);
-}
-
 /* The same box as Documents', because it is the same control. Copied rather than
    promoted to `ui/`: a shared search input with two callers is a directory entry,
    not a decision, and the first screen to need a third one should make it. */
