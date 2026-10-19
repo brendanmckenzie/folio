@@ -1,6 +1,8 @@
+> **History, not current (stopped being current 2026-07-31).** This was the build plan for port phase 7, the editor, written while phases 4 and 5 were in flight. Phase 7 landed, and the port completed at phase 8 on 2026-07-31 with the deletion of `admin/admin.css`. The live version is [the port plan in docs/ui-architecture.md](ui-architecture.md#the-port-plan).
+
 # Port phase 7: the editor
 
-> **Status:** plan
+> **Status:** history, not current
 > **Reads with:** `docs/ui-architecture.md`'s `### The editor` section, which is the
 > design. This file is how it gets built without one agent having to hold all of it.
 > **Written:** 2026-07-31, while phases 4 and 5 were in flight.
