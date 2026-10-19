@@ -51,6 +51,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # gitignored, and examples/demo does not typecheck without it.
+      - name: generate Worker types
+        run: pnpm --filter demo cf-typegen
+
       # Tag matches package.json and sits on main; biome, tests, typecheck, the
       # end-to-end sweep, then the packed-install smoke test in a temp directory.
       - name: release gates

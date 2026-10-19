@@ -40,6 +40,11 @@ jobs:
       - name: biome
         run: pnpm lint
 
+      # worker-configuration.d.ts is gitignored; examples/demo does not typecheck
+      # without it.
+      - name: generate Worker types
+        run: pnpm --filter demo cf-typegen
+
       - name: typecheck
         run: pnpm typecheck
 
