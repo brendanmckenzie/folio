@@ -232,11 +232,13 @@ export async function unpublish(
 export async function checkpoint(
   deps: PublishDeps,
   story: StorySelector,
-  input: { label?: string | null; actor?: string | null },
+  /** `doc` is a draft the caller already read and means to save as it stood
+   * (`restoreVersion` saves the one it diffs against); absent, it is read here. */
+  input: { label?: string | null; actor?: string | null; doc?: Doc },
 ): Promise<VersionMeta> {
   const meta = await requireStory(deps.db, story);
   const actor = input.actor ?? null;
-  const doc = await deps.draft(meta);
+  const doc = input.doc ?? (await deps.draft(meta));
 
   const version = await writeVersion(deps.db, {
     storyId: meta.id,

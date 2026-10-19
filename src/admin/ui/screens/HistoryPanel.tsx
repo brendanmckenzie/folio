@@ -418,20 +418,20 @@ function VersionRow({
           replaces: `History.tsx` routed it through the preview banner so a version
           was always seen before it was applied. `ui-architecture.md` asks for
           "restore and checkpoint in place", and the guard the old arrangement was
-          buying is cheaper than it looked — a restore is one transaction, so it
-          syncs and ⌘Z undoes it, and a version identical to the draft is refused
-          rather than applied. The title says both; the section's note says it once
-          more.
+          buying is cheaper than it looked — a restore is one transaction that
+          syncs to everyone, and a version identical to the draft is refused rather
+          than applied. It is committed by the server (issue #32), so it is not in
+          the restorer's own undo stack, so the server saves the previous draft as a
+          "before restore" checkpoint instead: the title and the note say so.
 
-          Rejected: a confirmation dialog. It would tell the reader this is the
-          irreversible kind of action, which is exactly what it is not.
+          Rejected: a confirmation dialog. Nothing is lost, so there is nothing to confirm.
         */}
         <Button
           size="sm"
           variant="subtle"
           disabled={busy}
           reason="A version request is in flight"
-          title="Apply the difference as one edit. It syncs to everyone here, and ⌘Z undoes it."
+          title="Apply the difference as one edit. It syncs to everyone here. The previous draft is saved to history; ⌘Z does not undo it."
           onClick={() => void onRestore(version)}
         >
           Restore

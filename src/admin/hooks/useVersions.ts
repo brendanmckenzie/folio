@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { diff, summariseDiff } from "../../core/diff";
 import type { Doc } from "../../core/doc";
 import type { Page } from "../../core/pagination";
-import { type ActivityEntry, MAX_TX_MUTATIONS } from "../../core/protocol";
+import type { ActivityEntry } from "../../core/protocol";
 import type { VersionMeta } from "../../server/versions";
 import { afterWrite, expectJson, expectOk, send } from "../api";
 import type { StoryStore } from "../store";
@@ -27,6 +27,33 @@ export interface PreviewSource {
 }
 
 const LIVE: PreviewSource = { mode: "live", doc: null };
+
+/**
+ * Resolves once the store has no unacknowledged transactions, or after `ms`.
+ *
+ * A restore diffs the object's draft, not this browser's, so keystrokes still in
+ * flight would otherwise miss the "before restore" checkpoint and could re-apply on
+ * top of the restored content. Bounded so an offline editor's restore is refused by
+ * the server rather than hanging here.
+ */
+export function whenSynced(
+  store: Pick<StoryStore, "subscribe" | "getSnapshot">,
+  ms = 5000,
+): Promise<void> {
+  if (store.getSnapshot().inflight === 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    let off = () => {};
+    const done = () => {
+      clearTimeout(timer);
+      off();
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    off = store.subscribe(() => {
+      if (store.getSnapshot().inflight === 0) done();
+    });
+  });
+}
 
 /* ------------------------------------------------------------------ paging --- */
 
@@ -227,7 +254,7 @@ export interface Versions {
   checkpoint: (label: string) => Promise<void>;
   view: (version: VersionMeta) => Promise<void>;
   exit: () => void;
-  restore: (version: VersionMeta, preloaded?: Doc) => Promise<void>;
+  restore: (version: VersionMeta) => Promise<void>;
   /**
    * The same rows as `activity`, plus the cursor and the control over it — the
    * activity half of what `VersionsList.trail` is for the versions half.
@@ -360,65 +387,56 @@ export function useVersions({
   }, [store]);
 
   /**
-   * Restore does not overwrite the document. It diffs the live document against
-   * the version and applies the result as one transaction, so the restore
-   * reaches other editors and Cmd+Z undoes it.
+   * Restore is the server's: `POST {base}/api/story/:id/restore` reads the draft,
+   * diffs it against the version (migrated on read) and commits the difference
+   * through the mutation log, which is what `POST /api/v1/documents/:id/restore`
+   * does too (`restoreVersion`, `server/write.ts`). The browser no longer computes
+   * the diff, so there is one implementation of it.
+   *
+   * The restored content reaches this editor over the socket like any other
+   * committed write, and other editors see it the same way. What it does **not** do
+   * is join this editor's undo stack: that stack holds inverses `store.tx` built
+   * from the diff it computed, and a remote commit never enters it. A restore is
+   * not undoable with Cmd+Z; instead the server saves the draft it replaces as a
+   * "before restore" checkpoint (unless it equals the newest version), so restoring
+   * that version in turn gets it back.
    */
   const restore = useCallback(
-    async (version: VersionMeta, preloaded?: Doc) => {
-      const live = store.getSnapshot().doc;
-      if (!live) return;
+    async (version: VersionMeta) => {
       setBusy(true);
       try {
-        const target = preloaded ?? (await fetchDoc(version));
-        if (!target) return;
-        const mutations = diff(live, target);
-        if (mutations.length === 0) {
+        await whenSynced(store);
+        // One key per click: a retried request replays instead of saving a second
+        // "before restore" checkpoint of a half-restored draft.
+        const res = await fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/restore`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "idempotency-key": crypto.randomUUID() },
+          body: JSON.stringify({ versionId: version.id }),
+        });
+        await expectOk(res);
+        const { changed } = (await res.json()) as { changed: number };
+        if (changed === 0) {
           notify("Already identical to that version.");
           return;
         }
-        // A restore is one transaction so it lands and undoes as a single step;
-        // that means it is also one shot at the wire caps, with no chunking to
-        // fall back on (see MAX_TX_MUTATIONS in core/protocol). A restore this
-        // large is rare enough that refusing it up front, rather than splitting
-        // it into several separately-undoable transactions, is the simpler and
-        // more honest failure.
-        if (mutations.length > MAX_TX_MUTATIONS) {
-          notify(
-            `This restore touches ${mutations.length} things at once, over the ` +
-              `${MAX_TX_MUTATIONS} the sync engine allows in one step. Try restoring a ` +
-              "version with a smaller difference from the live page.",
-          );
-          return;
-        }
-        // Leave preview first so the live document flows to the iframe again.
+        // Leave preview so the live document flows to the iframe again.
         setViewing(null);
-        if (!store.tx(mutations)) {
-          notify("That restore could not be sent: it is too large to sync. Nothing changed.");
-          return;
-        }
-        const s = summariseDiff(mutations);
         notify(
-          `Restored: ${[
-            s.edited && `${s.edited} edited`,
-            s.added && `${s.added} added`,
-            s.removed && `${s.removed} removed`,
-            s.moved && `${s.moved} moved`,
-          ]
-            .filter(Boolean)
-            .join(", ")}. Cmd+Z to undo.`,
+          `Restored: ${changed} ${changed === 1 ? "change" : "changes"} applied. The previous draft is saved in history.`,
         );
-        // The transaction has landed and synced, and the notice above says so.
-        // A failed refresh must not replace it with a fetch error about a
-        // restore that did happen.
+        // The restore has landed and the notice says so. A failed refresh must not
+        // replace it with a fetch error about a restore that did happen.
         await afterWrite(reload());
       } catch (e) {
-        notify((e as Error).message);
+        notify(
+          `${(e as Error).message} If any of the restore was applied, the previous draft is ` +
+            'saved in History as "before restore".',
+        );
       } finally {
         setBusy(false);
       }
     },
-    [fetchDoc, notify, reload, store],
+    [apiBase, notify, reload, store, storyId],
   );
 
   const source = useMemo<PreviewSource>(

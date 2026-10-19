@@ -263,8 +263,8 @@ export function describeEdit(
  */
 export const VERSIONS_NOTE =
   "Coarse and restorable. Publishing saves one automatically; a checkpoint is one you name. " +
-  "Restoring applies the difference as a single edit, so it reaches everyone in the document and ⌘Z undoes it.";
+  "Restoring applies the difference as a single edit and reaches everyone in the document. ⌘Z does not undo it, but the previous draft is saved here as a “before restore” checkpoint.";
 
 export const ACTIVITY_NOTE =
   "Every transaction on this document, from its own log. Fine-grained, and not restorable — " +
-  "use ⌘Z for the last few, or restore a version above.";
+  "use ⌘Z for your own recent edits, or restore a version above.";

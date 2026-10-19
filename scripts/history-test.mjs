@@ -180,17 +180,17 @@ check("checkpoint predates the added block", target.bloks[HERO] === undefined);
 const live = await client("Bob", "#0090ff").hello();
 check("live doc contains the added block", live.bloks[HERO] !== undefined);
 
-const mutations = diff(live, target);
+// The server diffs: the admin sends the version id and nothing else.
+const restored = await json(`${API}/story/${STORY}/restore`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ versionId: cp.id }),
+});
 check(
-  "diff is minimal: one remove, one set",
-  mutations.length === 2 &&
-    mutations.some((m) => m.t === "remove" && m.uid === HERO) &&
-    mutations.some((m) => m.t === "set" && m.field === "title" && m.value === "Version One"),
-  JSON.stringify(mutations.map((m) => m.t)),
+  "server diff is minimal: one remove, one set",
+  restored.changed === 2 && restored.transactions === 1,
+  JSON.stringify(restored),
 );
-
-alice.send({ type: "tx", txId: "t3", mutations });
-await alice.expect((m) => m.type === "delta" && m.txId === "t3");
 await wait(150);
 
 const draftHtml = await fetch(`${HTTP}/?_folio=preview`).then((r) => r.text());

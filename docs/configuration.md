@@ -491,7 +491,7 @@ hook and no way to veto or rewrite a publish.
 | `created` / `deleted` | A document was created or deleted |
 | `updated` | A published document changed without its path changing (a title-only patch) |
 | `pathsChanged` | A move or rename rewrote descendant paths |
-| `checkpointed` | A version was written |
+| `checkpointed` | A checkpoint version was written, by a checkpoint request or by the "before restore" snapshot of a restore (so any actor who may restore can fire it) |
 | `migrated` | `runMigrations` rewrote `published_doc` |
 | `reindexed` | `POST {base}/reindex` changed what every collection answers |
 | `redirectsChanged` | A manual redirect was added or removed |

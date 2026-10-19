@@ -4,7 +4,7 @@
  * mutation log (fine-grained, not restorable).
  */
 import { Hono } from "hono";
-import { actorString, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
+import { actorName, actorString, EDIT, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
 import { FolioError } from "../errors";
 import {
   fenceStory,
@@ -18,9 +18,20 @@ import { checkpoint } from "../publish";
 import type { FolioRuntime } from "../runtime";
 import { storyById } from "../stories";
 import type { FolioEnv } from "../types";
-import { CheckpointBody, idParam, limitParam, parseOptionalBody, requireCursor } from "../validate";
+import {
+  CheckpointBody,
+  idempotencyKeyHeader,
+  idParam,
+  limitParam,
+  parseBody,
+  parseOptionalBody,
+  RestoreBody,
+  requireCursor,
+} from "../validate";
 import { getVersion, listRecentPublishes, listVersions } from "../versions";
-import { brandOf } from "./stories";
+import { restoreVersion } from "../write";
+import { layerOption } from "./api/documents";
+import { brandOf, draftOf } from "./stories";
 
 export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>();
@@ -74,9 +85,55 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   );
 
   /**
-   * Returns the version's document. Restoring happens on the client: it diffs
-   * the live document against this one and applies the result as a single
-   * transaction, so a restore syncs to other editors and can be undone.
+   * Restore a version onto the draft, on the server: the admin's twin of
+   * `POST /api/v1/documents/:id/restore`, sharing `restoreVersion` with it.
+   *
+   * Unversioned on purpose. `{base}/api/v1/*` is a contract with somebody's script
+   * (`CLAUDE.md`: a version segment is a promise), and the admin calls no `/api/v1`
+   * route; a second route over one implementation costs a dozen lines and keeps the
+   * admin free to change this shape in any commit.
+   *
+   * The diff is committed through the mutation log like a keystroke, so it reaches
+   * the open editor over the socket. It is attributed to the person, not to a
+   * client-sent name, and it does **not** enter the restorer's own undo stack: that
+   * stack lives in the browser's `StoryStore` and a remote commit never joins it.
+   * `restoreVersion` therefore saves the previous draft as a "before restore"
+   * checkpoint first, which is how a restore is undone.
+   */
+  app.post(
+    "/story/:id/restore",
+    requireAccess<Env>(rt, EDIT),
+    loadStory<Env>(rt, "write"),
+    async (c) => {
+      const body = await parseBody(c.req, RestoreBody);
+      const key = idempotencyKeyHeader(c.req.header("idempotency-key"));
+      const bindings = c.var.bindings();
+      const story = c.var.story;
+      const brand = brandOf(c);
+      return c.json(
+        await restoreVersion(
+          { draft: () => draftOf(c, rt)(story), stub: rt.stub(bindings, story.id) },
+          bindings.db,
+          story.id,
+          body.versionId,
+          { migrations: brand.migrations, schema: brand.schema, typeOf: brand.typeOf },
+          { id: actorString(c.var.actor) ?? "api", name: actorName(c.var.actor) ?? "API" },
+          (doc) =>
+            checkpoint(brand.publishDeps(bindings, hookCtx(c)), story, {
+              label: "before restore",
+              actor: actorString(c.var.actor),
+              doc,
+            }),
+          key,
+          (await layerOption(c, rt, story)).layer,
+        ),
+      );
+    },
+  );
+
+  /**
+   * Returns the version's document, for the preview. Restoring is the route
+   * above this one and happens on the server, not in the browser.
    *
    * The document is **migrated on read** (`schema-migrations.md` checkpoint 3):
    * the stored row is never rewritten, so history stays byte-true, and the

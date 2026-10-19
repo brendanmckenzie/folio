@@ -1215,6 +1215,39 @@ describe("Layered globals", () => {
     });
   });
 
+  it("restores a bare layer by unsetting what the version inherited, not by writing null", async () => {
+    const who = await tokenFor("bravo");
+    const actor = { id: "ls", name: "Layers" };
+    const root = (await layered.draft(env, "sng_lsHeader:bravo")).root;
+    if ("title" in rootOf(await layered.draft(env, "sng_lsHeader:bravo"))!.data) {
+      await stubOf("sng_lsHeader:bravo").commit(
+        [{ t: "unset", uid: root, field: "title" }],
+        actor,
+        "ls-restore-prep",
+      );
+    }
+    // A version in which title is inherited (absent).
+    const version = (await (
+      await api("/api/v1/documents/sng_lsHeader:bravo/versions", who, {
+        method: "POST",
+        body: JSON.stringify({}),
+      })
+    ).json()) as { id: string };
+    // The draft now overrides it.
+    await stubOf("sng_lsHeader:bravo").commit(
+      [{ t: "set", uid: root, field: "title", value: "Overridden" }],
+      actor,
+      "ls-restore-override",
+    );
+    const res = await api("/api/v1/documents/sng_lsHeader:bravo/restore", who, {
+      method: "POST",
+      body: JSON.stringify({ versionId: version.id }),
+    });
+    expect(res.status).toBe(200);
+    // Unset: the key is gone and reads inherited, rather than `title: null` (removed).
+    expect("title" in rootOf(await layered.draft(env, "sng_lsHeader:bravo"))!.data).toBe(false);
+  });
+
   it("carries the type’s defaults and preset when the shared layer is first created", async () => {
     const who = await tokenFor("shared");
     const res = await api("/~shared/api/v1/documents/sng_lsHeader:shared?status=draft", who);
