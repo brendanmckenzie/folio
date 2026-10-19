@@ -1,36 +1,36 @@
-import type { ReactNode } from 'react'
-import type { MenuItem } from './Menu'
-import type { NavGroup, ScopeOptionGroup } from './nav'
-import type { Crumb, Screen } from './route'
-import { scoped } from './scope'
-import css from './Shell.module.css'
-import { Sidebar } from './Sidebar'
-import { TopBar } from './TopBar'
+import type { ReactNode } from "react";
+import type { MenuItem } from "./Menu";
+import type { NavGroup, ScopeOptionGroup } from "./nav";
+import type { Crumb, Screen } from "./route";
+import { scoped } from "./scope";
+import css from "./Shell.module.css";
+import { Sidebar } from "./Sidebar";
+import { TopBar } from "./TopBar";
 
 interface Props {
-  groups: readonly NavGroup[]
-  active: Screen
-  crumbs: readonly Crumb[]
-  mount: string
+  groups: readonly NavGroup[];
+  active: Screen;
+  crumbs: readonly Crumb[];
+  mount: string;
   /** Held above this component so `⌘\` can reach it — the shortcut and the
    * sidebar's own toggle have to drive the same value, and the remembering is
    * per-surface (`remembered.ts`). */
-  collapsed: boolean
-  onToggleSidebar: () => void
-  presence?: ReactNode
-  onSearch: () => void
-  actor: string | null
-  user: readonly MenuItem[]
-  children: ReactNode
+  collapsed: boolean;
+  onToggleSidebar: () => void;
+  presence?: ReactNode;
+  onSearch: () => void;
+  actor: string | null;
+  user: readonly MenuItem[];
+  children: ReactNode;
   /** Lets the editor take the whole area with no padding, while a platform screen
    * gets the gutter every list wants. */
-  bare?: boolean
+  bare?: boolean;
   /** The scope switcher, on a deployment with `sites`. See `Sidebar`. */
   switcher?: {
-    groups: readonly ScopeOptionGroup[]
-    current: string | null
-    onSwitch: (scope: string) => void
-  }
+    groups: readonly ScopeOptionGroup[];
+    current: string | null;
+    onSwitch: (scope: string) => void;
+  };
 }
 
 /**
@@ -78,5 +78,5 @@ export function Shell({
         <main className={bare ? css.bare : css.screen}>{children}</main>
       </div>
     </div>
-  )
+  );
 }

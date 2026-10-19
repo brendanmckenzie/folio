@@ -1,12 +1,12 @@
-import { useCallback, useState } from 'react'
-import { canPublish, type Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { ListHeader } from '../List'
-import { type Column, Table } from '../Table'
-import css from './Schedules.module.css'
+import { useCallback, useState } from "react";
+import { canPublish, type Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { ListHeader } from "../List";
+import { type Column, Table } from "../Table";
+import css from "./Schedules.module.css";
 import {
   ACTIONS,
   actionLabel,
@@ -27,12 +27,12 @@ import {
   STATUSES,
   titleOf,
   whenLabel,
-} from './schedules-model'
-import { messageOf } from './useContent'
-import { useSchedules } from './useSchedules'
+} from "./schedules-model";
+import { messageOf } from "./useContent";
+import { useSchedules } from "./useSchedules";
 
 interface Props {
-  apiBase: string
+  apiBase: string;
   /**
    * Who is signed in, for the one role gate on this screen. Cancelling a schedule
    * is `PUBLISH` — it is a publish or an unpublish being called off — so the
@@ -40,17 +40,17 @@ interface Props {
    * (`../../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7). Reading
    * the list is `READ`, so a viewer still sees what is coming.
    */
-  me: Me
-  query: Readonly<Record<string, string>>
-  onQuery: (next: Record<string, string | undefined>) => void
-  onNotice: (message: string) => void
+  me: Me;
+  query: Readonly<Record<string, string>>;
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onNotice: (message: string) => void;
   /** Opens a document in the editor. A schedule is *about* a document, and the
    * thing a person wants next is almost always to look at it. */
-  onOpen: (id: string) => void
+  onOpen: (id: string) => void;
 }
 
 /** Matching Redirects', Content's and Documents'. */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6"];
 
 /**
  * What is scheduled across this site.
@@ -90,12 +90,12 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  * the only ordering a person reads this list in, and a second keyset buys nothing.
  */
 export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Props) {
-  const mayPublish = canPublish(me)
-  const url = parseSchedulesUrl(query)
-  const data = useSchedules(apiBase, url)
+  const mayPublish = canPublish(me);
+  const url = parseSchedulesUrl(query);
+  const data = useSchedules(apiBase, url);
 
-  const [cancelling, setCancelling] = useState<ResolvedSchedule | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [cancelling, setCancelling] = useState<ResolvedSchedule | null>(null);
+  const [busy, setBusy] = useState(false);
 
   /**
    * One clock reading per render, taken here rather than inside each cell.
@@ -105,47 +105,47 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
    * table did not badge. It also means the whole screen is a pure function of
    * `(rows, now)`, which is what makes `schedules-model.ts` testable in Node.
    */
-  const now = Date.now()
-  const narrowed = isNarrowed(url)
-  const firstLoad = data.page.loading && data.page.rows.length === 0
-  const warning = health(data.page.rows, now)
+  const now = Date.now();
+  const narrowed = isNarrowed(url);
+  const firstLoad = data.page.loading && data.page.rows.length === 0;
+  const warning = health(data.page.rows, now);
 
-  const go = useCallback((next: SchedulesUrl) => onQuery(schedulesQuery(next)), [onQuery])
+  const go = useCallback((next: SchedulesUrl) => onQuery(schedulesQuery(next)), [onQuery]);
 
   const cancel = useCallback(
     async (row: ResolvedSchedule) => {
-      setBusy(true)
+      setBusy(true);
       try {
-        const res = await fetch(`${apiBase}${cancelPath(row)}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error(await messageOf(res))
-        setCancelling(null)
-        onNotice(`${titleOf(row)} will no longer ${row.action} automatically`)
-        data.reload()
+        const res = await fetch(`${apiBase}${cancelPath(row)}`, { method: "DELETE" });
+        if (!res.ok) throw new Error(await messageOf(res));
+        setCancelling(null);
+        onNotice(`${titleOf(row)} will no longer ${row.action} automatically`);
+        data.reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [apiBase, data, onNotice],
-  )
+  );
 
   const columns: Column<ResolvedSchedule>[] = [
     {
-      key: 'document',
-      label: 'Document',
+      key: "document",
+      label: "Document",
       cell: (row) => (
         <span className={isUnnamed(row) ? css.unnamed : undefined}>{titleOf(row)}</span>
       ),
     },
     {
-      key: 'action',
-      label: 'Action',
+      key: "action",
+      label: "Action",
       cell: (row) => <Badge tone="neutral">{actionLabel(row.action)}</Badge>,
     },
     {
-      key: 'at',
-      label: 'When',
+      key: "at",
+      label: "When",
       cell: (row) => (
         <span className={css.when}>
           {/* Absolute answers "when", relative answers "is that soon". Both, because
@@ -157,10 +157,10 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
       ),
     },
     {
-      key: 'outcome',
-      label: 'Outcome',
+      key: "outcome",
+      label: "Outcome",
       cell: (row) => {
-        const outcome = outcomeOf(row, now)
+        const outcome = outcomeOf(row, now);
         return (
           <span className={css.outcome}>
             <Badge tone={outcomeTone(outcome)}>{outcomeLabel(outcome)}</Badge>
@@ -174,10 +174,10 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
               </span>
             ) : null}
           </span>
-        )
+        );
       },
     },
-  ]
+  ];
 
   return (
     <div className={css.screen}>
@@ -190,9 +190,9 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
               <legend className={css.srOnly}>Filter by action</legend>
               <button
                 type="button"
-                className={`${css.chip} ${url.action === '' ? css.chipOn : ''}`}
-                aria-pressed={url.action === ''}
-                onClick={() => go({ ...url, action: '' })}
+                className={`${css.chip} ${url.action === "" ? css.chipOn : ""}`}
+                aria-pressed={url.action === ""}
+                onClick={() => go({ ...url, action: "" })}
               >
                 All actions
               </button>
@@ -200,7 +200,7 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
                 <button
                   key={action}
                   type="button"
-                  className={`${css.chip} ${url.action === action ? css.chipOn : ''}`}
+                  className={`${css.chip} ${url.action === action ? css.chipOn : ""}`}
                   aria-pressed={url.action === action}
                   onClick={() => go({ ...url, action })}
                 >
@@ -212,9 +212,9 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
               <legend className={css.srOnly}>Filter by status</legend>
               <button
                 type="button"
-                className={`${css.chip} ${url.status === '' ? css.chipOn : ''}`}
-                aria-pressed={url.status === ''}
-                onClick={() => go({ ...url, status: '' })}
+                className={`${css.chip} ${url.status === "" ? css.chipOn : ""}`}
+                aria-pressed={url.status === ""}
+                onClick={() => go({ ...url, status: "" })}
               >
                 All
               </button>
@@ -222,11 +222,11 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
                 <button
                   key={status}
                   type="button"
-                  className={`${css.chip} ${url.status === status ? css.chipOn : ''}`}
+                  className={`${css.chip} ${url.status === status ? css.chipOn : ""}`}
                   aria-pressed={url.status === status}
                   onClick={() => go({ ...url, status })}
                 >
-                  {status === 'pending' ? 'Pending' : 'Failed'}
+                  {status === "pending" ? "Pending" : "Failed"}
                 </button>
               ))}
             </fieldset>
@@ -291,15 +291,15 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
             : {})}
           empty={
             <EmptyState
-              title={narrowed ? 'Nothing matches' : 'Nothing is scheduled'}
+              title={narrowed ? "Nothing matches" : "Nothing is scheduled"}
               body={
                 narrowed
-                  ? 'Try a different action or status.'
-                  : 'A scheduled publish or unpublish appears here until it fires, and then disappears — a schedule that has run leaves a version, not a row. Schedule one from a document’s own publish menu.'
+                  ? "Try a different action or status."
+                  : "A scheduled publish or unpublish appears here until it fires, and then disappears — a schedule that has run leaves a version, not a row. Schedule one from a document’s own publish menu."
               }
               action={
                 narrowed ? (
-                  <Button size="sm" onClick={() => go({ status: '', action: '' })}>
+                  <Button size="sm" onClick={() => go({ status: "", action: "" })}>
                     Clear filters
                   </Button>
                 ) : undefined
@@ -354,5 +354,5 @@ export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Pro
         />
       ) : null}
     </div>
-  )
+  );
 }

@@ -29,7 +29,7 @@
  * label text, which stays in the DOM even on the 48px rail (see `Sidebar`); an
  * icon with its own accessible name would announce every nav item twice.
  */
-import type { ReactElement, ReactNode } from 'react'
+import type { ReactElement, ReactNode } from "react";
 
 /**
  * The names a nav item may ask for, which is a closed set on purpose. `nav.ts`
@@ -42,17 +42,17 @@ import type { ReactElement, ReactNode } from 'react'
  * later redrawn.
  */
 export type IconName =
-  | 'home'
-  | 'content'
-  | 'records'
-  | 'assets'
-  | 'global'
-  | 'model'
-  | 'redirects'
-  | 'schedules'
-  | 'forms'
-  | 'access'
-  | 'settings'
+  | "home"
+  | "content"
+  | "records"
+  | "assets"
+  | "global"
+  | "model"
+  | "redirects"
+  | "schedules"
+  | "forms"
+  | "access"
+  | "settings";
 
 /** The one place the grid, the weight, the caps and the joins are stated. */
 const svg = (children: ReactNode): ReactElement => (
@@ -70,7 +70,7 @@ const svg = (children: ReactNode): ReactElement => (
   >
     {children}
   </svg>
-)
+);
 
 /**
  * Elements, not components, and shared between renders — a React element is
@@ -220,4 +220,4 @@ export const ICONS: Record<IconName, ReactElement> = {
       <path d="M4.5 15.75h8" />
     </>,
   ),
-}
+};

@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from "hono";
 import {
   ALL_SCOPES,
   chain,
@@ -6,10 +6,10 @@ import {
   SHARED_SCOPE,
   SINGLE_SITE_CHAIN,
   type SiteRef,
-} from '../core/sites'
-import type { StoryMeta } from '../core/story'
-import { readSessionCookie } from './auth/cookie'
-import { credentialOf, originAllowed, type PreviewSite, resolveActor } from './auth/resolve'
+} from "../core/sites";
+import type { StoryMeta } from "../core/story";
+import { readSessionCookie } from "./auth/cookie";
+import { credentialOf, originAllowed, type PreviewSite, resolveActor } from "./auth/resolve";
 import {
   type Access,
   type Actor,
@@ -18,7 +18,7 @@ import {
   refusalOf,
   type Role,
   tokenScopesOn,
-} from './auth/roles'
+} from "./auth/roles";
 import {
   bookmarkCookie,
   type DbSession,
@@ -26,14 +26,14 @@ import {
   PRIMARY_FIRST,
   readBookmark,
   sessionFor,
-} from './db'
-import { FolioError } from './errors'
-import type { HookRunnerCtx } from './hooks'
-import type { FolioRuntime } from './runtime'
-import { SCOPE_HEADER, SITE_HEADER, SURFACE_HEADER } from './sites'
-import { storyById } from './stories'
-import type { ReadBindings, FolioConfig, FolioEnv } from './types'
-import { idParam, safeNext } from './validate'
+} from "./db";
+import { FolioError } from "./errors";
+import type { HookRunnerCtx } from "./hooks";
+import type { FolioRuntime } from "./runtime";
+import { SCOPE_HEADER, SITE_HEADER, SURFACE_HEADER } from "./sites";
+import { storyById } from "./stories";
+import type { ReadBindings, FolioConfig, FolioEnv } from "./types";
+import { idParam, safeNext } from "./validate";
 
 /**
  * The one place the host's `Env` becomes Folio's bindings, and the one place a
@@ -64,27 +64,27 @@ import { idParam, safeNext } from './validate'
  */
 export function withBindings<Env>(config: FolioConfig<Env>): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
-    const cookie = c.req.raw.headers.get('cookie')
-    const writes = c.req.method !== 'GET' && c.req.method !== 'HEAD'
+    const cookie = c.req.raw.headers.get("cookie");
+    const writes = c.req.method !== "GET" && c.req.method !== "HEAD";
 
-    let resolved: ReadBindings | undefined
-    let session: DbSession | undefined
-    c.set('bindings', () => {
+    let resolved: ReadBindings | undefined;
+    let session: DbSession | undefined;
+    c.set("bindings", () => {
       if (!resolved) {
-        const bound = config.bindings(c.env)
-        session = sessionFor(bound.db, { bookmark: readBookmark(cookie), write: writes })
-        resolved = { ...bound, db: session }
+        const bound = config.bindings(c.env);
+        session = sessionFor(bound.db, { bookmark: readBookmark(cookie), write: writes });
+        resolved = { ...bound, db: session };
       }
-      return resolved
-    })
+      return resolved;
+    });
 
-    await next()
+    await next();
 
-    if (!writes || !session) return
-    if (readSessionCookie(cookie) === null) return
-    const bookmark = session.getBookmark()
-    if (bookmark) c.res.headers.append('set-cookie', bookmarkCookie(c.req.url, bookmark))
-  }
+    if (!writes || !session) return;
+    if (readSessionCookie(cookie) === null) return;
+    const bookmark = session.getBookmark();
+    if (bookmark) c.res.headers.append("set-cookie", bookmarkCookie(c.req.url, bookmark));
+  };
 }
 
 /**
@@ -108,38 +108,38 @@ export function withBindings<Env>(config: FolioConfig<Env>): MiddlewareHandler<F
  */
 export function withScope<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
   // The one brand of a deployment with no `brands`: every request's, with no read.
-  const only = rt.brands.get(null) ?? null
+  const only = rt.brands.get(null) ?? null;
   return async (c, next) => {
     if (!rt.sites) {
-      c.set('scope', null)
-      c.set('site', null)
-      c.set('brand', only)
-      await next()
-      return
+      c.set("scope", null);
+      c.set("site", null);
+      c.set("brand", only);
+      await next();
+      return;
     }
-    const scope = c.req.raw.headers.get(SCOPE_HEADER)
+    const scope = c.req.raw.headers.get(SCOPE_HEADER);
     // Read only for a request that named a scope, or (with `brands`) one that
     // arrived on a site's host: a bare admin request costs nothing, as it did.
-    const site = c.req.raw.headers.get(SITE_HEADER)
+    const site = c.req.raw.headers.get(SITE_HEADER);
     const registry =
-      scope !== null || (!only && site !== null) ? await rt.sites.registry(c.env) : null
+      scope !== null || (!only && site !== null) ? await rt.sites.registry(c.env) : null;
     if (scope !== null && chain(registry!, scope).length === 0) {
-      throw new FolioError('not_found', `No site or group '${scope}'`)
+      throw new FolioError("not_found", `No site or group '${scope}'`);
     }
-    const surface = c.req.raw.headers.get(SURFACE_HEADER)
-    c.set('scope', scope)
+    const surface = c.req.raw.headers.get(SURFACE_HEADER);
+    c.set("scope", scope);
     c.set(
-      'site',
-      site !== null && (surface === 'live' || surface === 'preview') ? { id: site, surface } : null,
-    )
+      "site",
+      site !== null && (surface === "live" || surface === "preview") ? { id: site, surface } : null,
+    );
     // The request's brand (`multi-brand.md` decision 6), looked up once: the scope's,
     // else the gated site's. With `brands` a scope or site the snapshot holds always
     // has one (a row of no configured brand is not in it, so it 404'd above), and no
     // scope and no site is null — never the first brand.
-    const at = scope ?? c.var.site?.id ?? null
-    c.set('brand', only ?? (registry && at !== null ? rt.forScope(registry, at) : null))
-    await next()
-  }
+    const at = scope ?? c.var.site?.id ?? null;
+    c.set("brand", only ?? (registry && at !== null ? rt.forScope(registry, at) : null));
+    await next();
+  };
 }
 
 /**
@@ -154,21 +154,21 @@ export function withScope<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env
  */
 export function requireScope<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
-    if (rt.sites && c.var.scope === null) return siteRequired(c, rt)
-    await next()
-  }
+    if (rt.sites && c.var.scope === null) return siteRequired(c, rt);
+    await next();
+  };
 }
 
 function siteRequired<Env>(c: Context<FolioEnv<Env>>, rt: FolioRuntime): Response {
   return c.json(
     {
       error: {
-        code: 'site_required',
+        code: "site_required",
         message: `Name the site: ${rt.base}/~<site>/… (this deployment has many)`,
       },
     },
     400,
-  )
+  );
 }
 
 /* ------------------------------------------------------ which routes scope --- */
@@ -202,7 +202,7 @@ export const UNSCOPED_API: readonly RegExp[] = [
   /^\/audit$/,
   /^\/migrations$/,
   /^\/assets\/describe$/,
-]
+];
 
 /**
  * The pages below `{base}` that name no scope: sign-in, the public bytes and form
@@ -220,7 +220,7 @@ export const UNSCOPED_PAGES: readonly RegExp[] = [
   /^\/share$/,
   /^\/draft\/(enter|exit)$/,
   /^\/site\/enter$/,
-]
+];
 
 /**
  * **The routes marked `reach: 'preview'`, which is `site/start` and nothing else**
@@ -231,16 +231,16 @@ export const UNSCOPED_PAGES: readonly RegExp[] = [
  * Without the exemption a shared-only or group-only editor would be refused at the
  * first hop of every preview. `scope-partition.test.ts` asserts this list exactly.
  */
-export const PREVIEW_REACH: readonly string[] = ['/site/start']
+export const PREVIEW_REACH: readonly string[] = ["/site/start"];
 
 /** How a path below `{base}` is scoped, by the three lists above. */
-export function routeScope(below: string): 'unscoped' | 'scoped' | 'preview' {
-  if (PREVIEW_REACH.includes(below)) return 'preview'
-  if (below.startsWith('/api/')) {
-    const rest = below.slice('/api'.length)
-    return UNSCOPED_API.some((r) => r.test(rest)) ? 'unscoped' : 'scoped'
+export function routeScope(below: string): "unscoped" | "scoped" | "preview" {
+  if (PREVIEW_REACH.includes(below)) return "preview";
+  if (below.startsWith("/api/")) {
+    const rest = below.slice("/api".length);
+    return UNSCOPED_API.some((r) => r.test(rest)) ? "unscoped" : "scoped";
   }
-  return UNSCOPED_PAGES.some((r) => r.test(below)) ? 'unscoped' : 'scoped'
+  return UNSCOPED_PAGES.some((r) => r.test(below)) ? "unscoped" : "scoped";
 }
 
 /**
@@ -262,68 +262,68 @@ export function routeScope(below: string): 'unscoped' | 'scoped' | 'preview' {
 async function scopedActor<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
-  sites: NonNullable<FolioRuntime['sites']>,
+  sites: NonNullable<FolioRuntime["sites"]>,
   actor: Actor | null,
 ): Promise<Actor | Response | null> {
-  const below = c.req.path.slice(rt.base.length) || '/'
-  const kind = routeScope(below)
-  let scope = c.var.scope
-  const bound = actor?.kind === 'token' ? (actor.site ?? null) : null
+  const below = c.req.path.slice(rt.base.length) || "/";
+  const kind = routeScope(below);
+  let scope = c.var.scope;
+  const bound = actor?.kind === "token" ? (actor.site ?? null) : null;
   if (scope === null && bound !== null) {
-    scope = bound
-    c.set('scope', scope)
+    scope = bound;
+    c.set("scope", scope);
     // `withScope` set the brand from the scope as it stood, which was none: on a
     // deployment with `brands` it follows the binding now (`multi-brand.md`
     // decisions 6 and 19), or every route below would read a bound token's
     // request as brandless. With one brand it is already that brand.
-    if (!rt.brands.has(null)) c.set('brand', rt.forScope(await sites.registry(c.env), scope))
+    if (!rt.brands.has(null)) c.set("brand", rt.forScope(await sites.registry(c.env), scope));
   }
   if (scope === null) {
     // `{base}/mcp` too: it is a scoped surface (`{base}/~<scope>/mcp`, decision 11),
     // and without a scope its tools would run on a person's `*` role — or `viewer`
     // for somebody who holds none — against every site at once.
-    if (kind === 'scoped' && (below.startsWith('/api/') || below === '/mcp')) {
-      return siteRequired(c, rt)
+    if (kind === "scoped" && (below.startsWith("/api/") || below === "/mcp")) {
+      return siteRequired(c, rt);
     }
-    return actor
+    return actor;
   }
-  if (!actor) return actor
+  if (!actor) return actor;
   // An unscoped route ignores the scope, except that on a deployment with `brands` the
   // scope picks the brand a few of them answer for (`/schema`, `/v1/schema`,
   // `/migrations`, `/assets/describe`), so the caller has to reach it. The check below
   // then runs, and what an unscoped route sees of the actor is left exactly as it was.
-  const unscoped = kind === 'unscoped'
-  if (unscoped && rt.brands.has(null)) return actor
+  const unscoped = kind === "unscoped";
+  if (unscoped && rt.brands.has(null)) return actor;
 
-  const registry = await sites.registry(c.env)
+  const registry = await sites.registry(c.env);
   // A preview grant reads its site's chain and nothing else (decision 13); on any
   // other scope it is a caller with no role there.
-  if (actor.kind === 'grant') {
-    if (unscoped) return actor
+  if (actor.kind === "grant") {
+    if (unscoped) return actor;
     if (!chain(registry, actor.site).includes(scope)) {
-      throw new FolioError('forbidden', `A preview of '${actor.site}' cannot read '${scope}'.`)
+      throw new FolioError("forbidden", `A preview of '${actor.site}' cannot read '${scope}'.`);
     }
-    return actor
+    return actor;
   }
   if (bound !== null && chain(registry, bound).length === 0) {
-    throw new FolioError('forbidden', `This token is bound to '${bound}', which no longer exists.`)
+    throw new FolioError("forbidden", `This token is bound to '${bound}', which no longer exists.`);
   }
-  if (actor.kind === 'token') {
-    const scopes = tokenScopesOn(actor.scopes, bound, registry, scope)
-    if (scopes === null && kind !== 'preview') {
+  if (actor.kind === "token") {
+    const scopes = tokenScopesOn(actor.scopes, bound, registry, scope);
+    if (scopes === null && kind !== "preview") {
       throw new FolioError(
-        'forbidden',
+        "forbidden",
         `This token is bound to '${bound}' and cannot reach '${scope}'.`,
-      )
+      );
     }
-    return unscoped ? actor : { ...actor, scopes: scopes ?? [] }
+    return unscoped ? actor : { ...actor, scopes: scopes ?? [] };
   }
-  const role = effectiveRole(actor.grants ?? { [ALL_SCOPES]: actor.role }, registry, scope)
-  if (role === null && kind !== 'preview') {
-    throw new FolioError('forbidden', `You have no role on '${scope}'.`)
+  const role = effectiveRole(actor.grants ?? { [ALL_SCOPES]: actor.role }, registry, scope);
+  if (role === null && kind !== "preview") {
+    throw new FolioError("forbidden", `You have no role on '${scope}'.`);
   }
   // The one route with no role to give: it checks preview eligibility itself.
-  return unscoped ? actor : { ...actor, role: role ?? 'viewer' }
+  return unscoped ? actor : { ...actor, role: role ?? "viewer" };
 }
 
 /**
@@ -340,23 +340,23 @@ async function scopedActor<Env>(
  * (`PreviewSite.db` says why); only a request carrying a grant cookie on a
  * preview origin reaches that read.
  */
-const GRANT_READS = [/^\/api\/v1\//, /^\/draft\/enter$/]
+const GRANT_READS = [/^\/api\/v1\//, /^\/draft\/enter$/];
 
 async function grantSite<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
-  sites: NonNullable<FolioRuntime['sites']>,
+  sites: NonNullable<FolioRuntime["sites"]>,
 ): Promise<PreviewSite | undefined> {
-  const site = c.var.site
-  if (site?.surface !== 'preview') return undefined
-  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return undefined
-  const below = c.req.path.slice(rt.base.length) || '/'
-  if (!GRANT_READS.some((r) => r.test(below))) return undefined
+  const site = c.var.site;
+  if (site?.surface !== "preview") return undefined;
+  if (c.req.method !== "GET" && c.req.method !== "HEAD") return undefined;
+  const below = c.req.path.slice(rt.base.length) || "/";
+  if (!GRANT_READS.some((r) => r.test(below))) return undefined;
   return {
     id: site.id,
     registry: await sites.registry(c.env),
     db: sites.rawDb(c.env).withSession(PRIMARY_FIRST),
-  }
+  };
 }
 
 /**
@@ -381,29 +381,29 @@ async function grantSite<Env>(
  */
 export function withActor<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
-    let actor: Actor | null = null
-    if (rt.auth.mode === 'session') {
-      const credential = credentialOf(c.req.raw)
+    let actor: Actor | null = null;
+    if (rt.auth.mode === "session") {
+      const credential = credentialOf(c.req.raw);
       if (!originAllowed(c.req.raw, credential)) {
         throw new FolioError(
-          'forbidden',
-          'That request came from another site. Reload the editor and try again.',
-        )
+          "forbidden",
+          "That request came from another site. Reload the editor and try again.",
+        );
       }
-      const preview = rt.sites ? await grantSite(c, rt, rt.sites) : undefined
-      actor = await resolveActor(() => c.var.bindings().db, rt.auth, credential, { preview })
+      const preview = rt.sites ? await grantSite(c, rt, rt.sites) : undefined;
+      actor = await resolveActor(() => c.var.bindings().db, rt.auth, credential, { preview });
     }
     // With `sites`, the scope decides the role (`multi-site.md` decision 10). With
     // none there is one scope, the actor is exactly what was resolved, and nothing
     // here reads the registry — `allows()` then answers what it always has.
     if (rt.sites) {
-      const scoped = await scopedActor(c, rt, rt.sites, actor)
-      if (scoped instanceof Response) return scoped
-      actor = scoped
+      const scoped = await scopedActor(c, rt, rt.sites, actor);
+      if (scoped instanceof Response) return scoped;
+      actor = scoped;
     }
-    c.set('actor', actor)
-    await next()
-  }
+    c.set("actor", actor);
+    await next();
+  };
 }
 
 /**
@@ -427,15 +427,15 @@ export function requireAccess<Env>(
   access: Access,
 ): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
-    if (rt.auth.mode !== 'session') {
-      await next()
-      return
+    if (rt.auth.mode !== "session") {
+      await next();
+      return;
     }
-    const actor = c.var.actor
-    if (!actor) throw new FolioError('unauthorized', 'Sign in to continue.')
-    if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))
-    await next()
-  }
+    const actor = c.var.actor;
+    if (!actor) throw new FolioError("unauthorized", "Sign in to continue.");
+    if (!allows(actor, access)) throw new FolioError("forbidden", refusalOf(actor, access));
+    await next();
+  };
 }
 
 /**
@@ -449,9 +449,9 @@ export function requireAccess<Env>(
  * refusal wording; the only difference is where it is asked.
  */
 export function ensureAccess(rt: FolioRuntime, actor: Actor | null, access: Access): void {
-  if (rt.auth.mode !== 'session') return
-  if (!actor) throw new FolioError('unauthorized', 'Sign in to continue.')
-  if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))
+  if (rt.auth.mode !== "session") return;
+  if (!actor) throw new FolioError("unauthorized", "Sign in to continue.");
+  if (!allows(actor, access)) throw new FolioError("forbidden", refusalOf(actor, access));
 }
 
 /**
@@ -469,22 +469,22 @@ export function requireHtmlAccess<Env>(
   access: Access,
 ): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
-    if (rt.auth.mode !== 'session') {
-      await next()
-      return
+    if (rt.auth.mode !== "session") {
+      await next();
+      return;
     }
-    const actor = c.var.actor
+    const actor = c.var.actor;
     if (!actor) {
-      const url = new URL(c.req.url)
+      const url = new URL(c.req.url);
       const next = safeNext(
         `${url.pathname}${url.search}`,
         rt.sites ? `${rt.base}/` : `${rt.base}/edit`,
-      )
-      return c.redirect(`${rt.base}/login?next=${encodeURIComponent(next)}`)
+      );
+      return c.redirect(`${rt.base}/login?next=${encodeURIComponent(next)}`);
     }
-    if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))
-    await next()
-  }
+    if (!allows(actor, access)) throw new FolioError("forbidden", refusalOf(actor, access));
+    await next();
+  };
 }
 
 /**
@@ -494,9 +494,9 @@ export function requireHtmlAccess<Env>(
  */
 export function requireAuthConfigured<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
   return async (_c, next) => {
-    if (rt.auth.mode !== 'session') throw new FolioError('not_found', 'Auth is not configured')
-    await next()
-  }
+    if (rt.auth.mode !== "session") throw new FolioError("not_found", "Auth is not configured");
+    await next();
+  };
 }
 
 /**
@@ -517,11 +517,11 @@ export function requireAuthConfigured<Env>(rt: FolioRuntime): MiddlewareHandler<
  */
 export function requirePasskeys<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
   return async (_c, next) => {
-    if (rt.auth.mode !== 'session' || !rt.auth.passkey) {
-      throw new FolioError('not_found', 'Passkeys are not configured')
+    if (rt.auth.mode !== "session" || !rt.auth.passkey) {
+      throw new FolioError("not_found", "Passkeys are not configured");
     }
-    await next()
-  }
+    await next();
+  };
 }
 
 /**
@@ -535,14 +535,14 @@ export function requirePasskeys<Env>(rt: FolioRuntime): MiddlewareHandler<FolioE
  */
 export function loadStory<Env>(rt: FolioRuntime, reach: Reach): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
-    const id = idParam('id', c.req.param('id'))
-    const story = await storyById(c.var.bindings().db, id)
+    const id = idParam("id", c.req.param("id"));
+    const story = await storyById(c.var.bindings().db, id);
     if (!story || !(await inFence(c, rt, story, reach))) {
-      throw new FolioError('not_found', 'Unknown story')
+      throw new FolioError("not_found", "Unknown story");
     }
-    c.set('story', story)
-    await next()
-  }
+    c.set("story", story);
+    await next();
+  };
 }
 
 /* ---------------------------------------------------------------- fences --- */
@@ -552,7 +552,7 @@ export function loadStory<Env>(rt: FolioRuntime, reach: Reach): MiddlewareHandle
  * checks): `'write'` needs the row in the request's scope, `'read'` anywhere in its
  * chain. **Reads flow up the chain; writes never do.**
  */
-export type Reach = 'read' | 'write'
+export type Reach = "read" | "write";
 
 /**
  * The scope a request acts in: the `~<scope>` segment or a bound token's binding,
@@ -560,7 +560,7 @@ export type Reach = 'read' | 'write'
  * named none, which reaches no row.
  */
 export function requestScope<Env>(c: Context<FolioEnv<Env>>, rt: FolioRuntime): string | null {
-  return rt.sites ? c.var.scope : DEFAULT_SITE
+  return rt.sites ? c.var.scope : DEFAULT_SITE;
 }
 
 /** The request's chain, nearest first: `['default']` with no `sites`, empty for a
@@ -569,9 +569,9 @@ export async function requestChain<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
 ): Promise<readonly string[]> {
-  if (!rt.sites) return SINGLE_SITE_CHAIN
-  const scope = c.var.scope
-  return scope === null ? [] : chain(await rt.sites.registry(c.env), scope)
+  if (!rt.sites) return SINGLE_SITE_CHAIN;
+  const scope = c.var.scope;
+  return scope === null ? [] : chain(await rt.sites.registry(c.env), scope);
 }
 
 /**
@@ -583,13 +583,13 @@ export async function requestChain<Env>(
 export async function inFence<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
-  row: Pick<StoryMeta, 'site'>,
+  row: Pick<StoryMeta, "site">,
   reach: Reach,
 ): Promise<boolean> {
-  if (!rt.sites) return true
-  const site = row.site ?? DEFAULT_SITE
-  if (reach === 'write') return site === c.var.scope
-  return (await requestChain(c, rt)).includes(site)
+  if (!rt.sites) return true;
+  const site = row.site ?? DEFAULT_SITE;
+  if (reach === "write") return site === c.var.scope;
+  return (await requestChain(c, rt)).includes(site);
 }
 
 /**
@@ -605,17 +605,17 @@ export async function inFence<Env>(
 export function fenceStory<Env>(
   rt: FolioRuntime,
   reach: Reach,
-  opts: { absent?: 'pass' | 'refuse' } = {},
+  opts: { absent?: "pass" | "refuse" } = {},
 ): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
     if (rt.sites) {
-      const id = idParam('id', c.req.param('id'))
-      const story = await storyById(c.var.bindings().db, id)
-      const outside = story ? !(await inFence(c, rt, story, reach)) : opts.absent !== 'pass'
-      if (outside) throw new FolioError('not_found', 'Unknown story')
+      const id = idParam("id", c.req.param("id"));
+      const story = await storyById(c.var.bindings().db, id);
+      const outside = story ? !(await inFence(c, rt, story, reach)) : opts.absent !== "pass";
+      if (outside) throw new FolioError("not_found", "Unknown story");
     }
-    await next()
-  }
+    await next();
+  };
 }
 
 /**
@@ -630,10 +630,10 @@ export async function fenceParent<Env>(
   rt: FolioRuntime,
   parentId: string | null | undefined,
 ): Promise<void> {
-  if (!rt.sites || !parentId) return
-  const parent = await storyById(c.var.bindings().db, parentId)
-  if (parent && !(await inFence(c, rt, parent, 'read'))) {
-    throw new FolioError('not_found', 'Unknown parent')
+  if (!rt.sites || !parentId) return;
+  const parent = await storyById(c.var.bindings().db, parentId);
+  if (parent && !(await inFence(c, rt, parent, "read"))) {
+    throw new FolioError("not_found", "Unknown parent");
   }
 }
 
@@ -646,9 +646,9 @@ export async function requestSite<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
 ): Promise<SiteRef | undefined> {
-  const scope = rt.sites ? c.var.scope : null
-  if (!rt.sites || scope === null) return undefined
-  return (await rt.sites.registry(c.env)).sites.find((site) => site.id === scope)
+  const scope = rt.sites ? c.var.scope : null;
+  if (!rt.sites || scope === null) return undefined;
+  return (await rt.sites.registry(c.env)).sites.find((site) => site.id === scope);
 }
 
 /**
@@ -662,9 +662,9 @@ export async function requestSite<Env>(
 export async function requestUrls<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
-): Promise<FolioRuntime['withUrls']> {
-  if (!rt.sites) return rt.withUrls
-  return rt.urlsFor(await requestSite(c, rt))
+): Promise<FolioRuntime["withUrls"]> {
+  if (!rt.sites) return rt.withUrls;
+  return rt.urlsFor(await requestSite(c, rt));
 }
 
 /**
@@ -677,25 +677,25 @@ export async function readableScopes<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
 ): Promise<readonly string[]> {
-  const within = await requestChain(c, rt)
-  const actor = c.var.actor
-  if (!rt.sites || !actor) return within
-  const registry = await rt.sites.registry(c.env)
+  const within = await requestChain(c, rt);
+  const actor = c.var.actor;
+  if (!rt.sites || !actor) return within;
+  const registry = await rt.sites.registry(c.env);
   const every = [
     SHARED_SCOPE,
     ...registry.groups.map((g) => g.id),
     ...registry.sites.map((s) => s.id),
-  ]
+  ];
   const readable = every.filter((scope) => {
-    if (actor.kind === 'user') {
-      return effectiveRole(actor.grants ?? { [ALL_SCOPES]: actor.role }, registry, scope) !== null
+    if (actor.kind === "user") {
+      return effectiveRole(actor.grants ?? { [ALL_SCOPES]: actor.role }, registry, scope) !== null;
     }
-    if (actor.kind === 'token') {
-      return tokenScopesOn(actor.scopes, actor.site ?? null, registry, scope) !== null
+    if (actor.kind === "token") {
+      return tokenScopesOn(actor.scopes, actor.site ?? null, registry, scope) !== null;
     }
-    return false
-  })
-  return [...new Set([...within, ...readable])]
+    return false;
+  });
+  return [...new Set([...within, ...readable])];
 }
 
 /**
@@ -708,8 +708,8 @@ export function chainResolver<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
 ): ((scope: string) => Promise<readonly string[]>) | undefined {
-  const sites = rt.sites
-  return sites ? async (scope) => chain(await sites.registry(c.env), scope) : undefined
+  const sites = rt.sites;
+  return sites ? async (scope) => chain(await sites.registry(c.env), scope) : undefined;
 }
 
 /**
@@ -728,17 +728,17 @@ export function fenceRow<Env>(
   reach: Reach,
   siteOf: (db: FolioDb, id: string) => Promise<string | null>,
   what: string,
-  param = 'id',
+  param = "id",
 ): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
     if (rt.sites) {
-      const site = await siteOf(c.var.bindings().db, c.req.param(param) ?? '')
+      const site = await siteOf(c.var.bindings().db, c.req.param(param) ?? "");
       if (site !== null && !(await inFence(c, rt, { site }, reach))) {
-        throw new FolioError('not_found', `Unknown ${what}`)
+        throw new FolioError("not_found", `Unknown ${what}`);
       }
     }
-    await next()
-  }
+    await next();
+  };
 }
 
 /**
@@ -750,11 +750,11 @@ export function fenceRow<Env>(
 export async function roleOnScope<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
-  actor: Extract<Actor, { kind: 'user' }>,
+  actor: Extract<Actor, { kind: "user" }>,
   scope: string,
 ): Promise<Role | null> {
-  if (!rt.sites || !actor.grants) return actor.role
-  return effectiveRole(actor.grants, await rt.sites.registry(c.env), scope)
+  if (!rt.sites || !actor.grants) return actor.role;
+  return effectiveRole(actor.grants, await rt.sites.registry(c.env), scope);
 }
 
 /**
@@ -771,7 +771,7 @@ export async function roleOnScope<Env>(
  * hooks (`alarmHookCtx`, runtime.ts).
  */
 export function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
-  return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) }
+  return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) };
 }
 
 /**
@@ -780,5 +780,5 @@ export function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
  * answers with no brand.
  */
 export function brandIdOf<Env>(c: Context<FolioEnv<Env>>): string | null {
-  return c.var.brand?.brand?.id ?? null
+  return c.var.brand?.brand?.id ?? null;
 }

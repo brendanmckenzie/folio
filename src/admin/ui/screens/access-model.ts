@@ -19,13 +19,13 @@
  * makes a person tick three boxes to express one intention and then stores a
  * redundant list.
  */
-import type { Grants, Role, Scope } from '../../../server/auth/roles'
-import { ROLES, SCOPES, hasScope } from '../../../server/auth/roles'
-import { roleSetByReason } from '../../../server/auth/roles-from'
-import type { TokenRow } from '../../../server/auth/tokens'
-import { isMultiSite, type Me, type MeUser } from '../../me'
-import type { BadgeTone } from '../Badge'
-import { when } from './content-rows'
+import type { Grants, Role, Scope } from "../../../server/auth/roles";
+import { ROLES, SCOPES, hasScope } from "../../../server/auth/roles";
+import { roleSetByReason } from "../../../server/auth/roles-from";
+import type { TokenRow } from "../../../server/auth/tokens";
+import { isMultiSite, type Me, type MeUser } from "../../me";
+import type { BadgeTone } from "../Badge";
+import { when } from "./content-rows";
 
 /* -------------------------------------------------------------------- rows --- */
 
@@ -35,28 +35,28 @@ import { when } from './content-rows'
  * a user row holds no secret.
  */
 export interface AccessUser {
-  id: string
-  email: string
-  name: string
-  role: Role
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
   /** Null in the database; the server derives one for presence. Shown as a dot,
    * which is the only place a user's presence hue is visible outside a live
    * editing session. */
-  colour: string | null
+  colour: string | null;
   /** How they last signed in, or null for somebody who never has. */
-  provider: string | null
+  provider: string | null;
   /** Which provider's claims placed `role`, or null for a role Folio owns —
    * an admin invited them, or edited it here. */
-  roleFrom: string | null
-  createdAt: number
-  lastSeenAt: number | null
+  roleFrom: string | null;
+  createdAt: number;
+  lastSeenAt: number | null;
   /**
    * Every grant the person holds, each with who set it — `GET /users`' `grants`
    * (`multi-site.md` decision 10). With no `sites` it is the one `*` entry `role`
    * already is, and the screen never reads it. **Optional** because a row built
    * before spec 23 has none.
    */
-  grants?: readonly AccessGrant[]
+  grants?: readonly AccessGrant[];
   /**
    * How many passkeys this person has enrolled.
    *
@@ -66,15 +66,15 @@ export interface AccessUser {
    * column has one shape to render either way (`docs/specs/foundation/
    * passkeys.md` decision 4).
    */
-  passkeys: number
+  passkeys: number;
 }
 
 /** One grant as the route answers it. `roleFrom` is null for one Folio placed, or the
  * id of the provider whose claims did. */
 export interface AccessGrant {
-  scope: string
-  role: Role
-  roleFrom: string | null
+  scope: string;
+  role: Role;
+  roleFrom: string | null;
 }
 
 /* --------------------------------------------------------------- the gate --- */
@@ -95,50 +95,50 @@ export interface AccessGrant {
  * flow, and a banner needs to know *which* condition.
  */
 export type AccessGate =
-  | { kind: 'ok'; self: MeUser }
-  | { kind: 'open' }
-  | { kind: 'anonymous'; loginUrl: string }
-  | { kind: 'refused'; reason: string }
+  | { kind: "ok"; self: MeUser }
+  | { kind: "open" }
+  | { kind: "anonymous"; loginUrl: string }
+  | { kind: "refused"; reason: string };
 
 export function accessGate(me: Me): AccessGate {
-  if (me.mode === 'open') return { kind: 'open' }
-  if (me.actor === null) return { kind: 'anonymous', loginUrl: me.loginUrl }
+  if (me.mode === "open") return { kind: "open" };
+  if (me.actor === null) return { kind: "anonymous", loginUrl: me.loginUrl };
   // A token never drives the admin — `canManageAccess` refuses one for the same
   // reason the socket does (4004): a token is not a person with a cursor. Worth
   // saying rather than falling through to the role branch, which would have to
   // invent a role a token does not have.
-  if (me.actor.kind === 'token') {
+  if (me.actor.kind === "token") {
     return {
-      kind: 'refused',
+      kind: "refused",
       reason:
-        'This session is authenticated by an API token. Sign in as an admin to manage access.',
-    }
+        "This session is authenticated by an API token. Sign in as an admin to manage access.",
+    };
   }
   // With `sites`, users and tokens are the platform tier: `role` is the `*` grant and
   // says nothing about any one site, so the answer is `platform`, and the sentence
   // says so rather than naming a role the person may hold on some other page.
   if (me.sites && !me.sites.platform) {
     return {
-      kind: 'refused',
+      kind: "refused",
       reason:
-        'Only a platform administrator manages editors and tokens. A site administrator’s role covers the site’s content.',
-    }
+        "Only a platform administrator manages editors and tokens. A site administrator’s role covers the site’s content.",
+    };
   }
-  if (!me.sites && me.actor.role !== 'admin') {
+  if (!me.sites && me.actor.role !== "admin") {
     // Deliberately the same sentence shape as `refusalOf` on the server, so the
     // pre-emptive explanation and the 403 that would follow read alike.
     return {
-      kind: 'refused',
+      kind: "refused",
       reason: `Your role (${me.actor.role}) may not manage editors or tokens; admin is required.`,
-    }
+    };
   }
-  return { kind: 'ok', self: me.actor }
+  return { kind: "ok", self: me.actor };
 }
 
 /* ---------------------------------------------------------------- yourself --- */
 
 export function isSelf(userId: string, selfId: string): boolean {
-  return userId === selfId
+  return userId === selfId;
 }
 
 /**
@@ -149,7 +149,7 @@ export function isSelf(userId: string, selfId: string): boolean {
  * than after: it is the one delete that can leave a site with no way to manage
  * access at all, and the recovery is a `wrangler d1 execute` against production.
  */
-export const SELF_REMOVE_REASON = 'You cannot remove your own account'
+export const SELF_REMOVE_REASON = "You cannot remove your own account";
 
 /**
  * Why the screen refuses to change your own role.
@@ -162,7 +162,7 @@ export const SELF_REMOVE_REASON = 'You cannot remove your own account'
  * a server gap rather than fixed by reflex, since a route change is a wider blast
  * radius than this screen.
  */
-export const SELF_ROLE_REASON = 'You cannot change your own role'
+export const SELF_ROLE_REASON = "You cannot change your own role";
 
 /**
  * Why the screen refuses to change a role an identity provider placed, or null
@@ -180,8 +180,8 @@ export const SELF_ROLE_REASON = 'You cannot change your own role'
  * changed — and a row with no role control at all would leave "why can I not
  * edit this one?" as the reader's problem.
  */
-export function roleFromReason(user: Pick<AccessUser, 'roleFrom'>): string | null {
-  return user.roleFrom ? roleSetByReason(user.roleFrom) : null
+export function roleFromReason(user: Pick<AccessUser, "roleFrom">): string | null {
+  return user.roleFrom ? roleSetByReason(user.roleFrom) : null;
 }
 
 /**
@@ -193,13 +193,13 @@ export function roleFromReason(user: Pick<AccessUser, 'roleFrom'>): string | nul
  * about a refusal explaining itself applies just as well to "there is nothing
  * here" as to "you may not".
  */
-export function removePasskeysRefusal(user: Pick<AccessUser, 'passkeys'>): string | undefined {
-  return user.passkeys === 0 ? 'This person has no passkeys' : undefined
+export function removePasskeysRefusal(user: Pick<AccessUser, "passkeys">): string | undefined {
+  return user.passkeys === 0 ? "This person has no passkeys" : undefined;
 }
 
 /** The roles a `<select>` offers, weakest first — `ROLES`' own order, which is the
  * order the permission table in `identity-and-access.md` reads in. */
-export const ROLE_OPTIONS: readonly Role[] = ROLES
+export const ROLE_OPTIONS: readonly Role[] = ROLES;
 
 /**
  * What a role lets somebody do, in one line, from `identity-and-access.md`
@@ -211,11 +211,11 @@ export const ROLE_OPTIONS: readonly Role[] = ROLES
  * `publisher` is the one that matters most and is least visible.
  */
 export const ROLE_MEANING: Record<Role, string> = {
-  viewer: 'Reads drafts. Changes nothing.',
-  editor: 'Writes documents and starts new ones. Cannot publish, move or delete.',
-  publisher: 'Everything an editor does, plus publish, move, rename and delete.',
-  admin: 'Everything, including managing editors and tokens.',
-}
+  viewer: "Reads drafts. Changes nothing.",
+  editor: "Writes documents and starts new ones. Cannot publish, move or delete.",
+  publisher: "Everything an editor does, plus publish, move, rename and delete.",
+  admin: "Everything, including managing editors and tokens.",
+};
 
 /* ------------------------------------------------------------------ scopes --- */
 
@@ -230,40 +230,40 @@ export const ROLE_MEANING: Record<Role, string> = {
  * "Read drafts — unpublished work in progress" it is obvious.
  */
 export const SCOPE_MEANING: Record<Scope, { label: string; description: string }> = {
-  'content:read': {
-    label: 'Read published content',
-    description: 'Everything the public site can see, and nothing that is unpublished.',
+  "content:read": {
+    label: "Read published content",
+    description: "Everything the public site can see, and nothing that is unpublished.",
   },
-  'content:read:draft': {
-    label: 'Read drafts',
-    description: 'Unpublished work in progress, as an editor sees it.',
+  "content:read:draft": {
+    label: "Read drafts",
+    description: "Unpublished work in progress, as an editor sees it.",
   },
-  'content:write': {
-    label: 'Write content',
-    description: 'Create and change documents. Does not make anything live.',
+  "content:write": {
+    label: "Write content",
+    description: "Create and change documents. Does not make anything live.",
   },
   publish: {
-    label: 'Publish',
-    description: 'Make a draft live, take a page down, and set checkpoints.',
+    label: "Publish",
+    description: "Make a draft live, take a page down, and set checkpoints.",
   },
-  'assets:write': {
-    label: 'Manage media',
-    description: 'Upload, rename and delete files in the media library.',
+  "assets:write": {
+    label: "Manage media",
+    description: "Upload, rename and delete files in the media library.",
   },
-  'forms:read': {
-    label: 'Read form responses',
-    description: 'Everything strangers submitted through a form, and their uploads.',
+  "forms:read": {
+    label: "Read form responses",
+    description: "Everything strangers submitted through a form, and their uploads.",
   },
   admin: {
-    label: 'Manage access',
-    description: 'Invite editors, change roles, and mint or revoke tokens.',
+    label: "Manage access",
+    description: "Invite editors, change roles, and mint or revoke tokens.",
   },
-}
+};
 
 /** The order the individual scopes are offered in: weakest first, so the list
  * reads as a ramp and `admin` — which grants all of it — is last. `SCOPES`' own
  * declaration order already is that ramp. */
-export const SCOPE_OPTIONS: readonly Scope[] = SCOPES
+export const SCOPE_OPTIONS: readonly Scope[] = SCOPES;
 
 /**
  * A named shape of access, which is what a person minting a token actually has in
@@ -276,57 +276,57 @@ export const SCOPE_OPTIONS: readonly Scope[] = SCOPES
  * cage rather than a shortcut.
  */
 export interface TokenPreset {
-  id: string
-  label: string
+  id: string;
+  label: string;
   /** What kind of thing holds a token like this. */
-  description: string
-  scopes: readonly Scope[]
+  description: string;
+  scopes: readonly Scope[];
   /** Marks the preset that grants everything, so it can carry a red edge rather
    * than sitting fifth in a list of equals. */
-  danger?: boolean
+  danger?: boolean;
 }
 
-export const CUSTOM_PRESET = 'custom'
+export const CUSTOM_PRESET = "custom";
 
 export const TOKEN_PRESETS: readonly TokenPreset[] = [
   {
-    id: 'read',
-    label: 'Read published content',
-    description: 'A downstream renderer, a static build, a search indexer.',
-    scopes: ['content:read'],
+    id: "read",
+    label: "Read published content",
+    description: "A downstream renderer, a static build, a search indexer.",
+    scopes: ["content:read"],
   },
   {
-    id: 'preview',
-    label: 'Read drafts',
-    description: 'A preview deployment that has to see unpublished work.',
-    scopes: ['content:read:draft'],
+    id: "preview",
+    label: "Read drafts",
+    description: "A preview deployment that has to see unpublished work.",
+    scopes: ["content:read:draft"],
   },
   {
-    id: 'import',
-    label: 'Import and edit',
-    description: 'A migration or an import script. Writes documents and uploads media.',
-    scopes: ['content:write', 'assets:write'],
+    id: "import",
+    label: "Import and edit",
+    description: "A migration or an import script. Writes documents and uploads media.",
+    scopes: ["content:write", "assets:write"],
   },
   {
-    id: 'publish',
-    label: 'Write and publish',
-    description: 'A scheduled publisher or a deploy hook. Everything but managing access.',
-    scopes: ['content:write', 'publish', 'assets:write'],
+    id: "publish",
+    label: "Write and publish",
+    description: "A scheduled publisher or a deploy hook. Everything but managing access.",
+    scopes: ["content:write", "publish", "assets:write"],
   },
   {
-    id: 'full',
-    label: 'Full access',
-    description: 'Everything, including minting and revoking tokens. Prefer a narrower token.',
-    scopes: ['admin'],
+    id: "full",
+    label: "Full access",
+    description: "Everything, including minting and revoking tokens. Prefer a narrower token.",
+    scopes: ["admin"],
     danger: true,
   },
-]
+];
 
 /** The preset a fresh dialog opens on. The narrowest one there is, so the lazy
  * path produces the least dangerous token rather than the most useful one — the
  * same choice `admin/Access.tsx`'s `DEFAULT_SCOPES` made and the one thing about
  * its scope control that was right. */
-export const DEFAULT_PRESET = 'read'
+export const DEFAULT_PRESET = "read";
 
 /**
  * Every scope a selection actually grants, implications included.
@@ -336,7 +336,7 @@ export const DEFAULT_PRESET = 'read'
  * the whole point of asking it rather than restating the table here.
  */
 export function effectiveScopes(selected: readonly Scope[]): Scope[] {
-  return SCOPES.filter((scope) => hasScope(selected, scope))
+  return SCOPES.filter((scope) => hasScope(selected, scope));
 }
 
 /**
@@ -348,7 +348,7 @@ export function effectiveScopes(selected: readonly Scope[]): Scope[] {
  * screen renders those as granted, disabled, and naming what grants them.
  */
 export function grantedBy(scope: Scope, selected: readonly Scope[]): Scope | null {
-  return selected.find((held) => held !== scope && hasScope([held], scope)) ?? null
+  return selected.find((held) => held !== scope && hasScope([held], scope)) ?? null;
 }
 
 /**
@@ -362,8 +362,8 @@ export function grantedBy(scope: Scope, selected: readonly Scope[]): Scope | nul
  * array verbatim), so minimal here is minimal forever.
  */
 export function minimalScopes(selected: readonly Scope[]): Scope[] {
-  const unique = SCOPES.filter((scope) => selected.includes(scope))
-  return unique.filter((scope) => grantedBy(scope, unique) === null)
+  const unique = SCOPES.filter((scope) => selected.includes(scope));
+  return unique.filter((scope) => grantedBy(scope, unique) === null);
 }
 
 /**
@@ -375,8 +375,10 @@ export function minimalScopes(selected: readonly Scope[]): Scope[] {
  * cannot exist.
  */
 export function toggleScope(selected: readonly Scope[], scope: Scope): Scope[] {
-  const next = selected.includes(scope) ? selected.filter((s) => s !== scope) : [...selected, scope]
-  return minimalScopes(next)
+  const next = selected.includes(scope)
+    ? selected.filter((s) => s !== scope)
+    : [...selected, scope];
+  return minimalScopes(next);
 }
 
 /**
@@ -388,35 +390,35 @@ export function toggleScope(selected: readonly Scope[], scope: Scope): Scope[] {
  * them apart would be a distinction with no consequence.
  */
 export function presetOf(selected: readonly Scope[]): string {
-  const mine = minimalScopes(selected)
-  const match = TOKEN_PRESETS.find((preset) => sameScopes(minimalScopes(preset.scopes), mine))
-  return match?.id ?? CUSTOM_PRESET
+  const mine = minimalScopes(selected);
+  const match = TOKEN_PRESETS.find((preset) => sameScopes(minimalScopes(preset.scopes), mine));
+  return match?.id ?? CUSTOM_PRESET;
 }
 
 /** Set equality over two already-minimal lists. Both come out of `minimalScopes`,
  * which filters `SCOPES` in declaration order, so order is not a variable and a
  * length-plus-membership check is exact. */
 function sameScopes(a: readonly Scope[], b: readonly Scope[]): boolean {
-  return a.length === b.length && a.every((scope) => b.includes(scope))
+  return a.length === b.length && a.every((scope) => b.includes(scope));
 }
 
 /** The scopes a preset id means, or null for `custom` and for an id nothing
  * declares — a URL or a stale render must not be able to name a sixth preset. */
 export function scopesOfPreset(id: string): readonly Scope[] | null {
-  return TOKEN_PRESETS.find((preset) => preset.id === id)?.scopes ?? null
+  return TOKEN_PRESETS.find((preset) => preset.id === id)?.scopes ?? null;
 }
 
 /** A token with no scopes cannot be minted: `TokenCreateBody` requires at least
  * one and answers 400 otherwise, so the button says so before the request. */
 export function mintRefusal(name: string, scopes: readonly Scope[]): string | undefined {
-  if (!name.trim()) return 'Give the token a name first'
-  if (scopes.length === 0) return 'Choose at least one thing this token may do'
-  return undefined
+  if (!name.trim()) return "Give the token a name first";
+  if (scopes.length === 0) return "Choose at least one thing this token may do";
+  return undefined;
 }
 
 /* ------------------------------------------------------------------ tokens --- */
 
-export type TokenStatus = 'active' | 'expired' | 'revoked'
+export type TokenStatus = "active" | "expired" | "revoked";
 
 /**
  * A token's real state, which is three things and not the one boolean the old rail
@@ -428,12 +430,12 @@ export type TokenStatus = 'active' | 'expired' | 'revoked'
  * working in between.
  */
 export function tokenStatus(
-  row: Pick<TokenRow, 'revokedAt' | 'expiresAt'>,
+  row: Pick<TokenRow, "revokedAt" | "expiresAt">,
   now: number = Date.now(),
 ): TokenStatus {
-  if (row.revokedAt !== null) return 'revoked'
-  if (row.expiresAt !== null && row.expiresAt <= now) return 'expired'
-  return 'active'
+  if (row.revokedAt !== null) return "revoked";
+  if (row.expiresAt !== null && row.expiresAt <= now) return "expired";
+  return "active";
 }
 
 /**
@@ -447,12 +449,12 @@ export function tokenStatus(
  */
 export function tokenStatusTone(status: TokenStatus): BadgeTone {
   switch (status) {
-    case 'revoked':
-      return 'danger'
-    case 'expired':
-      return 'warn'
-    case 'active':
-      return 'neutral'
+    case "revoked":
+      return "danger";
+    case "expired":
+      return "warn";
+    case "active":
+      return "neutral";
   }
 }
 
@@ -460,25 +462,25 @@ export function tokenStatusTone(status: TokenStatus): BadgeTone {
  * answers 404 for it, since its `update` matches `revoked_at is null`). An expired
  * one still can be, and should be — expiry is not revocation, and the hash is only
  * permanently spent once `revoked_at` is set. */
-export function revokeRefusal(row: Pick<TokenRow, 'revokedAt'>): string | undefined {
-  return row.revokedAt === null ? undefined : 'This token is already revoked'
+export function revokeRefusal(row: Pick<TokenRow, "revokedAt">): string | undefined {
+  return row.revokedAt === null ? undefined : "This token is already revoked";
 }
 
 /** How long a fresh token lives. Offered as a small set rather than a number
  * field: `expiresInDays` accepts 1–3650 and nobody wants to type `90`. */
 export const EXPIRY_OPTIONS: readonly { value: string; label: string }[] = [
-  { value: '', label: 'Never' },
-  { value: '30', label: '30 days' },
-  { value: '90', label: '90 days' },
-  { value: '365', label: 'A year' },
-]
+  { value: "", label: "Never" },
+  { value: "30", label: "30 days" },
+  { value: "90", label: "90 days" },
+  { value: "365", label: "A year" },
+];
 
 /** The `expiresInDays` a chosen option means, absent for "never" — which is the
  * shape `TokenCreateBody` wants, where the key being missing is what says
  * "no expiry". */
 export function expiryDays(value: string): number | undefined {
-  const days = Number(value)
-  return Number.isInteger(days) && days > 0 ? days : undefined
+  const days = Number(value);
+  return Number.isInteger(days) && days > 0 ? days : undefined;
 }
 
 /* --------------------------------------------------------------- stamps --- */
@@ -493,7 +495,7 @@ export function expiryDays(value: string): number | undefined {
  * the whole answer for an invited account nobody has signed into yet.
  */
 export function since(at: number | null, now?: number): string {
-  return at === null ? 'never' : when({ updatedAt: at, draftUpdatedAt: null }, now)
+  return at === null ? "never" : when({ updatedAt: at, draftUpdatedAt: null }, now);
 }
 
 /* --------------------------------------------------------------------- URL --- */
@@ -512,39 +514,39 @@ export function since(at: number | null, now?: number): string {
  * is meaningless without the stack that makes *previous* a pop, and a link into the
  * middle of a keyset would arrive with no way back.
  */
-export type AccessDialog = 'user' | 'token'
+export type AccessDialog = "user" | "token";
 
 export interface AccessUrl {
-  open: AccessDialog | null
+  open: AccessDialog | null;
 }
 
 export function parseAccessUrl(query: Readonly<Record<string, string>>): AccessUrl {
-  return { open: query.new === 'user' || query.new === 'token' ? query.new : null }
+  return { open: query.new === "user" || query.new === "token" ? query.new : null };
 }
 
 export function accessQuery(url: AccessUrl): Record<string, string | undefined> {
-  return { new: url.open ?? undefined }
+  return { new: url.open ?? undefined };
 }
 
 /* ------------------------------------------------------------------ grants --- */
 
 /** The `*` grant's scope id, and the words for it: on a deployment with `sites` it is
  * the platform tier, and "everywhere" is what a person reads it as. */
-export const EVERYWHERE = '*'
+export const EVERYWHERE = "*";
 
 /** A scope's display name in a grant: `*` is "Every site", else the name the registry
  * gave it, else the id — which is what a grant on a deleted scope reads as. */
 export function grantScopeLabel(me: Me, scope: string): string {
-  if (scope === EVERYWHERE) return 'Every site'
-  return me.sites?.scopes.find((candidate) => candidate.id === scope)?.name ?? scope
+  if (scope === EVERYWHERE) return "Every site";
+  return me.sites?.scopes.find((candidate) => candidate.id === scope)?.name ?? scope;
 }
 
 /** A grant as a table cell reads it. */
 export interface GrantRow extends AccessGrant {
-  label: string
+  label: string;
   /** Names a scope that no longer exists: the grant is listed and reaches nothing
    * (`multi-site.md` decision 10). */
-  ignored: boolean
+  ignored: boolean;
 }
 
 /**
@@ -553,8 +555,8 @@ export interface GrantRow extends AccessGrant {
  * platform tier), so `me.sites.scopes` is every scope there is — `*` excepted, which
  * is never a content scope and never ignored.
  */
-export function grantRows(user: Pick<AccessUser, 'grants'>, me: Me): GrantRow[] {
-  const known = new Set(me.sites?.scopes.map((scope) => scope.id) ?? [])
+export function grantRows(user: Pick<AccessUser, "grants">, me: Me): GrantRow[] {
+  const known = new Set(me.sites?.scopes.map((scope) => scope.id) ?? []);
   return [...(user.grants ?? [])]
     .sort((a, b) =>
       a.scope === EVERYWHERE ? -1 : b.scope === EVERYWHERE ? 1 : a.scope < b.scope ? -1 : 1,
@@ -563,7 +565,7 @@ export function grantRows(user: Pick<AccessUser, 'grants'>, me: Me): GrantRow[] 
       ...grant,
       label: grantScopeLabel(me, grant.scope),
       ignored: grant.scope !== EVERYWHERE && !known.has(grant.scope),
-    }))
+    }));
 }
 
 /**
@@ -572,50 +574,50 @@ export function grantRows(user: Pick<AccessUser, 'grants'>, me: Me): GrantRow[] 
  * sign-in set (`roleSetByReason`), because the next sign-in would overwrite it — so
  * the control is replaced by the sentence, not offered and refused.
  */
-export function grantsReason(user: Pick<AccessUser, 'grants' | 'roleFrom'>): string | null {
-  const placed = user.grants?.find((grant) => grant.roleFrom !== null)?.roleFrom ?? user.roleFrom
-  return placed ? roleSetByReason(placed) : null
+export function grantsReason(user: Pick<AccessUser, "grants" | "roleFrom">): string | null {
+  const placed = user.grants?.find((grant) => grant.roleFrom !== null)?.roleFrom ?? user.roleFrom;
+  return placed ? roleSetByReason(placed) : null;
 }
 
 /** The map the editor starts from: every grant the person has, ignored ones too, so
  * saving does not silently drop a grant the admin has not looked at. */
-export function grantsOf(user: Pick<AccessUser, 'grants'>): Grants {
-  return Object.fromEntries((user.grants ?? []).map((grant) => [grant.scope, grant.role]))
+export function grantsOf(user: Pick<AccessUser, "grants">): Grants {
+  return Object.fromEntries((user.grants ?? []).map((grant) => [grant.scope, grant.role]));
 }
 
 /** The scopes a grant can name, `*` first: what the editor's scope `<select>` offers. */
 export function grantScopeOptions(me: Me): { id: string; label: string }[] {
   return [
-    { id: EVERYWHERE, label: 'Every site (platform)' },
+    { id: EVERYWHERE, label: "Every site (platform)" },
     ...(me.sites?.scopes ?? []).map((scope) => ({ id: scope.id, label: scope.name })),
-  ]
+  ];
 }
 
 /** `grants` with `scope` set to `role`: a new entry, or a change to one already there. */
 export function withGrant(grants: Grants, scope: string, role: Role): Grants {
-  return { ...grants, [scope]: role }
+  return { ...grants, [scope]: role };
 }
 
 /** `grants` without `scope`. */
 export function withoutGrant(grants: Grants, scope: string): Grants {
-  const { [scope]: _gone, ...rest } = grants
-  return rest
+  const { [scope]: _gone, ...rest } = grants;
+  return rest;
 }
 
 /** The first scope not yet granted, for the editor's *Add* row; null when they all are. */
 export function nextScope(me: Me, grants: Grants): string | null {
-  return grantScopeOptions(me).find((option) => !(option.id in grants))?.id ?? null
+  return grantScopeOptions(me).find((option) => !(option.id in grants))?.id ?? null;
 }
 
 /** Why a grant set cannot be saved: the route requires at least one. */
 export function grantsRefusal(grants: Grants): string | undefined {
-  return Object.keys(grants).length === 0 ? 'Give at least one grant' : undefined
+  return Object.keys(grants).length === 0 ? "Give at least one grant" : undefined;
 }
 
 /** Whether the Access screen shows grants at all. With no `sites` it shows a role,
  * exactly as it always did. */
 export function showsGrants(me: Me): boolean {
-  return isMultiSite(me)
+  return isMultiSite(me);
 }
 
 /* ---------------------------------------------------------------- binding --- */
@@ -626,18 +628,18 @@ export function showsGrants(me: Me): boolean {
  * decision 10), since the scope is the platform tier's.
  */
 export function presetsFor(bound: boolean): readonly TokenPreset[] {
-  return bound ? TOKEN_PRESETS.filter((preset) => !preset.scopes.includes('admin')) : TOKEN_PRESETS
+  return bound ? TOKEN_PRESETS.filter((preset) => !preset.scopes.includes("admin")) : TOKEN_PRESETS;
 }
 
 /** The scopes to keep when a binding is chosen: a selection holding `admin` cannot
  * stay, and falls back to the default preset rather than to a silently smaller token. */
 export function scopesForBinding(selected: readonly Scope[], bound: boolean): Scope[] {
-  return bound && selected.includes('admin')
+  return bound && selected.includes("admin")
     ? [...(scopesOfPreset(DEFAULT_PRESET) ?? [])]
-    : [...selected]
+    : [...selected];
 }
 
 /** What a token's binding reads as in the table. Null is today's token, on every site. */
 export function bindingLabel(me: Me, site: string | null | undefined): string {
-  return site ? (me.sites?.scopes.find((scope) => scope.id === site)?.name ?? site) : 'Every site'
+  return site ? (me.sites?.scopes.find((scope) => scope.id === site)?.name ?? site) : "Every site";
 }

@@ -14,13 +14,13 @@
  * Both are `GET`s that redirect, because both are reached by a person clicking a
  * link — from the admin, or from a banner on the site — rather than by script.
  */
-import { Hono } from 'hono'
-import { clearDraftCookies, draftCookieName, serialiseCookie } from '../auth/cookie'
-import { mayPreviewDrafts, READ_DRAFT } from '../auth/roles'
-import { requireHtmlAccess } from '../middleware'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
-import { safeNext } from '../validate'
+import { Hono } from "hono";
+import { clearDraftCookies, draftCookieName, serialiseCookie } from "../auth/cookie";
+import { mayPreviewDrafts, READ_DRAFT } from "../auth/roles";
+import { requireHtmlAccess } from "../middleware";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
+import { safeNext } from "../validate";
 
 /**
  * A week. Long enough that an editor checking a site over a few days is not
@@ -31,10 +31,10 @@ import { safeNext } from '../validate'
  * draft and it is checked per render, so an expired flag costs a click and a
  * revoked role costs everything.
  */
-const DRAFT_COOKIE_DAYS = 7
+const DRAFT_COOKIE_DAYS = 7;
 
 export function draftRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * `requireHtmlAccess`, not `requireAccess`: this is a browser navigation, so an
@@ -51,42 +51,42 @@ export function draftRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * here to send anybody to: the browser goes to `site/start` on the admin origin,
    * which mints a grant and brings it back to this route.
    */
-  app.use('/draft/enter', async (c, next) => {
-    const here = c.var.site
-    if (!rt.sites || here?.surface !== 'preview' || rt.auth.mode !== 'session') {
-      await next()
-      return
+  app.use("/draft/enter", async (c, next) => {
+    const here = c.var.site;
+    if (!rt.sites || here?.surface !== "preview" || rt.auth.mode !== "session") {
+      await next();
+      return;
     }
     // Decision 13's rule for this site, the one every render path asks
     // (`mayPreviewDrafts`): a session or token that cannot preview it is no
     // authority here either, and goes to `site/start` like a stranger.
     if (mayPreviewDrafts(c.var.actor, await rt.sites.registry(c.env), here.id)) {
-      await next()
-      return
+      await next();
+      return;
     }
-    const back = `${rt.base}/draft/enter?next=${encodeURIComponent(safeNext(c.req.query('next'), '/'))}`
+    const back = `${rt.base}/draft/enter?next=${encodeURIComponent(safeNext(c.req.query("next"), "/"))}`;
     return c.redirect(
       `${rt.sites.admin}${rt.base}/~${here.id}/site/start?next=${encodeURIComponent(back)}`,
-    )
-  })
+    );
+  });
 
-  app.get('/draft/enter', requireHtmlAccess<Env>(rt, READ_DRAFT), (c) => {
-    const url = new URL(c.req.url)
+  app.get("/draft/enter", requireHtmlAccess<Env>(rt, READ_DRAFT), (c) => {
+    const url = new URL(c.req.url);
     // `next` is attacker-controllable — it is in a link anyone can write — and
     // this route sets a cookie, so an open redirect here would be one behind an
     // authenticated action. The same screen the login route uses, for the same
     // reason; `//evil.example` is the case a naive `startsWith('/')` misses.
-    const next = safeNext(c.req.query('next'), '/')
+    const next = safeNext(c.req.query("next"), "/");
     return new Response(null, {
       status: 302,
       headers: {
         location: next,
-        'set-cookie': serialiseCookie(url, draftCookieName(url), '1', {
+        "set-cookie": serialiseCookie(url, draftCookieName(url), "1", {
           maxAge: DRAFT_COOKIE_DAYS * 24 * 60 * 60,
         }),
       },
-    })
-  })
+    });
+  });
 
   /**
    * **Deliberately ungated.** A reviewer whose grant has expired, or an editor
@@ -95,17 +95,17 @@ export function draftRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * state is clearing cookies by hand. Clearing a flag that grants nothing is
    * safe for anyone to do, including someone with no session at all.
    */
-  app.get('/draft/exit', (c) => {
-    const url = new URL(c.req.url)
-    const next = safeNext(c.req.query('next'), '/')
+  app.get("/draft/exit", (c) => {
+    const url = new URL(c.req.url);
+    const next = safeNext(c.req.query("next"), "/");
     // Both names, always — a browser that moved between localhost and a deployed
     // worker may hold the plain one, and a half-cleared flag is a draft mode that
     // will not switch off.
-    const headers = new Headers()
-    for (const cookie of clearDraftCookies(url)) headers.append('set-cookie', cookie)
-    headers.set('location', next)
-    return new Response(null, { status: 302, headers })
-  })
+    const headers = new Headers();
+    for (const cookie of clearDraftCookies(url)) headers.append("set-cookie", cookie);
+    headers.set("location", next);
+    return new Response(null, { status: 302, headers });
+  });
 
-  return app
+  return app;
 }

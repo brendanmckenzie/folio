@@ -17,11 +17,11 @@
  * `GET /folio/asset/:key`, which parseTransform (assets.ts) parses and clamps
  * itself.
  */
-import * as v from 'valibot'
-import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from '../core/assets'
-import { MAX_FORM_FIELDS } from '../core/forms'
-import { decodeCursor } from '../core/pagination'
-import type { DocumentType } from '../core/schema'
+import * as v from "valibot";
+import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from "../core/assets";
+import { MAX_FORM_FIELDS } from "../core/forms";
+import { decodeCursor } from "../core/pagination";
+import type { DocumentType } from "../core/schema";
 import {
   DEFAULT_DOCUMENT_SORT,
   DEFAULT_FLAT_SORT,
@@ -32,17 +32,17 @@ import {
   type ScheduleStatus,
   type SearchSort,
   type StoryFilter,
-} from '../core/story'
-import { MAX_ASSET_TAGS, MAX_TAG_FILTER } from './asset-tags'
-import { FolioError } from './errors'
-import type { ResponseFilter } from './forms'
+} from "../core/story";
+import { MAX_ASSET_TAGS, MAX_TAG_FILTER } from "./asset-tags";
+import { FolioError } from "./errors";
+import type { ResponseFilter } from "./forms";
 
 /**
  * Ceiling on a validation message. A backstop rather than the defence: a schema
  * added here without its own message would fall back to valibot's, which
  * stringifies the value it received, and this bounds how much of it travels.
  */
-const MAX_MESSAGE = 200
+const MAX_MESSAGE = 200;
 
 /* ----------------------------------------------------------- primitives --- */
 
@@ -56,12 +56,12 @@ const MAX_MESSAGE = 200
  * that junk can never become a large bind.
  */
 const ID = v.pipe(
-  v.string('must be a string'),
+  v.string("must be a string"),
   v.trim(),
-  v.minLength(1, 'is required'),
-  v.maxLength(64, 'must be 64 characters or fewer'),
-  v.regex(/^[A-Za-z0-9_.:-]+$/, 'contains unsupported characters'),
-)
+  v.minLength(1, "is required"),
+  v.maxLength(64, "must be 64 characters or fewer"),
+  v.regex(/^[A-Za-z0-9_.:-]+$/, "contains unsupported characters"),
+);
 
 /**
  * A document type name, as a body field or a query param. Names are written by
@@ -70,15 +70,15 @@ const ID = v.pipe(
  * route looks the name up in the config.
  */
 const TYPE_NAME = v.pipe(
-  v.string('must be a string'),
+  v.string("must be a string"),
   v.trim(),
-  v.minLength(1, 'is required'),
-  v.maxLength(64, 'must be 64 characters or fewer'),
-  v.regex(/^[A-Za-z0-9_-]+$/, 'contains unsupported characters'),
-)
+  v.minLength(1, "is required"),
+  v.maxLength(64, "must be 64 characters or fewer"),
+  v.regex(/^[A-Za-z0-9_-]+$/, "contains unsupported characters"),
+);
 
 export function typeNameQuery(raw: string | undefined): string {
-  return parseOrThrow(TYPE_NAME, raw, 'type')
+  return parseOrThrow(TYPE_NAME, raw, "type");
 }
 
 /**
@@ -88,15 +88,15 @@ export function typeNameQuery(raw: string | undefined): string {
  * server simply has no such locale (`localisation.md`).
  */
 const LOCALE_CODE = v.pipe(
-  v.string('must be a string'),
+  v.string("must be a string"),
   v.trim(),
-  v.minLength(1, 'is required'),
-  v.maxLength(32, 'must be 32 characters or fewer'),
-  v.regex(/^[A-Za-z0-9_-]+$/, 'contains unsupported characters'),
-)
+  v.minLength(1, "is required"),
+  v.maxLength(32, "must be 32 characters or fewer"),
+  v.regex(/^[A-Za-z0-9_-]+$/, "contains unsupported characters"),
+);
 
 export function localeQuery(raw: string): string {
-  return parseOrThrow(LOCALE_CODE, raw, 'locale')
+  return parseOrThrow(LOCALE_CODE, raw, "locale");
 }
 
 /**
@@ -112,18 +112,18 @@ export function localeQuery(raw: string): string {
  * JOINER is what holds together every multi-codepoint emoji ("👨‍💻", "🏳️‍🌈"), plus
  * `Cn`, which would make the screen tighten with each Unicode release.
  */
-const PRINTABLE = /^[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]*$/u
+const PRINTABLE = /^[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]*$/u;
 
 const bounded = (max: number) =>
   v.pipe(
-    v.string('must be a string'),
+    v.string("must be a string"),
     v.trim(),
     v.maxLength(max, `must be ${max} characters or fewer`),
-    v.regex(PRINTABLE, 'contains unsupported characters'),
-  )
+    v.regex(PRINTABLE, "contains unsupported characters"),
+  );
 
 /** Required, non-empty once trimmed. */
-const required = (max: number) => v.pipe(bounded(max), v.minLength(1, 'is required'))
+const required = (max: number) => v.pipe(bounded(max), v.minLength(1, "is required"));
 
 /**
  * `bounded()`'s screen for text that **nobody typed** — what a model answered
@@ -143,10 +143,10 @@ const required = (max: number) => v.pipe(bounded(max), v.minLength(1, 'is requir
  * by the thing enforcing the cap.
  */
 export function clampText(raw: unknown, max: number): string | undefined {
-  if (typeof raw !== 'string') return undefined
-  const clean = raw.replace(/[\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]/gu, '').trim()
-  const points = [...clean]
-  return points.length > max ? points.slice(0, max).join('').trim() : clean
+  if (typeof raw !== "string") return undefined;
+  const clean = raw.replace(/[\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]/gu, "").trim();
+  const points = [...clean];
+  return points.length > max ? points.slice(0, max).join("").trim() : clean;
 }
 
 /* --------------------------------------------------------------- bodies --- */
@@ -157,7 +157,7 @@ export function clampText(raw: unknown, max: number): string | undefined {
  * a reflection of whatever the client sent — the one leak `MAX_MESSAGE` alone
  * would be left bounding.
  */
-const OBJECT = 'must be a JSON object'
+const OBJECT = "must be a JSON object";
 
 /**
  * `slug` is capped before slugify, which then truncates to 64 (core/story.ts):
@@ -183,10 +183,10 @@ export const StoryCreateBody = v.object(
      * page*): `slug = ''`, `path = ''`, no parent. A scope has at most one, so it is
      * a 409 when this one already does; `parentId` alongside it is a 400.
      */
-    root: v.optional(v.boolean('must be true or false')),
+    root: v.optional(v.boolean("must be true or false")),
   },
   OBJECT,
-)
+);
 
 /**
  * `index` is a sibling position, not a stored `ord`: stories.ts turns it into a
@@ -209,14 +209,14 @@ export const StoryPatchBody = v.object(
     type: v.optional(TYPE_NAME),
     index: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(0, 'must be 0 or greater'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(0, "must be 0 or greater"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
 /**
  * `duplicate-and-paste.md`'s `POST /stories/:id/duplicate`. Both optional:
@@ -229,7 +229,7 @@ export const StoryDuplicateBody = v.object(
     parentId: v.nullish(ID),
   },
   OBJECT,
-)
+);
 
 /**
  * `actor` used to be a field here. It is gone (`identity-and-access.md` phase 5):
@@ -239,7 +239,7 @@ export const StoryDuplicateBody = v.object(
  * still sends one is a stale tab, not a caller asking for something the server
  * will not do, and valibot strips an undeclared key silently.
  */
-export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJECT)
+export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJECT);
 
 /**
  * What an editor can change about one library row
@@ -269,13 +269,13 @@ export const AssetPatchBody = v.object(
     folderId: v.optional(v.nullable(ID)),
     tags: v.optional(
       v.pipe(
-        v.array(ID, 'must be an array of tag ids'),
+        v.array(ID, "must be an array of tag ids"),
         v.maxLength(MAX_ASSET_TAGS, `must name ${MAX_ASSET_TAGS} tags or fewer`),
       ),
     ),
   },
   OBJECT,
-)
+);
 
 /**
  * A tag, created or renamed (`../../docs/specs/content-model/media-library.md` decision 4).
@@ -290,7 +290,7 @@ export const AssetPatchBody = v.object(
  * exactly one editable field, so the two bodies cannot drift apart the way
  * `{ name?, parentId? }` can.
  */
-export const AssetTagBody = v.object({ name: required(60) }, OBJECT)
+export const AssetTagBody = v.object({ name: required(60) }, OBJECT);
 
 /**
  * A media-library folder (`../../docs/specs/content-model/media-library.md` decision 3).
@@ -309,14 +309,14 @@ export const AssetTagBody = v.object({ name: required(60) }, OBJECT)
 export const AssetFolderCreateBody = v.object(
   { name: required(120), parentId: v.optional(v.nullable(ID)) },
   OBJECT,
-)
+);
 
 /** The same fields, both optional: `{ name }` renames, `{ parentId }` moves, and
  * both together is one subtree rewrite rather than two. */
 export const AssetFolderPatchBody = v.object(
   { name: v.optional(required(120)), parentId: v.optional(v.nullable(ID)) },
   OBJECT,
-)
+);
 
 /**
  * A manual redirect (redirects.md). `to` is capped generously: it is either an
@@ -330,7 +330,7 @@ export const RedirectCreateBody = v.object(
     status: v.optional(v.picklist([301, 302, 307, 308])),
   },
   OBJECT,
-)
+);
 
 /**
  * `POST /folio/migrate` (`schema-migrations.md`). Every field is optional, so an
@@ -343,20 +343,20 @@ export const RedirectCreateBody = v.object(
  */
 export const MigrateBody = v.object(
   {
-    dryRun: v.optional(v.boolean('must be true or false')),
+    dryRun: v.optional(v.boolean("must be true or false")),
     /** The previous call's `continueFrom`, so it is a story id. */
     continueFrom: v.nullish(ID),
     batch: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(1, 'must be at least 1'),
-        v.maxValue(200, 'must be 200 or fewer'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(1, "must be at least 1"),
+        v.maxValue(200, "must be 200 or fewer"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
 /**
  * `POST /folio/reindex` (`../../docs/specs/content-model/collections.md`). Shaped exactly like
@@ -366,21 +366,21 @@ export const MigrateBody = v.object(
  */
 export const ReindexBody = v.object(
   {
-    dryRun: v.optional(v.boolean('must be true or false')),
+    dryRun: v.optional(v.boolean("must be true or false")),
     continueFrom: v.nullish(ID),
     batch: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(1, 'must be at least 1'),
-        v.maxValue(200, 'must be 200 or fewer'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(1, "must be at least 1"),
+        v.maxValue(200, "must be 200 or fewer"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
-export type ReindexInput = v.InferOutput<typeof ReindexBody>
+export type ReindexInput = v.InferOutput<typeof ReindexBody>;
 
 /* -------------------------------------------------------------- schedules --- */
 
@@ -390,28 +390,28 @@ export type ReindexInput = v.InferOutput<typeof ReindexBody>
  * so a typo is a 400 naming what it can be instead of a pending row whose action
  * the sweep will refuse three times.
  */
-const SCHEDULE_ACTION = v.picklist(['publish', 'unpublish'], 'must be one of: publish, unpublish')
+const SCHEDULE_ACTION = v.picklist(["publish", "unpublish"], "must be one of: publish, unpublish");
 
 /** `?action=` on the cancel route, where it is **required**: cancelling "the
  * schedule" for a document is ambiguous when a campaign window has two. */
 export function scheduleActionQuery(raw: string | undefined): ScheduleAction {
-  return parseOrThrow(SCHEDULE_ACTION, raw, 'action')
+  return parseOrThrow(SCHEDULE_ACTION, raw, "action");
 }
 
 /** The same as an optional list filter, where absent means both. */
 export function scheduleActionFilter(raw: string | undefined): ScheduleAction | undefined {
-  if (raw === undefined || raw === '') return undefined
-  return scheduleActionQuery(raw)
+  if (raw === undefined || raw === "") return undefined;
+  return scheduleActionQuery(raw);
 }
 
 /** `?status=`. Absent means both, which is what "what is scheduled" means. */
 export function scheduleStatusQuery(raw: string | undefined): ScheduleStatus | undefined {
-  if (raw === undefined || raw === '') return undefined
+  if (raw === undefined || raw === "") return undefined;
   return parseOrThrow(
-    v.picklist(['pending', 'failed'], 'must be one of: pending, failed'),
+    v.picklist(["pending", "failed"], "must be one of: pending, failed"),
     raw,
-    'status',
-  )
+    "status",
+  );
 }
 
 /**
@@ -431,15 +431,15 @@ export const ScheduleBody = v.object(
   {
     action: SCHEDULE_ACTION,
     at: v.pipe(
-      v.number('must be a number'),
-      v.integer('must be a whole number of milliseconds'),
-      v.minValue(0, 'must be 0 or greater'),
+      v.number("must be a number"),
+      v.integer("must be a whole number of milliseconds"),
+      v.minValue(0, "must be 0 or greater"),
     ),
   },
   OBJECT,
-)
+);
 
-export type ScheduleInput = v.InferOutput<typeof ScheduleBody>
+export type ScheduleInput = v.InferOutput<typeof ScheduleBody>;
 
 /**
  * `POST {base}/api/schedules/run`. Shaped like `MigrateBody` and `ReindexBody`,
@@ -458,23 +458,23 @@ export type ScheduleInput = v.InferOutput<typeof ScheduleBody>
  */
 export const RunSchedulesBody = v.object(
   {
-    dryRun: v.optional(v.boolean('must be true or false')),
+    dryRun: v.optional(v.boolean("must be true or false")),
     continueFrom: v.nullish(
-      v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+      v.pipe(v.string("must be a string"), v.maxLength(500, "is not a pagination cursor")),
     ),
     batch: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(1, 'must be at least 1'),
-        v.maxValue(200, 'must be 200 or fewer'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(1, "must be at least 1"),
+        v.maxValue(200, "must be 200 or fewer"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
-export type RunSchedulesInput = v.InferOutput<typeof RunSchedulesBody>
+export type RunSchedulesInput = v.InferOutput<typeof RunSchedulesBody>;
 
 /* ------------------------------------------------------------ content API --- */
 
@@ -493,12 +493,12 @@ export type RunSchedulesInput = v.InferOutput<typeof RunSchedulesBody>
  *
  * What this file still owns is the wrapper: the `mode`, the locale, the caps.
  */
-const CONTENT = v.unknown()
+const CONTENT = v.unknown();
 
 /** `merge` (the default) leaves absent fields alone; `replace` makes the payload whole. */
-const WRITE_MODE = v.optional(v.picklist(['merge', 'replace'], "must be 'merge' or 'replace'"))
+const WRITE_MODE = v.optional(v.picklist(["merge", "replace"], "must be 'merge' or 'replace'"));
 
-export const ContentPutBody = v.object({ content: CONTENT, mode: WRITE_MODE }, OBJECT)
+export const ContentPutBody = v.object({ content: CONTENT, mode: WRITE_MODE }, OBJECT);
 
 /**
  * `PATCH /documents/:id/fields` — the targeted write, which skips the diff
@@ -520,16 +520,16 @@ export const FieldsPatchBody = v.object(
         v.array(
           v.object(
             { uid: ID, fields: v.record(bounded(120), v.unknown()) },
-            'each entry must be a JSON object',
+            "each entry must be a JSON object",
           ),
         ),
-        v.maxLength(500, 'must name 500 blocks or fewer'),
+        v.maxLength(500, "must name 500 blocks or fewer"),
       ),
     ),
     locale: v.optional(LOCALE_CODE),
   },
   OBJECT,
-)
+);
 
 /** `POST /api/v1/documents` — `StoryCreateBody` plus optional starting content. */
 export const DocumentCreateBody = v.object(
@@ -539,22 +539,22 @@ export const DocumentCreateBody = v.object(
     parentId: v.nullish(ID),
     type: v.optional(TYPE_NAME),
     /** As `StoryCreateBody.root`: the scope's home page. */
-    root: v.optional(v.boolean('must be true or false')),
+    root: v.optional(v.boolean("must be true or false")),
     content: v.optional(CONTENT),
   },
   OBJECT,
-)
+);
 
 /**
  * `POST /api/v1/documents/:id/restore`. The version id, and nothing else — the
  * route checks it against `getVersion`'s own `storyId`, so a mismatch is a 400
  * from the route rather than something this schema could catch.
  */
-export const RestoreBody = v.object({ versionId: ID }, OBJECT)
+export const RestoreBody = v.object({ versionId: ID }, OBJECT);
 
-export type ContentPutInput = v.InferOutput<typeof ContentPutBody>
-export type FieldsPatchInput = v.InferOutput<typeof FieldsPatchBody>
-export type DocumentCreateInput = v.InferOutput<typeof DocumentCreateBody>
+export type ContentPutInput = v.InferOutput<typeof ContentPutBody>;
+export type FieldsPatchInput = v.InferOutput<typeof FieldsPatchBody>;
+export type DocumentCreateInput = v.InferOutput<typeof DocumentCreateBody>;
 
 /**
  * The `Idempotency-Key` header, bounded before it is hashed. Opaque to Folio: it
@@ -562,8 +562,8 @@ export type DocumentCreateInput = v.InferOutput<typeof DocumentCreateBody>
  * with it is `txIdFromKey`.
  */
 export function idempotencyKeyHeader(raw: string | undefined): string | undefined {
-  if (raw === undefined) return undefined
-  return parseOrThrow(required(200), raw, 'Idempotency-Key')
+  if (raw === undefined) return undefined;
+  return parseOrThrow(required(200), raw, "Idempotency-Key");
 }
 
 /**
@@ -572,7 +572,7 @@ export function idempotencyKeyHeader(raw: string | undefined): string | undefine
  * mistake.
  */
 export function storyPathParam(raw: string | undefined): string {
-  return parseOrThrow(bounded(500), raw ?? '', 'path')
+  return parseOrThrow(bounded(500), raw ?? "", "path");
 }
 
 /* ------------------------------------------------- identity and access --- */
@@ -585,34 +585,34 @@ export function storyPathParam(raw: string | undefined): string {
  * *verified* by whether the sign-in link is ever clicked, not by this schema.
  */
 const EMAIL = v.pipe(
-  v.string('must be a string'),
+  v.string("must be a string"),
   v.trim(),
   v.toLowerCase(),
-  v.minLength(3, 'is required'),
-  v.maxLength(254, 'must be 254 characters or fewer'),
-  v.regex(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, 'must be an email address'),
-)
+  v.minLength(3, "is required"),
+  v.maxLength(254, "must be 254 characters or fewer"),
+  v.regex(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, "must be an email address"),
+);
 
 /** `POST /folio/login/email`. `next` is screened by `safeNext`, not here: this
  * only bounds it, since where it may point is a URL question. */
-export const LoginEmailBody = v.object({ email: EMAIL, next: v.optional(bounded(500)) }, OBJECT)
+export const LoginEmailBody = v.object({ email: EMAIL, next: v.optional(bounded(500)) }, OBJECT);
 
 export const UserCreateBody = v.object(
   {
     email: EMAIL,
     name: v.optional(bounded(120)),
-    role: v.optional(v.picklist(['viewer', 'editor', 'publisher', 'admin'])),
+    role: v.optional(v.picklist(["viewer", "editor", "publisher", "admin"])),
   },
   OBJECT,
-)
+);
 
 export const UserPatchBody = v.object(
   {
     name: v.optional(required(120)),
-    role: v.optional(v.picklist(['viewer', 'editor', 'publisher', 'admin'])),
+    role: v.optional(v.picklist(["viewer", "editor", "publisher", "admin"])),
   },
   OBJECT,
-)
+);
 
 /**
  * `POST /folio/tokens`. `scopes` is checked against the picklist here rather
@@ -626,31 +626,31 @@ export const TokenCreateBody = v.object(
       v.array(
         v.picklist(
           [
-            'content:read',
-            'content:read:draft',
-            'content:write',
-            'publish',
-            'assets:write',
-            'forms:read',
-            'admin',
+            "content:read",
+            "content:read:draft",
+            "content:write",
+            "publish",
+            "assets:write",
+            "forms:read",
+            "admin",
           ],
-          'is not a scope',
+          "is not a scope",
         ),
       ),
-      v.minLength(1, 'must name at least one scope'),
+      v.minLength(1, "must name at least one scope"),
     ),
     /** Days from now. Absent means no expiry. */
     expiresInDays: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(1, 'must be 1 or greater'),
-        v.maxValue(3650, 'must be 3650 or fewer'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(1, "must be 1 or greater"),
+        v.maxValue(3650, "must be 3650 or fewer"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
 /* ------------------------------------------------------------ passkeys --- */
 
@@ -669,17 +669,17 @@ export const TokenCreateBody = v.object(
  */
 const b64url = (max: number) =>
   v.pipe(
-    v.string('must be a string'),
-    v.minLength(1, 'is required'),
+    v.string("must be a string"),
+    v.minLength(1, "is required"),
     v.maxLength(max, `must be ${max} characters or fewer`),
-    v.regex(/^[A-Za-z0-9_-]+$/, 'must be base64url'),
-  )
+    v.regex(/^[A-Za-z0-9_-]+$/, "must be base64url"),
+  );
 
 /** A credential id as the authenticator minted it. 1023 bytes is the WebAuthn
  * ceiling; base64url of that is 1364. */
-const CREDENTIAL_ID = b64url(1400)
+const CREDENTIAL_ID = b64url(1400);
 
-const CREDENTIAL_TYPE = v.literal('public-key', "must be 'public-key'")
+const CREDENTIAL_TYPE = v.literal("public-key", "must be 'public-key'");
 
 /**
  * `POST {base}/api/me/passkeys`. The enrolment half.
@@ -712,7 +712,7 @@ export const PasskeyRegisterBody = v.object(
     name: v.optional(bounded(60)),
   },
   OBJECT,
-)
+);
 
 /**
  * `POST {base}/login/passkey`. The assertion half.
@@ -746,14 +746,14 @@ export const PasskeyAssertionBody = v.object(
     next: v.optional(bounded(500)),
   },
   OBJECT,
-)
+);
 
 /** `PATCH {base}/api/me/passkeys/:id`. 1–60 characters, matching the column's
  * own bound in `auth/passkeys.ts`. */
-export const PasskeyPatchBody = v.object({ name: required(60) }, OBJECT)
+export const PasskeyPatchBody = v.object({ name: required(60) }, OBJECT);
 
-export type PasskeyRegisterInput = v.InferOutput<typeof PasskeyRegisterBody>
-export type PasskeyAssertionInput = v.InferOutput<typeof PasskeyAssertionBody>
+export type PasskeyRegisterInput = v.InferOutput<typeof PasskeyRegisterBody>;
+export type PasskeyAssertionInput = v.InferOutput<typeof PasskeyAssertionBody>;
 
 /**
  * `POST {base}/api/story/:id/share` (`../../docs/specs/platform/draft-sharing.md`).
@@ -775,30 +775,30 @@ export const ShareCreateBody = v.object(
   {
     expiresInDays: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number of days'),
-        v.minValue(1, 'must be 1 or greater'),
-        v.maxValue(90, 'must be 90 or fewer'),
+        v.number("must be a number"),
+        v.integer("must be a whole number of days"),
+        v.minValue(1, "must be 1 or greater"),
+        v.maxValue(90, "must be 90 or fewer"),
       ),
     ),
     /** What the editor calls it, for the list. "For Rachel's Friday review". */
     note: v.optional(bounded(200)),
   },
   OBJECT,
-)
+);
 
 /** `?state=` on the share list. Absent means both, which is what "which links exist"
  * means; `live` is "what is outstanding right now" and is the interesting one. */
-export function shareStateQuery(raw: string | undefined): 'live' | 'lapsed' | undefined {
-  if (raw === undefined || raw === '') return undefined
-  return parseOrThrow(v.picklist(['live', 'lapsed'], 'must be one of: live, lapsed'), raw, 'state')
+export function shareStateQuery(raw: string | undefined): "live" | "lapsed" | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  return parseOrThrow(v.picklist(["live", "lapsed"], "must be one of: live, lapsed"), raw, "state");
 }
 
-export type LoginEmailInput = v.InferOutput<typeof LoginEmailBody>
-export type UserCreateInput = v.InferOutput<typeof UserCreateBody>
-export type UserPatchInput = v.InferOutput<typeof UserPatchBody>
-export type TokenCreateInput = v.InferOutput<typeof TokenCreateBody>
-export type ShareCreateInput = v.InferOutput<typeof ShareCreateBody>
+export type LoginEmailInput = v.InferOutput<typeof LoginEmailBody>;
+export type UserCreateInput = v.InferOutput<typeof UserCreateBody>;
+export type UserPatchInput = v.InferOutput<typeof UserPatchBody>;
+export type TokenCreateInput = v.InferOutput<typeof TokenCreateBody>;
+export type ShareCreateInput = v.InferOutput<typeof ShareCreateBody>;
 
 /**
  * Where to send a browser after signing in, screened to a same-origin path.
@@ -810,19 +810,19 @@ export type ShareCreateInput = v.InferOutput<typeof ShareCreateBody>
  * redirect out of a login page, the single most useful kind.
  */
 export function safeNext(raw: string | null | undefined, fallback: string): string {
-  if (!raw || raw.length > 500) return fallback
-  if (!sameOriginPath(raw)) return fallback
+  if (!raw || raw.length > 500) return fallback;
+  if (!sameOriginPath(raw)) return fallback;
   // Percent-encoded forms of the same tricks (`/%09/evil.example`, `/%5Cevil`,
   // `/%2F/evil`): a browser does not decode them in a `Location` path, but a
   // screen that let them through would be one decode away from an open redirect
   // wherever the value is used again. Undecodable is refused outright.
-  let decoded: string
+  let decoded: string;
   try {
-    decoded = decodeURIComponent(raw)
+    decoded = decodeURIComponent(raw);
   } catch {
-    return fallback
+    return fallback;
   }
-  return sameOriginPath(decoded) ? raw : fallback
+  return sameOriginPath(decoded) ? raw : fallback;
 }
 
 /**
@@ -834,25 +834,25 @@ export function safeNext(raw: string | null | undefined, fallback: string): stri
  * origin and keep it.
  */
 function sameOriginPath(value: string): boolean {
-  if (!value.startsWith('/') || value.startsWith('//')) return false
+  if (!value.startsWith("/") || value.startsWith("//")) return false;
   // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters is the point
-  if (/[\u0000-\u001f\u007f\\]/.test(value)) return false
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return false;
   try {
-    return new URL(value, 'https://next.invalid').origin === 'https://next.invalid'
+    return new URL(value, "https://next.invalid").origin === "https://next.invalid";
   } catch {
-    return false
+    return false;
   }
 }
 
-export type StoryCreateInput = v.InferOutput<typeof StoryCreateBody>
-export type StoryPatchInput = v.InferOutput<typeof StoryPatchBody>
-export type StoryDuplicateInput = v.InferOutput<typeof StoryDuplicateBody>
-export type CheckpointInput = v.InferOutput<typeof CheckpointBody>
-export type AssetPatchInput = v.InferOutput<typeof AssetPatchBody>
-export type AssetFolderCreateInput = v.InferOutput<typeof AssetFolderCreateBody>
-export type AssetFolderPatchInput = v.InferOutput<typeof AssetFolderPatchBody>
-export type AssetTagInput = v.InferOutput<typeof AssetTagBody>
-export type RedirectCreateInput = v.InferOutput<typeof RedirectCreateBody>
+export type StoryCreateInput = v.InferOutput<typeof StoryCreateBody>;
+export type StoryPatchInput = v.InferOutput<typeof StoryPatchBody>;
+export type StoryDuplicateInput = v.InferOutput<typeof StoryDuplicateBody>;
+export type CheckpointInput = v.InferOutput<typeof CheckpointBody>;
+export type AssetPatchInput = v.InferOutput<typeof AssetPatchBody>;
+export type AssetFolderCreateInput = v.InferOutput<typeof AssetFolderCreateBody>;
+export type AssetFolderPatchInput = v.InferOutput<typeof AssetFolderPatchBody>;
+export type AssetTagInput = v.InferOutput<typeof AssetTagBody>;
+export type RedirectCreateInput = v.InferOutput<typeof RedirectCreateBody>;
 
 /* --------------------------------------------------------------- parsing --- */
 
@@ -866,12 +866,12 @@ export function parseOrThrow<S extends v.GenericSchema>(
   input: unknown,
   label: string,
 ): v.InferOutput<S> {
-  const result = v.safeParse(schema, input)
-  if (result.success) return result.output as v.InferOutput<S>
+  const result = v.safeParse(schema, input);
+  if (result.success) return result.output as v.InferOutput<S>;
 
-  const issue = result.issues[0]!
-  const where = v.getDotPath(issue) ?? label
-  throw new FolioError('bad_request', `${where} ${issue.message}`.slice(0, MAX_MESSAGE))
+  const issue = result.issues[0]!;
+  const where = v.getDotPath(issue) ?? label;
+  throw new FolioError("bad_request", `${where} ${issue.message}`.slice(0, MAX_MESSAGE));
 }
 
 /**
@@ -882,31 +882,31 @@ export function parseOrThrow<S extends v.GenericSchema>(
 export async function parseBody<S extends v.GenericSchema>(
   req: { json: () => Promise<unknown> },
   schema: S,
-  label = 'body',
+  label = "body",
 ): Promise<v.InferOutput<S>> {
-  let raw: unknown
+  let raw: unknown;
   try {
-    raw = await req.json()
+    raw = await req.json();
   } catch {
-    throw new FolioError('bad_request', 'Request body must be JSON.')
+    throw new FolioError("bad_request", "Request body must be JSON.");
   }
-  return parseOrThrow(schema, raw, label)
+  return parseOrThrow(schema, raw, label);
 }
 
 /** An optional JSON body: absent or malformed both parse as `{}`. */
 export async function parseOptionalBody<S extends v.GenericSchema>(
   req: { json: () => Promise<unknown> },
   schema: S,
-  label = 'body',
+  label = "body",
 ): Promise<v.InferOutput<S>> {
-  const raw = await req.json().catch(() => ({}))
-  return parseOrThrow(schema, raw, label)
+  const raw = await req.json().catch(() => ({}));
+  return parseOrThrow(schema, raw, label);
 }
 
 /* ---------------------------------------------------- params and headers --- */
 
 export function idParam(label: string, raw: string | undefined): string {
-  return parseOrThrow(ID, raw, label)
+  return parseOrThrow(ID, raw, label);
 }
 
 /**
@@ -917,7 +917,7 @@ export function idParam(label: string, raw: string | undefined): string {
  * answer 404 for an id nothing is behind).
  */
 export function isId(raw: string | undefined): boolean {
-  return v.is(ID, raw)
+  return v.is(ID, raw);
 }
 
 /**
@@ -931,12 +931,12 @@ export function isId(raw: string | undefined): boolean {
  * `.env` co-tenanted in the same bucket under a guessable key are not.
  */
 const ASSET_KEY = v.pipe(
-  v.string('must be a string'),
-  v.regex(/^ast_[0-9a-f]{12}-[a-z0-9.-]{1,80}$/, 'must be a Folio asset key'),
-)
+  v.string("must be a string"),
+  v.regex(/^ast_[0-9a-f]{12}-[a-z0-9.-]{1,80}$/, "must be a Folio asset key"),
+);
 
 export function assetKeyParam(raw: string | undefined): string {
-  return parseOrThrow(ASSET_KEY, raw, 'key')
+  return parseOrThrow(ASSET_KEY, raw, "key");
 }
 
 /**
@@ -944,7 +944,7 @@ export function assetKeyParam(raw: string | undefined): string {
  * it to `[a-z0-9.-]` and truncates to 80 for the R2 key.
  */
 export function filenameQuery(raw: string | undefined): string {
-  return parseOrThrow(required(200), raw, 'filename')
+  return parseOrThrow(required(200), raw, "filename");
 }
 
 /**
@@ -962,12 +962,12 @@ export function filenameQuery(raw: string | undefined): string {
  * `SANDBOXED_CONTENT_TYPES`.
  */
 export const SERVED_CONTENT_TYPES: ReadonlySet<string> = new Set([
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-  'image/avif',
-])
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/avif",
+]);
 
 /**
  * Types served **inline but never transformed**, and never decoded by anything
@@ -993,15 +993,15 @@ export const SERVED_CONTENT_TYPES: ReadonlySet<string> = new Set([
  * nor the sandbox helps with. That is the exposure the five raster decoders
  * above already carry, not a new one.
  */
-export const SANDBOXED_CONTENT_TYPES: ReadonlySet<string> = new Set(['image/svg+xml'])
+export const SANDBOXED_CONTENT_TYPES: ReadonlySet<string> = new Set(["image/svg+xml"]);
 
 /** Every type this route will send with `content-disposition: inline`. */
 export function isInlineContentType(type: string): boolean {
-  return SERVED_CONTENT_TYPES.has(type) || SANDBOXED_CONTENT_TYPES.has(type)
+  return SERVED_CONTENT_TYPES.has(type) || SANDBOXED_CONTENT_TYPES.has(type);
 }
 
 /** What anything else is stored and served as: kept, but never rendered. */
-export const DOWNLOAD_CONTENT_TYPE = 'application/octet-stream'
+export const DOWNLOAD_CONTENT_TYPE = "application/octet-stream";
 
 /**
  * The `content-type` of an upload, reduced to something safe to store and later
@@ -1017,8 +1017,8 @@ export const DOWNLOAD_CONTENT_TYPE = 'application/octet-stream'
  */
 export function contentTypeHeader(raw: string | undefined): string {
   // Parameters (`; charset=…`) are not part of the type being allowlisted.
-  const type = (raw ?? '').split(';')[0]!.trim().toLowerCase()
-  return isInlineContentType(type) ? type : DOWNLOAD_CONTENT_TYPE
+  const type = (raw ?? "").split(";")[0]!.trim().toLowerCase();
+  return isInlineContentType(type) ? type : DOWNLOAD_CONTENT_TYPE;
 }
 
 /**
@@ -1031,11 +1031,11 @@ export function contentTypeHeader(raw: string | undefined): string {
  * arrives with no `content-length` to read here.
  */
 export function contentLengthHeader(raw: string | undefined, max: number): void {
-  const declared = Number(raw)
+  const declared = Number(raw);
   if (Number.isFinite(declared) && declared > max) {
     // Worded exactly as assets.ts's post-read check, so which of the two
     // refused a request is not something a client can tell apart.
-    throw new FolioError('too_large', `File is larger than ${Math.floor(max / 1024 / 1024)}MB`)
+    throw new FolioError("too_large", `File is larger than ${Math.floor(max / 1024 / 1024)}MB`);
   }
 }
 
@@ -1050,11 +1050,11 @@ export function contentLengthHeader(raw: string | undefined, max: number): void 
  * 400ing: a stale bookmark should not break a panel.
  */
 // `number()` already refuses NaN; `finite()` covers the infinities.
-const LIMIT = v.pipe(v.string(), v.transform(Number), v.number(), v.finite())
+const LIMIT = v.pipe(v.string(), v.transform(Number), v.number(), v.finite());
 
 export function limitParam(raw: string | undefined, fallback: number, max: number): number {
-  const n: number = v.parse(v.fallback(LIMIT, fallback), raw)
-  return Math.min(Math.max(Math.trunc(n), 1), max)
+  const n: number = v.parse(v.fallback(LIMIT, fallback), raw);
+  return Math.min(Math.max(Math.trunc(n), 1), max);
 }
 
 /**
@@ -1071,7 +1071,7 @@ export function limitParam(raw: string | undefined, fallback: number, max: numbe
  */
 export function requireCursor(raw: string | undefined): void {
   if (raw !== undefined && decodeCursor(raw) === null) {
-    throw new FolioError('bad_request', 'Malformed pagination cursor')
+    throw new FolioError("bad_request", "Malformed pagination cursor");
   }
 }
 
@@ -1086,7 +1086,7 @@ export function requireCursor(raw: string | undefined): void {
  * a client with a bug or a URL somebody built by accident, and answering it would
  * be twenty round trips to D1 inside one request.
  */
-const MAX_BATCH = 500
+const MAX_BATCH = 500;
 
 /**
  * A comma-separated id list off a query string, screened id by id.
@@ -1098,7 +1098,7 @@ const MAX_BATCH = 500
  * the row is missing or its id was rejected.
  */
 export function idListQuery(raw: string | undefined): string[] {
-  return listQuery(raw, 'ids', (value, label) => parseOrThrow(ID, value, label))
+  return listQuery(raw, "ids", (value, label) => parseOrThrow(ID, value, label));
 }
 
 /**
@@ -1111,7 +1111,7 @@ export function idListQuery(raw: string | undefined): string[] {
  * returns `['']`).
  */
 export function pathListQuery(raw: string | undefined): string[] {
-  return listQuery(raw, 'paths', (value, label) => parseOrThrow(STORY_PATH, value, label))
+  return listQuery(raw, "paths", (value, label) => parseOrThrow(STORY_PATH, value, label));
 }
 
 /**
@@ -1124,23 +1124,23 @@ export function pathListQuery(raw: string | undefined): string[] {
  * `''` is allowed, and is the root story.
  */
 const STORY_PATH = v.pipe(
-  v.string('must be a string'),
-  v.maxLength(1024, 'must be 1024 characters or fewer'),
-  v.regex(PRINTABLE, 'contains unsupported characters'),
-  v.regex(/^(?!\/)\S*$/, 'is not a story path'),
-)
+  v.string("must be a string"),
+  v.maxLength(1024, "must be 1024 characters or fewer"),
+  v.regex(PRINTABLE, "contains unsupported characters"),
+  v.regex(/^(?!\/)\S*$/, "is not a story path"),
+);
 
 function listQuery(
   raw: string | undefined,
   label: string,
   screen: (value: string, label: string) => string,
 ): string[] {
-  if (raw === undefined || raw === '') return []
-  const parts = raw.split(',')
+  if (raw === undefined || raw === "") return [];
+  const parts = raw.split(",");
   if (parts.length > MAX_BATCH) {
-    throw new FolioError('bad_request', `\`${label}\` names more than ${MAX_BATCH} documents`)
+    throw new FolioError("bad_request", `\`${label}\` names more than ${MAX_BATCH} documents`);
   }
-  return parts.map((part, at) => screen(part, `${label}[${at}]`))
+  return parts.map((part, at) => screen(part, `${label}[${at}]`));
 }
 
 /** The four states `core/story.ts`'s `StoryState` names. Screened here so a chip
@@ -1152,9 +1152,9 @@ function listQuery(
  * every call. `test/unit/mcp/tools.test.ts` pins the two together by value, which
  * needs the picklist itself rather than a second copy of its options. */
 export const STORY_STATE = v.picklist(
-  ['draft', 'unpublished', 'live', 'changed'],
-  'must be one of: draft, unpublished, live, changed',
-)
+  ["draft", "unpublished", "live", "changed"],
+  "must be one of: draft, unpublished, live, changed",
+);
 
 /**
  * A free-text search term. Bounded, and that is the whole screen: it reaches SQL
@@ -1162,7 +1162,7 @@ export const STORY_STATE = v.picklist(
  * rather than an injection — a substring search where `_` matched any character
  * is a surprise, not a vulnerability.
  */
-const SEARCH_Q = v.pipe(v.string('must be a string'), v.trim(), v.maxLength(200))
+const SEARCH_Q = v.pipe(v.string("must be a string"), v.trim(), v.maxLength(200));
 
 /**
  * `StoryFilter` off a query string — the same object the Content screen keeps in
@@ -1176,16 +1176,16 @@ const SEARCH_Q = v.pipe(v.string('must be a string'), v.trim(), v.maxLength(200)
  * forgotten inside an options object.
  */
 export function storyFilterQuery(req: { query: (key: string) => string | undefined }): StoryFilter {
-  const type = req.query('type')
-  const state = req.query('state')
-  const q = req.query('q')
-  const locale = req.query('locale')
+  const type = req.query("type");
+  const state = req.query("state");
+  const q = req.query("q");
+  const locale = req.query("locale");
   return {
     ...(type ? { type: typeNameQuery(type) } : {}),
-    ...(state ? { state: parseOrThrow(STORY_STATE, state, 'state') } : {}),
-    ...(q ? { q: parseOrThrow(SEARCH_Q, q, 'q') } : {}),
+    ...(state ? { state: parseOrThrow(STORY_STATE, state, "state") } : {}),
+    ...(q ? { q: parseOrThrow(SEARCH_Q, q, "q") } : {}),
     ...(locale ? { locale: localeQuery(locale) } : {}),
-  }
+  };
 }
 
 /**
@@ -1199,8 +1199,8 @@ export function storyFilterQuery(req: { query: (key: string) => string | undefin
  * (`null`), and anything else names a specific parent.
  */
 export function parentIdQuery(raw: string | undefined): string | null | undefined {
-  if (raw === undefined) return undefined
-  return raw === '' ? null : idParam('parentId', raw)
+  if (raw === undefined) return undefined;
+  return raw === "" ? null : idParam("parentId", raw);
 }
 
 /**
@@ -1212,11 +1212,11 @@ export function parentIdQuery(raw: string | undefined): string | null | undefine
  * typo here has no silently-correct answer.
  */
 export function routedQuery(raw: string | undefined): boolean | undefined {
-  if (raw === undefined || raw === '') return undefined
+  if (raw === undefined || raw === "") return undefined;
   return (
-    parseOrThrow(v.picklist(['true', 'false'], 'must be `true` or `false`'), raw, 'routed') ===
-    'true'
-  )
+    parseOrThrow(v.picklist(["true", "false"], "must be `true` or `false`"), raw, "routed") ===
+    "true"
+  );
 }
 
 /* ------------------------------------------------------------ bulk writes --- */
@@ -1229,13 +1229,13 @@ export function routedQuery(raw: string | undefined): boolean | undefined {
  * page at a time, and a list page is 200 rows at most. Past this, "select all
  * matching" is the shape that exists — it names no ids at all.
  */
-const MAX_SELECTION_IDS = 500
+const MAX_SELECTION_IDS = 500;
 
 const SELECTION_IDS = v.pipe(
-  v.array(ID, 'must be an array of document ids'),
-  v.minLength(1, 'must name at least one document'),
+  v.array(ID, "must be an array of document ids"),
+  v.minLength(1, "must name at least one document"),
   v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} documents or fewer`),
-)
+);
 
 /**
  * The `StoryFilter` a select-all **captured**, as a body field rather than a query
@@ -1256,10 +1256,10 @@ const CAPTURED_FILTER = v.object(
     state: v.optional(STORY_STATE),
     q: v.optional(SEARCH_Q),
     locale: v.optional(LOCALE_CODE),
-    routed: v.optional(v.boolean('must be true or false')),
+    routed: v.optional(v.boolean("must be true or false")),
   },
   OBJECT,
-)
+);
 
 /**
  * A selection, in the two shapes `core/story.ts`'s `BulkSelection` describes:
@@ -1288,16 +1288,16 @@ const SELECTION = v.union(
   [
     v.strictObject(
       {
-        all: v.literal(true, 'must be true'),
+        all: v.literal(true, "must be true"),
         filter: CAPTURED_FILTER,
         expected: v.pipe(
-          v.number('must be a number'),
-          v.integer('must be a whole number'),
-          v.minValue(0, 'must be 0 or greater'),
+          v.number("must be a number"),
+          v.integer("must be a whole number"),
+          v.minValue(0, "must be 0 or greater"),
         ),
         exclude: v.optional(
           v.pipe(
-            v.array(ID, 'must be an array of document ids'),
+            v.array(ID, "must be an array of document ids"),
             v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} documents or fewer`),
           ),
         ),
@@ -1306,8 +1306,8 @@ const SELECTION = v.union(
     ),
     v.strictObject({ ids: SELECTION_IDS }, OBJECT),
   ],
-  'must be either { ids } or { all: true, filter, expected }',
-)
+  "must be either { ids } or { all: true, filter, expected }",
+);
 
 /**
  * The job-control half of every bulk body, shaped exactly like `MigrateBody`,
@@ -1321,23 +1321,23 @@ const SELECTION = v.union(
  */
 const BULK_CONTROL = {
   selection: SELECTION,
-  dryRun: v.optional(v.boolean('must be true or false')),
+  dryRun: v.optional(v.boolean("must be true or false")),
   continueFrom: v.nullish(
-    v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+    v.pipe(v.string("must be a string"), v.maxLength(500, "is not a pagination cursor")),
   ),
   batch: v.optional(
     v.pipe(
-      v.number('must be a number'),
-      v.integer('must be a whole number'),
-      v.minValue(1, 'must be at least 1'),
-      v.maxValue(200, 'must be 200 or fewer'),
+      v.number("must be a number"),
+      v.integer("must be a whole number"),
+      v.minValue(1, "must be at least 1"),
+      v.maxValue(200, "must be 200 or fewer"),
     ),
   ),
-}
+};
 
 /** `POST {base}/api/bulk/publish`, `/unpublish` and `/duplicate` — the three actions
  * that take no argument beyond the selection. */
-export const BulkBody = v.object(BULK_CONTROL, OBJECT)
+export const BulkBody = v.object(BULK_CONTROL, OBJECT);
 
 /**
  * `POST {base}/api/bulk/move`. `parentId` is **required** and nullable: null is the
@@ -1353,14 +1353,14 @@ export const BulkMoveBody = v.object(
     parentId: v.nullable(ID),
     index: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(0, 'must be 0 or greater'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(0, "must be 0 or greater"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
 /**
  * `POST {base}/api/bulk/delete`. `redirect` defaults to **true**, matching
@@ -1373,13 +1373,13 @@ export const BulkMoveBody = v.object(
  * not have to know that one parameter went somewhere else.
  */
 export const BulkDeleteBody = v.object(
-  { ...BULK_CONTROL, redirect: v.optional(v.boolean('must be true or false')) },
+  { ...BULK_CONTROL, redirect: v.optional(v.boolean("must be true or false")) },
   OBJECT,
-)
+);
 
-export type BulkInput = v.InferOutput<typeof BulkBody>
-export type BulkMoveInput = v.InferOutput<typeof BulkMoveBody>
-export type BulkDeleteInput = v.InferOutput<typeof BulkDeleteBody>
+export type BulkInput = v.InferOutput<typeof BulkBody>;
+export type BulkMoveInput = v.InferOutput<typeof BulkMoveBody>;
+export type BulkDeleteInput = v.InferOutput<typeof BulkDeleteBody>;
 
 /**
  * Flat mode's ordering, defaulting to `edited`.
@@ -1391,12 +1391,12 @@ export type BulkDeleteInput = v.InferOutput<typeof BulkDeleteBody>
  * what is on screen.
  */
 export function flatSortQuery(raw: string | undefined): FlatSort {
-  if (raw === undefined || raw === '') return DEFAULT_FLAT_SORT
+  if (raw === undefined || raw === "") return DEFAULT_FLAT_SORT;
   return parseOrThrow(
-    v.picklist(['edited', 'title', 'path'], 'must be one of: edited, title, path'),
+    v.picklist(["edited", "title", "path"], "must be one of: edited, title, path"),
     raw,
-    'sort',
-  )
+    "sort",
+  );
 }
 
 /**
@@ -1410,12 +1410,12 @@ export function flatSortQuery(raw: string | undefined): FlatSort {
  * against the old client-side sort meets, and the message names what it can have.
  */
 export function documentSortQuery(raw: string | undefined): DocumentSort {
-  if (raw === undefined || raw === '') return DEFAULT_DOCUMENT_SORT
+  if (raw === undefined || raw === "") return DEFAULT_DOCUMENT_SORT;
   return parseOrThrow(
-    v.picklist(['ord', 'title', 'edited'], 'must be one of: ord, title, edited'),
+    v.picklist(["ord", "title", "edited"], "must be one of: ord, title, edited"),
     raw,
-    'sort',
-  )
+    "sort",
+  );
 }
 
 /**
@@ -1429,12 +1429,12 @@ export function documentSortQuery(raw: string | undefined): DocumentSort {
  * `size` is the one that descends.
  */
 export function assetSortQuery(raw: string | undefined): AssetSort {
-  if (raw === undefined || raw === '') return DEFAULT_ASSET_SORT
+  if (raw === undefined || raw === "") return DEFAULT_ASSET_SORT;
   return parseOrThrow(
-    v.picklist(['created', 'filename', 'size'], 'must be one of: created, filename, size'),
+    v.picklist(["created", "filename", "size"], "must be one of: created, filename, size"),
     raw,
-    'sort',
-  )
+    "sort",
+  );
 }
 
 /**
@@ -1455,15 +1455,15 @@ export function assetSortQuery(raw: string | undefined): AssetSort {
  * a folder Folio itself created.
  */
 const ASSET_FOLDER_PATH = v.pipe(
-  v.string('must be a string'),
-  v.maxLength(1024, 'must be 1024 characters or fewer'),
-  v.regex(PRINTABLE, 'contains unsupported characters'),
-  v.regex(/^[^/\s]+(\/[^/\s]+)*$/u, 'is not a folder path'),
-)
+  v.string("must be a string"),
+  v.maxLength(1024, "must be 1024 characters or fewer"),
+  v.regex(PRINTABLE, "contains unsupported characters"),
+  v.regex(/^[^/\s]+(\/[^/\s]+)*$/u, "is not a folder path"),
+);
 
 export function folderQuery(raw: string | undefined): string | undefined {
-  if (raw === undefined || raw === '') return undefined
-  return parseOrThrow(ASSET_FOLDER_PATH, raw, 'folder')
+  if (raw === undefined || raw === "") return undefined;
+  return parseOrThrow(ASSET_FOLDER_PATH, raw, "folder");
 }
 
 /**
@@ -1477,11 +1477,11 @@ export function folderQuery(raw: string | undefined): string | undefined {
  * itself minted.
  */
 const ASSET_TAG_SLUG = v.pipe(
-  v.string('must be a string'),
-  v.maxLength(60, 'must be 60 characters or fewer'),
-  v.regex(PRINTABLE, 'contains unsupported characters'),
-  v.regex(/^\S+$/u, 'is not a tag'),
-)
+  v.string("must be a string"),
+  v.maxLength(60, "must be 60 characters or fewer"),
+  v.regex(PRINTABLE, "contains unsupported characters"),
+  v.regex(/^\S+$/u, "is not a tag"),
+);
 
 /**
  * `?tags=` on the asset list, repeated once per tag and **ANDed** by
@@ -1499,13 +1499,13 @@ const ASSET_TAG_SLUG = v.pipe(
  * query string — from binding past `D1_BIND_CAP`.
  */
 export function tagsQuery(raw: string[] | undefined): string[] | undefined {
-  if (raw === undefined) return undefined
-  const slugs = [...new Set(raw.map((value) => tagSlug(value)).filter((value) => value !== ''))]
-  if (slugs.length === 0) return undefined
+  if (raw === undefined) return undefined;
+  const slugs = [...new Set(raw.map((value) => tagSlug(value)).filter((value) => value !== ""))];
+  if (slugs.length === 0) return undefined;
   if (slugs.length > MAX_TAG_FILTER) {
-    throw new FolioError('bad_request', `tags must name ${MAX_TAG_FILTER} tags or fewer`)
+    throw new FolioError("bad_request", `tags must name ${MAX_TAG_FILTER} tags or fewer`);
   }
-  return slugs.map((slug) => parseOrThrow(ASSET_TAG_SLUG, slug, 'tags'))
+  return slugs.map((slug) => parseOrThrow(ASSET_TAG_SLUG, slug, "tags"));
 }
 
 /* ------------------------------------------------------ bulk asset writes --- */
@@ -1539,17 +1539,17 @@ const CAPTURED_ASSET_FILTER = v.object(
     folder: v.optional(ASSET_FOLDER_PATH),
     tags: v.optional(
       v.pipe(
-        v.array(ASSET_TAG_SLUG, 'must be an array of tag slugs'),
+        v.array(ASSET_TAG_SLUG, "must be an array of tag slugs"),
         v.maxLength(MAX_TAG_FILTER, `must name ${MAX_TAG_FILTER} tags or fewer`),
       ),
     ),
-    unfiled: v.optional(v.boolean('must be true or false')),
-    untagged: v.optional(v.boolean('must be true or false')),
-    undescribed: v.optional(v.boolean('must be true or false')),
-    failed: v.optional(v.boolean('must be true or false')),
+    unfiled: v.optional(v.boolean("must be true or false")),
+    untagged: v.optional(v.boolean("must be true or false")),
+    undescribed: v.optional(v.boolean("must be true or false")),
+    failed: v.optional(v.boolean("must be true or false")),
   },
   OBJECT,
-)
+);
 
 /**
  * A selection of library rows, in the same two shapes `SELECTION` describes for
@@ -1560,16 +1560,16 @@ const ASSET_SELECTION = v.union(
   [
     v.strictObject(
       {
-        all: v.literal(true, 'must be true'),
+        all: v.literal(true, "must be true"),
         filter: CAPTURED_ASSET_FILTER,
         expected: v.pipe(
-          v.number('must be a number'),
-          v.integer('must be a whole number'),
-          v.minValue(0, 'must be 0 or greater'),
+          v.number("must be a number"),
+          v.integer("must be a whole number"),
+          v.minValue(0, "must be 0 or greater"),
         ),
         exclude: v.optional(
           v.pipe(
-            v.array(ID, 'must be an array of asset ids'),
+            v.array(ID, "must be an array of asset ids"),
             v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} files or fewer`),
           ),
         ),
@@ -1579,34 +1579,34 @@ const ASSET_SELECTION = v.union(
     v.strictObject(
       {
         ids: v.pipe(
-          v.array(ID, 'must be an array of asset ids'),
-          v.minLength(1, 'must name at least one file'),
+          v.array(ID, "must be an array of asset ids"),
+          v.minLength(1, "must name at least one file"),
           v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} files or fewer`),
         ),
       },
       OBJECT,
     ),
   ],
-  'must be either { ids } or { all: true, filter, expected }',
-)
+  "must be either { ids } or { all: true, filter, expected }",
+);
 
 /** The job-control half of every asset bulk body — `BULK_CONTROL` with the other
  * selection. Same fields, same bounds, same cursor rule. */
 const ASSET_BULK_CONTROL = {
   selection: ASSET_SELECTION,
-  dryRun: v.optional(v.boolean('must be true or false')),
+  dryRun: v.optional(v.boolean("must be true or false")),
   continueFrom: v.nullish(
-    v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+    v.pipe(v.string("must be a string"), v.maxLength(500, "is not a pagination cursor")),
   ),
   batch: v.optional(
     v.pipe(
-      v.number('must be a number'),
-      v.integer('must be a whole number'),
-      v.minValue(1, 'must be at least 1'),
-      v.maxValue(200, 'must be 200 or fewer'),
+      v.number("must be a number"),
+      v.integer("must be a whole number"),
+      v.minValue(1, "must be at least 1"),
+      v.maxValue(200, "must be 200 or fewer"),
     ),
   ),
-}
+};
 
 /**
  * `POST {base}/api/assets/bulk/tag` and `/untag`.
@@ -1621,13 +1621,13 @@ export const AssetBulkTagBody = v.object(
   {
     ...ASSET_BULK_CONTROL,
     tagIds: v.pipe(
-      v.array(ID, 'must be an array of tag ids'),
-      v.minLength(1, 'must name at least one tag'),
+      v.array(ID, "must be an array of tag ids"),
+      v.minLength(1, "must name at least one tag"),
       v.maxLength(MAX_ASSET_TAGS, `must name ${MAX_ASSET_TAGS} tags or fewer`),
     ),
   },
   OBJECT,
-)
+);
 
 /**
  * `POST {base}/api/assets/bulk/move`. `folderId` is **required and nullable**:
@@ -1638,11 +1638,11 @@ export const AssetBulkTagBody = v.object(
 export const AssetBulkMoveBody = v.object(
   { ...ASSET_BULK_CONTROL, folderId: v.nullable(ID) },
   OBJECT,
-)
+);
 
 /** `POST {base}/api/assets/bulk/delete`. Nothing beyond the selection: there is
  * no redirect switch to offer, because an asset has no path to redirect from. */
-export const AssetBulkBody = v.object(ASSET_BULK_CONTROL, OBJECT)
+export const AssetBulkBody = v.object(ASSET_BULK_CONTROL, OBJECT);
 
 /**
  * `POST {base}/api/assets/describe` — the batched enrichment run
@@ -1665,43 +1665,47 @@ export const AssetBulkBody = v.object(ASSET_BULK_CONTROL, OBJECT)
 export const AssetDescribeBody = v.object(
   {
     selection: ASSET_SELECTION,
-    dryRun: v.optional(v.boolean('must be true or false')),
+    dryRun: v.optional(v.boolean("must be true or false")),
     continueFrom: v.nullish(
-      v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+      v.pipe(v.string("must be a string"), v.maxLength(500, "is not a pagination cursor")),
     ),
     batch: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(1, 'must be at least 1'),
-        v.maxValue(25, 'must be 25 or fewer'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(1, "must be at least 1"),
+        v.maxValue(25, "must be 25 or fewer"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
-export type AssetBulkTagInput = v.InferOutput<typeof AssetBulkTagBody>
-export type AssetBulkMoveInput = v.InferOutput<typeof AssetBulkMoveBody>
-export type AssetBulkInput = v.InferOutput<typeof AssetBulkBody>
-export type AssetDescribeInput = v.InferOutput<typeof AssetDescribeBody>
+export type AssetBulkTagInput = v.InferOutput<typeof AssetBulkTagBody>;
+export type AssetBulkMoveInput = v.InferOutput<typeof AssetBulkMoveBody>;
+export type AssetBulkInput = v.InferOutput<typeof AssetBulkBody>;
+export type AssetDescribeInput = v.InferOutput<typeof AssetDescribeBody>;
 
 /**
  * `?dir=` — reverses a sort. Absent means the ordering's own natural direction,
  * which is what a column header shows on its first click, so this is only ever
  * present once somebody has clicked twice.
  */
-export function sortDirQuery(raw: string | undefined): 'asc' | 'desc' | undefined {
-  if (raw === undefined || raw === '') return undefined
-  return parseOrThrow(v.picklist(['asc', 'desc'], 'must be one of: asc, desc'), raw, 'dir')
+export function sortDirQuery(raw: string | undefined): "asc" | "desc" | undefined {
+  if (raw === undefined || raw === "") return undefined;
+  return parseOrThrow(v.picklist(["asc", "desc"], "must be one of: asc, desc"), raw, "dir");
 }
 
 /** `?sort=` on the search route. See `core/story.ts`'s `SearchSort` for why the
  * two values are `title` and `edited` and why the choice matters at all when the
  * consumer does the ranking. */
 export function searchSortQuery(raw: string | undefined): SearchSort {
-  if (raw === undefined || raw === '') return DEFAULT_SEARCH_SORT
-  return parseOrThrow(v.picklist(['title', 'edited'], 'must be one of: title, edited'), raw, 'sort')
+  if (raw === undefined || raw === "") return DEFAULT_SEARCH_SORT;
+  return parseOrThrow(
+    v.picklist(["title", "edited"], "must be one of: title, edited"),
+    raw,
+    "sort",
+  );
 }
 
 /**
@@ -1712,13 +1716,13 @@ export function searchSortQuery(raw: string | undefined): SearchSort {
  * route into a list of type names, because nothing on a `stories` row records a
  * kind — it is a property of the type the host declared.
  */
-export function searchKindQuery(raw: string | undefined): DocumentType['kind'] | undefined {
-  if (raw === undefined || raw === '') return undefined
+export function searchKindQuery(raw: string | undefined): DocumentType["kind"] | undefined {
+  if (raw === undefined || raw === "") return undefined;
   return parseOrThrow(
-    v.picklist(['page', 'record', 'singleton'], 'must be one of: page, record, singleton'),
+    v.picklist(["page", "record", "singleton"], "must be one of: page, record, singleton"),
     raw,
-    'kind',
-  )
+    "kind",
+  );
 }
 
 /* ---------------------------------------------------------------- forms --- */
@@ -1733,12 +1737,12 @@ export function searchKindQuery(raw: string | undefined): DocumentType['kind'] |
  * finds a use for. Ids are minted `frm_<12 hex>` and nothing else is a form.
  */
 const FORM_ID = v.pipe(
-  v.string('must be a string'),
-  v.regex(/^frm_[0-9a-f]{12}$/, 'must be a Folio form id'),
-)
+  v.string("must be a string"),
+  v.regex(/^frm_[0-9a-f]{12}$/, "must be a Folio form id"),
+);
 
 export function formIdParam(raw: string | undefined): string {
-  return parseOrThrow(FORM_ID, raw, 'id')
+  return parseOrThrow(FORM_ID, raw, "id");
 }
 
 /**
@@ -1748,7 +1752,7 @@ export function formIdParam(raw: string | undefined): string {
  * should be screened by mint format, not by charset.
  */
 export function formIdListQuery(raw: string | undefined): string[] {
-  return listQuery(raw, 'ids', (value, label) => parseOrThrow(FORM_ID, value, label))
+  return listQuery(raw, "ids", (value, label) => parseOrThrow(FORM_ID, value, label));
 }
 
 /**
@@ -1760,25 +1764,25 @@ export function formIdListQuery(raw: string | undefined): string[] {
  * ours to insist on. Bounded and screened for control characters, no more.
  */
 const FORM_PAGE = v.pipe(
-  v.string('must be a string'),
-  v.maxLength(2048, 'must be 2048 characters or fewer'),
-  v.regex(PRINTABLE, 'contains unsupported characters'),
-)
+  v.string("must be a string"),
+  v.maxLength(2048, "must be 2048 characters or fewer"),
+  v.regex(PRINTABLE, "contains unsupported characters"),
+);
 
 export function formPageQuery(raw: string): string {
-  return parseOrThrow(FORM_PAGE, raw, 'page')
+  return parseOrThrow(FORM_PAGE, raw, "page");
 }
 
 /** A response id from a path param. `res_<12 hex>`, anchored the way `FORM_ID`
  *  is — these routes are behind `FORMS`, but a screened-by-charset id parameter
  *  on a route that reads rows keyed by it is the same primitive either way. */
 const RESPONSE_ID = v.pipe(
-  v.string('must be a string'),
-  v.regex(/^res_[0-9a-f]{12}$/, 'must be a Folio response id'),
-)
+  v.string("must be a string"),
+  v.regex(/^res_[0-9a-f]{12}$/, "must be a Folio response id"),
+);
 
 export function responseIdParam(raw: string | undefined): string {
-  return parseOrThrow(RESPONSE_ID, raw, 'rid')
+  return parseOrThrow(RESPONSE_ID, raw, "rid");
 }
 
 /**
@@ -1793,12 +1797,12 @@ export function responseIdParam(raw: string | undefined): string {
  * actually holds. Same shape as `core/forms.ts`'s own `NAME`.
  */
 const FIELD_NAME = v.pipe(
-  v.string('must be a string'),
-  v.regex(/^[a-z][a-z0-9_]{0,63}$/, 'must be a field name'),
-)
+  v.string("must be a string"),
+  v.regex(/^[a-z][a-z0-9_]{0,63}$/, "must be a field name"),
+);
 
 export function fieldNameParam(raw: string | undefined): string {
-  return parseOrThrow(FIELD_NAME, raw, 'name')
+  return parseOrThrow(FIELD_NAME, raw, "name");
 }
 
 /**
@@ -1810,7 +1814,7 @@ export function fieldNameParam(raw: string | undefined): string {
  * a D1 column. A hundred options is a country list; more is a mistake or a
  * script.
  */
-const MAX_FORM_OPTIONS = 100
+const MAX_FORM_OPTIONS = 100;
 
 /**
  * One question, bounded. Every string cap here exists for the reason this file
@@ -1858,7 +1862,7 @@ const FORM_FIELD = v.object(
     // value from one a byte flipped, and only refusing here would leave that
     // case unreachable from a well-behaved client.
     beside: v.optional(v.boolean()),
-    grow: v.optional(v.picklist([1, 2, 3, 4], 'must be 1, 2, 3 or 4')),
+    grow: v.optional(v.picklist([1, 2, 3, 4], "must be 1, 2, 3 or 4")),
     i18n: v.optional(
       v.record(
         LOCALE_CODE,
@@ -1875,7 +1879,7 @@ const FORM_FIELD = v.object(
     ),
   },
   OBJECT,
-)
+);
 
 /**
  * The whole field array. Bounded at `MAX_FORM_FIELDS` here as well as in
@@ -1884,9 +1888,9 @@ const FORM_FIELD = v.object(
  * into anything, and the core function refuses the *form*.
  */
 const FORM_FIELDS = v.pipe(
-  v.array(FORM_FIELD, 'must be an array of fields'),
+  v.array(FORM_FIELD, "must be an array of fields"),
   v.maxLength(MAX_FORM_FIELDS, `must be ${MAX_FORM_FIELDS} fields or fewer`),
-)
+);
 
 /**
  * `{ label, name? }`. `name` is capped before `formSlug`, which truncates its
@@ -1896,7 +1900,7 @@ const FORM_FIELDS = v.pipe(
 export const FormCreateBody = v.object(
   { label: required(200), name: v.optional(bounded(200)) },
   OBJECT,
-)
+);
 
 /**
  * A builder save. `expectedUpdatedAt` is **required and never optional**: it is
@@ -1909,7 +1913,7 @@ export const FormCreateBody = v.object(
  */
 export const FormPatchBody = v.object(
   {
-    expectedUpdatedAt: v.pipe(v.number('must be a number'), v.finite()),
+    expectedUpdatedAt: v.pipe(v.number("must be a number"), v.finite()),
     label: v.optional(required(200)),
     name: v.optional(bounded(200)),
     fields: v.optional(FORM_FIELDS),
@@ -1923,13 +1927,13 @@ export const FormPatchBody = v.object(
     redirectTo: v.optional(v.nullable(bounded(2000))),
   },
   OBJECT,
-)
+);
 
-export type FormCreateInput = v.InferOutput<typeof FormCreateBody>
-export type FormPatchInput = v.InferOutput<typeof FormPatchBody>
+export type FormCreateInput = v.InferOutput<typeof FormCreateBody>;
+export type FormPatchInput = v.InferOutput<typeof FormPatchBody>;
 
 /** An epoch-millisecond bound off a query string. */
-const TIMESTAMP = v.pipe(v.string(), v.transform(Number), v.number(), v.finite())
+const TIMESTAMP = v.pipe(v.string(), v.transform(Number), v.number(), v.finite());
 
 /**
  * `?from=`, `?to=` and `?q=` on the responses table and on the CSV export, which
@@ -1940,20 +1944,20 @@ const TIMESTAMP = v.pipe(v.string(), v.transform(Number), v.number(), v.finite()
  * free of Hono.
  */
 export function responseFilterQuery(req: {
-  query: (key: string) => string | undefined
+  query: (key: string) => string | undefined;
 }): ResponseFilter {
-  const filter: ResponseFilter = {}
-  const from = req.query('from')
-  const to = req.query('to')
-  const q = req.query('q')
-  if (from !== undefined && from !== '') filter.from = parseOrThrow(TIMESTAMP, from, 'from')
-  if (to !== undefined && to !== '') filter.to = parseOrThrow(TIMESTAMP, to, 'to')
+  const filter: ResponseFilter = {};
+  const from = req.query("from");
+  const to = req.query("to");
+  const q = req.query("q");
+  if (from !== undefined && from !== "") filter.from = parseOrThrow(TIMESTAMP, from, "from");
+  if (to !== undefined && to !== "") filter.to = parseOrThrow(TIMESTAMP, to, "to");
   // Trimmed and bounded rather than refused, the `limit` side of this file's
   // asymmetry: a 300-character search term is a paste accident with an obvious
   // right answer, and truncating one leaves a client in no state at all.
-  const term = q?.trim().slice(0, 200)
-  if (term) filter.q = term
-  return filter
+  const term = q?.trim().slice(0, 200);
+  if (term) filter.q = term;
+  return filter;
 }
 
 /* -------------------------------------------------- bulk response writes --- */
@@ -1971,12 +1975,12 @@ export function responseFilterQuery(req: {
  */
 const CAPTURED_RESPONSE_FILTER = v.object(
   {
-    from: v.optional(v.pipe(v.number('must be a number'), v.finite())),
-    to: v.optional(v.pipe(v.number('must be a number'), v.finite())),
+    from: v.optional(v.pipe(v.number("must be a number"), v.finite())),
+    to: v.optional(v.pipe(v.number("must be a number"), v.finite())),
     q: v.optional(bounded(200)),
   },
   OBJECT,
-)
+);
 
 /**
  * A selection of responses, in the same two shapes `SELECTION` and
@@ -1990,20 +1994,20 @@ const CAPTURED_RESPONSE_FILTER = v.object(
  * argues for one route up.
  */
 const SELECTION_RESPONSE_IDS = v.pipe(
-  v.array(RESPONSE_ID, 'must be an array of response ids'),
+  v.array(RESPONSE_ID, "must be an array of response ids"),
   v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} responses or fewer`),
-)
+);
 
 const RESPONSE_SELECTION = v.union(
   [
     v.strictObject(
       {
-        all: v.literal(true, 'must be true'),
+        all: v.literal(true, "must be true"),
         filter: CAPTURED_RESPONSE_FILTER,
         expected: v.pipe(
-          v.number('must be a number'),
-          v.integer('must be a whole number'),
-          v.minValue(0, 'must be 0 or greater'),
+          v.number("must be a number"),
+          v.integer("must be a whole number"),
+          v.minValue(0, "must be 0 or greater"),
         ),
         exclude: v.optional(SELECTION_RESPONSE_IDS),
       },
@@ -2011,13 +2015,13 @@ const RESPONSE_SELECTION = v.union(
     ),
     v.strictObject(
       {
-        ids: v.pipe(SELECTION_RESPONSE_IDS, v.minLength(1, 'must name at least one response')),
+        ids: v.pipe(SELECTION_RESPONSE_IDS, v.minLength(1, "must name at least one response")),
       },
       OBJECT,
     ),
   ],
-  'must be either { ids } or { all: true, filter, expected }',
-)
+  "must be either { ids } or { all: true, filter, expected }",
+);
 
 /**
  * `POST {base}/api/forms/:id/responses/delete`. Nothing beyond the selection and
@@ -2027,23 +2031,23 @@ const RESPONSE_SELECTION = v.union(
 export const ResponseBulkBody = v.object(
   {
     selection: RESPONSE_SELECTION,
-    dryRun: v.optional(v.boolean('must be true or false')),
+    dryRun: v.optional(v.boolean("must be true or false")),
     continueFrom: v.nullish(
-      v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+      v.pipe(v.string("must be a string"), v.maxLength(500, "is not a pagination cursor")),
     ),
     batch: v.optional(
       v.pipe(
-        v.number('must be a number'),
-        v.integer('must be a whole number'),
-        v.minValue(1, 'must be at least 1'),
-        v.maxValue(200, 'must be 200 or fewer'),
+        v.number("must be a number"),
+        v.integer("must be a whole number"),
+        v.minValue(1, "must be at least 1"),
+        v.maxValue(200, "must be 200 or fewer"),
       ),
     ),
   },
   OBJECT,
-)
+);
 
-export type ResponseBulkInput = v.InferOutput<typeof ResponseBulkBody>
+export type ResponseBulkInput = v.InferOutput<typeof ResponseBulkBody>;
 
 /* ------------------------------------------------------ form submissions --- */
 
@@ -2061,7 +2065,7 @@ export type ResponseBulkInput = v.InferOutput<typeof ResponseBulkBody>
  * (`{base}/f/:id`), so the bound is on the *count* as well as on the bytes: the
  * map built from it is sized by whoever posted.
  */
-export const MAX_SUBMISSION_KEYS = 200
+export const MAX_SUBMISSION_KEYS = 200;
 
 /**
  * The ceiling on one answer's characters, whatever `max` the builder set on the
@@ -2072,7 +2076,7 @@ export const MAX_SUBMISSION_KEYS = 200
  * stranger. A question with no `max` is bounded by this; a question whose `max`
  * is larger does not raise it.
  */
-export const MAX_ANSWER_CHARS = 10_000
+export const MAX_ANSWER_CHARS = 10_000;
 
 /**
  * `PRINTABLE`'s screen with the three whitespace controls a `textarea` carries
@@ -2083,7 +2087,7 @@ export const MAX_ANSWER_CHARS = 10_000
  * control including the newline, so the three have to be admitted by a second
  * branch rather than carved out of the first.
  */
-const PRINTABLE_MULTILINE = /^(?:[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]|[\n\r\t])*$/u
+const PRINTABLE_MULTILINE = /^(?:[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]|[\n\r\t])*$/u;
 
 /**
  * Whether one submitted answer holds only characters a stored string may hold.
@@ -2094,7 +2098,7 @@ const PRINTABLE_MULTILINE = /^(?:[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]|[\n\r
  * is somebody trying to make one stored value look like two.
  */
 export function isPrintableAnswer(raw: string, multiline: boolean): boolean {
-  return (multiline ? PRINTABLE_MULTILINE : PRINTABLE).test(raw)
+  return (multiline ? PRINTABLE_MULTILINE : PRINTABLE).test(raw);
 }
 
 /**
@@ -2108,7 +2112,7 @@ export function isPrintableAnswer(raw: string, multiline: boolean): boolean {
  * page of it (`../../docs/specs/content-model/forms.md` decision 5).
  */
 export function wantsJson(req: { headers: Headers }): boolean {
-  const accept = req.headers.get('accept') ?? ''
-  if (accept.includes('application/json')) return true
-  return !accept.includes('text/html') && (req.headers.get('content-type') ?? '').includes('json')
+  const accept = req.headers.get("accept") ?? "";
+  if (accept.includes("application/json")) return true;
+  return !accept.includes("text/html") && (req.headers.get("content-type") ?? "").includes("json");
 }

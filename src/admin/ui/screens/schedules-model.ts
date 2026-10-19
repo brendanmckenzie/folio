@@ -1,5 +1,5 @@
-import type { Schedule, ScheduleAction, ScheduleStatus } from '../../../core/story'
-import type { BadgeTone } from '../Badge'
+import type { Schedule, ScheduleAction, ScheduleStatus } from "../../../core/story";
+import type { BadgeTone } from "../Badge";
 
 /**
  * Everything decidable about the Schedules screen, as pure functions.
@@ -16,7 +16,7 @@ import type { BadgeTone } from '../Badge'
  */
 
 /** A row as `GET {base}/api/schedules` answers it. */
-export type ScheduleRow = Schedule
+export type ScheduleRow = Schedule;
 
 /**
  * A row with the title resolved.
@@ -34,9 +34,9 @@ export type ScheduleRow = Schedule
  * lookup succeeded and this id was not in it, and `titleOf` has three branches.
  */
 export interface ResolvedSchedule extends ScheduleRow {
-  title?: string
+  title?: string;
   /** The lookup answered and this document was not in it. */
-  missing?: boolean
+  missing?: boolean;
 }
 
 /**
@@ -45,18 +45,18 @@ export interface ResolvedSchedule extends ScheduleRow {
  * row is either waiting or in trouble, and there is no completed-history noise to
  * filter out. It is also why there is no `done` status to offer as a filter.
  */
-export const STATUSES: readonly ScheduleStatus[] = ['pending', 'failed']
-export const ACTIONS: readonly ScheduleAction[] = ['publish', 'unpublish']
+export const STATUSES: readonly ScheduleStatus[] = ["pending", "failed"];
+export const ACTIONS: readonly ScheduleAction[] = ["publish", "unpublish"];
 
 /** Matching `server/scheduler.ts`. A `failed` row at this many attempts is done
  * trying, which is the difference between "wait" and "do something". */
-export const MAX_ATTEMPTS = 3
+export const MAX_ATTEMPTS = 3;
 
 /* ------------------------------------------------------------------- the URL --- */
 
 export interface SchedulesUrl {
-  status: string
-  action: string
+  status: string;
+  action: string;
 }
 
 /**
@@ -66,17 +66,17 @@ export interface SchedulesUrl {
  * takes: a hand-edited or stale URL should show an unfiltered list, not an error page.
  */
 export function parseSchedulesUrl(query: Readonly<Record<string, string>>): SchedulesUrl {
-  const status = query.status ?? ''
-  const action = query.action ?? ''
+  const status = query.status ?? "";
+  const action = query.action ?? "";
   return {
-    status: (STATUSES as readonly string[]).includes(status) ? status : '',
-    action: (ACTIONS as readonly string[]).includes(action) ? action : '',
-  }
+    status: (STATUSES as readonly string[]).includes(status) ? status : "",
+    action: (ACTIONS as readonly string[]).includes(action) ? action : "",
+  };
 }
 
 /** The inverse, for `href`. Empty values are dropped by `href` itself. */
 export function schedulesQuery(url: SchedulesUrl): Record<string, string | undefined> {
-  return { status: url.status || undefined, action: url.action || undefined }
+  return { status: url.status || undefined, action: url.action || undefined };
 }
 
 /** What goes on the wire. One representation, shared by the fetch and by the
@@ -85,21 +85,21 @@ export function schedulesParams(
   url: SchedulesUrl,
   opts: { limit: number; cursor?: string | null; count?: boolean },
 ): URLSearchParams {
-  const params = new URLSearchParams()
-  params.set('limit', String(opts.limit))
-  if (url.status) params.set('status', url.status)
-  if (url.action) params.set('action', url.action)
-  if (opts.cursor) params.set('cursor', opts.cursor)
-  if (opts.count) params.set('count', '1')
-  return params
+  const params = new URLSearchParams();
+  params.set("limit", String(opts.limit));
+  if (url.status) params.set("status", url.status);
+  if (url.action) params.set("action", url.action);
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  if (opts.count) params.set("count", "1");
+  return params;
 }
 
-export const isNarrowed = (url: SchedulesUrl): boolean => url.status !== '' || url.action !== ''
+export const isNarrowed = (url: SchedulesUrl): boolean => url.status !== "" || url.action !== "";
 
 /* ------------------------------------------------------------------- labels --- */
 
 export function actionLabel(action: ScheduleAction): string {
-  return action === 'publish' ? 'Publish' : 'Unpublish'
+  return action === "publish" ? "Publish" : "Unpublish";
 }
 
 /**
@@ -110,13 +110,13 @@ export function actionLabel(action: ScheduleAction): string {
  * honest about not knowing the title. A dash would claim there is no name.
  */
 export function titleOf(row: ResolvedSchedule): string {
-  if (row.title !== undefined) return row.title
-  return row.missing ? 'Deleted document' : row.storyId
+  if (row.title !== undefined) return row.title;
+  return row.missing ? "Deleted document" : row.storyId;
 }
 
 /** Whether the document column is showing something other than a real title, which
  * is what the muted treatment keys on. */
-export const isUnnamed = (row: ResolvedSchedule): boolean => row.title === undefined
+export const isUnnamed = (row: ResolvedSchedule): boolean => row.title === undefined;
 
 /**
  * When it is due, in the reader's own timezone.
@@ -128,12 +128,12 @@ export const isUnnamed = (row: ResolvedSchedule): boolean => row.title === undef
  */
 export function whenLabel(at: number, locale?: string): string {
   return new Intl.DateTimeFormat(locale, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(at))
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(at));
 }
 
 /**
@@ -144,20 +144,20 @@ export function whenLabel(at: number, locale?: string): string {
  * are shown and this is not a hover title.
  */
 export function relativeLabel(at: number, now: number, locale?: string): string {
-  const format = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
-  const seconds = Math.round((at - now) / 1000)
+  const format = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const seconds = Math.round((at - now) / 1000);
   const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ['year', 31_536_000],
-    ['month', 2_592_000],
-    ['week', 604_800],
-    ['day', 86_400],
-    ['hour', 3600],
-    ['minute', 60],
-  ]
+    ["year", 31_536_000],
+    ["month", 2_592_000],
+    ["week", 604_800],
+    ["day", 86_400],
+    ["hour", 3600],
+    ["minute", 60],
+  ];
   for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) return format.format(Math.round(seconds / size), unit)
+    if (Math.abs(seconds) >= size) return format.format(Math.round(seconds / size), unit);
   }
-  return format.format(seconds, 'second')
+  return format.format(seconds, "second");
 }
 
 /* ---------------------------------------------------------------- the outcome --- */
@@ -182,42 +182,42 @@ export function relativeLabel(at: number, now: number, locale?: string): string 
  * and a schedule fires on the first sweep *at or after* its due time — so a row a few
  * seconds past due is on time, and flagging it would cry wolf once a minute forever.
  */
-export type Outcome = 'waiting' | 'retrying' | 'overdue' | 'stuck'
+export type Outcome = "waiting" | "retrying" | "overdue" | "stuck";
 
 /** How late a pending row may be before the sweep is presumed not to be running.
  * One tick of the cron plus a little, per the spec's "never early, late by at most
  * one tick". */
-export const OVERDUE_GRACE_MS = 90_000
+export const OVERDUE_GRACE_MS = 90_000;
 
 export function outcomeOf(row: ScheduleRow, now: number): Outcome {
-  if (row.attempts >= MAX_ATTEMPTS) return 'stuck'
-  if (row.attempts > 0) return 'retrying'
-  return row.at < now - OVERDUE_GRACE_MS ? 'overdue' : 'waiting'
+  if (row.attempts >= MAX_ATTEMPTS) return "stuck";
+  if (row.attempts > 0) return "retrying";
+  return row.at < now - OVERDUE_GRACE_MS ? "overdue" : "waiting";
 }
 
 export function outcomeLabel(outcome: Outcome): string {
   switch (outcome) {
-    case 'waiting':
-      return 'Scheduled'
-    case 'retrying':
-      return 'Retrying'
-    case 'overdue':
-      return 'Overdue'
-    case 'stuck':
-      return 'Not run'
+    case "waiting":
+      return "Scheduled";
+    case "retrying":
+      return "Retrying";
+    case "overdue":
+      return "Overdue";
+    case "stuck":
+      return "Not run";
   }
 }
 
 /** `Badge`'s tone. `overdue` and `stuck` are the two a person has to act on. */
 export function outcomeTone(outcome: Outcome): BadgeTone {
   switch (outcome) {
-    case 'waiting':
-      return 'neutral'
-    case 'retrying':
-      return 'warn'
-    case 'overdue':
-    case 'stuck':
-      return 'danger'
+    case "waiting":
+      return "neutral";
+    case "retrying":
+      return "warn";
+    case "overdue":
+    case "stuck":
+      return "danger";
   }
 }
 
@@ -238,25 +238,25 @@ export function health(
   rows: readonly ScheduleRow[],
   now: number,
 ): { tone: BadgeTone; message: string } | null {
-  const overdue = rows.filter((row) => outcomeOf(row, now) === 'overdue').length
-  const stuck = rows.filter((row) => outcomeOf(row, now) === 'stuck').length
+  const overdue = rows.filter((row) => outcomeOf(row, now) === "overdue").length;
+  const stuck = rows.filter((row) => outcomeOf(row, now) === "stuck").length;
 
   if (overdue > 0) {
     return {
-      tone: 'danger',
-      message: `${count(overdue, 'schedule')} past due and not attempted. Nothing appears to be running the sweep — check that your Worker declares a cron trigger and calls folio.runSchedules().`,
-    }
+      tone: "danger",
+      message: `${count(overdue, "schedule")} past due and not attempted. Nothing appears to be running the sweep — check that your Worker declares a cron trigger and calls folio.runSchedules().`,
+    };
   }
   if (stuck > 0) {
     return {
-      tone: 'warn',
-      message: `${count(stuck, 'schedule')} failed ${MAX_ATTEMPTS} times and will not be retried. Cancel and reschedule once the cause is fixed.`,
-    }
+      tone: "warn",
+      message: `${count(stuck, "schedule")} failed ${MAX_ATTEMPTS} times and will not be retried. Cancel and reschedule once the cause is fixed.`,
+    };
   }
-  return null
+  return null;
 }
 
-const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? ' is' : 's are'}`
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? " is" : "s are"}`;
 
 /* -------------------------------------------------------------- cancellation --- */
 
@@ -271,13 +271,13 @@ const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? ' is' : 's a
  * come down that was never going up.
  */
 export function cancelWarning(row: ResolvedSchedule): string {
-  const other = row.action === 'publish' ? 'unpublish' : 'publish'
-  return `“${titleOf(row)}” will no longer ${row.action} automatically. Any scheduled ${other} for the same document is not affected.`
+  const other = row.action === "publish" ? "unpublish" : "publish";
+  return `“${titleOf(row)}” will no longer ${row.action} automatically. Any scheduled ${other} for the same document is not affected.`;
 }
 
 /** The path that cancels it. One route, narrowed by action. */
 export function cancelPath(row: ScheduleRow): string {
-  return `/story/${encodeURIComponent(row.storyId)}/schedule?action=${row.action}`
+  return `/story/${encodeURIComponent(row.storyId)}/schedule?action=${row.action}`;
 }
 
 /* ------------------------------------------------------------------- footer --- */
@@ -286,6 +286,6 @@ export function cancelPath(row: ScheduleRow): string {
  * footers on two list screens reading differently is the kind of drift nobody
  * notices and everybody feels. */
 export function showing(shown: number, total: number | undefined): string {
-  if (total === undefined) return `${shown} shown`
-  return `${shown} of ${total} ${total === 1 ? 'schedule' : 'schedules'}`
+  if (total === undefined) return `${shown} shown`;
+  return `${shown} of ${total} ${total === 1 ? "schedule" : "schedules"}`;
 }

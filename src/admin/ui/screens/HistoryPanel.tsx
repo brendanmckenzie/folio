@@ -1,17 +1,17 @@
-import type { ReactNode } from 'react'
-import { useCallback, useId, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import type { Doc } from '../../../core/doc'
-import type { ActivityEntry } from '../../../core/protocol'
-import type { SchemaIndex } from '../../../core/schema'
-import type { VersionMeta } from '../../../server/versions'
-import { useFocusTrap } from '../../hooks/useFocusTrap'
-import type { Trail } from '../../hooks/useVersions'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
-import { scoped } from '../scope'
-import css from './HistoryPanel.module.css'
+import type { ReactNode } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { Doc } from "../../../core/doc";
+import type { ActivityEntry } from "../../../core/protocol";
+import type { SchemaIndex } from "../../../core/schema";
+import type { VersionMeta } from "../../../server/versions";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
+import type { Trail } from "../../hooks/useVersions";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
+import { scoped } from "../scope";
+import css from "./HistoryPanel.module.css";
 import {
   ACTIVITY_NOTE,
   type ActorForm,
@@ -24,7 +24,7 @@ import {
   versionKindLabel,
   versionTitle,
   versionTone,
-} from './history-model'
+} from "./history-model";
 
 export interface HistoryPanelProps {
   /**
@@ -32,46 +32,46 @@ export interface HistoryPanelProps {
    * (`ui/shortcuts.ts`), not to this component — the same rule `Palette.tsx`'s
    * closing comment states for `⌘K`.
    */
-  open: boolean
-  onClose: () => void
+  open: boolean;
+  onClose: () => void;
   /** The live draft, for the labels in an activity phrase. */
-  doc: Doc
-  schema: SchemaIndex
+  doc: Doc;
+  schema: SchemaIndex;
   /**
    * `useVersionsList().trail` — the version list with its cursor. **Not a second
    * copy**: it is the same state `usePublishedDoc` and the viewing machinery read,
    * which is what makes a checkpoint saved from this panel appear in it.
    */
-  versionTrail: Trail<VersionMeta>
+  versionTrail: Trail<VersionMeta>;
   /** `useVersions().activityTrail`. */
-  activityTrail: Trail<ActivityEntry>
+  activityTrail: Trail<ActivityEntry>;
   /** `useVersions.reload` — both lists, for the panel's own Reload. */
-  onReload: () => Promise<void>
+  onReload: () => Promise<void>;
   /** `useVersions`' own flag: a version request is in flight, so its controls stay
    * disabled. */
-  busy: boolean
+  busy: boolean;
   /** `useVersions`' `viewing?.version.id ?? null` — the row that has the amber
    * frame on the stage. Only the id is needed here; the document belongs to the
    * stage. */
-  viewingId: string | null
+  viewingId: string | null;
   /** `useVersions.checkpoint`. Reports its own failures through the toast. */
-  onCheckpoint: (label: string) => Promise<void>
+  onCheckpoint: (label: string) => Promise<void>;
   /** `useVersions.view` — loads the version and puts it on the stage. */
-  onView: (version: VersionMeta) => Promise<void>
+  onView: (version: VersionMeta) => Promise<void>;
   /** `useVersions.exit`. */
-  onExitView: () => void
+  onExitView: () => void;
   /**
    * `useVersions.restore`. No preloaded document from here: the hook fetches the
    * version itself, which is the difference between restoring from this list and
    * restoring from `ViewingBar`, where the document is already in hand.
    */
-  onRestore: (version: VersionMeta) => Promise<void>
+  onRestore: (version: VersionMeta) => Promise<void>;
   /**
    * Actor id → display name for whatever the shell already knows; presence is the
    * intended source, since a peer broadcast carries both. Optional, and layered
    * *under* the names the activity trail captured. See `actorNames`.
    */
-  peerNames?: Readonly<Record<string, string>>
+  peerNames?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -112,8 +112,8 @@ export function HistoryPanel(props: HistoryPanelProps) {
   // The early return is what makes `open` mean *mounted*, which the focus trap's
   // memory of the opener depends on. It is also what makes `active` — and therefore
   // the activity trail's first read — the shell's `open` state and nothing else.
-  if (!props.open) return null
-  return <Panel {...props} />
+  if (!props.open) return null;
+  return <Panel {...props} />;
 }
 
 /* ------------------------------------------------------------------- panel --- */
@@ -133,29 +133,29 @@ function Panel({
   onRestore,
   peerNames,
 }: HistoryPanelProps) {
-  const panel = useRef<HTMLDivElement>(null)
-  const titleId = useId()
-  const versionsId = useId()
-  const activityId = useId()
-  useFocusTrap(panel, onClose)
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const versionsId = useId();
+  const activityId = useId();
+  useFocusTrap(panel, onClose);
 
-  const [naming, setNaming] = useState(false)
+  const [naming, setNaming] = useState(false);
 
   const names = useMemo(
     () => actorNames(activityTrail.rows, peerNames),
     [activityTrail.rows, peerNames],
-  )
+  );
 
   // No reload of either list here, and that is the point of the widening:
   // `useVersions.checkpoint` and `.restore` already refresh both through
   // `afterWrite`, and the rows they refresh are the rows this panel is drawing.
   const checkpoint = useCallback(
     async (label: string) => {
-      await onCheckpoint(label)
-      setNaming(false)
+      await onCheckpoint(label);
+      setNaming(false);
     },
     [onCheckpoint],
-  )
+  );
 
   return createPortal(
     // See `scope.ts`: a portal leaves the shell, so it carries the scope itself.
@@ -188,7 +188,7 @@ function Panel({
             size="sm"
             variant="subtle"
             disabled={busy || naming}
-            reason={naming ? 'Name the checkpoint below first' : 'A version request is in flight'}
+            reason={naming ? "Name the checkpoint below first" : "A version request is in flight"}
             onClick={() => setNaming(true)}
           >
             New checkpoint
@@ -281,14 +281,14 @@ function Panel({
       </div>
     </div>,
     document.body,
-  )
+  );
 }
 
 /* -------------------------------------------------------------------- rows --- */
 
 /** Four skeleton rows. Named rather than indexed, matching Content's and
  * Documents'. */
-const SKELETON = ['h1', 'h2', 'h3', 'h4']
+const SKELETON = ["h1", "h2", "h3", "h4"];
 
 /**
  * One list, with its first-load skeleton, its empty state, its error line and its
@@ -304,13 +304,13 @@ function TrailList<T>({
 }: {
   /** `useVersions.ts`'s `Trail`, which carries its own `more` and `reload`: the
    * controls belong to the state, so the panel never has to hold a cursor. */
-  trail: Trail<T>
+  trail: Trail<T>;
   /** Plural, for the count and the failure line. */
-  noun: string
-  empty: ReactNode
-  children: ReactNode
+  noun: string;
+  empty: ReactNode;
+  children: ReactNode;
 }) {
-  let body: ReactNode
+  let body: ReactNode;
   if (trail.loading && trail.rows.length === 0) {
     body = (
       <div className={css.skeletons} aria-hidden="true">
@@ -318,7 +318,7 @@ function TrailList<T>({
           <div className={css.skeleton} key={key} />
         ))}
       </div>
-    )
+    );
   } else if (trail.error !== undefined && trail.rows.length === 0) {
     body = (
       <EmptyState
@@ -330,9 +330,9 @@ function TrailList<T>({
           </Button>
         }
       />
-    )
+    );
   } else if (trail.rows.length === 0) {
-    body = empty
+    body = empty;
   } else {
     body = (
       <>
@@ -347,14 +347,14 @@ function TrailList<T>({
           </span>
           {trail.cursor === null ? null : (
             <Button size="sm" disabled={trail.loading} onClick={() => void trail.more()}>
-              {trail.loading ? 'Loading…' : 'Show older'}
+              {trail.loading ? "Loading…" : "Show older"}
             </Button>
           )}
         </div>
       </>
-    )
+    );
   }
-  return <div className={css.scroller}>{body}</div>
+  return <div className={css.scroller}>{body}</div>;
 }
 
 function VersionRow({
@@ -366,17 +366,17 @@ function VersionRow({
   onExitView,
   onRestore,
 }: {
-  version: VersionMeta
-  actor: ActorForm
-  busy: boolean
-  viewing: boolean
-  onView: (version: VersionMeta) => Promise<void>
-  onExitView: () => void
-  onRestore: (version: VersionMeta) => Promise<void>
+  version: VersionMeta;
+  actor: ActorForm;
+  busy: boolean;
+  viewing: boolean;
+  onView: (version: VersionMeta) => Promise<void>;
+  onExitView: () => void;
+  onRestore: (version: VersionMeta) => Promise<void>;
 }) {
-  const label = versionTitle(version)
+  const label = versionTitle(version);
   return (
-    <li className={`${css.row} ${viewing ? css.rowViewing : ''}`}>
+    <li className={`${css.row} ${viewing ? css.rowViewing : ""}`}>
       <span className={css.rowMain}>
         <span className={css.rowTitle} title={label}>
           {label}
@@ -438,7 +438,7 @@ function VersionRow({
         </Button>
       </span>
     </li>
-  )
+  );
 }
 
 /** Relative, with the exact timestamp as its title — `historyWhen` argues the
@@ -448,7 +448,7 @@ function When({ at }: { at: number }) {
     <time className={css.when} dateTime={new Date(at).toISOString()} title={historyExactly(at)}>
       {historyWhen(at)}
     </time>
-  )
+  );
 }
 
 /**
@@ -461,20 +461,20 @@ function When({ at }: { at: number }) {
  */
 function Actor({ form }: { form: ActorForm }) {
   switch (form.kind) {
-    case 'none':
+    case "none":
       // No actor at all — `auth: 'open'`. A row that said "by nobody" would report
       // the absence of a feature as a property of the edit.
-      return null
-    case 'name':
-      return <span className={css.actor}>{form.label}</span>
-    case 'token':
+      return null;
+    case "name":
+      return <span className={css.actor}>{form.label}</span>;
+    case "token":
       return (
         <span className={css.actor}>
           {form.label}
           <Badge tone="neutral">API token</Badge>
         </span>
-      )
-    case 'id':
+      );
+    case "id":
       return (
         <code
           className={css.actorId}
@@ -482,7 +482,7 @@ function Actor({ form }: { form: ActorForm }) {
         >
           {form.label}
         </code>
-      )
+      );
   }
 }
 
@@ -499,18 +499,18 @@ function CheckpointForm({
   onSubmit,
   onCancel,
 }: {
-  onSubmit: (label: string) => Promise<void>
-  onCancel: () => void
+  onSubmit: (label: string) => Promise<void>;
+  onCancel: () => void;
 }) {
-  const [label, setLabel] = useState('')
-  const [saving, setSaving] = useState(false)
+  const [label, setLabel] = useState("");
+  const [saving, setSaving] = useState(false);
   return (
     <form
       className={css.checkpoint}
       onSubmit={(e) => {
-        e.preventDefault()
-        setSaving(true)
-        void onSubmit(label.trim()).finally(() => setSaving(false))
+        e.preventDefault();
+        setSaving(true);
+        void onSubmit(label.trim()).finally(() => setSaving(false));
       }}
     >
       <input
@@ -532,5 +532,5 @@ function CheckpointForm({
         Cancel
       </Button>
     </form>
-  )
+  );
 }

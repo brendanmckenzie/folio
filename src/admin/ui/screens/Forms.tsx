@@ -1,15 +1,15 @@
-import { useCallback, useId, useState } from 'react'
-import { canDeleteForms, canEdit, canReadResponses, type Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { Field, Input } from '../Field'
-import { ListHeader } from '../List'
-import type { Screen } from '../route'
-import { type Column, Table } from '../Table'
-import { FormDeleteDialog } from './FormDeleteDialog'
-import css from './Forms.module.css'
+import { useCallback, useId, useState } from "react";
+import { canDeleteForms, canEdit, canReadResponses, type Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { Field, Input } from "../Field";
+import { ListHeader } from "../List";
+import type { Screen } from "../route";
+import { type Column, Table } from "../Table";
+import { FormDeleteDialog } from "./FormDeleteDialog";
+import css from "./Forms.module.css";
 import {
   BLANK_FORM_DRAFT,
   createFormBody,
@@ -21,19 +21,19 @@ import {
   responsesLabel,
   statusHint,
   updatedLabel,
-} from './forms-model'
-import { messageOf } from './useContent'
-import { useForms } from './useForms'
+} from "./forms-model";
+import { messageOf } from "./useContent";
+import { useForms } from "./useForms";
 
 interface Props {
-  apiBase: string
-  me: Me
-  onOpen: (screen: Screen) => void
-  onNotice: (message: string) => void
+  apiBase: string;
+  me: Me;
+  onOpen: (screen: Screen) => void;
+  onNotice: (message: string) => void;
 }
 
 /** Six placeholder rows, matching Redirects' and Documents' skeleton count. */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6"];
 
 /**
  * The forms list — `docs/specs/content-model/forms.md` phase 6, decision 12's
@@ -49,7 +49,7 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  * how many people answered it.
  */
 export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
-  const data = useForms(apiBase)
+  const data = useForms(apiBase);
   /**
    * The two row actions, and they are **two different roles** — which is why the
    * gap issue #7 found here was invisible: `New form` and `Delete` were both
@@ -57,100 +57,100 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
    * `GET {base}/api/forms/:id/responses` is `FORMS` (publisher), so an editor
    * clicking it reached a 403 to learn something the button could have not said.
    */
-  const mayRead = canReadResponses(me)
-  const mayDelete = canDeleteForms(me)
+  const mayRead = canReadResponses(me);
+  const mayDelete = canDeleteForms(me);
 
-  const [creating, setCreating] = useState(false)
-  const [deleting, setDeleting] = useState<FormRow | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<FormRow | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const create = useCallback(
     async (draft: FormDraft) => {
-      setBusy(true)
+      setBusy(true);
       try {
         const res = await fetch(`${apiBase}/forms`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          method: "POST",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify(createFormBody(draft)),
-        })
-        if (!res.ok) throw new Error(await messageOf(res))
-        const form = (await res.json()) as { id: string }
-        setCreating(false)
+        });
+        if (!res.ok) throw new Error(await messageOf(res));
+        const form = (await res.json()) as { id: string };
+        setCreating(false);
         // Straight to the builder, the way a new document opens straight to the
         // editor — a form with no questions yet has nothing a list row can show.
-        onOpen({ name: 'form', id: form.id })
+        onOpen({ name: "form", id: form.id });
       } catch (e) {
         // Left open: a slug collision names the existing form and is exactly
         // the kind of thing somebody fixes by editing what they typed, not by
         // starting over from a toast.
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [apiBase, onOpen, onNotice],
-  )
+  );
 
   const remove = useCallback(
     async (row: FormRow) => {
-      setBusy(true)
+      setBusy(true);
       try {
         const res = await fetch(`${apiBase}/forms/${encodeURIComponent(row.id)}`, {
-          method: 'DELETE',
-        })
-        if (!res.ok) throw new Error(await messageOf(res))
-        onNotice(`"${row.label}" and everything it collected are gone.`)
-        data.reload()
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(await messageOf(res));
+        onNotice(`"${row.label}" and everything it collected are gone.`);
+        data.reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [apiBase, data, onNotice],
-  )
+  );
 
   const columns: Column<FormRow>[] = [
     {
-      key: 'label',
-      label: 'Form',
-      cell: (row) => <span className={css.label}>{row.label || 'Untitled form'}</span>,
+      key: "label",
+      label: "Form",
+      cell: (row) => <span className={css.label}>{row.label || "Untitled form"}</span>,
     },
     {
-      key: 'name',
-      label: 'Name',
+      key: "name",
+      label: "Name",
       cell: (row) => <code className={css.slug}>{row.name}</code>,
     },
     {
-      key: 'status',
-      label: 'Status',
+      key: "status",
+      label: "Status",
       cell: (row) => {
-        const status = formStatus(row)
+        const status = formStatus(row);
         return (
-          <Badge tone={status === 'open' ? 'ok' : 'neutral'} title={statusHint(row)}>
-            {status === 'open' ? 'Open' : 'Closed'}
+          <Badge tone={status === "open" ? "ok" : "neutral"} title={statusHint(row)}>
+            {status === "open" ? "Open" : "Closed"}
           </Badge>
-        )
+        );
       },
     },
     {
-      key: 'questions',
-      label: 'Questions',
+      key: "questions",
+      label: "Questions",
       numeric: true,
       cell: (row) => questionsLabel(row),
     },
     {
-      key: 'responses',
-      label: 'Responses',
+      key: "responses",
+      label: "Responses",
       numeric: true,
       cell: (row) => responsesLabel(row),
     },
     {
-      key: 'updated',
-      label: 'Last edited',
+      key: "updated",
+      label: "Last edited",
       cell: (row) => <span className={css.stamp}>{updatedLabel(row)}</span>,
     },
-  ]
+  ];
 
   if (data.page.error && data.page.rows.length === 0) {
     return (
@@ -165,10 +165,10 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
           }
         />
       </div>
-    )
+    );
   }
 
-  const firstLoad = data.page.loading && data.page.rows.length === 0
+  const firstLoad = data.page.loading && data.page.rows.length === 0;
 
   return (
     <div className={css.screen}>
@@ -194,7 +194,7 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
           columns={columns}
           rows={data.page.rows}
           rowKey={(row) => row.id}
-          onOpen={(row) => onOpen({ name: 'form', id: row.id })}
+          onOpen={(row) => onOpen({ name: "form", id: row.id })}
           /* Neither action available means no actions column at all: `Table`
              draws its header cell and its `<td>` only when this prop is passed,
              so an editor gets a table one column narrower rather than a hover
@@ -207,7 +207,7 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
                       <Button
                         size="sm"
                         variant="subtle"
-                        onClick={() => onOpen({ name: 'responses', id: row.id })}
+                        onClick={() => onOpen({ name: "responses", id: row.id })}
                       >
                         Responses
                       </Button>
@@ -247,7 +247,7 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
         <span className={css.count}>
           {data.page.total === undefined
             ? `${data.page.rows.length} shown`
-            : `${data.page.rows.length} of ${data.page.total} ${data.page.total === 1 ? 'form' : 'forms'}`}
+            : `${data.page.rows.length} of ${data.page.total} ${data.page.total === 1 ? "form" : "forms"}`}
         </span>
         <span className={css.pager}>
           <Button
@@ -284,14 +284,14 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
           label={deleting.label}
           onClose={() => setDeleting(null)}
           onConfirm={() => {
-            const row = deleting
-            setDeleting(null)
-            void remove(row)
+            const row = deleting;
+            setDeleting(null);
+            void remove(row);
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ create --- */
@@ -301,23 +301,23 @@ function NewFormDialog({
   onClose,
   onSubmit,
 }: {
-  busy: boolean
-  onClose: () => void
-  onSubmit: (draft: FormDraft) => void
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (draft: FormDraft) => void;
 }) {
-  const [draft, setDraft] = useState<FormDraft>(BLANK_FORM_DRAFT)
+  const [draft, setDraft] = useState<FormDraft>(BLANK_FORM_DRAFT);
   /** Refusals appear on the first submit, not on the first keystroke —
    *  `Redirects.tsx`'s `NewRedirectDialog` states the reason. */
-  const [submitted, setSubmitted] = useState(false)
-  const formId = useId()
+  const [submitted, setSubmitted] = useState(false);
+  const formId = useId();
 
-  const refusal = formDraftRefusal(draft)
-  const shown = submitted ? refusal : null
+  const refusal = formDraftRefusal(draft);
+  const shown = submitted ? refusal : null;
 
   const submit = () => {
-    setSubmitted(true)
-    if (!refusal) onSubmit(draft)
-  }
+    setSubmitted(true);
+    if (!refusal) onSubmit(draft);
+  };
 
   return (
     <Dialog
@@ -337,8 +337,8 @@ function NewFormDialog({
         id={formId}
         className={css.form}
         onSubmit={(e) => {
-          e.preventDefault()
-          submit()
+          e.preventDefault();
+          submit();
         }}
       >
         <Field label="Label" required error={shown ?? undefined}>
@@ -368,5 +368,5 @@ function NewFormDialog({
         </Field>
       </form>
     </Dialog>
-  )
+  );
 }

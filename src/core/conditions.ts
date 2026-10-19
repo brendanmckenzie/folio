@@ -1,5 +1,5 @@
-import type { Json } from './doc'
-import { deepEqual } from './diff'
+import type { Json } from "./doc";
+import { deepEqual } from "./diff";
 
 /**
  * A field's visibility rule. Declarative data, never a function: the admin
@@ -19,7 +19,7 @@ export type FieldCondition =
   | { field: string; isSet: boolean }
   | { all: readonly FieldCondition[] }
   | { any: readonly FieldCondition[] }
-  | { not: FieldCondition }
+  | { not: FieldCondition };
 
 /**
  * "Empty" is ambiguous across kinds, so `isSet` is explicit about it: `false`
@@ -28,9 +28,9 @@ export type FieldCondition =
  * `{ eq: true }`, not `{ isSet: true }`.
  */
 function isSet(value: Json | undefined): boolean {
-  if (value === null || value === undefined || value === '') return false
-  if (Array.isArray(value) && value.length === 0) return false
-  return true
+  if (value === null || value === undefined || value === "") return false;
+  if (Array.isArray(value) && value.length === 0) return false;
+  return true;
 }
 
 /**
@@ -47,17 +47,17 @@ function isSet(value: Json | undefined): boolean {
  * throwing would take down the whole inspector.
  */
 export function matches(condition: FieldCondition, data: Record<string, Json>): boolean {
-  if ('all' in condition) return condition.all.every((c) => matches(c, data))
-  if ('any' in condition) return condition.any.some((c) => matches(c, data))
-  if ('not' in condition) return !matches(condition.not, data)
+  if ("all" in condition) return condition.all.every((c) => matches(c, data));
+  if ("any" in condition) return condition.any.some((c) => matches(c, data));
+  if ("not" in condition) return !matches(condition.not, data);
 
-  if ('field' in condition) {
-    const value = data[condition.field] ?? null
-    if ('eq' in condition) return deepEqual(value, condition.eq)
-    if ('ne' in condition) return !deepEqual(value, condition.ne)
-    if ('in' in condition) return condition.in.some((v) => deepEqual(value, v))
-    if ('isSet' in condition) return isSet(value) === condition.isSet
+  if ("field" in condition) {
+    const value = data[condition.field] ?? null;
+    if ("eq" in condition) return deepEqual(value, condition.eq);
+    if ("ne" in condition) return !deepEqual(value, condition.ne);
+    if ("in" in condition) return condition.in.some((v) => deepEqual(value, v));
+    if ("isSet" in condition) return isSet(value) === condition.isSet;
   }
 
-  return false
+  return false;
 }

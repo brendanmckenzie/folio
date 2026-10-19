@@ -1,13 +1,13 @@
-import { useId } from 'react'
-import type { MigrateReport } from '../../../server/migrate'
-import type { Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
-import { ListHeader } from '../List'
-import { href } from '../route'
-import { type Column, Table } from '../Table'
-import css from './Model.module.css'
+import { useId } from "react";
+import type { MigrateReport } from "../../../server/migrate";
+import type { Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
+import { ListHeader } from "../List";
+import { href } from "../route";
+import { type Column, Table } from "../Table";
+import css from "./Model.module.css";
 import {
   type AuditGroup,
   type AuditRow,
@@ -27,24 +27,24 @@ import {
   type StoryTitles,
   whyNotRun,
   whyNothingToRun,
-} from './model-model'
-import { useModel, useStoryTitles } from './useModel'
+} from "./model-model";
+import { useModel, useStoryTitles } from "./useModel";
 
 interface Props {
-  apiBase: string
+  apiBase: string;
   /** Where Folio is mounted, for `href(...)` links to the documents a finding names. */
-  mount: string
-  me: Me
-  onNotice: (message: string) => void
+  mount: string;
+  me: Me;
+  onNotice: (message: string) => void;
 }
 
 /** Four placeholder rows, matching Content's and Documents'. */
-const SKELETON = ['s1', 's2', 's3', 's4']
+const SKELETON = ["s1", "s2", "s3", "s4"];
 
 /** No document names resolved, for a list that does not resolve them. Frozen and
  * shared rather than a `{}` literal per render, which would be a new object identity
  * on every pass through `Run`. */
-const NO_TITLES: StoryTitles = Object.freeze({})
+const NO_TITLES: StoryTitles = Object.freeze({});
 
 /**
  * The content model as a screen — `docs/ui-architecture.md`'s port phase 5, and the
@@ -71,13 +71,13 @@ const NO_TITLES: StoryTitles = Object.freeze({})
  *    `DataList.tsx`'s deleted "Unknown type" heading went.
  */
 export function Model({ apiBase, mount, me, onNotice }: Props) {
-  const data = useModel(apiBase, me, onNotice)
-  const migrationsId = useId()
-  const auditId = useId()
+  const data = useModel(apiBase, me, onNotice);
+  const migrationsId = useId();
+  const auditId = useId();
 
-  const banner = driftBanner(data.status)
-  const rows = data.status?.migrations ?? []
-  const mayRun = canRunMigrations(me)
+  const banner = driftBanner(data.status);
+  const rows = data.status?.migrations ?? [];
+  const mayRun = canRunMigrations(me);
 
   return (
     <div className={css.screen}>
@@ -140,8 +140,8 @@ export function Model({ apiBase, mount, me, onNotice }: Props) {
             <div className={css.actions}>
               <span className={css.behind}>
                 {data.status?.behind === 0
-                  ? 'Every document has had every declared migration.'
-                  : `${count(data.status?.behind ?? 0, 'document')} behind the latest model.`}
+                  ? "Every document has had every declared migration."
+                  : `${count(data.status?.behind ?? 0, "document")} behind the latest model.`}
               </span>
               {/*
                 Preview before Run, in that order on screen, because the dry run is
@@ -164,7 +164,7 @@ export function Model({ apiBase, mount, me, onNotice }: Props) {
               <Button
                 size="sm"
                 disabled={!mayRun || rows.length === 0 || data.run?.running === true}
-                reason={whyNotRun(me) ?? whyNothingToRun(rows.length) ?? 'A run is in flight'}
+                reason={whyNotRun(me) ?? whyNothingToRun(rows.length) ?? "A run is in flight"}
                 onClick={() => data.start({ dryRun: true })}
               >
                 Preview
@@ -173,7 +173,7 @@ export function Model({ apiBase, mount, me, onNotice }: Props) {
                 variant="primary"
                 size="sm"
                 disabled={!mayRun || rows.length === 0 || data.run?.running === true}
-                reason={whyNotRun(me) ?? whyNothingToRun(rows.length) ?? 'A run is in flight'}
+                reason={whyNotRun(me) ?? whyNothingToRun(rows.length) ?? "A run is in flight"}
                 onClick={() => data.start({ dryRun: false })}
               >
                 Run
@@ -205,15 +205,15 @@ export function Model({ apiBase, mount, me, onNotice }: Props) {
         onContinue={data.continueAudit}
       />
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------ migrations --- */
 
 interface MigrationRow {
-  id: string
-  description: string
-  applied: boolean
+  id: string;
+  description: string;
+  applied: boolean;
 }
 
 /**
@@ -227,32 +227,32 @@ interface MigrationRow {
  */
 const MIGRATION_COLUMNS: Column<MigrationRow>[] = [
   {
-    key: 'id',
-    label: 'Migration',
+    key: "id",
+    label: "Migration",
     cell: (row) => (
       <Badge mono tone="neutral">
         {row.id}
       </Badge>
     ),
   },
-  { key: 'description', label: 'What it does', cell: (row) => row.description },
+  { key: "description", label: "What it does", cell: (row) => row.description },
   {
-    key: 'applied',
-    label: 'Ledger',
+    key: "applied",
+    label: "Ledger",
     cell: (row) => (
       <Badge
         tone={migrationTone(row.applied)}
         title={
           row.applied
-            ? 'Recorded in schema_migrations: this migration has reached every document.'
-            : 'Not recorded yet. A row is written when the sweep finishes with nothing behind.'
+            ? "Recorded in schema_migrations: this migration has reached every document."
+            : "Not recorded yet. A row is written when the sweep finishes with nothing behind."
         }
       >
-        {row.applied ? 'run' : 'pending'}
+        {row.applied ? "run" : "pending"}
       </Badge>
     ),
   },
-]
+];
 
 /**
  * What a run or a preview did, and — the part the old rail could not say — whether
@@ -264,15 +264,15 @@ const MIGRATION_COLUMNS: Column<MigrationRow>[] = [
  * half the site has not seen it.
  */
 function Run({ run, mount }: { run: RunState; mount: string }) {
-  const report = run.report
+  const report = run.report;
   const progress = run.running
     ? `Batch ${run.batches + 1}…`
-    : `${count(run.batches, 'batch', 'batches')}`
+    : `${count(run.batches, "batch", "batches")}`;
 
   return (
     <div className={css.report}>
       <div className={css.reportHead}>
-        <h3 className={css.subheading}>{run.dryRun ? 'Preview' : 'Run'}</h3>
+        <h3 className={css.subheading}>{run.dryRun ? "Preview" : "Run"}</h3>
         <span className={css.progress}>{progress}</span>
       </div>
 
@@ -309,7 +309,7 @@ function Run({ run, mount }: { run: RunState; mount: string }) {
               rows={report.oversized.map((o) => ({
                 key: o.storyId,
                 subject: null,
-                note: `${count(o.mutations, 'mutation')} in ${count(o.transactions, 'transaction')}`,
+                note: `${count(o.mutations, "mutation")} in ${count(o.transactions, "transaction")}`,
                 stories: [o.storyId],
                 more: 0,
               }))}
@@ -339,14 +339,14 @@ function Run({ run, mount }: { run: RunState; mount: string }) {
         </>
       )}
     </div>
-  )
+  );
 }
 
 /** What a run says while it is still going: where it is, never how it went. */
 function runningNote(report: MigrateReport): string {
   return isUnfinished(report)
-    ? `${count(report.behind, 'document')} still behind. Continuing…`
-    : 'Finishing…'
+    ? `${count(report.behind, "document")} still behind. Continuing…`
+    : "Finishing…";
 }
 
 function Stat({ label, value }: { label: string; value: number }) {
@@ -355,7 +355,7 @@ function Stat({ label, value }: { label: string; value: number }) {
       <dt className={css.statLabel}>{label}</dt>
       <dd className={css.statValue}>{value}</dd>
     </div>
-  )
+  );
 }
 
 /* ----------------------------------------------------------------- audit --- */
@@ -367,21 +367,21 @@ function Audit({
   mount,
   onContinue,
 }: {
-  state: AuditState
-  auditId: string
-  apiBase: string
-  mount: string
-  onContinue: () => void
+  state: AuditState;
+  auditId: string;
+  apiBase: string;
+  mount: string;
+  onContinue: () => void;
 }) {
-  const groups = auditGroups(state.data)
-  const findings = auditFindingCount(state.data)
-  const partial = state.data !== null && state.data.continueFrom !== null
+  const groups = auditGroups(state.data);
+  const findings = auditFindingCount(state.data);
+  const partial = state.data !== null && state.data.continueFrom !== null;
   /*
    * Resolved before the early return below, because a hook cannot be conditional —
    * and harmless there: with no groups there are no ids, and `useStoryTitles` makes
    * no request for an empty set.
    */
-  const titles = useStoryTitles(apiBase, linkedStoryIds(groups))
+  const titles = useStoryTitles(apiBase, linkedStoryIds(groups));
 
   /*
    * Nothing to say and nothing still to read: the panel does not exist. No heading,
@@ -392,12 +392,12 @@ function Audit({
    * `loading` is false, and the whole panel is absent rather than explaining itself.
    * A "you may not read this" card would be a control that cannot act, rendered.
    */
-  if (groups.length === 0 && !partial && !state.error && !state.loading) return null
+  if (groups.length === 0 && !partial && !state.error && !state.loading) return null;
 
   return (
     <section className={css.section} aria-labelledby={auditId}>
       <h2 className={css.heading} id={auditId}>
-        Drift{findings > 0 ? ` · ${findings}` : ''}
+        Drift{findings > 0 ? ` · ${findings}` : ""}
       </h2>
       <p className={css.note}>
         What the published content actually is, as against what the code now says it should be.
@@ -449,7 +449,7 @@ function Audit({
         </div>
       ) : null}
     </section>
-  )
+  );
 }
 
 function Group({
@@ -457,9 +457,9 @@ function Group({
   mount,
   titles,
 }: {
-  group: AuditGroup
-  mount: string
-  titles: StoryTitles
+  group: AuditGroup;
+  mount: string;
+  titles: StoryTitles;
 }) {
   return (
     <div className={css.group}>
@@ -476,7 +476,7 @@ function Group({
         />
       ))}
     </div>
-  )
+  );
 }
 
 /**
@@ -506,11 +506,11 @@ function FindingList({
   mount,
   titles,
 }: {
-  title: string
-  body: string
-  rows: readonly AuditRow[]
-  mount: string
-  titles: StoryTitles
+  title: string;
+  body: string;
+  rows: readonly AuditRow[];
+  mount: string;
+  titles: StoryTitles;
 }) {
   return (
     <div className={css.family}>
@@ -526,7 +526,7 @@ function FindingList({
             )}
             {row.documents === undefined ? null : (
               <span className={css.counts}>
-                {count(row.documents, 'document')} · {count(row.bloks ?? 0, 'blok')}
+                {count(row.documents, "document")} · {count(row.bloks ?? 0, "blok")}
               </span>
             )}
             {row.note ? <span className={css.rowNote}>{row.note}</span> : null}
@@ -542,7 +542,7 @@ function FindingList({
         ))}
       </ul>
     </div>
-  )
+  );
 }
 
 /**
@@ -558,11 +558,11 @@ function FindingList({
  * `storyLabel`'s null and neither is an error: see its comment.
  */
 function StoryLink({ id, mount, titles }: { id: string; mount: string; titles: StoryTitles }) {
-  const label = storyLabel(id, titles)
+  const label = storyLabel(id, titles);
   return (
-    <a className={css.link} href={href({ name: 'edit', id }, mount)}>
+    <a className={css.link} href={href({ name: "edit", id }, mount)}>
       {label === null ? null : <span className={css.linkTitle}>{label}</span>}
       <span className={css.linkId}>{id}</span>
     </a>
-  )
+  );
 }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DocumentType } from '../../core/schema'
-import { ancestorPaths, type StoryMeta } from '../../core/story'
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { DocumentType } from "../../core/schema";
+import { ancestorPaths, type StoryMeta } from "../../core/story";
 
 /**
  * One document and its ancestors, by id.
@@ -19,10 +19,10 @@ import { ancestorPaths, type StoryMeta } from '../../core/story'
  * the server has in hand after the first query.
  */
 export interface OpenStory {
-  story: StoryMeta | undefined
+  story: StoryMeta | undefined;
   /** Root first, the document itself last — the breadcrumb's chain. */
-  chain: { id: string; title: string }[]
-  loading: boolean
+  chain: { id: string; title: string }[];
+  loading: boolean;
   /**
    * Fetch the row again, because a write moved it.
    *
@@ -34,15 +34,15 @@ export interface OpenStory {
    * stayed enabled on a document that had just been published**. Which is how the
    * owner found it.
    */
-  reload: () => void
+  reload: () => void;
 }
 
-const NOTHING: Omit<OpenStory, 'reload'> = { story: undefined, chain: [], loading: false }
+const NOTHING: Omit<OpenStory, "reload"> = { story: undefined, chain: [], loading: false };
 
 export function useStory(apiBase: string, id: string | undefined): OpenStory {
-  const [state, setState] = useState<Omit<OpenStory, 'reload'>>(
+  const [state, setState] = useState<Omit<OpenStory, "reload">>(
     id ? { ...NOTHING, loading: true } : NOTHING,
-  )
+  );
   /**
    * Which request is allowed to answer.
    *
@@ -54,44 +54,44 @@ export function useStory(apiBase: string, id: string | undefined): OpenStory {
    * them — only the newest request may write, whoever started it — and it subsumes
    * the unmount case the flag existed for, because the cleanup bumps it too.
    */
-  const generation = useRef(0)
+  const generation = useRef(0);
 
   const load = useCallback(
     (storyId: string) => {
-      const mine = ++generation.current
-      setState((prev) => ({ ...prev, loading: true }))
-      const query = new URLSearchParams({ ids: storyId, ancestors: '1' })
+      const mine = ++generation.current;
+      setState((prev) => ({ ...prev, loading: true }));
+      const query = new URLSearchParams({ ids: storyId, ancestors: "1" });
       fetch(`${apiBase}/stories?${query}`)
         .then((res) => (res.ok ? (res.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
         .then(({ rows }) => {
-          if (generation.current !== mine) return
-          const story = rows.find((row) => row.id === storyId)
-          setState({ story, chain: story ? chainOf(rows, story) : [], loading: false })
+          if (generation.current !== mine) return;
+          const story = rows.find((row) => row.id === storyId);
+          setState({ story, chain: story ? chainOf(rows, story) : [], loading: false });
         })
         .catch(() => {
-          if (generation.current === mine) setState({ ...NOTHING, loading: false })
-        })
+          if (generation.current === mine) setState({ ...NOTHING, loading: false });
+        });
     },
     [apiBase],
-  )
+  );
 
   const reload = useCallback(() => {
-    if (id) load(id)
-  }, [id, load])
+    if (id) load(id);
+  }, [id, load]);
 
   useEffect(() => {
     if (!id) {
-      setState(NOTHING)
-      return
+      setState(NOTHING);
+      return;
     }
-    load(id)
+    load(id);
     return () => {
       // Nothing in flight may answer for a document that is no longer open.
-      generation.current++
-    }
-  }, [id, load])
+      generation.current++;
+    };
+  }, [id, load]);
 
-  return { ...state, reload }
+  return { ...state, reload };
 }
 
 /**
@@ -113,15 +113,15 @@ export function chainOf(
   rows: readonly StoryMeta[],
   node: StoryMeta,
 ): { id: string; title: string }[] {
-  const label = (row: StoryMeta) => row.title || row.slug || row.id
-  if (node.path === null) return [{ id: node.id, title: label(node) }]
-  const byPath = new Map(rows.filter((r) => r.path !== null).map((r) => [r.path, r]))
+  const label = (row: StoryMeta) => row.title || row.slug || row.id;
+  if (node.path === null) return [{ id: node.id, title: label(node) }];
+  const byPath = new Map(rows.filter((r) => r.path !== null).map((r) => [r.path, r]));
   const out = ancestorPaths(node.path)
     .map((path) => byPath.get(path))
     .filter((row): row is StoryMeta => row !== undefined)
-    .map((row) => ({ id: row.id, title: label(row) }))
-  out.push({ id: node.id, title: label(node) })
-  return out
+    .map((row) => ({ id: row.id, title: label(row) }));
+  out.push({ id: node.id, title: label(node) });
+  return out;
 }
 
 /**
@@ -133,31 +133,31 @@ export function chainOf(
  * whole tree for it; now it asks for the one row.
  */
 export function usePreviewHost(apiBase: string, path: string | undefined): StoryMeta | undefined {
-  const [row, setRow] = useState<StoryMeta | undefined>(undefined)
+  const [row, setRow] = useState<StoryMeta | undefined>(undefined);
 
   useEffect(() => {
     if (path === undefined) {
-      setRow(undefined)
-      return
+      setRow(undefined);
+      return;
     }
-    let live = true
+    let live = true;
     // `paths` rather than `ids`, and an empty string is a legitimate value here —
     // `previewPath: ''` means the site's home page hosts the preview.
-    const query = new URLSearchParams({ paths: path })
+    const query = new URLSearchParams({ paths: path });
     fetch(`${apiBase}/stories?${query}`)
       .then((res) => (res.ok ? (res.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
       .then(({ rows }) => {
-        if (live) setRow(rows.find((r) => r.path === path))
+        if (live) setRow(rows.find((r) => r.path === path));
       })
       .catch(() => {
-        if (live) setRow(undefined)
-      })
+        if (live) setRow(undefined);
+      });
     return () => {
-      live = false
-    }
-  }, [apiBase, path])
+      live = false;
+    };
+  }, [apiBase, path]);
 
-  return row
+  return row;
 }
 
 /**
@@ -176,14 +176,14 @@ export function usePreviewHost(apiBase: string, path: string | undefined): Story
  * fabricating an empty `children` to satisfy a type this never read.
  */
 export function globalPreviewUrl(
-  type: Pick<DocumentType, 'name' | 'previewPath'>,
-  candidates: readonly Pick<StoryMeta, 'path' | 'previewUrl'>[],
+  type: Pick<DocumentType, "name" | "previewPath">,
+  candidates: readonly Pick<StoryMeta, "path" | "previewUrl">[],
   /** The bare mount, not `apiBase`: `/preview/global/:name` renders HTML. */
   base: string,
 ): string {
   if (type.previewPath !== undefined) {
-    const host = candidates.find((s) => s.path === type.previewPath)
-    if (host?.previewUrl) return `${host.previewUrl}&as=${encodeURIComponent(type.name)}`
+    const host = candidates.find((s) => s.path === type.previewPath);
+    if (host?.previewUrl) return `${host.previewUrl}&as=${encodeURIComponent(type.name)}`;
   }
-  return `${base}/preview/global/${encodeURIComponent(type.name)}`
+  return `${base}/preview/global/${encodeURIComponent(type.name)}`;
 }

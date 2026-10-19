@@ -1,5 +1,5 @@
-import { type Blok, childrenOf, type Doc } from './doc'
-import { allocateSubtree, type SubtreeBlok } from './schema'
+import { type Blok, childrenOf, type Doc } from "./doc";
+import { allocateSubtree, type SubtreeBlok } from "./schema";
 
 /**
  * `uid`'s own subtree, turned into an `allocateSubtree` recipe: every blok keeps
@@ -20,14 +20,14 @@ import { allocateSubtree, type SubtreeBlok } from './schema'
  * clone of it must terminate rather than recurse forever.
  */
 function subtreeRecipe(doc: Doc, uid: string): SubtreeBlok[] {
-  const out: SubtreeBlok[] = []
-  const visited = new Set<string>()
+  const out: SubtreeBlok[] = [];
+  const visited = new Set<string>();
 
   const walk = (id: string, parent: string | null, slot: string | null) => {
-    if (visited.has(id)) return
-    visited.add(id)
-    const b = doc.bloks[id]
-    if (!b) return
+    if (visited.has(id)) return;
+    visited.add(id);
+    const b = doc.bloks[id];
+    if (!b) return;
     // `i18n` is a sibling of `data` on `Blok`, not a key inside it
     // (`localisation.md` decision 1), so it has to be named here: a recipe
     // carrying only `data` would let duplicate, paste and "duplicate this
@@ -40,19 +40,19 @@ function subtreeRecipe(doc: Doc, uid: string): SubtreeBlok[] {
       parent,
       slot,
       ...(b.i18n ? { i18n: b.i18n } : {}),
-    })
+    });
 
-    const slots = new Set<string>()
+    const slots = new Set<string>();
     for (const child of Object.values(doc.bloks)) {
-      if (child.parent === id && child.slot !== null) slots.add(child.slot)
+      if (child.parent === id && child.slot !== null) slots.add(child.slot);
     }
     for (const slotName of slots) {
-      for (const kid of childrenOf(doc, id, slotName)) walk(kid.uid, id, slotName)
+      for (const kid of childrenOf(doc, id, slotName)) walk(kid.uid, id, slotName);
     }
-  }
+  };
 
-  walk(uid, null, null)
-  return out
+  walk(uid, null, null);
+  return out;
 }
 
 /**
@@ -72,7 +72,7 @@ export function cloneSubtree(
   uid: string,
   target: { parent: string; slot: string; order: string },
 ): Blok[] {
-  return allocateSubtree(subtreeRecipe(doc, uid), target.parent, target.slot, target.order)
+  return allocateSubtree(subtreeRecipe(doc, uid), target.parent, target.slot, target.order);
 }
 
 /**
@@ -89,7 +89,7 @@ export function cloneSubtree(
  * result into a new story.
  */
 export function cloneDoc(doc: Doc): Doc {
-  const bloks = allocateSubtree(subtreeRecipe(doc, doc.root), null, null, 'a0')
-  const root = bloks[0]!
-  return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
+  const bloks = allocateSubtree(subtreeRecipe(doc, doc.root), null, null, "a0");
+  const root = bloks[0]!;
+  return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) };
 }

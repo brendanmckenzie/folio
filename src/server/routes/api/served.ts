@@ -19,19 +19,19 @@
  * the same one `?_folio=`, `reader.page()` and draft mode's switch ask, so this route
  * cannot come to disagree with them.
  */
-import type { Context } from 'hono'
-import { gate, type SiteRef, type Surface } from '../../../core/sites'
-import { mayPreviewDrafts } from '../../auth/roles'
-import { FolioError } from '../../errors'
-import type { FolioRuntime } from '../../runtime'
-import type { FolioEnv } from '../../types'
+import type { Context } from "hono";
+import { gate, type SiteRef, type Surface } from "../../../core/sites";
+import { mayPreviewDrafts } from "../../auth/roles";
+import { FolioError } from "../../errors";
+import type { FolioRuntime } from "../../runtime";
+import type { FolioEnv } from "../../types";
 
 /** What the gate admitted: the site row, and the surface the caller is serving. */
 export interface ServedSite {
-  site: SiteRef
-  surface: Surface
+  site: SiteRef;
+  surface: Surface;
   /** The caller may read this site's drafts, so `?status=draft` is theirs to ask. */
-  drafts: boolean
+  drafts: boolean;
 }
 
 /**
@@ -44,25 +44,25 @@ export async function servedSite<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
 ): Promise<ServedSite | null> {
-  if (!rt.sites) return null
-  const scope = c.var.scope
-  if (scope === null) return null
-  const registry = await rt.sites.registry(c.env)
-  const row = registry.sites.find((site) => site.id === scope)
-  if (!row) return null
+  if (!rt.sites) return null;
+  const scope = c.var.scope;
+  if (scope === null) return null;
+  const registry = await rt.sites.registry(c.env);
+  const row = registry.sites.find((site) => site.id === scope);
+  if (!row) return null;
 
-  const named = c.req.query('surface') ?? 'live'
-  if (named !== 'live' && named !== 'preview') {
-    throw new FolioError('bad_request', "surface must be 'live' or 'preview'")
+  const named = c.req.query("surface") ?? "live";
+  if (named !== "live" && named !== "preview") {
+    throw new FolioError("bad_request", "surface must be 'live' or 'preview'");
   }
   // `auth: 'open'` has no accounts to hold a role, and admits every surface, as the
   // edge cases say of preview origins.
-  const drafts = rt.auth.mode !== 'session' || mayPreviewDrafts(c.var.actor, registry, row.id)
+  const drafts = rt.auth.mode !== "session" || mayPreviewDrafts(c.var.actor, registry, row.id);
   if (
     !drafts &&
     !gate(registry, { site: row.id, surface: named }, { path: null, grantFor: null })
   ) {
-    throw new FolioError('not_found', 'No such site')
+    throw new FolioError("not_found", "No such site");
   }
-  return { site: row, surface: named, drafts }
+  return { site: row, surface: named, drafts };
 }

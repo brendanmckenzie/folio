@@ -11,56 +11,56 @@
  * resizing strategy — a document written on a `workers.dev` preview renders
  * identically on a zone.
  */
-import type { AssetValue } from '../core/values'
-import type { AssetTransform } from '../core/resolve'
-import { FolioError } from './errors'
-import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from './validate'
-import { type AssetFilter, type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
-import { folderSiteOf, subtreeWhere } from './asset-folders'
-import { MAX_TAG_FILTER, setAssetTags } from './asset-tags'
-import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from '../core/sites'
-import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '../core/pagination'
-import type { StoryMeta } from '../core/story'
-import { assetReferences, clearInboundRefStatements } from './content-index'
-import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
-import { chainClause, storiesFor } from './stories'
-import { bindChunks, type FolioDb } from './db'
-import type { FolioLogger } from './types'
+import type { AssetValue } from "../core/values";
+import type { AssetTransform } from "../core/resolve";
+import { FolioError } from "./errors";
+import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from "./validate";
+import { type AssetFilter, type AssetSort, DEFAULT_ASSET_SORT } from "../core/assets";
+import { folderSiteOf, subtreeWhere } from "./asset-folders";
+import { MAX_TAG_FILTER, setAssetTags } from "./asset-tags";
+import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from "../core/sites";
+import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from "../core/pagination";
+import type { StoryMeta } from "../core/story";
+import { assetReferences, clearInboundRefStatements } from "./content-index";
+import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from "./keyset";
+import { chainClause, storiesFor } from "./stories";
+import { bindChunks, type FolioDb } from "./db";
+import type { FolioLogger } from "./types";
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
-export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 export interface AssetRow {
-  id: string
-  key: string
-  filename: string
-  contentType: string
-  size: number
-  width: number | null
-  height: number | null
-  alt: string
-  createdAt: number
+  id: string;
+  key: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  width: number | null;
+  height: number | null;
+  alt: string;
+  createdAt: number;
   /** Null is *unfiled*, a real state and the one every existing row starts in
    * (`migrations/0008_asset_organisation.sql`). */
-  folderId: string | null
+  folderId: string | null;
   /** Human, longer than `alt` and searchable — what the file *is*, as against
    * what a screen reader should say. */
-  description: string
+  description: string;
   /** Machine-written alt text. Separate from `alt` so a human edit is never
    * clobbered and a re-run is idempotent — `toAssetValue` reads `alt || altAuto`. */
-  altAuto: string
+  altAuto: string;
   /** The same, for `description`. */
-  descriptionAuto: string
+  descriptionAuto: string;
   /** Null means never attempted; set with `describeError` non-null means tried
    * and failed. */
-  describedAt: number | null
-  describeError: string | null
+  describedAt: number | null;
+  describeError: string | null;
 }
 
 const COLS = `id, key, filename, content_type as contentType, size, width, height,
               alt, created_at as createdAt, folder_id as folderId,
               description, alt_auto as altAuto, description_auto as descriptionAuto,
-              described_at as describedAt, describe_error as describeError`
+              described_at as describedAt, describe_error as describeError`;
 
 /**
  * The three orderings the Assets screen offers, and their natural directions.
@@ -75,21 +75,21 @@ const COLS = `id, key, filename, content_type as contentType, size, width, heigh
  */
 const ORDERS = {
   created: NEWEST_FIRST,
-  filename: { columns: ['filename', 'id'], direction: 'asc' },
-  size: { columns: ['size', 'id'], direction: 'desc' },
-} satisfies Record<AssetSort, Keyset>
+  filename: { columns: ["filename", "id"], direction: "asc" },
+  size: { columns: ["size", "id"], direction: "desc" },
+} satisfies Record<AssetSort, Keyset>;
 
 /** The sort key of a row, component for component with `ORDERS` — the one
  * correspondence `paginate` cannot check for its caller, which is why the two live
  * next to each other. */
 function keyOf(sort: AssetSort, row: AssetRow): [CursorPart, CursorPart] {
   switch (sort) {
-    case 'created':
-      return [row.createdAt, row.id]
-    case 'filename':
-      return [row.filename, row.id]
-    case 'size':
-      return [row.size, row.id]
+    case "created":
+      return [row.createdAt, row.id];
+    case "filename":
+      return [row.filename, row.id];
+    case "size":
+      return [row.size, row.id];
   }
 }
 
@@ -148,33 +148,33 @@ export function assetFilterSql(
    */
   scope?: readonly string[] | null,
 ): { clauses: string[]; binds: unknown[] } {
-  const clauses: string[] = []
-  const binds: unknown[] = []
-  const within = scope ? chainClause(scope) : null
+  const clauses: string[] = [];
+  const binds: unknown[] = [];
+  const within = scope ? chainClause(scope) : null;
 
   if (filter.q) {
     clauses.push(
       `(filename like ? or alt like ? or alt_auto like ?
         or description like ? or description_auto like ?)`,
-    )
-    const like = `%${filter.q}%`
-    binds.push(like, like, like, like, like)
+    );
+    const like = `%${filter.q}%`;
+    binds.push(like, like, like, like, like);
   }
   if (filter.kind) {
-    clauses.push('content_type like ?')
-    binds.push(`${filter.kind}%`)
+    clauses.push("content_type like ?");
+    binds.push(`${filter.kind}%`);
   }
   if (filter.folder) {
     // A folder filter includes the folder's descendants (checkpoint 10), which
     // the materialised path makes a range rather than a join to a recursion.
     // `like` here would sweep in every sibling whose name starts with this one's.
-    const range = subtreeWhere('path', filter.folder)
+    const range = subtreeWhere("path", filter.folder);
     clauses.push(
-      `folder_id in (select id from asset_folders where ${within ? `${within.sql} and ` : ''}${range.sql})`,
-    )
-    binds.push(...(within?.binds ?? []), ...range.binds)
+      `folder_id in (select id from asset_folders where ${within ? `${within.sql} and ` : ""}${range.sql})`,
+    );
+    binds.push(...(within?.binds ?? []), ...range.binds);
   }
-  if (filter.unfiled) clauses.push('folder_id is null')
+  if (filter.unfiled) clauses.push("folder_id is null");
 
   if (filter.tags && filter.tags.length > 0) {
     // **AND, not OR** (decision 4): two chips mean "the assets that carry both".
@@ -190,41 +190,41 @@ export function assetFilterSql(
     // folder's three, the keyset's and the `limit`. Deduplicated first so
     // `?tags=a&tags=a` cannot ask for two of one thing and then find nothing,
     // which is what `having count(*) = 2` over one slug would do.
-    const slugs = [...new Set(filter.tags)]
+    const slugs = [...new Set(filter.tags)];
     if (slugs.length > MAX_TAG_FILTER) {
       throw new FolioError(
-        'bad_request',
+        "bad_request",
         `tags must name ${MAX_TAG_FILTER} tags or fewer in one filter`,
-      )
+      );
     }
     clauses.push(
       `id in (select g.asset_id from asset_taggings g
                 join asset_tags t on t.id = g.tag_id
-               where ${within ? `${within.sql.replace('site_id', 't.site_id')} and ` : ''}t.slug in (${slugs.map(() => '?').join(', ')})
+               where ${within ? `${within.sql.replace("site_id", "t.site_id")} and ` : ""}t.slug in (${slugs.map(() => "?").join(", ")})
                group by g.asset_id having count(*) = ?)`,
-    )
-    binds.push(...(within?.binds ?? []), ...slugs, slugs.length)
+    );
+    binds.push(...(within?.binds ?? []), ...slugs, slugs.length);
   }
   // `not exists` rather than `id not in (select asset_id from asset_taggings)`:
   // the correlated form probes `asset_taggings`'s primary key per row, while the
   // `not in` form materialises every tagging in the table. Binds nothing either
   // way. This is the retro-organise starting point — "what have I never filed?".
   if (filter.untagged) {
-    clauses.push('not exists (select 1 from asset_taggings g where g.asset_id = assets.id)')
+    clauses.push("not exists (select 1 from asset_taggings g where g.asset_id = assets.id)");
   }
   // Never attempted, as against attempted and failed: `described_at` is stamped
   // on the failure path too (`describe.ts`), which is what keeps a permanently
   // failing asset out of this set and therefore out of every sweep after the
   // first. Retrying those is an explicit run, not the default one. Binds
   // nothing.
-  if (filter.undescribed) clauses.push('described_at is null')
+  if (filter.undescribed) clauses.push("described_at is null");
   // The other half of that same split: attempted *and* failed. `describe_error`
   // is cleared (`describe.ts`'s `stamp`) on a successful re-describe, so an
   // asset a retry fixes leaves this set on its own — nobody has to untick it.
   // Binds nothing.
-  if (filter.failed) clauses.push('describe_error is not null')
+  if (filter.failed) clauses.push("describe_error is not null");
 
-  return { clauses, binds }
+  return { clauses, binds };
 }
 
 /**
@@ -238,7 +238,7 @@ export function assetFilterSql(
  * `assets_filename` and `assets_size` lead with `site_id` since `0011`, so a list that
  * leaves it out is a scan and a sort.
  */
-export type AssetScope = readonly string[] | null
+export type AssetScope = readonly string[] | null;
 
 /**
  * `assetFilterSql` with the scope in front of it. **Kept out of `assetFilterSql`
@@ -250,10 +250,13 @@ export function scopedAssetFilter(
   filter: AssetFilter,
   scope: AssetScope = SINGLE_SITE_CHAIN,
 ): { clauses: string[]; binds: unknown[] } {
-  const composed = assetFilterSql(filter, scope)
-  if (scope === null) return composed
-  const within = chainClause(scope)
-  return { clauses: [within.sql, ...composed.clauses], binds: [...within.binds, ...composed.binds] }
+  const composed = assetFilterSql(filter, scope);
+  if (scope === null) return composed;
+  const within = chainClause(scope);
+  return {
+    clauses: [within.sql, ...composed.clauses],
+    binds: [...within.binds, ...composed.binds],
+  };
 }
 
 /**
@@ -263,15 +266,15 @@ export function scopedAssetFilter(
  * names here.
  */
 export interface ListAssetsOptions extends AssetFilter {
-  limit?: number
-  cursor?: string
+  limit?: number;
+  cursor?: string;
   /** Adds `total` for the same filter. One extra `count(*)`, only when asked
    * (`../../docs/specs/foundation/pagination.md` decision 5). */
-  count?: boolean
+  count?: boolean;
   /** The scopes listed: the chain, or `null` for every scope. See `AssetScope`. */
-  chain?: AssetScope
+  chain?: AssetScope;
   /** One of `core/assets.ts`'s `AssetSort` values. Absent is `created`. */
-  sort?: AssetSort
+  sort?: AssetSort;
   /**
    * Reverses the ordering. Absent means the sort's own natural direction, which is
    * what a column header shows on its first click.
@@ -281,7 +284,7 @@ export interface ListAssetsOptions extends AssetFilter {
    * the resume comparison and the `order by` together and cannot leave them
    * disagreeing about which way the list runs.
    */
-  dir?: Direction
+  dir?: Direction;
 }
 
 /**
@@ -298,14 +301,14 @@ export async function listAssets(
   db: FolioDb,
   opts: ListAssetsOptions = {},
 ): Promise<Page<AssetRow>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const sort = opts.sort ?? DEFAULT_ASSET_SORT
-  const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort]
-  const resume = keysetWhere(keyset, cursor)
+  const limit = clampLimit(opts.limit, 50, 200);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const sort = opts.sort ?? DEFAULT_ASSET_SORT;
+  const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort];
+  const resume = keysetWhere(keyset, cursor);
 
-  const filter = scopedAssetFilter(opts, opts.chain)
-  const where = whereOf(...filter.clauses, resume.sql)
+  const filter = scopedAssetFilter(opts, opts.chain);
+  const where = whereOf(...filter.clauses, resume.sql);
 
   const [rows, total] = await Promise.all([
     db
@@ -320,10 +323,10 @@ export async function listAssets(
           .bind(...filter.binds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  const page = paginate(rows.results, limit, (row) => keyOf(sort, row))
-  return total ? { ...page, total: total.n } : page
+  const page = paginate(rows.results, limit, (row) => keyOf(sort, row));
+  return total ? { ...page, total: total.n } : page;
 }
 
 /**
@@ -347,16 +350,16 @@ export async function countAssets(
   filter: AssetFilter = {},
   scope: AssetScope = SINGLE_SITE_CHAIN,
 ): Promise<number> {
-  const { clauses, binds } = scopedAssetFilter(filter, scope)
+  const { clauses, binds } = scopedAssetFilter(filter, scope);
   const row = await db
     .prepare(`select count(*) as n from assets ${whereOf(...clauses)}`)
     .bind(...binds)
-    .first<{ n: number }>()
-  return row?.n ?? 0
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 export async function assetById(db: FolioDb, id: string): Promise<AssetRow | null> {
-  return db.prepare(`select ${COLS} from assets where id = ?`).bind(id).first<AssetRow>()
+  return db.prepare(`select ${COLS} from assets where id = ?`).bind(id).first<AssetRow>();
 }
 
 /**
@@ -367,10 +370,10 @@ export async function assetById(db: FolioDb, id: string): Promise<AssetRow | nul
  */
 export async function assetSiteOf(db: FolioDb, id: string): Promise<string | null> {
   const row = await db
-    .prepare('select site_id as site from assets where id = ?')
+    .prepare("select site_id as site from assets where id = ?")
     .bind(id)
-    .first<{ site: string }>()
-  return row?.site ?? null
+    .first<{ site: string }>();
+  return row?.site ?? null;
 }
 
 /**
@@ -394,21 +397,21 @@ export async function assetsFor(
   /** The scopes an id may be read in; an id owned elsewhere is simply absent. */
   scope: AssetScope = SINGLE_SITE_CHAIN,
 ): Promise<AssetRow[]> {
-  if (ids.length === 0) return []
-  const within = scope === null ? null : chainClause(scope)
+  if (ids.length === 0) return [];
+  const within = scope === null ? null : chainClause(scope);
   const pages = await Promise.all(
     bindChunks([...new Set(ids)], 1 + (within?.binds.length ?? 0)).map(async (chunk) => {
       const { results } = await db
         .prepare(
           `select ${COLS} from assets
-           where id in (${chunk.map(() => '?').join(', ')})${within ? ` and ${within.sql}` : ''}`,
+           where id in (${chunk.map(() => "?").join(", ")})${within ? ` and ${within.sql}` : ""}`,
         )
         .bind(...chunk, ...(within?.binds ?? []))
-        .all<AssetRow>()
-      return results
+        .all<AssetRow>();
+      return results;
     }),
-  )
-  return pages.flat()
+  );
+  return pages.flat();
 }
 
 /**
@@ -435,24 +438,24 @@ export async function assetsMatching(
   db: FolioDb,
   filter: AssetFilter,
   opts: {
-    limit: number
-    after?: string | null
+    limit: number;
+    after?: string | null;
     /** The scopes walked: a captured filter is read against the request's, never a
      * scope of its own. `null` is every scope (the platform tier's describe run). */
-    scope?: AssetScope
+    scope?: AssetScope;
   },
 ): Promise<AssetRow[]> {
-  const { clauses, binds } = scopedAssetFilter(filter, opts.scope)
-  const sql = [...clauses]
+  const { clauses, binds } = scopedAssetFilter(filter, opts.scope);
+  const sql = [...clauses];
   if (opts.after) {
-    sql.push('id > ?')
-    binds.push(opts.after)
+    sql.push("id > ?");
+    binds.push(opts.after);
   }
   const { results } = await db
     .prepare(`select ${COLS} from assets ${whereOf(...sql)} order by id limit ?`)
     .bind(...binds, opts.limit)
-    .all<AssetRow>()
-  return results
+    .all<AssetRow>();
+  return results;
 }
 
 /* ------------------------------------------------------------------ usage --- */
@@ -501,15 +504,15 @@ export interface AssetUsage {
   /** Published documents using this asset. Routed first, by path; then unrouted
    * by title — an editor scanning "what breaks" wants the pages before the
    * records. */
-  published: StoryMeta[]
+  published: StoryMeta[];
   /** Distinct published documents, which is what "Used on N published pages"
    * counts. Equal to `published.length`; named so a caller reading only the count
    * does not have to know that. */
-  total: number
+  total: number;
   /** Distinct published documents in scopes **outside the chain** that use it:
    * counted, never named (`multi-site.md`: "uses in readable scopes listed; others
    * counted"). A shared logo is used by sites the caller has no role on. */
-  elsewhere: number
+  elsewhere: number;
 }
 
 export async function assetUsage(
@@ -518,8 +521,8 @@ export async function assetUsage(
   /** The scopes whose uses are named. */
   chain: readonly string[] = SINGLE_SITE_CHAIN,
 ): Promise<AssetUsage> {
-  const from = await assetReferences(db, key)
-  if (from.length === 0) return { published: [], total: 0, elsewhere: 0 }
+  const from = await assetReferences(db, key);
+  if (from.length === 0) return { published: [], total: 0, elsewhere: 0 };
 
   // A row whose source story has since been deleted is dropped rather than
   // reported as an untitled usage. `deleteStoryStatement` clears a deleted story's
@@ -528,14 +531,14 @@ export async function assetUsage(
   // no URL in front of somebody about to delete a file.
   // Read wherever they live (`null`), then split: the fence is on what is *named*, and
   // the sources are primary-key seeks either way.
-  const sources = await storiesFor(db, from, [], null)
-  const published = sources.filter((story) => chain.includes(story.site ?? DEFAULT_SITE))
+  const sources = await storiesFor(db, from, [], null);
+  const published = sources.filter((story) => chain.includes(story.site ?? DEFAULT_SITE));
   published.sort(
     (a, b) =>
       (a.path === null ? 1 : 0) - (b.path === null ? 1 : 0) ||
       (a.path ?? a.title).localeCompare(b.path ?? b.title),
-  )
-  return { published, total: published.length, elsewhere: sources.length - published.length }
+  );
+  return { published, total: published.length, elsewhere: sources.length - published.length };
 }
 
 /**
@@ -566,7 +569,7 @@ export function toAssetValue(row: AssetRow): AssetValue {
     ...(row.width ? { width: row.width } : {}),
     ...(row.height ? { height: row.height } : {}),
     alt: row.alt || row.altAuto,
-  }
+  };
 }
 
 /**
@@ -584,65 +587,65 @@ export async function readCappedBody(
   body: ReadableStream<Uint8Array> | null,
   max: number,
 ): Promise<ArrayBuffer> {
-  if (!body) return new ArrayBuffer(0)
+  if (!body) return new ArrayBuffer(0);
 
-  const reader = body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      total += value.byteLength
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
       if (total > max) {
-        await reader.cancel()
-        throw new FolioError('too_large', `File is larger than ${Math.floor(max / 1024 / 1024)}MB`)
+        await reader.cancel();
+        throw new FolioError("too_large", `File is larger than ${Math.floor(max / 1024 / 1024)}MB`);
       }
-      chunks.push(value)
+      chunks.push(value);
     }
   } finally {
-    reader.releaseLock()
+    reader.releaseLock();
   }
 
-  const out = new Uint8Array(total)
-  let offset = 0
+  const out = new Uint8Array(total);
+  let offset = 0;
   for (const chunk of chunks) {
-    out.set(chunk, offset)
-    offset += chunk.byteLength
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
   }
-  return out.buffer
+  return out.buffer;
 }
 
 export async function uploadAsset(
   db: FolioDb,
   bucket: R2Bucket,
   input: {
-    bytes: ArrayBuffer
-    filename: string
+    bytes: ArrayBuffer;
+    filename: string;
     /** The scope that owns the file (`multi-site.md` decision 3): the request's.
      * Default `default`, the one scope of a deployment with no `sites`. */
-    site?: string
+    site?: string;
   },
 ): Promise<AssetRow> {
-  if (input.bytes.byteLength === 0) throw new Error('Empty upload')
+  if (input.bytes.byteLength === 0) throw new Error("Empty upload");
   if (input.bytes.byteLength > MAX_UPLOAD_BYTES) {
-    throw new Error(`File is larger than ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB`)
+    throw new Error(`File is larger than ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB`);
   }
 
-  const id = `ast_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
-  const filename = safeFilename(input.filename)
+  const id = `ast_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const filename = safeFilename(input.filename);
   // The filename rides along in the key so a download keeps its name and the URL
   // stays legible. The id prefix makes collisions impossible.
-  const key = `${id}-${filename}`
-  const view = new Uint8Array(input.bytes)
+  const key = `${id}-${filename}`;
+  const view = new Uint8Array(input.bytes);
   // The client's Content-Type header is a hint only, never trusted: what gets
   // stored — and later served back on this origin — is whatever the bytes
   // themselves say they are. A lying header is overridden; bytes matching no
   // known signature fall back to the download type, same as an explicit
   // mismatch would.
-  const sniffed = sniffContentType(view)
-  const contentType = sniffed && isInlineContentType(sniffed) ? sniffed : DOWNLOAD_CONTENT_TYPE
-  const dims = imageSize(view)
+  const sniffed = sniffContentType(view);
+  const contentType = sniffed && isInlineContentType(sniffed) ? sniffed : DOWNLOAD_CONTENT_TYPE;
+  const dims = imageSize(view);
 
   // R2 first: the alternative (row first) can leave a library entry pointing at
   // an object that never made it into the bucket, which is the worse failure —
@@ -650,8 +653,8 @@ export async function uploadAsset(
   // narrow window below, where the insert fails and an orphaned object is left
   // behind; that window is closed immediately by the compensating delete.
   await bucket.put(key, input.bytes, {
-    httpMetadata: { contentType, cacheControl: 'public, max-age=31536000, immutable' },
-  })
+    httpMetadata: { contentType, cacheControl: "public, max-age=31536000, immutable" },
+  });
 
   const row: AssetRow = {
     id,
@@ -661,17 +664,17 @@ export async function uploadAsset(
     size: input.bytes.byteLength,
     width: dims?.width ?? null,
     height: dims?.height ?? null,
-    alt: '',
+    alt: "",
     createdAt: Date.now(),
     // Every new upload starts unfiled, untagged and undescribed — the defaults
     // the insert below leaves unspecified columns to (`migrations/0008_asset_organisation.sql`).
     folderId: null,
-    description: '',
-    altAuto: '',
-    descriptionAuto: '',
+    description: "",
+    altAuto: "",
+    descriptionAuto: "",
     describedAt: null,
     describeError: null,
-  }
+  };
 
   try {
     await db
@@ -691,7 +694,7 @@ export async function uploadAsset(
         row.createdAt,
         input.site ?? DEFAULT_SITE,
       )
-      .run()
+      .run();
   } catch (e) {
     // Compensate: the object must not outlive the row that was supposed to
     // describe it. The compensating delete gets its own try/catch so a
@@ -699,14 +702,14 @@ export async function uploadAsset(
     // caller needs to see and debug; a failed cleanup is a secondary, orphaned
     // object, not the reportable error.
     try {
-      await bucket.delete(key)
+      await bucket.delete(key);
     } catch {
       // Best-effort: nothing else to do with a cleanup failure here.
     }
-    throw e
+    throw e;
   }
 
-  return row
+  return row;
 }
 
 /**
@@ -717,13 +720,13 @@ export async function uploadAsset(
  * are things an editor asks for.
  */
 export interface AssetPatch {
-  alt?: string
+  alt?: string;
   /** Human, longer than `alt`, and searchable through `q` (decision 12). */
-  description?: string
+  description?: string;
   /** `null` files the asset back into *Unfiled*. */
-  folderId?: string | null
+  folderId?: string | null;
   /** The **whole** set of tag ids, replacing whatever is there. */
-  tags?: readonly string[]
+  tags?: readonly string[];
 }
 
 /**
@@ -753,39 +756,39 @@ export async function updateAsset(
    * refused (`multi-site.md`'s table). */
   site: string = DEFAULT_SITE,
 ): Promise<AssetRow | null> {
-  const row = await assetById(db, id)
-  if (!row || (await assetSiteOf(db, id)) !== site) return null
+  const row = await assetById(db, id);
+  if (!row || (await assetSiteOf(db, id)) !== site) return null;
 
   if (patch.folderId) {
     if ((await folderSiteOf(db, patch.folderId)) !== site) {
-      throw new FolioError('bad_request', 'Unknown folder')
+      throw new FolioError("bad_request", "Unknown folder");
     }
   }
 
-  const sets: string[] = []
-  const binds: unknown[] = []
+  const sets: string[] = [];
+  const binds: unknown[] = [];
   if (patch.alt !== undefined) {
-    sets.push('alt = ?')
-    binds.push(patch.alt)
+    sets.push("alt = ?");
+    binds.push(patch.alt);
   }
   if (patch.description !== undefined) {
-    sets.push('description = ?')
-    binds.push(patch.description)
+    sets.push("description = ?");
+    binds.push(patch.description);
   }
   if (patch.folderId !== undefined) {
-    sets.push('folder_id = ?')
-    binds.push(patch.folderId)
+    sets.push("folder_id = ?");
+    binds.push(patch.folderId);
   }
 
   if (sets.length > 0) {
     await db
-      .prepare(`update assets set ${sets.join(', ')} where id = ? and site_id = ?`)
+      .prepare(`update assets set ${sets.join(", ")} where id = ? and site_id = ?`)
       .bind(...binds, id, site)
-      .run()
+      .run();
   }
-  if (patch.tags !== undefined) await setAssetTags(db, id, patch.tags, site)
+  if (patch.tags !== undefined) await setAssetTags(db, id, patch.tags, site);
 
-  return sets.length > 0 ? assetById(db, id) : row
+  return sets.length > 0 ? assetById(db, id) : row;
 }
 
 /**
@@ -813,8 +816,8 @@ export async function deleteAsset(
   /** The scope the asset must be in: another scope's is absent (false). */
   site: string = DEFAULT_SITE,
 ): Promise<boolean> {
-  const row = await assetById(db, id)
-  if (!row || (await assetSiteOf(db, id)) !== site) return false
+  const row = await assetById(db, id);
+  if (!row || (await assetSiteOf(db, id)) !== site) return false;
   // D1 before R2: if the row survives (the delete throws), the asset is still
   // listed and still resolves, so a retry is exactly a retry. Deleting the
   // object first and then failing the D1 delete would leave a row that points
@@ -823,11 +826,11 @@ export async function deleteAsset(
   // Batched, so the library row and its edges go together: a surviving edge to a
   // key with no row is a usage count for an asset that no longer exists.
   await db.batch([
-    db.prepare('delete from assets where id = ? and site_id = ?').bind(id, site),
+    db.prepare("delete from assets where id = ? and site_id = ?").bind(id, site),
     ...clearInboundRefStatements(db, [row.key]),
-  ])
+  ]);
   try {
-    await bucket.delete(row.key)
+    await bucket.delete(row.key);
   } catch {
     // The row is already committed gone by this point, so there is no longer
     // a "retry" that can reach this object: a second call 404s (assetById
@@ -836,7 +839,7 @@ export async function deleteAsset(
     // operation that in fact committed is worse than the alternative, an
     // orphaned R2 object with nothing left pointing at it.
   }
-  return true
+  return true;
 }
 
 /* -------------------------------------------------------------- serving --- */
@@ -849,13 +852,13 @@ export async function deleteAsset(
  * worth its own Images invocation; both ends snap rather than refuse, so a
  * page whose markup asks for something out of range still renders.
  */
-export const MIN_TRANSFORM_DIMENSION = 16
-export const MAX_TRANSFORM_DIMENSION = 2400
+export const MIN_TRANSFORM_DIMENSION = 16;
+export const MAX_TRANSFORM_DIMENSION = 2400;
 
 /** Bounds on `q`. Below 30 is not a usable image; above 90 is not a visibly
  * better one, just another billable variant nobody asked for. */
-export const MIN_TRANSFORM_QUALITY = 30
-export const MAX_TRANSFORM_QUALITY = 90
+export const MIN_TRANSFORM_QUALITY = 30;
+export const MAX_TRANSFORM_QUALITY = 90;
 
 /**
  * A query param clamped into `[min, max]`. `null` (the param was never given)
@@ -865,9 +868,9 @@ export const MAX_TRANSFORM_QUALITY = 90
  * value `Number()` cannot make sense of at all is treated as absent.
  */
 function clampedParam(raw: string | null, min: number, max: number): number | undefined {
-  if (raw === null) return undefined
-  const n = Number(raw)
-  return Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), min), max) : undefined
+  if (raw === null) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), min), max) : undefined;
 }
 
 /** Clamps a focal-point coordinate into `[0, 1]` — the normalised range the
@@ -877,31 +880,31 @@ function clampedParam(raw: string | null, min: number, max: number): number | un
  * which would otherwise serve the full-size original at full R2 egress cost,
  * repeatably, since a thrown transform is never written to the Cache API. */
 function clampFocal(n: number): number {
-  return Math.min(Math.max(n, 0), 1)
+  return Math.min(Math.max(n, 0), 1);
 }
 
 export function parseTransform(
   params: URLSearchParams,
 ): AssetTransform & { focal?: { x: number; y: number } } {
-  const fit = params.get('fit')
-  const format = params.get('f')
-  const [fx, fy] = (params.get('fp') ?? '').split(',').map(Number)
+  const fit = params.get("fit");
+  const format = params.get("f");
+  const [fx, fy] = (params.get("fp") ?? "").split(",").map(Number);
 
   return {
-    width: clampedParam(params.get('w'), MIN_TRANSFORM_DIMENSION, MAX_TRANSFORM_DIMENSION),
-    height: clampedParam(params.get('h'), MIN_TRANSFORM_DIMENSION, MAX_TRANSFORM_DIMENSION),
-    quality: clampedParam(params.get('q'), MIN_TRANSFORM_QUALITY, MAX_TRANSFORM_QUALITY),
-    ...(fit === 'cover' || fit === 'contain' || fit === 'scale-down' ? { fit } : {}),
-    ...(format === 'webp' || format === 'avif' || format === 'jpeg' || format === 'png'
+    width: clampedParam(params.get("w"), MIN_TRANSFORM_DIMENSION, MAX_TRANSFORM_DIMENSION),
+    height: clampedParam(params.get("h"), MIN_TRANSFORM_DIMENSION, MAX_TRANSFORM_DIMENSION),
+    quality: clampedParam(params.get("q"), MIN_TRANSFORM_QUALITY, MAX_TRANSFORM_QUALITY),
+    ...(fit === "cover" || fit === "contain" || fit === "scale-down" ? { fit } : {}),
+    ...(format === "webp" || format === "avif" || format === "jpeg" || format === "png"
       ? { format }
       : {}),
     ...(Number.isFinite(fx) && Number.isFinite(fy)
       ? { focal: { x: clampFocal(fx!), y: clampFocal(fy!) } }
       : {}),
-  }
+  };
 }
 
-const IMMUTABLE = 'public, max-age=31536000, immutable'
+const IMMUTABLE = "public, max-age=31536000, immutable";
 /**
  * Cache-control for a response that is *not* the variant a transform query
  * asked for — no Images binding, a non-GET request, or a transform that threw.
@@ -910,7 +913,7 @@ const IMMUTABLE = 'public, max-age=31536000, immutable'
  * suppressed; a short, revalidatable max-age lets the next request try again
  * instead of being stuck.
  */
-const DEGRADED = 'public, max-age=60'
+const DEGRADED = "public, max-age=60";
 
 /**
  * `sandbox` forbids scripts, forms, and origin-privileged execution outright,
@@ -918,7 +921,7 @@ const DEGRADED = 'public, max-age=60'
  * the bucket by something other than `uploadAsset`) cannot run as this origin —
  * a second layer behind `nosniff`, not a replacement for it.
  */
-const CSP = "default-src 'none'; sandbox"
+const CSP = "default-src 'none'; sandbox";
 
 /**
  * Headers common to every response this route returns. `nosniff` and the CSP
@@ -937,12 +940,12 @@ const CSP = "default-src 'none'; sandbox"
  */
 function serveHeaders(cacheControl: string, contentType: string): Record<string, string> {
   return {
-    'content-type': contentType,
-    'cache-control': cacheControl,
-    'x-content-type-options': 'nosniff',
-    'content-security-policy': CSP,
-    'content-disposition': isInlineContentType(contentType) ? 'inline' : 'attachment',
-  }
+    "content-type": contentType,
+    "cache-control": cacheControl,
+    "x-content-type-options": "nosniff",
+    "content-security-policy": CSP,
+    "content-disposition": isInlineContentType(contentType) ? "inline" : "attachment",
+  };
 }
 
 /**
@@ -961,16 +964,16 @@ function canonicalTransformRequest(
   url: string,
   transform: AssetTransform & { focal?: { x: number; y: number } },
 ): Request {
-  const { origin, pathname } = new URL(url)
-  const params = new URLSearchParams()
-  if (transform.width) params.set('w', String(transform.width))
-  if (transform.height) params.set('h', String(transform.height))
-  if (transform.quality) params.set('q', String(transform.quality))
-  if (transform.fit) params.set('fit', transform.fit)
-  if (transform.format) params.set('f', transform.format)
-  if (transform.focal) params.set('fp', `${transform.focal.x},${transform.focal.y}`)
-  const query = params.toString()
-  return new Request(`${origin}${pathname}${query ? `?${query}` : ''}`)
+  const { origin, pathname } = new URL(url);
+  const params = new URLSearchParams();
+  if (transform.width) params.set("w", String(transform.width));
+  if (transform.height) params.set("h", String(transform.height));
+  if (transform.quality) params.set("q", String(transform.quality));
+  if (transform.fit) params.set("fit", transform.fit);
+  if (transform.format) params.set("f", transform.format);
+  if (transform.focal) params.set("fp", `${transform.focal.x},${transform.focal.y}`);
+  const query = params.toString();
+  return new Request(`${origin}${pathname}${query ? `?${query}` : ""}`);
 }
 
 export async function serveAsset(
@@ -981,17 +984,17 @@ export async function serveAsset(
   request: Request,
   logger: FolioLogger = console,
 ): Promise<Response> {
-  const object = await bucket.get(key)
-  if (!object) throw new FolioError('not_found', 'No such asset')
+  const object = await bucket.get(key);
+  if (!object) throw new FolioError("not_found", "No such asset");
 
   // Second gate on the same allowlists the upload applies (validate.ts): only
   // the types this route is willing to serve inline are echoed back, so an
   // object written by anything other than `uploadAsset` — or before those
   // allowlists existed — downloads rather than rendering as HTML on this origin.
-  const stored = object.httpMetadata?.contentType ?? ''
-  const contentType = isInlineContentType(stored) ? stored : DOWNLOAD_CONTENT_TYPE
+  const stored = object.httpMetadata?.contentType ?? "";
+  const contentType = isInlineContentType(stored) ? stored : DOWNLOAD_CONTENT_TYPE;
 
-  const wantsTransform = Boolean(transform.width || transform.height || transform.format)
+  const wantsTransform = Boolean(transform.width || transform.height || transform.format);
   // A transform only ever runs for a GET: the Cache API can only ever hold a
   // GET response, and HEAD is routable to this same path (an uptime monitor or
   // link-preview bot does exactly that) — running the transform anyway would
@@ -1008,7 +1011,7 @@ export async function serveAsset(
     Boolean(images) &&
     wantsTransform &&
     SERVED_CONTENT_TYPES.has(contentType) &&
-    request.method === 'GET'
+    request.method === "GET";
 
   if (!canTransform) {
     // Nothing here was ever going to be transformed — the type isn't one this
@@ -1017,13 +1020,13 @@ export async function serveAsset(
     // request that *did* ask for a transform but isn't getting one right now
     // (no Images binding configured, or a non-GET method choosing not to spend
     // one) is a degraded response and must not be.
-    const stable = !wantsTransform || !SERVED_CONTENT_TYPES.has(contentType)
+    const stable = !wantsTransform || !SERVED_CONTENT_TYPES.has(contentType);
     return new Response(object.body, {
       headers: {
         ...serveHeaders(stable ? IMMUTABLE : DEGRADED, contentType),
         etag: object.httpEtag,
       },
-    })
+    });
   }
 
   // Every distinct clamped transform below is its own billable Images
@@ -1036,13 +1039,13 @@ export async function serveAsset(
   // `CacheStorage` (this project's tsconfig pulls in "DOM" for react-dom/server)
   // shadows the Workers one and has no `default` property, though the runtime
   // object underneath is the same either way.
-  const cache = (caches as unknown as { default: Cache }).default
-  const canonical = canonicalTransformRequest(request.url, transform)
-  const cached = await cache.match(canonical)
-  if (cached) return cached
+  const cache = (caches as unknown as { default: Cache }).default;
+  const canonical = canonicalTransformRequest(request.url, transform);
+  const cached = await cache.match(canonical);
+  if (cached) return cached;
 
-  let bytes: ArrayBuffer
-  let outContentType: string
+  let bytes: ArrayBuffer;
+  let outContentType: string;
   try {
     const op: ImageTransform = {
       ...(transform.width ? { width: transform.width } : {}),
@@ -1053,50 +1056,50 @@ export async function serveAsset(
       // sits in the original. `parseTransform` has already clamped both
       // coordinates into `[0, 1]`, which is what keeps an out-of-range `fp`
       // from throwing here and falling through to the degraded branch below.
-      ...(transform.focal && transform.fit === 'cover'
-        ? { gravity: { x: transform.focal.x, y: transform.focal.y, mode: 'remainder' as const } }
+      ...(transform.focal && transform.fit === "cover"
+        ? { gravity: { x: transform.focal.x, y: transform.focal.y, mode: "remainder" as const } }
         : {}),
-    }
+    };
     const result = await images!
       .input(object.body)
       .transform(op)
       .output({
-        format: `image/${transform.format ?? 'webp'}` as ImageOutputOptions['format'],
+        format: `image/${transform.format ?? "webp"}` as ImageOutputOptions["format"],
         ...(transform.quality ? { quality: transform.quality } : {}),
-      })
+      });
 
     // Buffered rather than streamed so an empty result can be caught. A
     // transform that yields nothing still comes back as a 200, and streaming it
     // through would put a silently broken image on the page — the worst
     // available failure mode. Transformed variants are small and cached
     // immutably, so this is paid once per variant.
-    bytes = await result.response().arrayBuffer()
-    if (bytes.byteLength === 0) throw new Error('Transform produced no output')
-    outContentType = result.contentType()
+    bytes = await result.response().arrayBuffer();
+    if (bytes.byteLength === 0) throw new Error("Transform produced no output");
+    outContentType = result.contentType();
   } catch (e) {
     // Never silent: a transform failure that goes unlogged is indistinguishable
     // from "nobody ever requested this variant".
-    logger.error(`folio: asset transform failed for ${key}`, e)
+    logger.error(`folio: asset transform failed for ${key}`, e);
     // A transform failing is not a reason to show a broken image. Re-fetch,
     // because `object.body` was consumed by the attempt. Short-lived rather
     // than immutable: this is the original standing in for a variant that
     // failed, not the variant itself, and the failure may well be transient.
-    const original = await bucket.get(key)
-    if (!original) throw new FolioError('not_found', 'No such asset')
-    return new Response(original.body, { headers: serveHeaders(DEGRADED, contentType) })
+    const original = await bucket.get(key);
+    if (!original) throw new FolioError("not_found", "No such asset");
+    return new Response(original.body, { headers: serveHeaders(DEGRADED, contentType) });
   }
 
-  const response = new Response(bytes, { headers: serveHeaders(IMMUTABLE, outContentType) })
+  const response = new Response(bytes, { headers: serveHeaders(IMMUTABLE, outContentType) });
   // Deliberately outside the transform's own try/catch, and never allowed to
   // turn a successful transform into a reported failure: the transform above
   // already succeeded, so a cache-write failure only costs the next request
   // its cache hit, not this one its correct response.
   try {
-    await cache.put(canonical, response.clone())
+    await cache.put(canonical, response.clone());
   } catch (e) {
-    logger.error(`folio: asset cache write failed for ${key}`, e)
+    logger.error(`folio: asset cache write failed for ${key}`, e);
   }
-  return response
+  return response;
 }
 
 /**
@@ -1112,14 +1115,14 @@ export async function serveAsset(
  * depending on what else is co-tenanted there.
  */
 export function safeFilename(name: string): string {
-  const base = name.split(/[\\/]/).pop() ?? 'file'
+  const base = name.split(/[\\/]/).pop() ?? "file";
   return (
     base
       .toLowerCase()
-      .replace(/[^a-z0-9.]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 80) || 'file'
-  )
+      .replace(/[^a-z0-9.]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "file"
+  );
 }
 
 /* ------------------------------------------------------------- sniffing --- */
@@ -1132,7 +1135,7 @@ const ascii4 = (bytes: Uint8Array, offset: number): string =>
         bytes[offset + 2]!,
         bytes[offset + 3]!,
       )
-    : ''
+    : "";
 
 /**
  * The upload's real content type, off its own magic bytes. Covers exactly the
@@ -1158,33 +1161,33 @@ export function sniffContentType(bytes: Uint8Array): string | undefined {
     new DataView(bytes.buffer, bytes.byteOffset).getUint32(0) === 0x89504e47 &&
     new DataView(bytes.buffer, bytes.byteOffset).getUint32(4) === 0x0d0a1a0a
   ) {
-    return 'image/png'
+    return "image/png";
   }
   // SOI (FF D8) is always immediately followed by another marker, which always
   // starts with FF: without that third byte, "FF D8" alone is not a JPEG
   // signature, just its first two bytes.
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return 'image/jpeg'
+    return "image/jpeg";
   }
   // The full 6-byte header, not just the 3-byte "GIF" that precedes it: either
   // version string, "GIF87a" or "GIF89a".
   if (
     bytes.length >= 6 &&
-    ascii4(bytes, 0).slice(0, 3) === 'GIF' &&
+    ascii4(bytes, 0).slice(0, 3) === "GIF" &&
     bytes[3] === 0x38 &&
     (bytes[4] === 0x37 || bytes[4] === 0x39) &&
     bytes[5] === 0x61
   ) {
-    return 'image/gif'
+    return "image/gif";
   }
-  if (bytes.length >= 12 && ascii4(bytes, 0) === 'RIFF' && ascii4(bytes, 8) === 'WEBP') {
-    return 'image/webp'
+  if (bytes.length >= 12 && ascii4(bytes, 0) === "RIFF" && ascii4(bytes, 8) === "WEBP") {
+    return "image/webp";
   }
-  if (bytes.length >= 12 && ascii4(bytes, 4) === 'ftyp' && ascii4(bytes, 8) === 'avif') {
-    return 'image/avif'
+  if (bytes.length >= 12 && ascii4(bytes, 4) === "ftyp" && ascii4(bytes, 8) === "avif") {
+    return "image/avif";
   }
-  if (sniffSvg(bytes)) return 'image/svg+xml'
-  return undefined
+  if (sniffSvg(bytes)) return "image/svg+xml";
+  return undefined;
 }
 
 /**
@@ -1194,7 +1197,7 @@ export function sniffContentType(bytes: Uint8Array): string | undefined {
  * and Inkscape both emit them. Bounded so this stays a header check rather than
  * a scan of a multi-megabyte body.
  */
-const SVG_SNIFF_BYTES = 4096
+const SVG_SNIFF_BYTES = 4096;
 
 /**
  * Whether the first *element* in the document is `<svg`.
@@ -1210,48 +1213,48 @@ const SVG_SNIFF_BYTES = 4096
  * here) is not a file this route needs to serve inline.
  */
 function sniffSvg(bytes: Uint8Array): boolean {
-  const end = Math.min(bytes.length, SVG_SNIFF_BYTES)
+  const end = Math.min(bytes.length, SVG_SNIFF_BYTES);
   // UTF-8 BOM. UTF-16's BOM is deliberately not skipped: see above.
-  let i = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0
+  let i = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
 
   const at = (offset: number, literal: string) => {
-    if (offset + literal.length > end) return false
+    if (offset + literal.length > end) return false;
     for (let n = 0; n < literal.length; n++) {
-      if (bytes[offset + n] !== literal.charCodeAt(n)) return false
+      if (bytes[offset + n] !== literal.charCodeAt(n)) return false;
     }
-    return true
-  }
+    return true;
+  };
   /** Past the next occurrence of `literal`, or `-1` if it is not within range. */
   const skipTo = (offset: number, literal: string) => {
     for (let n = offset; n + literal.length <= end; n++) {
-      if (at(n, literal)) return n + literal.length
+      if (at(n, literal)) return n + literal.length;
     }
-    return -1
-  }
+    return -1;
+  };
 
   while (i < end) {
-    const byte = bytes[i]!
+    const byte = bytes[i]!;
     // Space, tab, LF, CR.
     if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) {
-      i++
-      continue
+      i++;
+      continue;
     }
-    if (at(i, '<?xml')) {
-      i = skipTo(i, '?>')
-    } else if (at(i, '<!--')) {
-      i = skipTo(i, '-->')
-    } else if (at(i, '<!DOCTYPE') || at(i, '<!doctype')) {
+    if (at(i, "<?xml")) {
+      i = skipTo(i, "?>");
+    } else if (at(i, "<!--")) {
+      i = skipTo(i, "-->");
+    } else if (at(i, "<!DOCTYPE") || at(i, "<!doctype")) {
       // An internal subset (`[ … ]`) can itself contain `>`, so close on `]>`
       // when one is opened. A DOCTYPE this route never serves is not worth
       // parsing further than that.
-      const bracket = skipTo(i, '[')
-      const close = skipTo(i, '>')
-      i = bracket !== -1 && (close === -1 || bracket < close) ? skipTo(i, ']>') : close
+      const bracket = skipTo(i, "[");
+      const close = skipTo(i, ">");
+      i = bracket !== -1 && (close === -1 || bracket < close) ? skipTo(i, "]>") : close;
     } else {
       // The first thing that is not prologue. It is the root tag or nothing.
       // `<svg` must be followed by a delimiter, so `<svgfoo>` is not a match.
-      if (!at(i, '<svg')) return false
-      const next = bytes[i + 4]
+      if (!at(i, "<svg")) return false;
+      const next = bytes[i + 4];
       return (
         next === 0x20 ||
         next === 0x09 ||
@@ -1259,11 +1262,11 @@ function sniffSvg(bytes: Uint8Array): boolean {
         next === 0x0d ||
         next === 0x2f || // /
         next === 0x3e // >
-      )
+      );
     }
-    if (i === -1) return false
+    if (i === -1) return false;
   }
-  return false
+  return false;
 }
 
 /* ------------------------------------------------------------ dimensions --- */
@@ -1277,61 +1280,61 @@ function sniffSvg(bytes: Uint8Array): boolean {
  * for an image instead of reflowing when it loads.
  */
 export function imageSize(bytes: Uint8Array): { width: number; height: number } | null {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const u16 = (o: number, le = false) => view.getUint16(o, le)
-  const u32 = (o: number, le = false) => view.getUint32(o, le)
-  const ascii = (o: number, n: number) => String.fromCharCode(...bytes.subarray(o, o + n))
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const u16 = (o: number, le = false) => view.getUint16(o, le);
+  const u32 = (o: number, le = false) => view.getUint32(o, le);
+  const ascii = (o: number, n: number) => String.fromCharCode(...bytes.subarray(o, o + n));
 
-  if (bytes.length >= 24 && u32(0) === 0x89504e47 && ascii(12, 4) === 'IHDR') {
-    return { width: u32(16), height: u32(20) }
+  if (bytes.length >= 24 && u32(0) === 0x89504e47 && ascii(12, 4) === "IHDR") {
+    return { width: u32(16), height: u32(20) };
   }
 
-  if (bytes.length >= 10 && ascii(0, 3) === 'GIF') {
-    return { width: u16(6, true), height: u16(8, true) }
+  if (bytes.length >= 10 && ascii(0, 3) === "GIF") {
+    return { width: u16(6, true), height: u16(8, true) };
   }
 
-  if (bytes.length >= 30 && ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') {
-    const chunk = ascii(12, 4)
-    if (chunk === 'VP8X') {
+  if (bytes.length >= 30 && ascii(0, 4) === "RIFF" && ascii(8, 4) === "WEBP") {
+    const chunk = ascii(12, 4);
+    if (chunk === "VP8X") {
       // 24-bit little-endian, stored as (dimension - 1).
-      const w = (bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16)) + 1
-      const h = (bytes[27]! | (bytes[28]! << 8) | (bytes[29]! << 16)) + 1
-      return { width: w, height: h }
+      const w = (bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16)) + 1;
+      const h = (bytes[27]! | (bytes[28]! << 8) | (bytes[29]! << 16)) + 1;
+      return { width: w, height: h };
     }
-    if (chunk === 'VP8 ') {
-      return { width: u16(26, true) & 0x3fff, height: u16(28, true) & 0x3fff }
+    if (chunk === "VP8 ") {
+      return { width: u16(26, true) & 0x3fff, height: u16(28, true) & 0x3fff };
     }
-    if (chunk === 'VP8L') {
-      const bits = u32(21, true)
-      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+    if (chunk === "VP8L") {
+      const bits = u32(21, true);
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
     }
   }
 
-  if (bytes.length >= 4 && u16(0) === 0xffd8) return jpegSize(bytes, view)
+  if (bytes.length >= 4 && u16(0) === 0xffd8) return jpegSize(bytes, view);
 
-  return null
+  return null;
 }
 
 function jpegSize(bytes: Uint8Array, view: DataView): { width: number; height: number } | null {
-  let offset = 2
+  let offset = 2;
   while (offset + 9 < bytes.length) {
     if (bytes[offset] !== 0xff) {
-      offset++
-      continue
+      offset++;
+      continue;
     }
-    const marker = bytes[offset + 1]!
+    const marker = bytes[offset + 1]!;
     // Start-of-frame markers carry the dimensions. C4, C8 and CC are tables and
     // arithmetic-coding conditioning, not frames.
     if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-      return { width: view.getUint16(offset + 7), height: view.getUint16(offset + 5) }
+      return { width: view.getUint16(offset + 7), height: view.getUint16(offset + 5) };
     }
     if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
-      offset += 2
-      continue
+      offset += 2;
+      continue;
     }
-    offset += 2 + view.getUint16(offset + 2)
+    offset += 2 + view.getUint16(offset + 2);
   }
-  return null
+  return null;
 }
 
 /**
@@ -1350,20 +1353,20 @@ function jpegSize(bytes: Uint8Array, view: DataView): { width: number; height: n
 export async function listAssetsByPage(
   db: FolioDb,
   opts: {
-    page: number
-    perPage: number
-    filter?: AssetFilter
+    page: number;
+    perPage: number;
+    filter?: AssetFilter;
     /** The scopes listed; see `AssetScope`. Default: the single-site chain. */
-    chain?: AssetScope
+    chain?: AssetScope;
   },
 ): Promise<{ assets: AssetRow[]; total: number }> {
-  const perPage = clampLimit(opts.perPage, 50, 200)
-  const page = Math.max(1, Math.trunc(opts.page) || 1)
+  const perPage = clampLimit(opts.perPage, 50, 200);
+  const page = Math.max(1, Math.trunc(opts.page) || 1);
   // The same composer `listAssets` uses (decision 13). Absent, it emits nothing
   // and the statement is the unfiltered one this route has always answered — the
   // filters are additive, so a caller passing none gets exactly today's rows.
-  const filter = scopedAssetFilter(opts.filter ?? {}, opts.chain)
-  const where = whereOf(...filter.clauses)
+  const filter = scopedAssetFilter(opts.filter ?? {}, opts.chain);
+  const where = whereOf(...filter.clauses);
   const [rows, total] = await Promise.all([
     db
       .prepare(
@@ -1375,6 +1378,6 @@ export async function listAssetsByPage(
       .prepare(`select count(*) as n from assets ${where}`)
       .bind(...filter.binds)
       .first<{ n: number }>(),
-  ])
-  return { assets: rows.results, total: total?.n ?? 0 }
+  ]);
+  return { assets: rows.results, total: total?.n ?? 0 };
 }

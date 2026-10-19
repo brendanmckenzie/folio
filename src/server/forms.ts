@@ -38,40 +38,40 @@ import {
   rowsOf,
   shapeOf,
   validateFormFields,
-} from '../core/forms'
-import type { LocaleContext } from '../core/locales'
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
-import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from '../core/sites'
-import type { StoryMeta } from '../core/story'
-import { MAX_UPLOAD_BYTES } from './assets'
-import { bindChunks, type FolioDb } from './db'
-import { FolioError } from './errors'
-import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
-import { chainClause, storiesFor } from './stories'
-import type { FolioLogger } from './types'
+} from "../core/forms";
+import type { LocaleContext } from "../core/locales";
+import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
+import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from "../core/sites";
+import type { StoryMeta } from "../core/story";
+import { MAX_UPLOAD_BYTES } from "./assets";
+import { bindChunks, type FolioDb } from "./db";
+import { FolioError } from "./errors";
+import { type Keyset, keysetWhere, orderBy, whereOf } from "./keyset";
+import { chainClause, storiesFor } from "./stories";
+import type { FolioLogger } from "./types";
 
 /** A form as the builder reads it: the row, with its questions parsed. */
 export interface Form {
   /** `frm_<12 hex>`. Immutable — the action URL in published HTML names it, so
    *  renaming a form must never touch it (decision 3). */
-  id: string
+  id: string;
   /** Slug, unique across the site. The admin's handle, and what rides back on a
    *  redirect as `folio_form=<name>`. Never part of an action URL. */
-  name: string
-  label: string
-  fields: FormField[]
-  version: number
+  name: string;
+  label: string;
+  fields: FormField[];
+  version: number;
   /** The editor's switch. The *effective* state is this and the clock together —
    *  see `isOpen`, which is the one place the two are combined. */
-  open: boolean
-  closesAt: number | null
-  closedMessage: string
-  successMessage: string
-  submitLabel: string
-  redirectTo: string | null
-  createdAt: number
+  open: boolean;
+  closesAt: number | null;
+  closedMessage: string;
+  successMessage: string;
+  submitLabel: string;
+  redirectTo: string | null;
+  createdAt: number;
   /** The optimistic-concurrency token a PATCH carries back (decision 18). */
-  updatedAt: number
+  updatedAt: number;
 }
 
 /**
@@ -83,29 +83,29 @@ export interface Form {
  * one form and gets the array, the list reads two hundred and does not need it.
  */
 export interface FormSummary {
-  id: string
-  name: string
-  label: string
-  version: number
-  open: boolean
-  closesAt: number | null
-  createdAt: number
-  updatedAt: number
-  questions: number
+  id: string;
+  name: string;
+  label: string;
+  version: number;
+  open: boolean;
+  closesAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  questions: number;
   /** Only under `?counts=1`: how many responses this form has collected. */
-  responses?: number
+  responses?: number;
 }
 
 /** What a hook payload names a form by (`hooks.ts`'s `formChanged`). */
 export interface FormMeta {
-  id: string
-  name: string
-  label: string
-  version: number
+  id: string;
+  name: string;
+  label: string;
+  version: number;
 }
 
 export function formMeta(form: Form | FormSummary): FormMeta {
-  return { id: form.id, name: form.name, label: form.label, version: form.version }
+  return { id: form.id, name: form.name, label: form.label, version: form.version };
 }
 
 /**
@@ -125,12 +125,12 @@ export function formMeta(form: Form | FormSummary): FormMeta {
  * descriptor so a host's own `maxBytes` attribute says what the server will do.
  */
 export function fileCap(field: FormField): number {
-  return Math.min(field.maxBytes ?? MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES)
+  return Math.min(field.maxBytes ?? MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES);
 }
 
 /** Whether this form needs the `media` binding at all (decision 15). */
 export function hasFileQuestion(fields: readonly FormField[]): boolean {
-  return fields.some((f) => f.kind === 'file')
+  return fields.some((f) => f.kind === "file");
 }
 
 /**
@@ -140,30 +140,30 @@ export function hasFileQuestion(fields: readonly FormField[]): boolean {
  * rule, applied to a second table.
  */
 export function isOpen(form: Form, now: number = Date.now()): boolean {
-  return form.open && (form.closesAt === null || form.closesAt > now)
+  return form.open && (form.closesAt === null || form.closesAt > now);
 }
 
 /** `frm_<12 hex>`, minted exactly the way `uploadAsset` mints an asset id. */
 function newFormId(): string {
-  return `frm_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+  return `frm_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
 const COLS = `id, name, label, fields, version, open, closes_at as closesAt,
   closed_message as closedMessage, success_message as successMessage,
   submit_label as submitLabel, redirect_to as redirectTo,
-  created_at as createdAt, updated_at as updatedAt`
+  created_at as createdAt, updated_at as updatedAt`;
 
 const SUMMARY_COLS = `id, name, label, version, open, closes_at as closesAt,
   created_at as createdAt, updated_at as updatedAt,
-  json_array_length(fields) as questions`
+  json_array_length(fields) as questions`;
 
-interface FormRow extends Omit<Form, 'fields' | 'open'> {
-  fields: string
-  open: number
+interface FormRow extends Omit<Form, "fields" | "open"> {
+  fields: string;
+  open: number;
 }
 
-interface SummaryRow extends Omit<FormSummary, 'open' | 'responses'> {
-  open: number
+interface SummaryRow extends Omit<FormSummary, "open" | "responses"> {
+  open: number;
 }
 
 /**
@@ -183,10 +183,10 @@ interface SummaryRow extends Omit<FormSummary, 'open' | 'responses'> {
  */
 function readFields(id: string, raw: string, logger: FolioLogger = console): FormField[] {
   try {
-    return validateFormFields(JSON.parse(raw))
+    return validateFormFields(JSON.parse(raw));
   } catch (err) {
-    logger.error(`folio: form ${id} has unreadable fields`, err)
-    return []
+    logger.error(`folio: form ${id} has unreadable fields`, err);
+    return [];
   }
 }
 
@@ -203,18 +203,18 @@ function readFields(id: string, raw: string, logger: FolioLogger = console): For
  */
 function fieldsFromInput(input: unknown): FormField[] {
   try {
-    return validateFormFields(input)
+    return validateFormFields(input);
   } catch (err) {
-    throw new FolioError('bad_request', err instanceof Error ? err.message : 'Invalid form fields')
+    throw new FolioError("bad_request", err instanceof Error ? err.message : "Invalid form fields");
   }
 }
 
 function toForm(row: FormRow, logger: FolioLogger = console): Form {
-  return { ...row, open: row.open !== 0, fields: readFields(row.id, row.fields, logger) }
+  return { ...row, open: row.open !== 0, fields: readFields(row.id, row.fields, logger) };
 }
 
 function toSummary(row: SummaryRow): FormSummary {
-  return { ...row, open: row.open !== 0 }
+  return { ...row, open: row.open !== 0 };
 }
 
 /* ------------------------------------------------------------------ reads --- */
@@ -233,11 +233,11 @@ export async function formById(
 ): Promise<Form | null> {
   const row = await db
     .prepare(
-      `select ${COLS} from forms where id = ?${site === undefined ? '' : ' and site_id = ?'}`,
+      `select ${COLS} from forms where id = ?${site === undefined ? "" : " and site_id = ?"}`,
     )
     .bind(...(site === undefined ? [id] : [id, site]))
-    .first<FormRow>()
-  return row ? toForm(row, logger) : null
+    .first<FormRow>();
+  return row ? toForm(row, logger) : null;
 }
 
 /**
@@ -248,10 +248,10 @@ export async function formById(
  */
 export async function formSiteOf(db: FolioDb, id: string): Promise<string | null> {
   const row = await db
-    .prepare('select site_id as site from forms where id = ?')
+    .prepare("select site_id as site from forms where id = ?")
     .bind(id)
-    .first<{ site: string }>()
-  return row?.site ?? null
+    .first<{ site: string }>();
+  return row?.site ?? null;
 }
 
 /**
@@ -268,8 +268,8 @@ export async function formByName(
   const row = await db
     .prepare(`select ${COLS} from forms where site_id = ? and name = ?`)
     .bind(site, name)
-    .first<FormRow>()
-  return row ? toForm(row, logger) : null
+    .first<FormRow>();
+  return row ? toForm(row, logger) : null;
 }
 
 /**
@@ -298,21 +298,21 @@ export async function formsByIds(
    */
   chain: readonly string[] | null = SINGLE_SITE_CHAIN,
 ): Promise<Form[]> {
-  if (ids.length === 0 || chain?.length === 0) return []
-  const within = chain ? chainClause(chain) : null
+  if (ids.length === 0 || chain?.length === 0) return [];
+  const within = chain ? chainClause(chain) : null;
   const pages = await Promise.all(
     bindChunks([...new Set(ids)], 1 + (within?.binds.length ?? 0)).map(async (chunk) => {
       const { results } = await db
         .prepare(
           `select ${COLS} from forms
-           where id in (${chunk.map(() => '?').join(', ')})${within ? ` and ${within.sql}` : ''}`,
+           where id in (${chunk.map(() => "?").join(", ")})${within ? ` and ${within.sql}` : ""}`,
         )
         .bind(...chunk, ...(within?.binds ?? []))
-        .all<FormRow>()
-      return results
+        .all<FormRow>();
+      return results;
     }),
-  )
-  return pages.flat().map((row) => toForm(row, logger))
+  );
+  return pages.flat().map((row) => toForm(row, logger));
 }
 
 /* -------------------------------------------------------------- descriptor --- */
@@ -328,26 +328,26 @@ export interface FormRenderContext {
    * already follows: remounting Folio under a different base path must not
    * invalidate every page that carries a form.
    */
-  base: string
+  base: string;
   /**
    * The render's locale, or undefined for the source locale. Every string a
    * visitor reads is resolved through this chain here, so a host writes no
    * locale code at all (decision 12).
    */
-  locale?: LocaleContext
+  locale?: LocaleContext;
   /**
    * The URL of the page being rendered, for the `_folio_page` hidden input.
    * Absent when the render does not know its page — `folio.resolve(env, doc)`
    * with no `story`, or a document that has no path. Then `hidden` is empty and
    * the submit route falls back to `Referer` and then to `/`.
    */
-  page?: string
+  page?: string;
   /** The clock half of `isOpen`. Injected so a test can move it. */
-  now?: number
+  now?: number;
 }
 
 /** The i18n keys a `FormField` can translate one string under. */
-type TranslatableKey = 'label' | 'help' | 'placeholder'
+type TranslatableKey = "label" | "help" | "placeholder";
 
 /**
  * One string through the locale chain: the active locale, then each fallback,
@@ -363,11 +363,11 @@ function translate(
 ): string | undefined {
   if (locale) {
     for (const code of [locale.code, ...locale.fallbacks]) {
-      const candidate = field.i18n?.[code]?.[key]
-      if (candidate !== undefined) return candidate
+      const candidate = field.i18n?.[code]?.[key];
+      if (candidate !== undefined) return candidate;
     }
   }
-  return field[key]
+  return field[key];
 }
 
 /** An option's label through the same chain, keyed by the option's value. */
@@ -378,11 +378,11 @@ function translateOption(
 ): FormFieldOption {
   if (locale) {
     for (const code of [locale.code, ...locale.fallbacks]) {
-      const candidate = field.i18n?.[code]?.options?.[option.value]
-      if (candidate !== undefined) return { value: option.value, label: candidate }
+      const candidate = field.i18n?.[code]?.options?.[option.value];
+      if (candidate !== undefined) return { value: option.value, label: candidate };
     }
   }
-  return option
+  return option;
 }
 
 /**
@@ -401,7 +401,7 @@ function compileField(
   const out: ResolvedFormField = {
     name: field.name,
     kind: field.kind,
-    label: translate(field, 'label', locale) ?? field.label,
+    label: translate(field, "label", locale) ?? field.label,
     // Always a boolean: a host writes `required={f.required}` and an absent key
     // would render `required` as present-and-false in some frameworks.
     required: field.required === true,
@@ -409,31 +409,31 @@ function compileField(
     // Always a number, never absent — a host writes `` `${grow}fr` `` with no
     // fallback of its own to remember (`core/forms.ts`'s `ResolvedFormField`).
     grow: field.grow ?? 1,
-  }
-  const help = translate(field, 'help', locale)
-  if (help !== undefined) out.help = help
-  const placeholder = translate(field, 'placeholder', locale)
-  if (placeholder !== undefined) out.placeholder = placeholder
-  if (field.max !== undefined) out.max = field.max
-  if (field.min !== undefined) out.min = field.min
-  if (field.pattern !== undefined) out.pattern = field.pattern
-  if (field.options) out.options = field.options.map((o) => translateOption(field, o, locale))
+  };
+  const help = translate(field, "help", locale);
+  if (help !== undefined) out.help = help;
+  const placeholder = translate(field, "placeholder", locale);
+  if (placeholder !== undefined) out.placeholder = placeholder;
+  if (field.max !== undefined) out.max = field.max;
+  if (field.min !== undefined) out.min = field.min;
+  if (field.pattern !== undefined) out.pattern = field.pattern;
+  if (field.options) out.options = field.options.map((o) => translateOption(field, o, locale));
   // The expanded content-type list, not the stored token: a host puts it
   // straight on the input's `accept`, and the menu it came from is an editor's
   // vocabulary rather than a visitor's.
-  if (field.accept !== undefined) out.accept = FILE_ACCEPT[field.accept]
+  if (field.accept !== undefined) out.accept = FILE_ACCEPT[field.accept];
   // The **clamped** cap, not the stored number: a host renders this as the
   // input's own limit, and a descriptor promising 50MB against a server that
   // takes 20 is a visitor watching an upload fail after it finished.
-  if (field.maxBytes !== undefined) out.maxBytes = fileCap(field)
-  if (field.value !== undefined) out.value = field.value
-  if (field.text !== undefined) out.text = field.text
-  return out
+  if (field.maxBytes !== undefined) out.maxBytes = fileCap(field);
+  if (field.value !== undefined) out.value = field.value;
+  if (field.text !== undefined) out.text = field.text;
+  return out;
 }
 
 /** The name Folio's own hidden input carries. `_`-prefixed, and the builder
  *  refuses a field slug in that namespace (decision 13). */
-export const PAGE_INPUT = '_folio_page'
+export const PAGE_INPUT = "_folio_page";
 
 /**
  * The render's locale, carried back on the submission (decision 12: *"the
@@ -445,7 +445,7 @@ export const PAGE_INPUT = '_folio_page'
  * whatever comes back through `localeOf`, so a value a submitter invented is
  * stored as `''` rather than as itself.
  */
-export const LOCALE_INPUT = '_folio_locale'
+export const LOCALE_INPUT = "_folio_locale";
 
 /**
  * A stored form as a `render` receives it (decision 4): everything a host needs
@@ -469,16 +469,16 @@ export const LOCALE_INPUT = '_folio_locale'
  *   exact shape, the same posture `presenceOf` takes toward a socket attachment.
  */
 export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
-  const rows = rowsOf(form.fields)
-  const fields = form.fields.map((field, i) => compileField(field, ctx.locale, rows[i] ?? 0))
+  const rows = rowsOf(form.fields);
+  const fields = form.fields.map((field, i) => compileField(field, ctx.locale, rows[i] ?? 0));
   return {
     id: form.id,
     name: form.name,
     action: `${ctx.base}/f/${form.id}`,
-    method: 'post',
-    enctype: form.fields.some((f) => f.kind === 'file')
-      ? 'multipart/form-data'
-      : 'application/x-www-form-urlencoded',
+    method: "post",
+    enctype: form.fields.some((f) => f.kind === "file")
+      ? "multipart/form-data"
+      : "application/x-www-form-urlencoded",
     version: form.version,
     open: isOpen(form, ctx.now ?? Date.now()),
     fields,
@@ -494,7 +494,7 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
     successMessage: form.successMessage,
     closedMessage: form.closedMessage,
     redirectTo: form.redirectTo,
-  }
+  };
 }
 
 /**
@@ -515,22 +515,22 @@ export async function countResponsesByForm(
    */
   sites?: readonly string[],
 ): Promise<Record<string, number>> {
-  if (ids.length === 0) return {}
-  const within = sites === undefined ? null : chainClause(sites)
+  if (ids.length === 0) return {};
+  const within = sites === undefined ? null : chainClause(sites);
   const pages = await Promise.all(
     bindChunks([...new Set(ids)], 1 + (within?.binds.length ?? 0)).map(async (chunk) => {
       const { results } = await db
         .prepare(
           `select form_id as id, count(*) as n from form_responses
-           where form_id in (${chunk.map(() => '?').join(', ')})${within ? ` and ${within.sql}` : ''}
+           where form_id in (${chunk.map(() => "?").join(", ")})${within ? ` and ${within.sql}` : ""}
            group by form_id`,
         )
         .bind(...chunk, ...(within?.binds ?? []))
-        .all<{ id: string; n: number }>()
-      return results
+        .all<{ id: string; n: number }>();
+      return results;
     }),
-  )
-  return Object.fromEntries(pages.flat().map((row) => [row.id, row.n]))
+  );
+  return Object.fromEntries(pages.flat().map((row) => [row.id, row.n]));
 }
 
 /**
@@ -539,7 +539,7 @@ export async function countResponsesByForm(
  * reason `listRedirects` has none: a second ordering means a second keyset with
  * its own tie-breaking, for a table bounded by what a person will build.
  */
-const FORMS_ORDER: Keyset = { columns: ['updated_at', 'id'], direction: 'desc' }
+const FORMS_ORDER: Keyset = { columns: ["updated_at", "id"], direction: "desc" };
 
 export interface ListFormsOptions {
   /**
@@ -548,27 +548,27 @@ export interface ListFormsOptions {
    * Defaults to the single-site chain and is bound either way: `forms_updated` leads
    * with `site_id`, so a list that leaves it out is a scan and a sort.
    */
-  chain?: readonly string[]
+  chain?: readonly string[];
   /** The submitting sites `counts` counts; see `countResponsesByForm`. */
-  sites?: readonly string[]
-  limit?: number
-  cursor?: string
+  sites?: readonly string[];
+  limit?: number;
+  cursor?: string;
   /** Adds `total` for the whole table — one extra `count(*)`, only when asked
    *  (`../../docs/specs/foundation/pagination.md` decision 5). */
-  count?: boolean
+  count?: boolean;
   /** Adds `responses` per row. Opt-in on its own, because it is a second query
    *  over a table that grows without bound while `forms` does not. */
-  counts?: boolean
+  counts?: boolean;
 }
 
 export async function listForms(
   db: FolioDb,
   opts: ListFormsOptions = {},
 ): Promise<Page<FormSummary>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const resume = keysetWhere(FORMS_ORDER, cursor)
-  const within = chainClause(opts.chain ?? SINGLE_SITE_CHAIN)
+  const limit = clampLimit(opts.limit, 50, 200);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const resume = keysetWhere(FORMS_ORDER, cursor);
+  const within = chainClause(opts.chain ?? SINGLE_SITE_CHAIN);
 
   const [rows, total] = await Promise.all([
     db
@@ -585,9 +585,9 @@ export async function listForms(
           .bind(...within.binds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  let page = paginate(rows.results.map(toSummary), limit, (row) => [row.updatedAt, row.id])
+  let page = paginate(rows.results.map(toSummary), limit, (row) => [row.updatedAt, row.id]);
 
   // After `paginate`, not before: the over-fetched row is discarded there, and
   // counting it would be one id of work for a row nobody is shown.
@@ -596,10 +596,10 @@ export async function listForms(
       db,
       page.rows.map((row) => row.id),
       opts.sites,
-    )
-    page = { ...page, rows: page.rows.map((row) => ({ ...row, responses: counts[row.id] ?? 0 })) }
+    );
+    page = { ...page, rows: page.rows.map((row) => ({ ...row, responses: counts[row.id] ?? 0 })) };
   }
-  return total ? { ...page, total: total.n } : page
+  return total ? { ...page, total: total.n } : page;
 }
 
 /**
@@ -618,17 +618,17 @@ export async function listForms(
  * the screen's "where it is used" component is the same one.
  */
 export interface FormUsage {
-  published: StoryMeta[]
+  published: StoryMeta[];
   /** Distinct published documents rendering this form. */
-  total: number
+  total: number;
   /** Distinct published documents in scopes outside the chain that render it:
    * counted, never named (`multi-site.md`: "uses in readable scopes listed; others
    * counted"). */
-  elsewhere: number
+  elsewhere: number;
   /** Responses a delete would destroy. */
-  responses: number
+  responses: number;
   /** Uploaded files a delete would destroy, counted across those responses. */
-  files: number
+  files: number;
 }
 
 export async function formUsage(
@@ -648,10 +648,10 @@ export async function formUsage(
         `select from_story as "from" from content_refs
          where to_id = ? and kind = ? order by "from"`,
       )
-      .bind(id, 'form')
+      .bind(id, "form")
       .all<{ from: string }>(),
     responseCounts(db, id, sites),
-  ])
+  ]);
 
   // `storiesFor` chunks, so an inbound list is its problem rather than this
   // one's — a form on every page of a 500-page site is the normal case for a
@@ -662,19 +662,19 @@ export async function formUsage(
     refs.results.map((row) => row.from),
     [],
     null,
-  )
-  const published = sources.filter((story) => chain.includes(story.site ?? DEFAULT_SITE))
+  );
+  const published = sources.filter((story) => chain.includes(story.site ?? DEFAULT_SITE));
   published.sort(
     (a, b) =>
       (a.path === null ? 1 : 0) - (b.path === null ? 1 : 0) ||
       (a.path ?? a.title).localeCompare(b.path ?? b.title),
-  )
+  );
   return {
     published,
     total: published.length,
     elsewhere: sources.length - published.length,
     ...counts,
-  }
+  };
 }
 
 /**
@@ -691,23 +691,23 @@ async function responseCounts(
   id: string,
   sites?: readonly string[],
 ): Promise<{ responses: number; files: number }> {
-  const within = sites === undefined ? null : chainClause(sites)
+  const within = sites === undefined ? null : chainClause(sites);
   const row = await db
     .prepare(
       `select count(*) as responses, coalesce(sum(json_array_length(files)), 0) as files
-       from form_responses where form_id = ?${within ? ` and ${within.sql}` : ''}`,
+       from form_responses where form_id = ?${within ? ` and ${within.sql}` : ""}`,
     )
     .bind(id, ...(within?.binds ?? []))
-    .first<{ responses: number; files: number }>()
-  return { responses: row?.responses ?? 0, files: row?.files ?? 0 }
+    .first<{ responses: number; files: number }>();
+  return { responses: row?.responses ?? 0, files: row?.files ?? 0 };
 }
 
 /* ----------------------------------------------------------------- writes --- */
 
 export interface CreateFormInput {
-  label: string
+  label: string;
   /** Slugified. Absent, the label supplies it. */
-  name?: string
+  name?: string;
 }
 
 /**
@@ -726,12 +726,12 @@ export async function createForm(
    * is unique within it, so two sites may each have a `contact`. */
   site: string = DEFAULT_SITE,
 ): Promise<Form> {
-  const name = formSlug(input.name ?? input.label)
-  const taken = await formByName(db, name, site)
-  if (taken) throw slugConflict(taken)
+  const name = formSlug(input.name ?? input.label);
+  const taken = await formByName(db, name, site);
+  if (taken) throw slugConflict(taken);
 
-  const id = newFormId()
-  const now = Date.now()
+  const id = newFormId();
+  const now = Date.now();
   const result = await db
     .prepare(
       `insert into forms (id, name, label, fields, version, open, created_at, updated_at, site_id)
@@ -741,51 +741,51 @@ export async function createForm(
     // The target is `forms_name`'s columns exactly (`0011_sites.sql`): a target
     // naming fewer matches no unique index and D1 refuses the statement.
     .bind(id, name, input.label, now, now, site)
-    .run()
+    .run();
 
   if ((result.meta.changes ?? 0) === 0) {
-    const winner = await formByName(db, name, site)
+    const winner = await formByName(db, name, site);
     // Unreachable unless the row went again between the insert and this read.
-    if (!winner) throw new FolioError('conflict', `Could not create the form '${name}'`)
-    throw slugConflict(winner)
+    if (!winner) throw new FolioError("conflict", `Could not create the form '${name}'`);
+    throw slugConflict(winner);
   }
 
-  const form = await formById(db, id)
-  if (!form) throw new FolioError('conflict', `Could not create the form '${name}'`)
-  return form
+  const form = await formById(db, id);
+  if (!form) throw new FolioError("conflict", `Could not create the form '${name}'`);
+  return form;
 }
 
 function slugConflict(existing: Form): FolioError {
   return new FolioError(
-    'conflict',
+    "conflict",
     `"${existing.label}" already uses the name '${existing.name}'. Pick a different one.`,
-  )
+  );
 }
 
 export interface UpdateFormInput {
   /** The `updatedAt` the client read. A stale one is a 409 (decision 18). */
-  expectedUpdatedAt: number
-  label?: string
-  name?: string
+  expectedUpdatedAt: number;
+  label?: string;
+  name?: string;
   /** Unparsed JSON — `validateFormFields` is what turns it into questions. */
-  fields?: unknown
-  open?: boolean
-  closesAt?: number | null
-  successMessage?: string
-  closedMessage?: string
-  submitLabel?: string
-  redirectTo?: string | null
+  fields?: unknown;
+  open?: boolean;
+  closesAt?: number | null;
+  successMessage?: string;
+  closedMessage?: string;
+  submitLabel?: string;
+  redirectTo?: string | null;
 }
 
 export interface UpdateFormResult {
-  form: Form
+  form: Form;
   /**
    * Whether `shapeOf` moved, and therefore whether `version` was bumped. The
    * route turns this into `formChanged`, and Folio's own hook turns *that* into
    * a purge of `form:<id>` — decision 7, undisturbed: `version` is `shapeOf`'s
    * question alone, never `descriptorChanged`'s below.
    */
-  structural: boolean
+  structural: boolean;
   /**
    * Whether anything a host's `render` can see moved — a label, a layout
    * share, `open`, a message, anything `compileForm` puts on the descriptor —
@@ -797,7 +797,7 @@ export interface UpdateFormResult {
    * fixed to `structural`, so a host relying on "the version this save bumped
    * to" never sees it called for a save that bumped nothing.
    */
-  descriptorChanged: boolean
+  descriptorChanged: boolean;
 }
 
 /**
@@ -822,23 +822,23 @@ export async function updateForm(
    * checked against this scope's names alone. */
   site: string = DEFAULT_SITE,
 ): Promise<UpdateFormResult | null> {
-  const current = await formById(db, id, undefined, site)
-  if (!current) return null
+  const current = await formById(db, id, undefined, site);
+  if (!current) return null;
 
-  const fields = input.fields === undefined ? current.fields : fieldsFromInput(input.fields)
-  const structural = shapeOf(fields) !== shapeOf(current.fields)
-  const version = structural ? current.version + 1 : current.version
+  const fields = input.fields === undefined ? current.fields : fieldsFromInput(input.fields);
+  const structural = shapeOf(fields) !== shapeOf(current.fields);
+  const version = structural ? current.version + 1 : current.version;
   // Every field a save can touch is already reduced to `FormField[]` by the
   // point it reaches here (`validateOneField`'s fixed key order, both for what
   // was just parsed and for what `readFields` reconstructed off the row this
   // read), so a full-array compare needs no key list of its own to fall out of
   // sync with `ResolvedFormField` the way a hand-maintained one would.
-  const fieldsChanged = JSON.stringify(fields) !== JSON.stringify(current.fields)
+  const fieldsChanged = JSON.stringify(fields) !== JSON.stringify(current.fields);
 
-  const name = input.name === undefined ? current.name : formSlug(input.name)
+  const name = input.name === undefined ? current.name : formSlug(input.name);
   if (name !== current.name) {
-    const taken = await formByName(db, name, site)
-    if (taken) throw slugConflict(taken)
+    const taken = await formByName(db, name, site);
+    if (taken) throw slugConflict(taken);
   }
 
   const next: Form = {
@@ -854,7 +854,7 @@ export async function updateForm(
     submitLabel: input.submitLabel ?? current.submitLabel,
     redirectTo: input.redirectTo === undefined ? current.redirectTo : input.redirectTo,
     updatedAt: Math.max(Date.now(), current.updatedAt + 1),
-  }
+  };
 
   const result = await db
     .prepare(
@@ -878,13 +878,13 @@ export async function updateForm(
       input.expectedUpdatedAt,
       site,
     )
-    .run()
+    .run();
 
   if ((result.meta.changes ?? 0) === 0) {
     throw new FolioError(
-      'conflict',
-      'This form was changed by somebody else. Reload it and make your change again.',
-    )
+      "conflict",
+      "This form was changed by somebody else. Reload it and make your change again.",
+    );
   }
 
   const descriptorChanged =
@@ -895,9 +895,9 @@ export async function updateForm(
     next.successMessage !== current.successMessage ||
     next.closedMessage !== current.closedMessage ||
     next.submitLabel !== current.submitLabel ||
-    next.redirectTo !== current.redirectTo
+    next.redirectTo !== current.redirectTo;
 
-  return { form: next, structural, descriptorChanged }
+  return { form: next, structural, descriptorChanged };
 }
 
 /* ------------------------------------------------------- the R2 half --- */
@@ -907,10 +907,10 @@ export async function updateForm(
  * column each, not the answers, so this is a memory bound rather than a bind
  * one — the statement binds four parameters whatever the page size is.
  */
-const UPLOAD_WALK_PAGE = 200
+const UPLOAD_WALK_PAGE = 200;
 
 /** R2 refuses a `delete` naming more than a thousand keys. */
-const R2_DELETE_KEYS = 1000
+const R2_DELETE_KEYS = 1000;
 
 /**
  * The R2 keys one page of responses holds, and the id to resume from.
@@ -937,28 +937,28 @@ async function uploadKeysPage(
        order by id limit ?`,
     )
     .bind(formId, after, UPLOAD_WALK_PAGE)
-    .all<{ id: string; files: string }>()
+    .all<{ id: string; files: string }>();
 
-  const keys: string[] = []
-  for (const row of results) keys.push(...uploadKeysOf(row.files))
-  return { keys, last: results.at(-1)?.id ?? null }
+  const keys: string[] = [];
+  for (const row of results) keys.push(...uploadKeysOf(row.files));
+  return { keys, last: results.at(-1)?.id ?? null };
 }
 
 /** The R2 keys inside one `form_responses.files` value. Total: anything that is
  *  not an object with a string `key` is simply not a key. */
 export function uploadKeysOf(raw: string): string[] {
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(raw);
   } catch {
-    return []
+    return [];
   }
-  if (!Array.isArray(parsed)) return []
+  if (!Array.isArray(parsed)) return [];
   return parsed
     .map((entry) =>
-      entry && typeof entry === 'object' ? (entry as { key?: unknown }).key : undefined,
+      entry && typeof entry === "object" ? (entry as { key?: unknown }).key : undefined,
     )
-    .filter((key): key is string => typeof key === 'string' && key !== '')
+    .filter((key): key is string => typeof key === "string" && key !== "");
 }
 
 /**
@@ -971,27 +971,27 @@ export function uploadKeysOf(raw: string): string[] {
  */
 export async function deleteUploads(bucket: R2Bucket, keys: readonly string[]): Promise<void> {
   for (let i = 0; i < keys.length; i += R2_DELETE_KEYS) {
-    await bucket.delete(keys.slice(i, i + R2_DELETE_KEYS))
+    await bucket.delete(keys.slice(i, i + R2_DELETE_KEYS));
   }
 }
 
 /** Every object every response to this form holds, in keyset pages. */
 async function purgeFormUploads(db: FolioDb, bucket: R2Bucket, formId: string): Promise<void> {
-  let after = ''
+  let after = "";
   for (;;) {
-    const { keys, last } = await uploadKeysPage(db, formId, after)
-    if (keys.length > 0) await deleteUploads(bucket, keys)
-    if (last === null) return
-    after = last
+    const { keys, last } = await uploadKeysPage(db, formId, after);
+    if (keys.length > 0) await deleteUploads(bucket, keys);
+    if (last === null) return;
+    after = last;
   }
 }
 
 export interface DeleteFormResult {
-  deleted: boolean
+  deleted: boolean;
   /** Responses destroyed with it. */
-  responses: number
+  responses: number;
   /** Uploaded files destroyed with it. */
-  files: number
+  files: number;
 }
 
 /**
@@ -1034,8 +1034,8 @@ export async function deleteForm(
   /** The scope the form must be in: another scope's is absent (`deleted: false`). */
   site: string = DEFAULT_SITE,
 ): Promise<DeleteFormResult> {
-  if ((await formSiteOf(db, id)) !== site) return { deleted: false, responses: 0, files: 0 }
-  const counts = await responseCounts(db, id)
+  if ((await formSiteOf(db, id)) !== site) return { deleted: false, responses: 0, files: 0 };
+  const counts = await responseCounts(db, id);
   if (counts.files > 0) {
     if (!bucket) {
       // Unreachable through the routes — a form cannot gain a `file` question
@@ -1043,19 +1043,19 @@ export async function deleteForm(
       // twelve people's CVs because a caller passed two arguments instead of
       // three is exactly the failure `documents.ts` exists to stop elsewhere.
       throw new FolioError(
-        'unsupported',
-        'No media bucket is configured, and this form holds uploaded files.',
-      )
+        "unsupported",
+        "No media bucket is configured, and this form holds uploaded files.",
+      );
     }
-    await purgeFormUploads(db, bucket, id)
+    await purgeFormUploads(db, bucket, id);
   }
   const [, , removed] = await db.batch([
-    db.prepare('delete from form_responses where form_id = ?').bind(id),
-    db.prepare('delete from content_refs where to_id = ? and kind = ?').bind(id, 'form'),
-    db.prepare('delete from forms where id = ? and site_id = ?').bind(id, site),
-  ])
-  const deleted = (removed?.meta.changes ?? 0) > 0
-  return deleted ? { deleted, ...counts } : { deleted: false, responses: 0, files: 0 }
+    db.prepare("delete from form_responses where form_id = ?").bind(id),
+    db.prepare("delete from content_refs where to_id = ? and kind = ?").bind(id, "form"),
+    db.prepare("delete from forms where id = ? and site_id = ?").bind(id, site),
+  ]);
+  const deleted = (removed?.meta.changes ?? 0) > 0;
+  return deleted ? { deleted, ...counts } : { deleted: false, responses: 0, files: 0 };
 }
 
 /* --------------------------------------------------------------- responses --- */
@@ -1071,11 +1071,11 @@ export async function deleteForm(
  */
 export interface ResponseFilter {
   /** Inclusive lower bound on `created_at`, in epoch milliseconds. */
-  from?: number
+  from?: number;
   /** Exclusive upper bound on `created_at`, in epoch milliseconds. */
-  to?: number
+  to?: number;
   /** Substring scan over the stored answers. Deliberately a scan: no index
    *  serves a leading-wildcard `like`, and decision 16's sibling reasoning is
    *  that a form's responses are read by a person on one screen. */
-  q?: string
+  q?: string;
 }

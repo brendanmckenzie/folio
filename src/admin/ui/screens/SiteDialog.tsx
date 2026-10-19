@@ -1,10 +1,10 @@
-import { useState } from 'react'
-import type { GroupRef } from '../../../core/sites'
-import type { BrandRef } from '../../../server/types'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { Field, Input, Select, Textarea } from '../Field'
-import css from './Sites.module.css'
+import { useState } from "react";
+import type { GroupRef } from "../../../core/sites";
+import type { BrandRef } from "../../../server/types";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { Field, Input, Select, Textarea } from "../Field";
+import css from "./Sites.module.css";
 import {
   brandField,
   brandLabel,
@@ -15,7 +15,7 @@ import {
   type SiteForm,
   withBrand,
   withGroup,
-} from './sites-model'
+} from "./sites-model";
 
 /**
  * Creating or editing one registry row: a site or a group
@@ -45,43 +45,43 @@ export function SiteDialog({
   onClose,
   onSave,
 }: {
-  mode: 'create' | 'edit'
-  initial: SiteForm
+  mode: "create" | "edit";
+  initial: SiteForm;
   /** The groups a site may join. */
-  groups: readonly GroupRef[]
+  groups: readonly GroupRef[];
   /** The configured brands; empty on a deployment with none. */
-  brands?: readonly BrandRef[]
+  brands?: readonly BrandRef[];
   /** The group being edited has sites, so its brand cannot change. */
-  hasSites?: boolean
-  onClose: () => void
-  onSave: (form: SiteForm) => Promise<void>
+  hasSites?: boolean;
+  onClose: () => void;
+  onSave: (form: SiteForm) => Promise<void>;
 }) {
-  const [form, setForm] = useState<SiteForm>(initial)
-  const [pending, setPending] = useState(false)
+  const [form, setForm] = useState<SiteForm>(initial);
+  const [pending, setPending] = useState(false);
   const set = <K extends keyof SiteForm>(key: K, value: SiteForm[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }))
+    setForm((prev) => ({ ...prev, [key]: value }));
 
-  const refusal = formRefusal(form, mode, brands)
-  const brandMode = brandField(form, brands, hasSites)
-  const noun = form.kind === 'group' ? 'group' : 'site'
+  const refusal = formRefusal(form, mode, brands);
+  const brandMode = brandField(form, brands, hasSites);
+  const noun = form.kind === "group" ? "group" : "site";
 
   const submit = async () => {
-    if (refusal) return
-    setPending(true)
+    if (refusal) return;
+    setPending(true);
     try {
-      await onSave(form)
+      await onSave(form);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Dialog
-      title={mode === 'create' ? `New ${noun}` : `Edit ${form.name || form.id}`}
+      title={mode === "create" ? `New ${noun}` : `Edit ${form.name || form.id}`}
       description={
-        form.kind === 'group'
-          ? 'A group holds content and settings for a region. Sites in it inherit both.'
-          : 'A site has its own hostnames, pages and editors.'
+        form.kind === "group"
+          ? "A group holds content and settings for a region. Sites in it inherit both."
+          : "A site has its own hostnames, pages and editors."
       }
       onClose={onClose}
       actions={
@@ -90,10 +90,10 @@ export function SiteDialog({
           <Button
             variant="primary"
             disabled={pending || refusal !== undefined}
-            reason={pending ? 'Saving…' : refusal}
+            reason={pending ? "Saving…" : refusal}
             onClick={() => void submit()}
           >
-            {mode === 'create' ? `Create ${noun}` : 'Save'}
+            {mode === "create" ? `Create ${noun}` : "Save"}
           </Button>
         </>
       }
@@ -101,11 +101,11 @@ export function SiteDialog({
       <form
         className={css.form}
         onSubmit={(e) => {
-          e.preventDefault()
-          void submit()
+          e.preventDefault();
+          void submit();
         }}
       >
-        {mode === 'create' ? (
+        {mode === "create" ? (
           <Field
             label="Id"
             help="Lowercase letters, digits and hyphens. It is in every URL and cannot be changed."
@@ -116,7 +116,7 @@ export function SiteDialog({
                 id={id}
                 value={form.id}
                 placeholder="north"
-                onChange={(e) => set('id', e.target.value.toLowerCase())}
+                onChange={(e) => set("id", e.target.value.toLowerCase())}
               />
             )}
           </Field>
@@ -124,11 +124,11 @@ export function SiteDialog({
 
         <Field label="Name" required>
           {(id) => (
-            <Input id={id} value={form.name} onChange={(e) => set('name', e.target.value)} />
+            <Input id={id} value={form.name} onChange={(e) => set("name", e.target.value)} />
           )}
         </Field>
 
-        {brandMode === 'choose' ? (
+        {brandMode === "choose" ? (
           <Field
             label="Brand"
             help="Which brand's types and blocks this content is written against."
@@ -140,7 +140,7 @@ export function SiteDialog({
                 value={form.brand}
                 onChange={(e) => setForm((prev) => withBrand(prev, e.target.value, groups))}
               >
-                {form.brand === '' ? <option value="">Choose a brand</option> : null}
+                {form.brand === "" ? <option value="">Choose a brand</option> : null}
                 {brands.map((brand) => (
                   <option key={brand.id} value={brand.id}>
                     {brand.label}
@@ -150,20 +150,20 @@ export function SiteDialog({
             )}
           </Field>
         ) : null}
-        {brandMode === 'fixed' ? (
+        {brandMode === "fixed" ? (
           <Field
             label="Brand"
             help={
-              form.kind === 'group'
-                ? 'A group with sites keeps its brand.'
-                : 'A site has its group’s brand.'
+              form.kind === "group"
+                ? "A group with sites keeps its brand."
+                : "A site has its group’s brand."
             }
           >
             {() => <span>{brandLabel(brands, form.brand)}</span>}
           </Field>
         ) : null}
 
-        {form.kind === 'site' ? (
+        {form.kind === "site" ? (
           <>
             <Field label="Group" help="Optional. A site inherits its group’s pages and settings.">
               {(id) => (
@@ -190,7 +190,7 @@ export function SiteDialog({
                 <Select
                   id={id}
                   value={form.status}
-                  onChange={(e) => set('status', e.target.value as SiteForm['status'])}
+                  onChange={(e) => set("status", e.target.value as SiteForm["status"])}
                 >
                   {STATUS_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -211,7 +211,7 @@ export function SiteDialog({
                   type="url"
                   value={form.preview}
                   placeholder="https://preview.example"
-                  onChange={(e) => set('preview', e.target.value)}
+                  onChange={(e) => set("preview", e.target.value)}
                 />
               )}
             </Field>
@@ -223,7 +223,7 @@ export function SiteDialog({
                   value={form.hosts}
                   rows={3}
                   placeholder="www.example.com"
-                  onChange={(e) => set('hosts', e.target.value)}
+                  onChange={(e) => set("hosts", e.target.value)}
                 />
               )}
             </Field>
@@ -231,5 +231,5 @@ export function SiteDialog({
         ) : null}
       </form>
     </Dialog>
-  )
+  );
 }

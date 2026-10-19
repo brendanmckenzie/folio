@@ -1,22 +1,22 @@
-import { useState } from 'react'
-import type { Json } from '../../../../core/doc'
-import type { StoryRef } from '../../../../core/resolve'
-import { asStoryIds } from '../../../../core/values'
-import { Button } from '../../Button'
-import { candidateHint, type Candidate } from './candidates'
-import { candidateOf, DocumentPicker } from './DocumentPicker'
-import css from './fields.module.css'
+import { useState } from "react";
+import type { Json } from "../../../../core/doc";
+import type { StoryRef } from "../../../../core/resolve";
+import { asStoryIds } from "../../../../core/values";
+import { Button } from "../../Button";
+import { candidateHint, type Candidate } from "./candidates";
+import { candidateOf, DocumentPicker } from "./DocumentPicker";
+import css from "./fields.module.css";
 
 interface Common {
-  id: string
+  id: string;
   /** The field's label, for the picker's own title. */
-  label: string
-  types?: readonly string[]
+  label: string;
+  types?: readonly string[];
   /** Every id this document points at, already resolved. See `candidateOf`. */
-  stories: Readonly<Record<string, StoryRef>>
-  apiBase: string
-  editable: boolean
-  onChange: (value: Json) => void
+  stories: Readonly<Record<string, StoryRef>>;
+  apiBase: string;
+  editable: boolean;
+  onChange: (value: Json) => void;
 }
 
 /* --------------------------------------------------------------- singular --- */
@@ -42,9 +42,9 @@ export function ReferenceField({
   value,
   onChange,
 }: Common & { value: Json }) {
-  const [picking, setPicking] = useState(false)
-  const chosen = typeof value === 'string' && value ? value : null
-  const resolved = chosen ? candidateOf(stories, chosen) : undefined
+  const [picking, setPicking] = useState(false);
+  const chosen = typeof value === "string" && value ? value : null;
+  const resolved = chosen ? candidateOf(stories, chosen) : undefined;
 
   return (
     <div className={css.stack}>
@@ -54,7 +54,7 @@ export function ReferenceField({
             composite is whatever opens the picker: the label has to name something
             focusable, and this is the only thing here that always exists. */}
         <Button id={id} size="sm" disabled={!editable} onClick={() => setPicking(true)}>
-          {chosen ? 'Change…' : 'Choose a document…'}
+          {chosen ? "Change…" : "Choose a document…"}
         </Button>
         {chosen ? (
           <Button size="sm" variant="subtle" disabled={!editable} onClick={() => onChange(null)}>
@@ -71,14 +71,14 @@ export function ReferenceField({
           routed={false}
           {...(types ? { types } : {})}
           onPick={(picked) => {
-            onChange(picked)
-            setPicking(false)
+            onChange(picked);
+            setPicking(false);
           }}
           onClose={() => setPicking(false)}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ----------------------------------------------------------------- plural --- */
@@ -110,30 +110,30 @@ export function ReferencesField({
   max,
   onChange,
 }: Common & { value: Json; max?: number }) {
-  const [picking, setPicking] = useState(false)
-  const ids = asStoryIds(value)
-  const full = max !== undefined && ids.length >= max
+  const [picking, setPicking] = useState(false);
+  const ids = asStoryIds(value);
+  const full = max !== undefined && ids.length >= max;
 
-  const write = (next: readonly string[]) => onChange([...next] as unknown as Json)
+  const write = (next: readonly string[]) => onChange([...next] as unknown as Json);
 
   const move = (from: number, to: number) => {
-    if (to < 0 || to >= ids.length) return
-    const next = [...ids]
-    const [moved] = next.splice(from, 1)
-    next.splice(to, 0, moved!)
-    write(next)
-  }
+    if (to < 0 || to >= ids.length) return;
+    const next = [...ids];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved!);
+    write(next);
+  };
 
   return (
     <div className={css.stack}>
       <ul className={css.list}>
         {ids.map((entry, i) => {
-          const resolved = candidateOf(stories, entry)
+          const resolved = candidateOf(stories, entry);
           // `↑`, `↓` and `×` have no accessible name of their own, and three of each
           // in a list of five means fifteen buttons called nothing. Named by the
           // document rather than by its id: `sty_9f2c…` is not something anybody can
           // act on, and the title is what is on screen beside the button.
-          const what = resolved?.title || entry
+          const what = resolved?.title || entry;
           return (
             <li key={entry}>
               <Picked
@@ -175,7 +175,7 @@ export function ReferencesField({
                 }
               />
             </li>
-          )
+          );
         })}
       </ul>
 
@@ -200,14 +200,14 @@ export function ReferencesField({
           {...(types ? { types } : {})}
           exclude={ids}
           onPick={(picked) => {
-            if (!full && !ids.includes(picked)) write([...ids, picked])
-            setPicking(false)
+            if (!full && !ids.includes(picked)) write([...ids, picked]);
+            setPicking(false);
           }}
           onClose={() => setPicking(false)}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------- shared --- */
@@ -226,19 +226,19 @@ function Picked({
   ord,
   actions,
 }: {
-  id: string
-  resolved: Candidate | undefined
-  ord?: number
-  actions?: React.ReactNode
+  id: string;
+  resolved: Candidate | undefined;
+  ord?: number;
+  actions?: React.ReactNode;
 }) {
   return (
-    <div className={`${css.picked} ${resolved ? '' : css.missing}`}>
+    <div className={`${css.picked} ${resolved ? "" : css.missing}`}>
       {ord === undefined ? null : <span className={css.ord}>{ord}</span>}
       <span className={css.pickedTitle}>
-        {resolved ? resolved.title || 'Untitled' : 'not found'}
+        {resolved ? resolved.title || "Untitled" : "not found"}
       </span>
       <span className={css.pickedWhere}>{resolved ? candidateHint(resolved) : id}</span>
       {actions ? <span className={css.row}>{actions}</span> : null}
     </div>
-  )
+  );
 }

@@ -45,7 +45,7 @@
  *    pre-cleaned its own output would be the one path where it is enforced
  *    twice and could drift.
  */
-import type { DescribeInput, DescribeResult } from './types'
+import type { DescribeInput, DescribeResult } from "./types";
 
 /**
  * The default, and it is the most capable model rather than the cheapest.
@@ -57,11 +57,11 @@ import type { DescribeInput, DescribeResult } from './types'
  * probably right for it — but that is the host's call, made once, in their own
  * config, with their own invoice in front of them.
  */
-export const DEFAULT_DESCRIBE_MODEL = 'claude-opus-5'
+export const DEFAULT_DESCRIBE_MODEL = "claude-opus-5";
 
 /** The endpoint, and the API version it is pinned to. */
-const ENDPOINT = 'https://api.anthropic.com/v1/messages'
-const API_VERSION = '2023-06-01'
+const ENDPOINT = "https://api.anthropic.com/v1/messages";
+const API_VERSION = "2023-06-01";
 
 /**
  * Enough for alt text, a paragraph and a handful of tags, and nowhere near
@@ -69,7 +69,7 @@ const API_VERSION = '2023-06-01'
  * clamped to 500 + 2000 characters downstream, so a larger ceiling would only
  * buy tokens that are thrown away.
  */
-const MAX_TOKENS = 1024
+const MAX_TOKENS = 1024;
 
 /**
  * The default prompt: alt text, a description, and tags **from the list**.
@@ -92,7 +92,7 @@ Answer with a single JSON object and nothing else — no prose before it, no cod
 
 - "alt": alt text for the image, at most a sentence. Write what a screen reader should say in place of the picture: the content and function of the image, not the fact that it is an image. Do not begin with "Image of" or "Photo of". Leave it out if the image is purely decorative.
 - "description": one or two sentences saying what the file is, for somebody searching a library of thousands. Include what a filename cannot: who or what is in it, the setting, the occasion, any legible text.
-- "tags": choose only from the tag list given below, copying each name exactly. Choose every tag that genuinely applies and none that do not. If none apply, answer an empty array. Never invent a tag that is not on the list — an invented tag is discarded, so it costs the user money and describes nothing.`
+- "tags": choose only from the tag list given below, copying each name exactly. Choose every tag that genuinely applies and none that do not. If none apply, answer an empty array. Never invent a tag that is not on the list — an invented tag is discarded, so it costs the user money and describes nothing.`;
 
 export interface AnthropicDescriberOptions {
   /**
@@ -100,16 +100,16 @@ export interface AnthropicDescriberOptions {
    * it to exactly one URL. Read it from a Worker secret, never from the config
    * file itself.
    */
-  apiKey: string
+  apiKey: string;
   /** Defaults to {@link DEFAULT_DESCRIBE_MODEL}. */
-  model?: string
+  model?: string;
   /**
    * Replaces {@link DEFAULT_DESCRIBE_PROMPT} entirely rather than adding to it.
    * A prompt is one instruction, and merging two would give a host no way to
    * remove a sentence they disagree with. **A replacement must still ask for
    * the JSON object above**, because that is what the reader below parses.
    */
-  prompt?: string
+  prompt?: string;
 }
 
 /**
@@ -122,20 +122,20 @@ export interface AnthropicDescriberOptions {
 export function anthropicDescriber(
   options: AnthropicDescriberOptions,
 ): (input: DescribeInput) => Promise<DescribeResult> {
-  const { apiKey } = options
-  const model = options.model ?? DEFAULT_DESCRIBE_MODEL
-  const prompt = options.prompt ?? DEFAULT_DESCRIBE_PROMPT
-  if (typeof apiKey !== 'string' || apiKey === '') {
-    throw new Error('anthropicDescriber: `apiKey` is required')
+  const { apiKey } = options;
+  const model = options.model ?? DEFAULT_DESCRIBE_MODEL;
+  const prompt = options.prompt ?? DEFAULT_DESCRIBE_PROMPT;
+  if (typeof apiKey !== "string" || apiKey === "") {
+    throw new Error("anthropicDescriber: `apiKey` is required");
   }
 
   return async function describeWithAnthropic(input: DescribeInput): Promise<DescribeResult> {
     const res = await fetch(ENDPOINT, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'content-type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': API_VERSION,
+        "content-type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": API_VERSION,
       },
       body: JSON.stringify({
         model,
@@ -153,34 +153,36 @@ export function anthropicDescriber(
         system: `${prompt}\n\n${vocabularyOf(input.tags)}`,
         messages: [
           {
-            role: 'user',
+            role: "user",
             content: [
               await imageBlock(input),
-              { type: 'text', text: `The file is named ${input.filename}.` },
+              { type: "text", text: `The file is named ${input.filename}.` },
             ],
           },
         ],
       }),
-    })
+    });
 
     if (!res.ok) {
       // The body is the useful half — an invalid key, a rate limit and an
       // unsupported model are all told apart by it — and it is bounded here
       // because `describe_error` is a column somebody reads in a table.
-      throw new Error(`anthropic: ${res.status} ${(await res.text()).slice(0, 300)}`)
+      throw new Error(`anthropic: ${res.status} ${(await res.text()).slice(0, 300)}`);
     }
 
-    const body = (await res.json()) as AnthropicMessage
+    const body = (await res.json()) as AnthropicMessage;
     // A refusal is a 200 with nothing usable in it. Recorded as a failure
     // rather than as an empty result: an empty result would stamp
     // `described_at` with no error and quietly retire the asset from the
     // backlog, which is exactly the row somebody wants to find again.
-    if (body.stop_reason === 'refusal') {
-      throw new Error(`anthropic: the model declined (${body.stop_details?.category ?? 'refusal'})`)
+    if (body.stop_reason === "refusal") {
+      throw new Error(
+        `anthropic: the model declined (${body.stop_details?.category ?? "refusal"})`,
+      );
     }
 
-    return parseDescribeJson(textOf(body))
-  }
+    return parseDescribeJson(textOf(body));
+  };
 }
 
 /* ----------------------------------------------------------- the request --- */
@@ -192,11 +194,11 @@ export function anthropicDescriber(
  * model reads best — `matchTags` slugifies whatever comes back, so "Head Shot"
  * finds the tag whose slug is `head-shot` either way.
  */
-function vocabularyOf(tags: DescribeInput['tags']): string {
+function vocabularyOf(tags: DescribeInput["tags"]): string {
   if (tags.length === 0) {
-    return 'No tags exist in this library yet. Answer an empty array for "tags".'
+    return 'No tags exist in this library yet. Answer an empty array for "tags".';
   }
-  return `The only tags that exist in this library are:\n${tags.map((tag) => `- ${tag.name}`).join('\n')}`
+  return `The only tags that exist in this library are:\n${tags.map((tag) => `- ${tag.name}`).join("\n")}`;
 }
 
 /**
@@ -226,9 +228,9 @@ function vocabularyOf(tags: DescribeInput['tags']): string {
  * `describe.ts`'s `renditionOf` carries that story.
  */
 async function imageBlock(input: DescribeInput): Promise<unknown> {
-  const { media, bytes } = await input.inline()
+  const { media, bytes } = await input.inline();
   if (!INLINE_TYPES.has(media)) {
-    throw new Error(`anthropic: ${media} cannot be sent inline`)
+    throw new Error(`anthropic: ${media} cannot be sent inline`);
   }
   if (bytes.byteLength > MAX_INLINE_BYTES) {
     // What this can verify is the byte count and the ceiling. It cannot see
@@ -238,9 +240,9 @@ async function imageBlock(input: DescribeInput): Promise<unknown> {
     // working (#21).
     throw new Error(
       `anthropic: the image is ${megabytes(bytes.byteLength)}MB, over the API's 5MB inline limit — Folio sends a resized 512px rendition instead wherever an Images binding is configured`,
-    )
+    );
   }
-  return { type: 'image', source: { type: 'base64', media_type: media, data: base64(bytes) } }
+  return { type: "image", source: { type: "base64", media_type: media, data: base64(bytes) } };
 }
 
 /**
@@ -250,7 +252,7 @@ async function imageBlock(input: DescribeInput): Promise<unknown> {
  * on the no-binding path, where a message naming the type beats a 400 from
  * somebody else's API.
  */
-const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+const INLINE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 /**
  * The API's per-image ceiling, checked before the call rather than after.
@@ -265,44 +267,44 @@ const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/web
  * *its* 20MB limit and therefore four times over this one. Nothing here can tell
  * the two apart, which is why the message above names neither.
  */
-const MAX_INLINE_BYTES = 5 * 1024 * 1024
+const MAX_INLINE_BYTES = 5 * 1024 * 1024;
 
 /** One decimal: `Math.round` turns 5.4MB into "5MB, over the 5MB limit". */
 function megabytes(bytes: number): string {
-  return (bytes / 1024 / 1024).toFixed(1)
+  return (bytes / 1024 / 1024).toFixed(1);
 }
 
 /** `btoa` takes a binary string, and a 20MB `apply(...)` overflows the stack. */
 function base64(bytes: ArrayBuffer): string {
-  const view = new Uint8Array(bytes)
-  let binary = ''
+  const view = new Uint8Array(bytes);
+  let binary = "";
   for (let i = 0; i < view.length; i += 0x8000) {
-    binary += String.fromCharCode(...view.subarray(i, i + 0x8000))
+    binary += String.fromCharCode(...view.subarray(i, i + 0x8000));
   }
-  return btoa(binary)
+  return btoa(binary);
 }
 
 /* ---------------------------------------------------------- the response --- */
 
 /** Only the fields this file reads. Not a mirror of the API's response. */
 interface AnthropicMessage {
-  content?: unknown
-  stop_reason?: string
-  stop_details?: { category?: string } | null
+  content?: unknown;
+  stop_reason?: string;
+  stop_details?: { category?: string } | null;
 }
 
 function textOf(body: AnthropicMessage): string {
-  if (!Array.isArray(body.content)) return ''
+  if (!Array.isArray(body.content)) return "";
   return body.content
     .filter(
-      (block): block is { type: 'text'; text: string } =>
-        typeof block === 'object' &&
+      (block): block is { type: "text"; text: string } =>
+        typeof block === "object" &&
         block !== null &&
-        (block as { type?: unknown }).type === 'text' &&
-        typeof (block as { text?: unknown }).text === 'string',
+        (block as { type?: unknown }).type === "text" &&
+        typeof (block as { text?: unknown }).text === "string",
     )
     .map((block) => block.text)
-    .join('\n')
+    .join("\n");
 }
 
 /**
@@ -325,22 +327,22 @@ function textOf(body: AnthropicMessage): string {
  * every one of them. Repeating that here is the drift.
  */
 export function parseDescribeJson(text: string): DescribeResult {
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
   if (start === -1 || end <= start) {
-    throw new Error(`anthropic: no JSON object in the answer (${text.slice(0, 200)})`)
+    throw new Error(`anthropic: no JSON object in the answer (${text.slice(0, 200)})`);
   }
 
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text.slice(start, end + 1))
+    parsed = JSON.parse(text.slice(start, end + 1));
   } catch {
-    throw new Error(`anthropic: the answer was not JSON (${text.slice(start, start + 200)})`)
+    throw new Error(`anthropic: the answer was not JSON (${text.slice(start, start + 200)})`);
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new Error('anthropic: the answer was not a JSON object')
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("anthropic: the answer was not a JSON object");
   }
 
-  const { alt, description, tags } = parsed as DescribeResult
-  return { alt, description, tags }
+  const { alt, description, tags } = parsed as DescribeResult;
+  return { alt, description, tags };
 }

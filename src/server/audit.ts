@@ -47,15 +47,15 @@
  * `unknownTypes` / `missingFields` are named projections of `content`, kept
  * because the spec's own route example names them.
  */
-import type { Blok, Doc } from '../core/doc'
-import { isIndexableKind } from '../core/index-projection'
-import { isBareLayer, mergeLayers } from '../core/layers'
-import { isTranslatable, type LocaleConfig } from '../core/locales'
-import { docBytes, MAX_DOC_BYTES, utf8Bytes } from '../core/protocol'
-import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from '../core/schema'
-import { chain, layerId, layerSeed, type Registry, singletonTypeOf } from '../core/sites'
-import { publishedDocsAfter, publishedDocsByIds } from './stories'
-import type { FolioDb } from './db'
+import type { Blok, Doc } from "../core/doc";
+import { isIndexableKind } from "../core/index-projection";
+import { isBareLayer, mergeLayers } from "../core/layers";
+import { isTranslatable, type LocaleConfig } from "../core/locales";
+import { docBytes, MAX_DOC_BYTES, utf8Bytes } from "../core/protocol";
+import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from "../core/schema";
+import { chain, layerId, layerSeed, type Registry, singletonTypeOf } from "../core/sites";
+import { publishedDocsAfter, publishedDocsByIds } from "./stories";
+import type { FolioDb } from "./db";
 
 /**
  * Config a check needs beyond the schema and the blok in front of it.
@@ -66,14 +66,14 @@ import type { FolioDb } from './db'
 export interface AuditContext {
   /** `FolioConfig.locales` (`../../docs/specs/content-model/localisation.md`). Absent for a
    * single-locale site, and every locale check reads that as "nothing to say". */
-  locales?: LocaleConfig
+  locales?: LocaleConfig;
   /**
    * The declared document types (`../../docs/specs/content-model/collections.md`). Needed by one
    * check and one check only: whether a block carrying an `indexed` field is any
    * type's **root**, which is a property of the config rather than of the schema.
    * Absent means "cannot judge", not "no block is a root".
    */
-  types?: readonly DocumentType[]
+  types?: readonly DocumentType[];
   /**
    * A deployment with `sites` (`multi-site.md` decision 2): the settings type and
    * the registry snapshot. Present, the report gains `settings`, the one place a
@@ -81,26 +81,26 @@ export interface AuditContext {
    * every field it deliberately leaves inherited. Absent for a single-site
    * deployment, whose report is exactly what it was.
    */
-  sites?: { settings: string; registry: Registry }
+  sites?: { settings: string; registry: Registry };
 }
 
-const NO_CONTEXT: AuditContext = {}
+const NO_CONTEXT: AuditContext = {};
 
 /** One problem found in one blok. Counted, not listed per blok: a site with 400 heroes carrying an orphan key needs the count, not 400 rows. */
 export interface Finding {
   /** Which check produced it. Kebab-ish and stable — the admin keys off it. */
-  check: string
+  check: string;
   /** Block type the finding is about. */
-  type: string
+  type: string;
   /** Field name, or null when the finding is about the block itself. */
-  field: string | null
+  field: string | null;
 }
 
 export interface ContentFinding extends Finding {
   /** Published documents containing at least one blok with this finding. */
-  documents: number
+  documents: number;
   /** Bloks with this finding, across those documents. */
-  bloks: number
+  bloks: number;
   /**
    * The first `FINDING_SAMPLE` documents carrying it, in the order the walk met
    * them, so a count can still be *opened*.
@@ -117,7 +117,7 @@ export interface ContentFinding extends Finding {
    * callable with a bare `{ doc }` literal from a test, which the file header
    * treats as worth keeping.
    */
-  sample: string[]
+  sample: string[];
 }
 
 /**
@@ -125,7 +125,7 @@ export interface ContentFinding extends Finding {
  * *in* rather than a listing: enough that a spot check is not the same document
  * twice, few enough that a row stays one line.
  */
-export const FINDING_SAMPLE = 5
+export const FINDING_SAMPLE = 5;
 
 /**
  * A finding that explains itself in prose — and the short form a UI shows instead.
@@ -157,12 +157,12 @@ export const FINDING_SAMPLE = 5
  */
 interface Explained {
   /** Written for a developer reading a report, not for a UI to parse. */
-  detail: string
+  detail: string;
   /**
    * The part of `detail` that differs from its siblings', short enough to sit
    * beside an identifier. Absent when the identifier is the whole difference.
    */
-  note?: string
+  note?: string;
 }
 
 /**
@@ -175,11 +175,11 @@ interface Explained {
  * "one document is nearly too big" without saying which is not actionable.
  */
 export interface StoryFinding extends Explained {
-  check: string
+  check: string;
   /** The story whose published document this is about. */
-  story: string
+  story: string;
   /** Its document type, as `stories.type` records it. */
-  type: string
+  type: string;
 }
 
 /**
@@ -191,22 +191,22 @@ export interface StoryFinding extends Explained {
  */
 export interface DocumentSizeFinding extends StoryFinding {
   /** Serialised size of the published document, in UTF-8 bytes. */
-  bytes: number
+  bytes: number;
   /**
    * What each locale's translations weigh inside that total, heaviest first.
    * Empty on an untranslated document. Measured over `i18n` alone, so the parts
    * sum to slightly under the whole — the source-locale `data`, and the
    * structure holding all of it, are the rest.
    */
-  locales: { code: string; bytes: number }[]
+  locales: { code: string; bytes: number }[];
 }
 
 /** A finding about the declarations alone: no document is involved. */
 export interface SchemaFinding extends Explained {
-  check: string
+  check: string;
   /** Block type whose declaration is at fault. */
-  block: string
-  field: string | null
+  block: string;
+  field: string | null;
 }
 
 /**
@@ -216,39 +216,39 @@ export interface SchemaFinding extends Explained {
  * document, which is only an identity within that site's answer.
  */
 export interface SettingsFinding {
-  check: 'required-setting'
-  site: string
+  check: "required-setting";
+  site: string;
   /** Block type the field is on. */
-  type: string
-  field: string
-  uid: string
+  type: string;
+  field: string;
+  uid: string;
 }
 
 export interface AuditReport {
   /** Published documents examined **by this call**, not by the whole walk. */
-  documents: number
+  documents: number;
   /**
    * Every content check's tally, most documents first. The extensible surface:
    * a check added to `DOCUMENT_CHECKS` appears here with nothing else changed.
    */
-  content: ContentFinding[]
+  content: ContentFinding[];
   /**
    * Every story check's findings: one per affected document, in each check's
    * own order. Same extensible surface, for `STORY_CHECKS`.
    */
-  stories: StoryFinding[]
+  stories: StoryFinding[];
   /** Every schema check's findings. Same, for `SCHEMA_CHECKS`. */
-  schema: SchemaFinding[]
+  schema: SchemaFinding[];
   /* The three the spec's route example names, projected out of `content`. */
-  orphanKeys: { type: string; field: string; documents: number }[]
-  unknownTypes: { type: string; documents: number }[]
-  missingFields: { type: string; field: string; documents: number }[]
+  orphanKeys: { type: string; field: string; documents: number }[];
+  unknownTypes: { type: string; documents: number }[];
+  missingFields: { type: string; field: string; documents: number }[];
   /**
    * Each site's settings that leave a `required` field empty, in registry order.
    * Present only on a deployment with `sites` and a `settings` type; absent, not
    * empty, everywhere else, so a single-site report keeps its shape.
    */
-  settings?: SettingsFinding[]
+  settings?: SettingsFinding[];
   /**
    * The story id to resume after, or null when the sweep reached the end — the
    * same contract `MigrateReport.continueFrom` carries, deliberately, because it
@@ -259,7 +259,7 @@ export interface AuditReport {
    * `documents` and every tally are that prefix's. The admin's Model screen says
    * so out loud rather than presenting one batch as the whole answer.
    */
-  continueFrom: string | null
+  continueFrom: string | null;
   /**
    * On a deployment with `brands` (`multi-brand.md` decision 16): the brand this
    * call audited, over its own scopes and against its own schema. `folio.audit`
@@ -267,7 +267,7 @@ export interface AuditReport {
    * finding names a type and two brands may each have a `page`. Absent with no
    * `brands`.
    */
-  brand?: string
+  brand?: string;
 }
 
 /**
@@ -277,21 +277,21 @@ export interface AuditReport {
  * (`isBareLayer`); its chain does.
  */
 export interface AuditBrand {
-  id: string
-  scopes: readonly string[]
-  registry: Registry
+  id: string;
+  scopes: readonly string[];
+  registry: Registry;
 }
 
 /** How many published documents one call reads. */
-export const DEFAULT_AUDIT_BATCH = 100
+export const DEFAULT_AUDIT_BATCH = 100;
 
 /** Ceiling on `batch`, so a caller cannot ask for a read that outlives the request. */
-export const MAX_AUDIT_BATCH = 500
+export const MAX_AUDIT_BATCH = 500;
 
 export interface AuditOptions {
   /** Resume after this story id — the `continueFrom` of the previous call. */
-  continueFrom?: string | null
-  batch?: number
+  continueFrom?: string | null;
+  batch?: number;
 }
 
 /* ------------------------------------------------------- content checks --- */
@@ -300,7 +300,7 @@ export type DocumentCheck = (
   blok: Blok,
   def: BlockSchema | undefined,
   ctx: AuditContext,
-) => Finding[]
+) => Finding[];
 
 /**
  * A key the schema no longer declares, holding something.
@@ -318,11 +318,11 @@ export type DocumentCheck = (
  * null is not content.
  */
 const orphanKey: DocumentCheck = (blok, def) => {
-  if (!def) return []
+  if (!def) return [];
   return Object.entries(blok.data)
     .filter(([name, value]) => value !== null && !(name in def.fields))
-    .map(([name]) => ({ check: 'orphan-key', type: blok.type, field: name }))
-}
+    .map(([name]) => ({ check: "orphan-key", type: blok.type, field: name }));
+};
 
 /**
  * A blok whose type nothing declares any more. Renders `Unknown block type` in
@@ -330,7 +330,7 @@ const orphanKey: DocumentCheck = (blok, def) => {
  * possible failure and the quietest possible symptom.
  */
 const unknownType: DocumentCheck = (blok, def) =>
-  def ? [] : [{ check: 'unknown-type', type: blok.type, field: null }]
+  def ? [] : [{ check: "unknown-type", type: blok.type, field: null }];
 
 /**
  * A field the schema declares that this blok has no key for — a field added
@@ -342,12 +342,12 @@ const unknownType: DocumentCheck = (blok, def) =>
  * the parent, so there is no key to be missing.
  */
 const missingField: DocumentCheck = (blok, def) => {
-  if (!def) return []
-  const slots = new Set(slotsOf(def).map(([name]) => name))
+  if (!def) return [];
+  const slots = new Set(slotsOf(def).map(([name]) => name));
   return Object.keys(def.fields)
     .filter((name) => !slots.has(name) && blok.data[name] === undefined)
-    .map((name) => ({ check: 'missing-field', type: blok.type, field: name }))
-}
+    .map((name) => ({ check: "missing-field", type: blok.type, field: name }));
+};
 
 /**
  * A translated value sitting in a field the schema does not mark `translatable`
@@ -364,21 +364,21 @@ const missingField: DocumentCheck = (blok, def) => {
  * every completed untranslation.
  */
 const translatedNotTranslatable: DocumentCheck = (blok, def, ctx) => {
-  if (!def || !ctx.locales || !blok.i18n) return []
-  const out: Finding[] = []
-  const seen = new Set<string>()
+  if (!def || !ctx.locales || !blok.i18n) return [];
+  const out: Finding[] = [];
+  const seen = new Set<string>();
   for (const map of Object.values(blok.i18n)) {
     for (const [name, value] of Object.entries(map)) {
-      if (value === null || seen.has(name)) continue
-      const field = def.fields[name]
+      if (value === null || seen.has(name)) continue;
+      const field = def.fields[name];
       if (field && !isTranslatable(field)) {
-        seen.add(name)
-        out.push({ check: 'translated-not-translatable', type: blok.type, field: name })
+        seen.add(name);
+        out.push({ check: "translated-not-translatable", type: blok.type, field: name });
       }
     }
   }
-  return out
-}
+  return out;
+};
 
 /**
  * A translation under a locale code the config no longer declares
@@ -391,14 +391,14 @@ const translatedNotTranslatable: DocumentCheck = (blok, def, ctx) => {
  * would be unrecoverable.
  */
 const unknownLocaleValues: DocumentCheck = (blok, _def, ctx) => {
-  if (!ctx.locales || !blok.i18n) return []
-  const declared = new Set(ctx.locales.available.map((l) => l.code))
+  if (!ctx.locales || !blok.i18n) return [];
+  const declared = new Set(ctx.locales.available.map((l) => l.code));
   return Object.entries(blok.i18n)
     .filter(
       ([code, map]) => !declared.has(code) && Object.values(map).some((value) => value !== null),
     )
-    .map(([code]) => ({ check: 'unknown-locale', type: blok.type, field: code }))
-}
+    .map(([code]) => ({ check: "unknown-locale", type: blok.type, field: code }));
+};
 
 /** See "Adding a check" in the file header. */
 export const DOCUMENT_CHECKS: readonly DocumentCheck[] = [
@@ -407,15 +407,15 @@ export const DOCUMENT_CHECKS: readonly DocumentCheck[] = [
   missingField,
   translatedNotTranslatable,
   unknownLocaleValues,
-]
+];
 
 /* --------------------------------------------------------- story checks --- */
 
 /** One published document, exactly as `publishedDocsAll` hands it over. */
 export interface AuditedStory {
-  id: string
-  type: string
-  doc: Doc
+  id: string;
+  type: string;
+  doc: Doc;
 }
 
 /**
@@ -427,7 +427,7 @@ export interface AuditedStory {
 export type StoryCheck = (
   stories: readonly AuditedStory[],
   ctx: AuditContext,
-) => readonly StoryFinding[]
+) => readonly StoryFinding[];
 
 /**
  * The share of `MAX_DOC_BYTES` at which a published document counts as
@@ -453,13 +453,13 @@ export type StoryCheck = (
  * (50%) reports every large page on any real site, and a report that is always
  * red is the same as no report.
  */
-export const DOC_BYTES_WARN_SHARE = 0.75
+export const DOC_BYTES_WARN_SHARE = 0.75;
 
 /** `DOC_BYTES_WARN_SHARE` of `MAX_DOC_BYTES`, floored to whole bytes — 6 MB of the 8 MB cap. */
-export const WARN_DOC_BYTES = Math.floor(MAX_DOC_BYTES * DOC_BYTES_WARN_SHARE)
+export const WARN_DOC_BYTES = Math.floor(MAX_DOC_BYTES * DOC_BYTES_WARN_SHARE);
 
 /** Bytes as an operator reads them. The cap is quoted in MB everywhere else too. */
-const mb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+const mb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
 /**
  * What each locale's translations weigh inside one document, heaviest first.
@@ -476,16 +476,16 @@ const mb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
  * config no longer names the code is `unknown-locale`'s finding, not this one's.
  */
 function localeWeights(doc: Doc): { code: string; bytes: number }[] {
-  const per = new Map<string, number>()
+  const per = new Map<string, number>();
   for (const blok of Object.values(doc.bloks)) {
-    if (!blok.i18n) continue
+    if (!blok.i18n) continue;
     for (const [code, map] of Object.entries(blok.i18n)) {
-      per.set(code, (per.get(code) ?? 0) + utf8Bytes(JSON.stringify(map)))
+      per.set(code, (per.get(code) ?? 0) + utf8Bytes(JSON.stringify(map)));
     }
   }
   return [...per]
     .map(([code, bytes]) => ({ code, bytes }))
-    .sort((a, b) => b.bytes - a.bytes || a.code.localeCompare(b.code))
+    .sort((a, b) => b.bytes - a.bytes || a.code.localeCompare(b.code));
 }
 
 /**
@@ -498,15 +498,15 @@ function localeWeights(doc: Doc): { code: string; bytes: number }[] {
  * standing advice about what happens at the cap is left to `sizeDetail`.
  */
 function sizeNote(bytes: number, locales: { code: string; bytes: number }[]): string {
-  const translated = locales.reduce((n, l) => n + l.bytes, 0)
-  const named = locales.slice(0, 3).map((l) => `${l.code} ${mb(l.bytes)}`)
-  if (locales.length > named.length) named.push(`${locales.length - named.length} more`)
+  const translated = locales.reduce((n, l) => n + l.bytes, 0);
+  const named = locales.slice(0, 3).map((l) => `${l.code} ${mb(l.bytes)}`);
+  if (locales.length > named.length) named.push(`${locales.length - named.length} more`);
   const where =
-    translated > 0 ? `, of which ${mb(translated)} is translations (${named.join(', ')})` : ''
+    translated > 0 ? `, of which ${mb(translated)} is translations (${named.join(", ")})` : "";
   return (
     `${mb(bytes)} serialised, ${Math.round((bytes / MAX_DOC_BYTES) * 100)}% of the ` +
     `${mb(MAX_DOC_BYTES)} document cap${where}`
-  )
+  );
 }
 
 /**
@@ -521,7 +521,7 @@ function sizeDetail(bytes: number, locales: { code: string; bytes: number }[]): 
   return (
     `${sizeNote(bytes, locales)} — the transaction that crosses the cap is ` +
     `refused whole, so the edit that does it is the one that is lost`
-  )
+  );
 }
 
 /**
@@ -545,23 +545,23 @@ function sizeDetail(bytes: number, locales: { code: string; bytes: number }[]): 
  * under-states is the right way round for one whose whole job is arriving early.
  */
 const documentSize: StoryCheck = (stories) => {
-  const out: DocumentSizeFinding[] = []
+  const out: DocumentSizeFinding[] = [];
   for (const { id, type, doc } of stories) {
-    const bytes = docBytes(doc)
-    if (bytes < WARN_DOC_BYTES) continue
-    const locales = localeWeights(doc)
+    const bytes = docBytes(doc);
+    if (bytes < WARN_DOC_BYTES) continue;
+    const locales = localeWeights(doc);
     out.push({
-      check: 'document-size',
+      check: "document-size",
       story: id,
       type,
       bytes,
       locales,
       note: sizeNote(bytes, locales),
       detail: sizeDetail(bytes, locales),
-    })
+    });
   }
-  return out.sort((a, b) => b.bytes - a.bytes || a.story.localeCompare(b.story))
-}
+  return out.sort((a, b) => b.bytes - a.bytes || a.story.localeCompare(b.story));
+};
 
 /**
  * A published document whose **document type** nothing declares any more.
@@ -593,12 +593,12 @@ const documentSize: StoryCheck = (stories) => {
  *     neighbours stay callable from a test with a bare literal.
  */
 const undeclaredDocumentType: StoryCheck = (stories, ctx) => {
-  const declared = new Set((ctx.types ?? []).map((t) => t.name))
-  if (declared.size === 0) return []
+  const declared = new Set((ctx.types ?? []).map((t) => t.name));
+  if (declared.size === 0) return [];
   return stories
     .filter((s) => !declared.has(s.type))
     .map(({ id, type }) => ({
-      check: 'unknown-document-type',
+      check: "unknown-document-type",
       story: id,
       // The orphaned type name is the varying fact, and it is on the finding as
       // `type` as well — but a UI reading it off there would be a screen deciding
@@ -612,8 +612,8 @@ const undeclaredDocumentType: StoryCheck = (stories, ctx) => {
       detail:
         `document type '${type}' is not declared any more — nothing lists this document, ` +
         `and a migration cannot run over it until a type by that name exists again`,
-    }))
-}
+    }));
+};
 
 /**
  * See "Adding a check" in the file header.
@@ -622,11 +622,11 @@ const undeclaredDocumentType: StoryCheck = (stories, ctx) => {
  * document nothing can reach is a worse problem than one that is merely getting
  * heavy, and the admin renders families in the order their findings appear.
  */
-export const STORY_CHECKS: readonly StoryCheck[] = [undeclaredDocumentType, documentSize]
+export const STORY_CHECKS: readonly StoryCheck[] = [undeclaredDocumentType, documentSize];
 
 /* -------------------------------------------------------- schema checks --- */
 
-export type SchemaCheck = (schema: SchemaIndex, ctx: AuditContext) => SchemaFinding[]
+export type SchemaCheck = (schema: SchemaIndex, ctx: AuditContext) => SchemaFinding[];
 
 /**
  * A `showIf` naming a field the block does not declare
@@ -637,14 +637,14 @@ export type SchemaCheck = (schema: SchemaIndex, ctx: AuditContext) => SchemaFind
  * the input is simply never drawn, and nothing anywhere says why.
  */
 const unknownConditionField: SchemaCheck = (schema) => {
-  const out: SchemaFinding[] = []
+  const out: SchemaFinding[] = [];
   const walk = (block: string, field: string, condition: unknown): void => {
-    if (typeof condition !== 'object' || condition === null) return
-    const c = condition as Record<string, unknown>
-    if (typeof c.field === 'string') {
+    if (typeof condition !== "object" || condition === null) return;
+    const c = condition as Record<string, unknown>;
+    if (typeof c.field === "string") {
       if (!schema[block]?.fields[c.field]) {
         out.push({
-          check: 'unknown-condition-field',
+          check: "unknown-condition-field",
           block,
           field,
           // The missing name is the one fact not already in `block` and `field`, so
@@ -652,25 +652,25 @@ const unknownConditionField: SchemaCheck = (schema) => {
           // whose subject is invisible.
           note: `showIf names '${c.field}'`,
           detail: `showIf names '${c.field}', which '${block}' does not declare — the input is never drawn`,
-        })
+        });
       }
-      return
+      return;
     }
     for (const nested of [
       ...(Array.isArray(c.all) ? c.all : []),
       ...(Array.isArray(c.any) ? c.any : []),
       ...(c.not ? [c.not] : []),
     ]) {
-      walk(block, field, nested)
+      walk(block, field, nested);
     }
-  }
+  };
   for (const def of Object.values(schema)) {
     for (const [name, f] of Object.entries(def.fields)) {
-      if (f.showIf) walk(def.name, name, f.showIf)
+      if (f.showIf) walk(def.name, name, f.showIf);
     }
   }
-  return out
-}
+  return out;
+};
 
 /**
  * A `summary` naming a field the block hides
@@ -683,36 +683,36 @@ const unknownConditionField: SchemaCheck = (schema) => {
  * type and absent on others is the same confusion, intermittently.
  */
 const hiddenSummaryField: SchemaCheck = (schema) => {
-  const out: SchemaFinding[] = []
+  const out: SchemaFinding[] = [];
   for (const def of Object.values(schema)) {
-    if (!def.summary) continue
-    const f = def.fields[def.summary]
+    if (!def.summary) continue;
+    const f = def.fields[def.summary];
     if (!f) {
       out.push({
-        check: 'unknown-summary-field',
+        check: "unknown-summary-field",
         block: def.name,
         field: def.summary,
         // No note: `block` and `field` are the entire finding, and every row of this
         // family says the same thing about a different pair. See `Explained.note` —
         // absent is the answer, not an omission.
         detail: `summary names '${def.summary}', which '${def.name}' does not declare — every tree row is unlabelled`,
-      })
-      continue
+      });
+      continue;
     }
-    const why = f.hidden ? 'hidden: true' : f.showIf ? 'a showIf' : null
+    const why = f.hidden ? "hidden: true" : f.showIf ? "a showIf" : null;
     if (why !== null) {
       out.push({
-        check: 'hidden-summary-field',
+        check: "hidden-summary-field",
         block: def.name,
         field: def.summary,
         // Which of the two ways it is hidden, which is the only thing that varies.
         note: why,
         detail: `summary names '${def.summary}', which carries ${why} — the tree labels every row with a value the inspector never shows`,
-      })
+      });
     }
   }
-  return out
-}
+  return out;
+};
 
 /**
  * A text-ish field nobody marked `translatable`
@@ -734,25 +734,25 @@ const hiddenSummaryField: SchemaCheck = (schema) => {
  * several hundred rows of advice about a feature the host is not using.
  */
 const untranslatableText: SchemaCheck = (schema, ctx) => {
-  if (!ctx.locales) return []
-  const PROSE = new Set(['text', 'textarea', 'richtext'])
-  const out: SchemaFinding[] = []
+  if (!ctx.locales) return [];
+  const PROSE = new Set(["text", "textarea", "richtext"]);
+  const out: SchemaFinding[] = [];
   for (const def of Object.values(schema)) {
     for (const [name, field] of Object.entries(def.fields)) {
-      if (!PROSE.has(field.kind) || isTranslatable(field)) continue
+      if (!PROSE.has(field.kind) || isTranslatable(field)) continue;
       out.push({
-        check: 'not-translatable',
+        check: "not-translatable",
         block: def.name,
         field: name,
         // The kind, which is the only varying word in a sentence that is otherwise
         // identical on every row — this is the family the note exists for.
         note: field.kind,
         detail: `'${name}' is a ${field.kind} field with no 'translatable: true' — a translator never sees it, and nothing in the editor says why`,
-      })
+      });
     }
   }
-  return out
-}
+  return out;
+};
 
 /**
  * An `indexed` flag that can never take effect
@@ -774,39 +774,39 @@ const untranslatableText: SchemaCheck = (schema, ctx) => {
  * document root" is a property of the *config*, not of the schema.
  */
 const unusableIndex: SchemaCheck = (schema, ctx) => {
-  const roots = new Set((ctx.types ?? []).map((t) => t.root))
-  const out: SchemaFinding[] = []
+  const roots = new Set((ctx.types ?? []).map((t) => t.root));
+  const out: SchemaFinding[] = [];
   for (const def of Object.values(schema)) {
     for (const [name, field] of Object.entries(def.fields)) {
       // `indexed` is only on the five scalar kinds, so anything else carrying one
       // arrived untyped; read it off the record rather than through `Field`.
-      if ((field as { indexed?: unknown }).indexed !== true) continue
+      if ((field as { indexed?: unknown }).indexed !== true) continue;
       if (!isIndexableKind(field)) {
         out.push({
-          check: 'indexed-unsupported',
+          check: "indexed-unsupported",
           block: def.name,
           field: name,
           note: field.kind,
           detail: `'${name}' is a ${field.kind} field marked 'indexed' — only text, textarea, number, boolean and select project to a scalar, so nothing is indexed`,
-        })
-        continue
+        });
+        continue;
       }
       // No declared types at all means nothing can be judged, not that every
       // block is a root: `auditSchema` is callable with a bare schema in a test.
       if (roots.size > 0 && !roots.has(def.name)) {
         out.push({
-          check: 'indexed-not-root',
+          check: "indexed-not-root",
           block: def.name,
           field: name,
           // No note: the block and the field are the whole finding, exactly as in
           // `unknown-summary-field`.
           detail: `'${name}' is marked 'indexed' on '${def.name}', which is no document type's root block — only a root block is projected, so this does nothing`,
-        })
+        });
       }
     }
   }
-  return out
-}
+  return out;
+};
 
 /** See "Adding a check" in the file header. */
 export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
@@ -814,13 +814,13 @@ export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
   hiddenSummaryField,
   untranslatableText,
   unusableIndex,
-]
+];
 
 /* ------------------------------------------------------------- the walk --- */
 
 /** The schema half on its own: pure, and worth calling from a test directly. */
 export function auditSchema(schema: SchemaIndex, ctx: AuditContext = NO_CONTEXT): SchemaFinding[] {
-  return SCHEMA_CHECKS.flatMap((check) => check(schema, ctx))
+  return SCHEMA_CHECKS.flatMap((check) => check(schema, ctx));
 }
 
 /**
@@ -832,7 +832,7 @@ export function auditStories(
   stories: readonly AuditedStory[],
   ctx: AuditContext = NO_CONTEXT,
 ): StoryFinding[] {
-  return STORY_CHECKS.flatMap((check) => [...check(stories, ctx)])
+  return STORY_CHECKS.flatMap((check) => [...check(stories, ctx)]);
 }
 
 /**
@@ -847,34 +847,34 @@ export function auditDocuments(
   schema: SchemaIndex,
   ctx: AuditContext = NO_CONTEXT,
 ): ContentFinding[] {
-  const tally = new Map<string, ContentFinding>()
+  const tally = new Map<string, ContentFinding>();
 
   for (const { id, doc, bare } of docs) {
-    const seenInDoc = new Set<string>()
+    const seenInDoc = new Set<string>();
     for (const blok of Object.values(doc.bloks)) {
-      const def = schema[blok.type]
+      const def = schema[blok.type];
       for (const check of DOCUMENT_CHECKS) {
         // A bare layer leaves fields out on purpose: absent means inherited.
-        if (bare && check === missingField) continue
+        if (bare && check === missingField) continue;
         for (const finding of check(blok, def, ctx)) {
-          const key = `${finding.check} ${finding.type} ${finding.field ?? ''}`
-          const row = tally.get(key) ?? { ...finding, documents: 0, bloks: 0, sample: [] }
-          row.bloks++
+          const key = `${finding.check} ${finding.type} ${finding.field ?? ""}`;
+          const row = tally.get(key) ?? { ...finding, documents: 0, bloks: 0, sample: [] };
+          row.bloks++;
           if (!seenInDoc.has(key)) {
-            seenInDoc.add(key)
-            row.documents++
+            seenInDoc.add(key);
+            row.documents++;
             // Under the cap only: `documents` is already the answer to "how
             // many". Sampled per *document* rather than per blok, because two
             // faulty bloks on one page are one thing to go and look at.
-            if (id !== undefined && row.sample.length < FINDING_SAMPLE) row.sample.push(id)
+            if (id !== undefined && row.sample.length < FINDING_SAMPLE) row.sample.push(id);
           }
-          tally.set(key, row)
+          tally.set(key, row);
         }
       }
     }
   }
 
-  return [...tally.values()].sort(compareContentFindings)
+  return [...tally.values()].sort(compareContentFindings);
 }
 
 /**
@@ -893,8 +893,8 @@ function compareContentFindings(a: ContentFinding, b: ContentFinding): number {
     b.documents - a.documents ||
     a.check.localeCompare(b.check) ||
     a.type.localeCompare(b.type) ||
-    (a.field ?? '').localeCompare(b.field ?? '')
-  )
+    (a.field ?? "").localeCompare(b.field ?? "")
+  );
 }
 
 /**
@@ -914,20 +914,20 @@ export async function audit(
   opts: AuditOptions = {},
   brand?: AuditBrand,
 ): Promise<AuditReport> {
-  const size = Math.min(Math.max(opts.batch ?? DEFAULT_AUDIT_BATCH, 1), MAX_AUDIT_BATCH)
-  const docs = await publishedDocsAfter(db, opts.continueFrom ?? null, size, brand?.scopes)
+  const size = Math.min(Math.max(opts.batch ?? DEFAULT_AUDIT_BATCH, 1), MAX_AUDIT_BATCH);
+  const docs = await publishedDocsAfter(db, opts.continueFrom ?? null, size, brand?.scopes);
   const bare = brand
     ? (id: string) => {
-        const layer = singletonTypeOf(id)
-        return layer !== null && layerSeed(brand.registry, layer.scope) === 'bare'
+        const layer = singletonTypeOf(id);
+        return layer !== null && layerSeed(brand.registry, layer.scope) === "bare";
       }
-    : isBareLayer
+    : isBareLayer;
   const content = auditDocuments(
     ctx.sites || brand ? docs.map((d) => ({ ...d, bare: bare(d.id) })) : docs,
     schema,
     ctx,
-  )
-  const named = (check: string) => content.filter((f) => f.check === check)
+  );
+  const named = (check: string) => content.filter((f) => f.check === check);
 
   return {
     documents: docs.length,
@@ -937,20 +937,20 @@ export async function audit(
     content,
     stories: auditStories(docs, ctx),
     schema: auditSchema(schema, ctx),
-    orphanKeys: named('orphan-key').map((f) => ({
+    orphanKeys: named("orphan-key").map((f) => ({
       type: f.type,
-      field: f.field ?? '',
+      field: f.field ?? "",
       documents: f.documents,
     })),
-    unknownTypes: named('unknown-type').map((f) => ({ type: f.type, documents: f.documents })),
-    missingFields: named('missing-field').map((f) => ({
+    unknownTypes: named("unknown-type").map((f) => ({ type: f.type, documents: f.documents })),
+    missingFields: named("missing-field").map((f) => ({
       type: f.type,
-      field: f.field ?? '',
+      field: f.field ?? "",
       documents: f.documents,
     })),
     ...(ctx.sites ? { settings: await auditSettings(db, schema, ctx.sites, ctx.types) } : {}),
     ...(brand ? { brand: brand.id } : {}),
-  }
+  };
 }
 
 /**
@@ -968,51 +968,51 @@ export async function auditSettings(
   sites: { settings: string; registry: Registry },
   types?: readonly DocumentType[],
 ): Promise<SettingsFinding[]> {
-  const { settings, registry } = sites
+  const { settings, registry } = sites;
   const chains = registry.sites.map((site) => ({
     site: site.id,
     // Most general first, as `mergeLayers` wants them.
     ids: [...chain(registry, site.id)].reverse().map((scope) => layerId(settings, scope)),
-  }))
+  }));
   // Every site's layers at once, by id: the audit is the platform tier's, and reads them
   // wherever they live.
-  const docs = await publishedDocsByIds(db, [...new Set(chains.flatMap((c) => c.ids))], null)
-  const rootType = types?.find((t) => t.name === settings)?.root
+  const docs = await publishedDocsByIds(db, [...new Set(chains.flatMap((c) => c.ids))], null);
+  const rootType = types?.find((t) => t.name === settings)?.root;
 
-  const out: SettingsFinding[] = []
+  const out: SettingsFinding[] = [];
   for (const { site, ids } of chains) {
     const merged = mergeLayers(
       ids.map((id) => docs[id]),
       schema,
-    )
+    );
     if (merged) {
       for (const blok of Object.values(merged.bloks)) {
         for (const field of requiredEmpty(schema[blok.type], blok, merged)) {
-          out.push({ check: 'required-setting', site, type: blok.type, field, uid: blok.uid })
+          out.push({ check: "required-setting", site, type: blok.type, field, uid: blok.uid });
         }
       }
     } else if (rootType) {
       for (const [field, def] of Object.entries(schema[rootType]?.fields ?? {})) {
         if (def.required) {
-          out.push({ check: 'required-setting', site, type: rootType, field, uid: '' })
+          out.push({ check: "required-setting", site, type: rootType, field, uid: "" });
         }
       }
     }
   }
-  return out
+  return out;
 }
 
 /** The `required` fields of `blok` that hold nothing: no key, `null`, `''`, or no children. */
 function requiredEmpty(def: BlockSchema | undefined, blok: Blok, doc: Doc): string[] {
-  if (!def) return []
+  if (!def) return [];
   return Object.entries(def.fields)
     .filter(([name, field]) => {
-      if (!field.required) return false
-      if (field.kind === 'blocks') {
-        return !Object.values(doc.bloks).some((b) => b.parent === blok.uid && b.slot === name)
+      if (!field.required) return false;
+      if (field.kind === "blocks") {
+        return !Object.values(doc.bloks).some((b) => b.parent === blok.uid && b.slot === name);
       }
-      const value = blok.data[name]
-      return value === undefined || value === null || value === ''
+      const value = blok.data[name];
+      return value === undefined || value === null || value === "";
     })
-    .map(([name]) => name)
+    .map(([name]) => name);
 }

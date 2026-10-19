@@ -1,17 +1,17 @@
-import { cloneElement, isValidElement, type ReactElement, type ReactNode } from 'react'
-import type { Registry } from '../core/block'
-import { childrenOf, type Doc } from '../core/doc'
-import type { Field } from '../core/fields'
-import { fieldValue } from '../core/locales'
+import { cloneElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import type { Registry } from "../core/block";
+import { childrenOf, type Doc } from "../core/doc";
+import type { Field } from "../core/fields";
+import { fieldValue } from "../core/locales";
 import {
   EMPTY_RESOLUTION,
   resolveReference,
   resolveReferences,
   resolveValue,
   type Resolution,
-} from '../core/resolve'
-import { asRichtext, sanitiseRichtext } from '../core/richtext'
-import { RichText } from './RichText'
+} from "../core/resolve";
+import { asRichtext, sanitiseRichtext } from "../core/richtext";
+import { RichText } from "./RichText";
 
 /**
  * How much of the editor's addressing a render carries
@@ -33,33 +33,33 @@ import { RichText } from './RichText'
  * grid child. See the wrapper's own comment for which way that trade is now
  * resolved and why.
  */
-export type RenderMode = 'off' | 'mark' | 'edit'
+export type RenderMode = "off" | "mark" | "edit";
 
 interface Props {
-  doc: Doc
-  registry: Registry
-  uid: string
+  doc: Doc;
+  registry: Registry;
+  uid: string;
   /**
    * How much addressing to emit. Defaults to `off` — no attributes at all — so a
    * host rendering a published page cannot leak the editor's markers by omission.
    */
-  mode?: RenderMode
+  mode?: RenderMode;
   /**
    * Context a document cannot hold: story ids to current URLs, and so on.
    * Defaulted so a caller with nothing to resolve stays a one-liner.
    */
-  resolution?: Resolution
+  resolution?: Resolution;
 }
 
 export function RenderBlok({
   doc,
   registry,
   uid,
-  mode = 'off',
+  mode = "off",
   resolution = EMPTY_RESOLUTION,
 }: Props): ReactNode {
-  const blok = doc.bloks[uid]
-  if (!blok) return null
+  const blok = doc.bloks[uid];
+  if (!blok) return null;
 
   /**
    * Every placeholder and affordance below is `edit` only, never `mark`: each one
@@ -67,11 +67,11 @@ export function RenderBlok({
    * it renders the same tree `off` does. An agent looking at a `mark` render of a
    * broken document sees what a visitor would see, which is the honest answer.
    */
-  const editing = mode === 'edit'
+  const editing = mode === "edit";
 
-  const def = registry[blok.type]
+  const def = registry[blok.type];
   if (!def) {
-    return editing ? <div className="folio-unknown">Unknown block type “{blok.type}”</div> : null
+    return editing ? <div className="folio-unknown">Unknown block type “{blok.type}”</div> : null;
   }
 
   /**
@@ -86,10 +86,10 @@ export function RenderBlok({
       <div className="folio-unrendered">
         “{def.label || blok.type}” has no renderer. It is data other pages read.
       </div>
-    ) : null
+    ) : null;
   }
 
-  const props: Record<string, unknown> = { uid }
+  const props: Record<string, unknown> = { uid };
   // Every field value this renderer reads goes through `fieldValue`
   // (`../../docs/specs/content-model/localisation.md` architecture decision
   // 3), so "which language" is answered once, from the resolution, rather than
@@ -100,45 +100,45 @@ export function RenderBlok({
   // is in `i18n` it wins, wherever it came from. The editor is what refuses to
   // *write* a locale value to an unmarked field; un-marking one must not silently
   // hide content somebody already translated, and the audit reports that case.
-  const locale = resolution.locale
+  const locale = resolution.locale;
   for (const [name, field] of Object.entries(def.fields as Record<string, Field>)) {
     // Richtext arrives already rendered, like a `blocks` field, so a block author
     // drops `{body}` into their JSX and cannot accidentally skip sanitising or
     // link resolution.
-    if (field.kind === 'richtext') {
+    if (field.kind === "richtext") {
       props[name] = (
         <RichText
           doc={sanitiseRichtext(asRichtext(fieldValue(blok, name, locale)), field)}
           resolution={resolution}
         />
-      )
-      continue
+      );
+      continue;
     }
-    if (field.kind === 'reference') {
-      const target = resolveReference(fieldValue(blok, name, locale), resolution, field.types)
+    if (field.kind === "reference") {
+      const target = resolveReference(fieldValue(blok, name, locale), resolution, field.types);
       props[name] = target
         ? { ...target, content: referenceContent(target.doc, registry, resolution) }
-        : null
-      continue
+        : null;
+      continue;
     }
     // The plural, in the editor's chosen order, with unresolvable entries already
     // dropped by `resolveReferences` (`data-documents.md` decision 3).
-    if (field.kind === 'references') {
+    if (field.kind === "references") {
       props[name] = resolveReferences(fieldValue(blok, name, locale), resolution, field.types).map(
         (target) => ({ ...target, content: referenceContent(target.doc, registry, resolution) }),
-      )
-      continue
+      );
+      continue;
     }
-    if (field.kind !== 'blocks') {
-      props[name] = resolveValue(field, fieldValue(blok, name, locale), resolution)
-      continue
+    if (field.kind !== "blocks") {
+      props[name] = resolveValue(field, fieldValue(blok, name, locale), resolution);
+      continue;
     }
-    const kids = childrenOf(doc, uid, name)
+    const kids = childrenOf(doc, uid, name);
     if (kids.length === 0) {
       props[name] = editing ? (
         <EmptySlot parent={uid} slot={name} label={field.label ?? name} />
-      ) : null
-      continue
+      ) : null;
+      continue;
     }
     props[name] = kids.map((child) => (
       <RenderBlok
@@ -149,11 +149,11 @@ export function RenderBlok({
         mode={mode}
         resolution={resolution}
       />
-    ))
+    ));
   }
 
-  const el = def.render(props as never)
-  if (mode === 'off') return el
+  const el = def.render(props as never);
+  if (mode === "off") return el;
 
   // Storyblok makes each block author remember to spread {...storyblokEditable(blok)}.
   // Deriving it here means a block cannot forget to be editable.
@@ -173,11 +173,11 @@ export function RenderBlok({
   // {...p} />` is the most natural thing to write when adopting Folio into a
   // site that already has a design system, and it was exactly the shape that
   // silently opted out of editing.
-  if (isValidElement(el) && typeof el.type === 'string') {
+  if (isValidElement(el) && typeof el.type === "string") {
     return cloneElement(el as ReactElement<Record<string, unknown>>, {
-      'data-folio-uid': uid,
-      'data-folio-type': blok.type,
-    })
+      "data-folio-uid": uid,
+      "data-folio-type": blok.type,
+    });
   }
   /**
    * **`mark` stops here, with no marker and therefore no uid for this block.**
@@ -194,7 +194,7 @@ export function RenderBlok({
    * box, so no bounding rect, so nothing to clip to, which is the same reason the
    * comment below gives for not using it for the outline.
    */
-  if (mode === 'mark') return el
+  if (mode === "mark") return el;
   /**
    * Everything else gets a wrapper, because the selection outline is drawn with
    * `position: relative` and an `::after` inset on the marked element, so the
@@ -212,7 +212,7 @@ export function RenderBlok({
     <div className="folio-marker" data-folio-uid={uid} data-folio-type={blok.type}>
       {el}
     </div>
-  )
+  );
 }
 
 /**
@@ -233,8 +233,8 @@ export function RenderBlok({
  * references itself from rendering until the stack gives out.
  */
 function referenceContent(doc: Doc, registry: Registry, resolution: Resolution): ReactNode {
-  const root = doc.bloks[doc.root]
-  if (!root || !registry[root.type]?.render) return null
+  const root = doc.bloks[doc.root];
+  if (!root || !registry[root.type]?.render) return null;
   return (
     <RenderBlok
       doc={doc}
@@ -242,7 +242,7 @@ function referenceContent(doc: Doc, registry: Registry, resolution: Resolution):
       uid={doc.root}
       resolution={{ ...resolution, docs: {} }}
     />
-  )
+  );
 }
 
 /** Rendered into an empty `blocks` field so the slot is reachable in the preview. */
@@ -256,14 +256,14 @@ function EmptySlot({ parent, slot, label }: { parent: string; slot: string; labe
     >
       Add to {label.toLowerCase()}
     </button>
-  )
+  );
 }
 
 /** Renders a whole document. The public entry point for both site and preview. */
-export function FolioDoc({ doc, registry, mode, resolution }: Omit<Props, 'uid'>) {
+export function FolioDoc({ doc, registry, mode, resolution }: Omit<Props, "uid">) {
   return (
     <RenderBlok doc={doc} registry={registry} uid={doc.root} mode={mode} resolution={resolution} />
-  )
+  );
 }
 
 /**
@@ -283,8 +283,8 @@ export function renderGlobalNode(
   name: string,
   opts?: { mode?: RenderMode },
 ): ReactNode {
-  const doc = resolution.globals?.[name]
-  if (!doc) return null
+  const doc = resolution.globals?.[name];
+  if (!doc) return null;
   // Keyed on the global's name, which is unique by construction (`globals` is a
   // list of declared singleton type names). The key is inert for the single-use
   // call a host makes in its own shell — `renderGlobal(resolution, 'header')` —
@@ -296,5 +296,5 @@ export function renderGlobalNode(
     <div key={name} data-folio-global={name}>
       <FolioDoc doc={doc} registry={registry} mode={opts?.mode} resolution={resolution} />
     </div>
-  )
+  );
 }

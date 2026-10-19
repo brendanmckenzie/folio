@@ -29,11 +29,11 @@
  * of a key or a URL.
  */
 export interface AssetFolder {
-  id: string
-  parentId: string | null
-  name: string
-  path: string
-  createdAt: number
+  id: string;
+  parentId: string | null;
+  name: string;
+  path: string;
+  createdAt: number;
 }
 
 /**
@@ -43,10 +43,10 @@ export interface AssetFolder {
  * asked for it (`?counts=1`); it is never populated speculatively.
  */
 export interface AssetTag {
-  id: string
-  name: string
-  slug: string
-  count?: number
+  id: string;
+  name: string;
+  slug: string;
+  count?: number;
 }
 
 /**
@@ -58,26 +58,26 @@ export interface AssetTag {
  * `kind` already are — nothing here means "navigate into", only "narrow to".
  */
 export interface AssetFilter {
-  q?: string
-  kind?: string
+  q?: string;
+  kind?: string;
   /** A folder `path`. Includes descendants — decision 3. */
-  folder?: string
+  folder?: string;
   /** Tag slugs, ANDed. At most 8 (decision 4). */
-  tags?: readonly string[]
+  tags?: readonly string[];
   /** `folder_id is null`. Mutually exclusive with `folder`. */
-  unfiled?: boolean
+  unfiled?: boolean;
   /** No tagging rows. The retro-organise starting point. */
-  untagged?: boolean
+  untagged?: boolean;
   /** `described_at is null`. Drives the enrichment backlog view. */
-  undescribed?: boolean
+  undescribed?: boolean;
   /** `describe_error is not null`. A recorded failure, retried on purpose
    * rather than swept up again by the default backlog run. */
-  failed?: boolean
+  failed?: boolean;
 }
 
 /** The four operations a selection of assets can be run through (phase 5's
  * `runAssetBulk`), mirroring `core/story.ts`'s `BulkAction` for stories. */
-export type AssetBulkAction = 'tag' | 'untag' | 'move' | 'delete'
+export type AssetBulkAction = "tag" | "untag" | "move" | "delete";
 
 /**
  * The tag identity: lowercased, trimmed, with every run of inner whitespace
@@ -88,7 +88,7 @@ export type AssetBulkAction = 'tag' | 'untag' | 'move' | 'delete'
  * a `unique` constraint that a caller then has to recover from.
  */
 export function tagSlug(raw: string): string {
-  return raw.trim().toLowerCase().replace(/\s+/g, '')
+  return raw.trim().toLowerCase().replace(/\s+/g, "");
 }
 
 /**
@@ -123,7 +123,7 @@ export function tagSlug(raw: string): string {
  * somebody grouping by type actually wants, and sorting by it would order by the
  * spelling of a MIME string.
  */
-export type AssetSort = 'created' | 'filename' | 'size'
+export type AssetSort = "created" | "filename" | "size";
 
 /**
  * `created`, because the library is a feed: a person arriving at Assets has
@@ -134,4 +134,4 @@ export type AssetSort = 'created' | 'filename' | 'size'
  * picker's grid looked like — alphabetical buries a fresh upload in the middle of
  * the list, where the person who just made it has no idea to look.
  */
-export const DEFAULT_ASSET_SORT: AssetSort = 'created'
+export const DEFAULT_ASSET_SORT: AssetSort = "created";

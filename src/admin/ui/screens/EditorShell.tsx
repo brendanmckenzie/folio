@@ -1,23 +1,23 @@
-import type { CSSProperties, ReactNode } from 'react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Blok, Doc } from '../../../core/doc'
-import type { LocaleConfig, LocaleContext } from '../../../core/locales'
-import type { Presence } from '../../../core/protocol'
-import type { Resolution } from '../../../core/resolve'
-import { type DocumentType, type SchemaIndex, singletonId } from '../../../core/schema'
-import { layerId } from '../../../core/sites'
-import { isLive, type StoryMeta } from '../../../core/story'
-import type { Blocks } from '../../hooks/useBlocks'
-import { atScope, canPublish, canShare, type Me, scopeName, whyNot } from '../../me'
-import type { StoryStore } from '../../store'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { Menu } from '../Menu'
-import { BlockRail } from './BlockRail'
-import { stateTone } from './content-rows'
-import css from './EditorShell.module.css'
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Blok, Doc } from "../../../core/doc";
+import type { LocaleConfig, LocaleContext } from "../../../core/locales";
+import type { Presence } from "../../../core/protocol";
+import type { Resolution } from "../../../core/resolve";
+import { type DocumentType, type SchemaIndex, singletonId } from "../../../core/schema";
+import { layerId } from "../../../core/sites";
+import { isLive, type StoryMeta } from "../../../core/story";
+import type { Blocks } from "../../hooks/useBlocks";
+import { atScope, canPublish, canShare, type Me, scopeName, whyNot } from "../../me";
+import type { StoryStore } from "../../store";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { Menu } from "../Menu";
+import { BlockRail } from "./BlockRail";
+import { stateTone } from "./content-rows";
+import css from "./EditorShell.module.css";
 import {
   type AddTarget,
   behindNotice,
@@ -40,14 +40,20 @@ import {
   VIEWPORT_NAMES,
   VIEWPORTS,
   SETTLED_TITLE,
-} from './editor-model'
-import { historyWhen } from './history-model'
-import { bareMount } from '../route'
-import { shareRefusal } from './share-model'
-import { SharePreview } from './SharePreview'
-import { useEditor } from './useEditor'
-import { isLayerDocument, layerInfo, type LayerInfo, layerOf, scopesBelow } from './inspector-model'
-import { useForkStatus, useLayerDocs, useOverride } from './useSiteContext'
+} from "./editor-model";
+import { historyWhen } from "./history-model";
+import { bareMount } from "../route";
+import { shareRefusal } from "./share-model";
+import { SharePreview } from "./SharePreview";
+import { useEditor } from "./useEditor";
+import {
+  isLayerDocument,
+  layerInfo,
+  type LayerInfo,
+  layerOf,
+  scopesBelow,
+} from "./inspector-model";
+import { useForkStatus, useLayerDocs, useOverride } from "./useSiteContext";
 
 /**
  * What the inspector — port phase 7b — is handed.
@@ -63,77 +69,77 @@ import { useForkStatus, useLayerDocs, useOverride } from './useSiteContext'
  * needs a strict subset of it — `versions`, `store` and the document.
  */
 export interface EditorSlot {
-  store: StoryStore
-  schema: SchemaIndex
-  types: readonly DocumentType[]
-  globals: readonly string[]
-  apiBase: string
+  store: StoryStore;
+  schema: SchemaIndex;
+  types: readonly DocumentType[];
+  globals: readonly string[];
+  apiBase: string;
   /** The bare mount, for asset URLs and a global's preview page. */
-  mount: string
-  locales: LocaleConfig | undefined
-  locale: string
-  localeCtx: LocaleContext | undefined
-  isSourceLocale: boolean
-  setLocale: (code: string) => void
-  resolution: Resolution
-  translation: ReturnType<typeof useEditor>['translation']
+  mount: string;
+  locales: LocaleConfig | undefined;
+  locale: string;
+  localeCtx: LocaleContext | undefined;
+  isSourceLocale: boolean;
+  setLocale: (code: string) => void;
+  resolution: Resolution;
+  translation: ReturnType<typeof useEditor>["translation"];
   /** The blok to draw: out of the version being viewed, when one is on screen. */
-  blok: Blok | null
+  blok: Blok | null;
   /** What is on screen — the version being viewed, or the live draft. */
-  doc: Doc | null
+  doc: Doc | null;
   /** Viewing a past version, or a role that may not edit. */
-  readOnly: boolean
-  blocks: Blocks
+  readOnly: boolean;
+  blocks: Blocks;
   /** Per-story presence, off the document socket. The inspector's field rings read
    * `selection.field`; the history panel's `peerNames` reads `actor` → `name`. */
-  peers: readonly Presence[]
+  peers: readonly Presence[];
   /** The whole store state, for the two things a pane may need that are not broken
    * out above: `connected` / `inflight` for a saving indicator, `focus` for which
    * field this client is in. */
-  state: ReturnType<typeof useEditor>['state']
-  story: StoryMeta
+  state: ReturnType<typeof useEditor>["state"];
+  story: StoryMeta;
   /** The document has a URL of its own, so the root block's row also edits its
    * address (`PageAddress`). False for a record and for a global. */
-  routed: boolean
+  routed: boolean;
   /** The selection is the document root, and it is editable. */
-  isRootBlok: boolean
+  isRootBlok: boolean;
   /** A block inside a global was clicked while previewing something else. */
-  globalHint: { name: string; label: string } | null
-  onEditGlobal: (name: string) => void
-  versions: ReturnType<typeof useEditor>['versions']
+  globalHint: { name: string; label: string } | null;
+  onEditGlobal: (name: string) => void;
+  versions: ReturnType<typeof useEditor>["versions"];
   /** The version list's paged trail. See `useEditor`'s own comment for why it is a
    * second name rather than a second read. */
-  versionTrail: ReturnType<typeof useEditor>['versionTrail']
-  onNotice: (message: string) => void
+  versionTrail: ReturnType<typeof useEditor>["versionTrail"];
+  onNotice: (message: string) => void;
   /**
    * There is no stage: this document is a form, so the inspector *is* the screen
    * and is rendered centred at a readable measure rather than in a 340px column.
    * The fields do not change; their measure does, which a richtext field wants to
    * know about.
    */
-  form: boolean
+  form: boolean;
   /**
    * How this global's layer stands against the layers below it, on a deployment with
    * `sites` (`multi-site.md` decision 8); undefined for everything else, which is what
    * keeps a single-site inspector free of labels.
    */
-  layers?: LayerInfo
+  layers?: LayerInfo;
 
   /* ------------------------------------------------- port phase 7c's seams --- */
 
   /** Whether the history slide-over should be showing. `⌘H` is the shell's, not
    * this screen's, so it arrives as a prop and is passed straight through. */
-  historyOpen: boolean
-  onCloseHistory: () => void
+  historyOpen: boolean;
+  onCloseHistory: () => void;
   /**
    * The slot a block is being added to, or null. Set by `+ Add` in the rail and by
    * `⌘⇧A`; the picker reads it, and `onAddBlock` is what a pick calls — so the
    * picker never learns where in the slot the block lands.
    */
-  adding: AddTarget | null
-  onRequestAdd: (target: AddTarget) => void
-  onCloseAdd: () => void
-  onAddBlock: (type: string, preset?: string) => void
+  adding: AddTarget | null;
+  onRequestAdd: (target: AddTarget) => void;
+  onCloseAdd: () => void;
+  onAddBlock: (type: string, preset?: string) => void;
 }
 
 interface Props {
@@ -141,7 +147,7 @@ interface Props {
    * `StoryMeta`, not `StoryNode`: a record or a global is not in the tree and has
    * no children to speak of.
    */
-  story: StoryMeta | undefined
+  story: StoryMeta | undefined;
   /**
    * The iframe src for the **source locale**, or undefined when this document has
    * no page to be seen in. Computed by the caller because two of the three cases
@@ -150,7 +156,7 @@ interface Props {
    * `&as=`, and a record has none at all. `editor-model.ts`'s `previewFrame` adds
    * the third fact, which is this screen's own — the locale being edited.
    */
-  preview: string | undefined
+  preview: string | undefined;
   /**
    * The story row is not here yet.
    *
@@ -158,43 +164,43 @@ interface Props {
    * and `story` undefined this screen says "no such document", so a caller that
    * passes only its boot flag makes that flash on every open.
    */
-  loading: boolean
-  apiBase: string
+  loading: boolean;
+  apiBase: string;
   /** The bare mount, for asset URLs and a global's preview page. */
-  mount: string
-  schema: SchemaIndex
-  types: readonly DocumentType[]
-  globals: readonly string[]
-  locales?: LocaleConfig
-  me: Me
-  onNotice: (message: string) => void
+  mount: string;
+  schema: SchemaIndex;
+  types: readonly DocumentType[];
+  globals: readonly string[];
+  locales?: LocaleConfig;
+  me: Me;
+  onNotice: (message: string) => void;
   /** Opens another document — the "Edit ‹global› →" affordance, and nothing else
    * yet. Absent turns that offer off rather than making it fail. */
-  onOpenDocument?: (id: string) => void
+  onOpenDocument?: (id: string) => void;
   /** The caller's story row is stale after a publish. See `EditorOptions`. */
-  onStoryChanged?: () => void
+  onStoryChanged?: () => void;
   /** Collapsed by `⌘\` from the shell, so the state lives above this component. */
-  railCollapsed: boolean
-  onToggleRail: () => void
-  inspectorCollapsed: boolean
-  onToggleInspector: () => void
+  railCollapsed: boolean;
+  onToggleRail: () => void;
+  inspectorCollapsed: boolean;
+  onToggleInspector: () => void;
   /** Port phase 7b. Absent draws a placeholder rather than an empty column. */
-  inspector?: (slot: EditorSlot) => ReactNode
+  inspector?: (slot: EditorSlot) => ReactNode;
   /**
    * Port phase 7c: the history slide-over, over the inspector, full height. It
    * mounts itself against `slot.historyOpen`, so this is called on every render
    * rather than conditionally — `HistoryPanel` returns null when closed.
    */
-  history?: (slot: EditorSlot) => ReactNode
+  history?: (slot: EditorSlot) => ReactNode;
   /** `⌘H`, which belongs to the shell's shortcut map rather than to this screen. */
-  historyOpen?: boolean
-  onCloseHistory?: () => void
+  historyOpen?: boolean;
+  onCloseHistory?: () => void;
   /**
    * Port phase 7c: the block picker. Present, and the rail's `+ Add` opens it
    * instead of the grouped menu; absent, the menu stays and the rail is complete
    * without it.
    */
-  picker?: (slot: EditorSlot) => ReactNode
+  picker?: (slot: EditorSlot) => ReactNode;
 }
 
 /**
@@ -232,7 +238,7 @@ export function EditorShell(props: Props) {
         <div className={css.bootStage} />
         <div className={css.bootInspector} />
       </div>
-    )
+    );
   }
   if (!props.story) {
     return (
@@ -242,26 +248,26 @@ export function EditorShell(props: Props) {
           body="It may have been deleted, or the id in this URL was never one."
         />
       </div>
-    )
+    );
   }
-  return <EditorBody {...props} story={props.story} />
+  return <EditorBody {...props} story={props.story} />;
 }
 
 /** Which confirmation is open, or null. Three of them, and none is "open" as a
  * bare boolean: a dialog that outlives the reason it was opened for is the bug
  * `Editor.tsx` guarded against by storing the story it was confirming *for*. */
-type Confirm = 'publish' | 'unpublish' | 'discard'
+type Confirm = "publish" | "unpublish" | "discard";
 
 function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
-  const [viewport, setViewport] = useState<Viewport>('Desktop')
-  const [confirm, setConfirm] = useState<Confirm | null>(null)
-  const [sharing, setSharing] = useState(false)
+  const [viewport, setViewport] = useState<Viewport>("Desktop");
+  const [confirm, setConfirm] = useState<Confirm | null>(null);
+  const [sharing, setSharing] = useState(false);
   /**
    * Which slot the picker is open for. Held here rather than in the rail because
    * `⌘⇧A` can open it too and the rail may be collapsed at the time — the same
    * reason `railCollapsed` lives above this component.
    */
-  const [adding, setAdding] = useState<AddTarget | null>(null)
+  const [adding, setAdding] = useState<AddTarget | null>(null);
 
   /**
    * A block was picked in the preview. There are no tabs to bring forward any
@@ -270,8 +276,8 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
    * selections happen and the tree is where you then see where you are.
    */
   const onPick = useCallback(() => {
-    if (props.railCollapsed) props.onToggleRail()
-  }, [props.railCollapsed, props.onToggleRail])
+    if (props.railCollapsed) props.onToggleRail();
+  }, [props.railCollapsed, props.onToggleRail]);
 
   /**
    * **Multi-site only** (`multi-site.md` decision 13): which site the pane shows this
@@ -282,14 +288,14 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
    * any of them changes, because a refusal is a fact about one frame. The callback is
    * stable, since the bridge's message listener is re-subscribed by its identity.
    */
-  const [previewIn, setPreviewIn] = useState<string | null>(null)
-  const pane = paneChoice(props.me, story, previewIn)
-  const paneSiteId = pane.kind === 'site' ? pane.site.id : null
-  const [blocked, setBlocked] = useState(false)
+  const [previewIn, setPreviewIn] = useState<string | null>(null);
+  const pane = paneChoice(props.me, story, previewIn);
+  const paneSiteId = pane.kind === "site" ? pane.site.id : null;
+  const [blocked, setBlocked] = useState(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the three are the reset trigger, not values the body reads
-  useEffect(() => setBlocked(false), [story.id, paneSiteId])
-  const onGrantBlocked = useCallback(() => setBlocked(true), [])
-  const adminBase = bareMount(props.mount)
+  useEffect(() => setBlocked(false), [story.id, paneSiteId]);
+  const onGrantBlocked = useCallback(() => setBlocked(true), []);
+  const adminBase = bareMount(props.mount);
 
   const editor = useEditor({
     storyId: story.id,
@@ -309,24 +315,24 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
     ...(props.onStoryChanged ? { onStoryChanged: props.onStoryChanged } : {}),
     historyOpen: props.historyOpen ?? false,
     onPick,
-  })
+  });
 
-  const routed = story.path !== null
+  const routed = story.path !== null;
   const layout = editorLayout({
     routed,
     preview: editor.src,
     nested: hasNestedBloks(editor.shownDoc),
     railCollapsed: props.railCollapsed,
     inspectorCollapsed: props.inspectorCollapsed,
-  })
+  });
 
-  const width = useInspectorWidth()
-  const viewing = editor.versions.viewing
-  const live = editor.versions.source.mode === 'live'
+  const width = useInspectorWidth();
+  const viewing = editor.versions.viewing;
+  const live = editor.versions.source.mode === "live";
   // Publishing is a role on the scope that **owns** the page, not the one being shown.
-  const owner = story.site ? atScope(props.me, story.site) : props.me
-  const mayPublish = canPublish(owner)
-  const mayShare = canShare(owner)
+  const owner = story.site ? atScope(props.me, story.site) : props.me;
+  const mayPublish = canPublish(owner);
+  const mayShare = canShare(owner);
   /*
    * **A live page whose draft is identical to it, still flagged `changed`.**
    *
@@ -350,17 +356,17 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
    *   clears the flag. Disabling it would leave the row amber with no way out.
    */
   const settled =
-    story.state === 'changed' &&
+    story.state === "changed" &&
     editor.published.delta !== null &&
-    editor.published.delta.total === 0
+    editor.published.delta.total === 0;
   const status = publishStatus(
     editor.state.connected,
     editor.state.inflight,
     editor.published.version !== null,
-    story.state === 'live',
+    story.state === "live",
     editor.published.delta,
-  )
-  const banner = behindNotice(editor.migrations.status)
+  );
+  const banner = behindNotice(editor.migrations.status);
 
   /**
    * The banners a deployment with `sites` adds over an open page (`inheritNotices`):
@@ -368,33 +374,33 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
    * has changed since you forked it". Each reads a route that exists only there, and
    * each is asked only when it could apply.
    */
-  const multi = props.me.sites !== undefined
+  const multi = props.me.sites !== undefined;
   const override = useOverride(
     props.apiBase,
     story,
     multi && story.site !== undefined && story.site !== props.me.scope,
-  )
-  const fork = useForkStatus(props.apiBase, story, multi)
-  const notices = inheritNotices(props.me, story, { override, fork })
-  const [forking, setForking] = useState(false)
+  );
+  const fork = useForkStatus(props.apiBase, story, multi);
+  const notices = inheritNotices(props.me, story, { override, fork });
+  const [forking, setForking] = useState(false);
   const forkIntoScope = async () => {
-    setForking(true)
+    setForking(true);
     try {
       const res = await fetch(`${props.apiBase}/stories/${encodeURIComponent(story.id)}/fork`, {
-        method: 'POST',
-      })
+        method: "POST",
+      });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
-        throw new Error(body.error?.message ?? `Request failed (${res.status})`)
+        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(body.error?.message ?? `Request failed (${res.status})`);
       }
-      const made = (await res.json()) as { story: { id: string } }
-      props.onOpenDocument?.(made.story.id)
+      const made = (await res.json()) as { story: { id: string } };
+      props.onOpenDocument?.(made.story.id);
     } catch (e) {
-      props.onNotice((e as Error).message)
+      props.onNotice((e as Error).message);
     } finally {
-      setForking(false)
+      setForking(false);
     }
-  }
+  };
 
   /**
    * Publish, warning first when a locale is incomplete. A complete page — and
@@ -402,9 +408,9 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
    * before: a confirmation that always appears is a confirmation nobody reads.
    */
   const requestPublish = () => {
-    if (editor.gaps.length > 0) setConfirm('publish')
-    else void editor.publish.publish()
-  }
+    if (editor.gaps.length > 0) setConfirm("publish");
+    else void editor.publish.publish();
+  };
 
   /**
    * The layers below an open global, and how each of its fields stands against them
@@ -412,17 +418,17 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
    * is a layer with something under it (`isLayerDocument`), so a single-site editor
    * fetches nothing and labels nothing.
    */
-  const layer = useMemo(() => layerOf(story.id), [story.id])
+  const layer = useMemo(() => layerOf(story.id), [story.id]);
   const ownChain = layer
     ? props.me.sites?.scopes.find((scope) => scope.id === layer.scope)?.chain
-    : undefined
-  const layerIds = layer && isLayerDocument(story.id, ownChain) ? layer : null
+    : undefined;
+  const layerIds = layer && isLayerDocument(story.id, ownChain) ? layer : null;
   const below = useMemo(
     () => (layerIds && ownChain ? scopesBelow(ownChain, layerIds.scope) : []),
     [layerIds, ownChain],
-  )
-  const layerDocs = useLayerDocs(props.apiBase, layerIds?.type ?? null, below)
-  const shown = editor.shownDoc
+  );
+  const layerDocs = useLayerDocs(props.apiBase, layerIds?.type ?? null, below);
+  const shown = editor.shownDoc;
   const layers = useMemo(
     () =>
       layerIds && shown && !layerDocs.loading && layerDocs.docs.length === below.length
@@ -436,7 +442,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
           })
         : undefined,
     [layerIds, shown, layerDocs.docs, layerDocs.loading, below, props.schema, props.me],
-  )
+  );
 
   const slot: EditorSlot = {
     ...(layers ? { layers } : {}),
@@ -486,13 +492,13 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
     onRequestAdd: setAdding,
     onCloseAdd: () => setAdding(null),
     onAddBlock: (type, preset) => {
-      if (!adding) return
-      editor.blocks.add(adding.parent, adding.slot, type, adding.index, preset)
+      if (!adding) return;
+      editor.blocks.add(adding.parent, adding.slot, type, adding.index, preset);
       // Closed by the pick rather than by the picker, so a picker that forgets to
       // close cannot leave a dialog over a block it has already inserted.
-      setAdding(null)
+      setAdding(null);
     },
-  }
+  };
 
   const inspectorNode = props.inspector ? (
     props.inspector(slot)
@@ -503,10 +509,10 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         body="The store, the selection and the block mutations are already here — this column is the seam they are handed through."
       />
     </div>
-  )
+  );
 
   return (
-    <div className={css.editor} style={{ '--inspector-w': `${width.value}px` } as CSSProperties}>
+    <div className={css.editor} style={{ "--inspector-w": `${width.value}px` } as CSSProperties}>
       {layout.rail ? (
         <BlockRail
           doc={editor.shownDoc}
@@ -539,8 +545,8 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             </Button>
           ) : null}
 
-          <span className={css.path} title={routed ? (story.url ?? story.path ?? '') : story.type}>
-            {routed ? (story.path === '' ? '/' : `/${story.path}`) : story.title || story.type}
+          <span className={css.path} title={routed ? (story.url ?? story.path ?? "") : story.type}>
+            {routed ? (story.path === "" ? "/" : `/${story.path}`) : story.title || story.type}
           </span>
           <Badge tone={stateTone(story.state)}>{story.state}</Badge>
 
@@ -553,7 +559,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
               type="button"
               className={css.status}
               onClick={() => {
-                if (editor.published.version) void editor.versions.view(editor.published.version)
+                if (editor.published.version) void editor.versions.view(editor.published.version);
               }}
             >
               {status.label}
@@ -567,7 +573,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
           {/* Multi-site: which site the pane shows this page in. A picker where more
               than one can, a sentence where one does, and why-not where none can. */}
           {paneLabel(pane) !== null ? (
-            pane.kind === 'site' && pane.choices.length > 1 ? (
+            pane.kind === "site" && pane.choices.length > 1 ? (
               <label className={css.previewIn}>
                 <span>Preview in</span>
                 <select
@@ -601,7 +607,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
               {props.locales.available.map((l) => (
                 <option key={l.code} value={l.code}>
                   {l.label}
-                  {props.locales && l.code === props.locales.default ? ' (source)' : ''}
+                  {props.locales && l.code === props.locales.default ? " (source)" : ""}
                 </option>
               ))}
             </select>
@@ -616,7 +622,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 <button
                   key={name}
                   type="button"
-                  className={`${css.segment} ${viewport === name ? css.segmentOn : ''}`}
+                  className={`${css.segment} ${viewport === name ? css.segmentOn : ""}`}
                   aria-pressed={viewport === name}
                   onClick={() => setViewport(name)}
                 >
@@ -667,16 +673,16 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
               !mayPublish
             }
             reason={
-              whyNot(owner, 'publish') ??
+              whyNot(owner, "publish") ??
               (!live
-                ? 'Close the version preview first'
+                ? "Close the version preview first"
                 : status.nothingToPublish
-                  ? 'No changes to publish'
-                  : 'Publishing…')
+                  ? "No changes to publish"
+                  : "Publishing…")
             }
             onClick={requestPublish}
           >
-            {editor.publish.publishing ? 'Publishing…' : 'Publish'}
+            {editor.publish.publishing ? "Publishing…" : "Publish"}
           </Button>
           {/* Beside Publish because it is the same kind of act and the same gate
               (`platform/draft-sharing.md`). Unrouted documents have no page to show. */}
@@ -694,15 +700,15 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             trigger="▾"
             items={[
               {
-                id: 'unpublish',
-                label: 'Unpublish…',
+                id: "unpublish",
+                label: "Unpublish…",
                 danger: true,
                 // `isLive`, not `state === 'live'`: a page with unpublished edits
                 // reads `changed` and is still serving the public, so this refused
                 // to take down the very pages most likely to need taking down.
                 disabled: !(isLive(story.state) && live && mayPublish),
-                reason: whyNot(owner, 'publish') ?? 'Only a live page can be unpublished',
-                run: () => setConfirm('unpublish'),
+                reason: whyNot(owner, "publish") ?? "Only a live page can be unpublished",
+                run: () => setConfirm("unpublish"),
               },
             ]}
           />
@@ -731,11 +737,11 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         ) : null}
 
         {notices.map((notice) => {
-          const link = noticeLink(notice, props.mount)
+          const link = noticeLink(notice, props.mount);
           return (
             <p className={css.banner} role="status" key={notice.kind}>
               {noticeText(notice)} {link ? <a href={link.href}>{link.text}</a> : null}
-              {notice.kind === 'readonly' && notice.canFork ? (
+              {notice.kind === "readonly" && notice.canFork ? (
                 <Button
                   size="sm"
                   disabled={forking}
@@ -746,7 +752,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 </Button>
               ) : null}
             </p>
-          )
+          );
         })}
 
         {/* The browser refused the partitioned grant cookie (`site/enter?check=1`), so
@@ -754,7 +760,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             A top-level open keeps a first-party cookie (`multi-site.md`, edge cases). */}
         {blocked && editor.src ? (
           <p className={css.banner} role="alert">
-            Your browser blocked the cookie the preview needs.{' '}
+            Your browser blocked the cookie the preview needs.{" "}
             <a href={editor.src} target="_blank" rel="noreferrer">
               Open preview in a new tab
             </a>
@@ -765,17 +771,17 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
           <div className={css.viewbar} role="status">
             <span className={css.viewdot} />
             <span className={css.viewtext}>
-              Viewing{' '}
+              Viewing{" "}
               <strong>
                 {viewing.version.label ||
-                  (viewing.version.kind === 'publish' ? 'a published version' : 'a checkpoint')}
-              </strong>{' '}
+                  (viewing.version.kind === "publish" ? "a published version" : "a checkpoint")}
+              </strong>{" "}
               {/* `historyWhen`, not the old admin's `formatWhen`: the two said the
                   same thing, one rounding and one flooring, and the slide-over
                   beside this banner already used this one. `formatWhen` went with
                   `History.tsx` rather than moving, since keeping both would have
                   been two clocks in one screen. */}
-              from {historyWhen(viewing.version.createdAt)} ·{' '}
+              from {historyWhen(viewing.version.createdAt)} ·{" "}
               {describeAgainstDraft(editor.versions.delta)}
             </span>
             <Button size="sm" variant="subtle" onClick={editor.versions.exit}>
@@ -787,7 +793,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 variant="danger"
                 disabled={editor.versions.busy || editor.versions.delta?.total === 0}
                 reason="This version is identical to the draft"
-                onClick={() => setConfirm('discard')}
+                onClick={() => setConfirm("discard")}
               >
                 Discard changes
               </Button>
@@ -813,8 +819,8 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         ) : (
           <div
             className={css.stage}
-            data-narrow={isNarrowedViewport(viewport) ? '' : undefined}
-            data-viewing={viewing ? '' : undefined}
+            data-narrow={isNarrowedViewport(viewport) ? "" : undefined}
+            data-viewing={viewing ? "" : undefined}
           >
             {editor.src ? (
               <div className={css.frameWrap} style={{ width: VIEWPORTS[viewport] }}>
@@ -822,7 +828,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                   // Keyed on the story *and* the locale: switching language is a
                   // reload, because the host's own chrome and `<html lang>` change
                   // and no postMessage reaches those.
-                  key={`${story.id}:${editor.locale}:${paneSiteId ?? ''}`}
+                  key={`${story.id}:${editor.locale}:${paneSiteId ?? ""}`}
                   ref={editor.frame}
                   className={css.frame}
                   title={`Preview of ${story.title || story.id}`}
@@ -835,7 +841,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                   title="No page to preview yet"
                   body={
                     paneUnavailable(pane) ??
-                    `This ${labelOf(props.types, story.type)} is routed, but the host's own route function returned no URL for ${story.path === '' ? '/' : `/${story.path}`}.`
+                    `This ${labelOf(props.types, story.type)} is routed, but the host's own route function returned no URL for ${story.path === "" ? "/" : `/${story.path}`}.`
                   }
                 />
               </div>
@@ -851,8 +857,8 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             <div className={css.inspectorHead}>
               <span className={css.inspectorTitle}>
                 {editor.selected
-                  ? (props.schema[editor.selected.type]?.label ?? 'Block')
-                  : 'Fields'}
+                  ? (props.schema[editor.selected.type]?.label ?? "Block")
+                  : "Fields"}
               </span>
               <Button
                 size="sm"
@@ -875,13 +881,13 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         <SharePreview
           apiBase={props.apiBase}
           story={story}
-          selfId={props.me.actor?.kind === 'user' ? props.me.actor.id : null}
+          selfId={props.me.actor?.kind === "user" ? props.me.actor.id : null}
           onClose={() => setSharing(false)}
           onNotice={props.onNotice}
         />
       ) : null}
 
-      {confirm === 'publish' ? (
+      {confirm === "publish" ? (
         <Dialog
           title="Publish with an incomplete translation?"
           description="Publishing sends every locale, including the ones with gaps."
@@ -897,7 +903,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 disabled={editor.publish.publishing}
                 reason="Publishing…"
                 onClick={() => {
-                  void editor.publish.publish().then(() => setConfirm(null))
+                  void editor.publish.publish().then(() => setConfirm(null));
                 }}
               >
                 Publish anyway
@@ -908,17 +914,17 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
           <ul className={css.gaps}>
             {editor.gaps.map((gap) => (
               <li key={gap.locale}>
-                <strong>{localeLabel(props.locales, gap.locale)}</strong> — {gap.missing.length}{' '}
-                {gap.missing.length === 1 ? 'field' : 'fields'} untranslated
+                <strong>{localeLabel(props.locales, gap.locale)}</strong> — {gap.missing.length}{" "}
+                {gap.missing.length === 1 ? "field" : "fields"} untranslated
               </li>
             ))}
           </ul>
         </Dialog>
       ) : null}
 
-      {confirm === 'unpublish' ? (
+      {confirm === "unpublish" ? (
         <Dialog
-          title={`Unpublish ${story.title || 'this page'}?`}
+          title={`Unpublish ${story.title || "this page"}?`}
           description="The page stops being served. The draft is kept, and publishing again brings it back."
           danger
           onClose={() => setConfirm(null)}
@@ -933,7 +939,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 disabled={editor.publish.unpublishing}
                 reason="Unpublishing…"
                 onClick={() => {
-                  void editor.publish.unpublish().then(() => setConfirm(null))
+                  void editor.publish.unpublish().then(() => setConfirm(null));
                 }}
               >
                 Unpublish
@@ -943,7 +949,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         />
       ) : null}
 
-      {confirm === 'discard' && viewing ? (
+      {confirm === "discard" && viewing ? (
         <Dialog
           title="Discard the unpublished changes?"
           description={`${describeAgainstDraft(editor.versions.delta)} — all of it goes back to what is published.`}
@@ -962,7 +968,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 onClick={() => {
                   void editor.versions
                     .restore(viewing.version, viewing.doc)
-                    .then(() => setConfirm(null))
+                    .then(() => setConfirm(null));
                 }}
               >
                 Discard
@@ -978,16 +984,16 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         </Dialog>
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ resize --- */
 
 interface InspectorWidth {
-  value: number
-  set: (next: number) => void
-  reset: () => void
-  begin: () => void
+  value: number;
+  set: (next: number) => void;
+  reset: () => void;
+  begin: () => void;
 }
 
 /**
@@ -1000,42 +1006,42 @@ interface InspectorWidth {
  * reason.
  */
 function useInspectorWidth(): InspectorWidth {
-  const [value, setValue] = useState(DEFAULT_INSPECTOR)
-  const dragging = useRef(false)
+  const [value, setValue] = useState(DEFAULT_INSPECTOR);
+  const dragging = useRef(false);
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
-      if (!dragging.current) return
+      if (!dragging.current) return;
       // Measured from the right edge, because that is the edge the inspector is
       // pinned to: anything else drifts as the window resizes mid-drag.
-      setValue(clampInspector(window.innerWidth - e.clientX))
-    }
+      setValue(clampInspector(window.innerWidth - e.clientX));
+    };
     const stop = () => {
-      if (!dragging.current) return
-      dragging.current = false
-      document.body.style.removeProperty('cursor')
-      document.body.style.removeProperty('user-select')
-    }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', stop)
-    window.addEventListener('pointercancel', stop)
+      if (!dragging.current) return;
+      dragging.current = false;
+      document.body.style.removeProperty("cursor");
+      document.body.style.removeProperty("user-select");
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
     return () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', stop)
-      window.removeEventListener('pointercancel', stop)
-    }
-  }, [])
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      window.removeEventListener("pointercancel", stop);
+    };
+  }, []);
 
   return {
     value,
     set: (next) => setValue(clampInspector(next)),
     reset: () => setValue(DEFAULT_INSPECTOR),
     begin: () => {
-      dragging.current = true
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
+      dragging.current = true;
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
     },
-  }
+  };
 }
 
 function InspectorGrip({ width }: { width: InspectorWidth }) {
@@ -1062,16 +1068,16 @@ function InspectorGrip({ width }: { width: InspectorWidth }) {
       onKeyDown={(e) => {
         // ← widens, because the inspector is on the right: the arrow points the
         // way the edge moves, not the way the value goes.
-        const step = e.shiftKey ? 40 : 8
-        if (e.key === 'ArrowLeft') width.set(width.value + step)
-        else if (e.key === 'ArrowRight') width.set(width.value - step)
-        else if (e.key === 'Home') width.reset()
-        else return
-        e.preventDefault()
+        const step = e.shiftKey ? 40 : 8;
+        if (e.key === "ArrowLeft") width.set(width.value + step);
+        else if (e.key === "ArrowRight") width.set(width.value - step);
+        else if (e.key === "Home") width.reset();
+        else return;
+        e.preventDefault();
       }}
       onDoubleClick={width.reset}
     />
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ labels --- */
@@ -1079,10 +1085,10 @@ function InspectorGrip({ width }: { width: InspectorWidth }) {
 /** A type's label, falling back to its name — which is what an orphaned document
  * of a type nobody declares any more has. */
 function labelOf(types: readonly DocumentType[], name: string): string {
-  return types.find((type) => type.name === name)?.label.toLowerCase() ?? name
+  return types.find((type) => type.name === name)?.label.toLowerCase() ?? name;
 }
 
 /** A locale's declared label, falling back to its code. */
 function localeLabel(locales: LocaleConfig | undefined, code: string): string {
-  return locales?.available.find((l) => l.code === code)?.label ?? code
+  return locales?.available.find((l) => l.code === code)?.label ?? code;
 }

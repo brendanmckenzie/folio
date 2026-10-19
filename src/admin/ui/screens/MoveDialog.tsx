@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import type { StoryMeta } from '../../../core/story'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { rank } from '../rank'
-import css from './Content.module.css'
-import { messageOf } from './useContent'
+import { useEffect, useMemo, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import type { StoryMeta } from "../../../core/story";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { rank } from "../rank";
+import css from "./Content.module.css";
+import { messageOf } from "./useContent";
 
 /**
  * Where a bulk move is going.
@@ -37,9 +37,9 @@ export function MoveDialog({
   onClose,
   onConfirm,
 }: {
-  apiBase: string
+  apiBase: string;
   /** How many pages are moving, for the title. */
-  count: number
+  count: number;
   /**
    * What a confirmation would have said — the invisible part of the selection, and
    * the conditions a select-all captured.
@@ -49,39 +49,39 @@ export function MoveDialog({
    * the current filter" and "pick a destination" are one question, and asking them
    * separately is two modals for one gesture.
    */
-  note?: string
-  onClose: () => void
+  note?: string;
+  onClose: () => void;
   /** `null` is the top level, which is a real destination rather than "no
    * choice" — hence a separate radio rather than an empty selection. */
-  onConfirm: (parentId: string | null) => void
+  onConfirm: (parentId: string | null) => void;
 }) {
-  const [q, setQ] = useState('')
-  const [rows, setRows] = useState<readonly StoryMeta[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const [target, setTarget] = useState<string | null>(null)
+  const [q, setQ] = useState("");
+  const [rows, setRows] = useState<readonly StoryMeta[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
 
   useEffect(() => {
-    let live = true
-    const query = new URLSearchParams({ flat: '1', sort: 'path', limit: '50' })
-    if (q.trim()) query.set('q', q.trim())
+    let live = true;
+    const query = new URLSearchParams({ flat: "1", sort: "path", limit: "50" });
+    if (q.trim()) query.set("q", q.trim());
     fetch(`${apiBase}/stories?${query}`)
       .then(async (res) => {
-        if (!res.ok) throw new Error(await messageOf(res))
-        return (await res.json()) as Page<StoryMeta>
+        if (!res.ok) throw new Error(await messageOf(res));
+        return (await res.json()) as Page<StoryMeta>;
       })
       .then((page) => {
         if (live) {
-          setRows(page.rows)
-          setError(null)
+          setRows(page.rows);
+          setError(null);
         }
       })
       .catch((e: Error) => {
-        if (live) setError(e.message)
-      })
+        if (live) setError(e.message);
+      });
     return () => {
-      live = false
-    }
-  }, [apiBase, q])
+      live = false;
+    };
+  }, [apiBase, q]);
 
   /**
    * Ranked client-side *as well* as filtered server-side, and the two are not
@@ -97,11 +97,11 @@ export function MoveDialog({
         rows.map((row) => ({ label: row.title, keywords: pathLabel(row), row })),
       ).map((hit) => hit.item.row),
     [q, rows],
-  )
+  );
 
   return (
     <Dialog
-      title={`Move ${count} ${count === 1 ? 'page' : 'pages'}`}
+      title={`Move ${count} ${count === 1 ? "page" : "pages"}`}
       // "In the order you see them" is a promise the server keeps: the set lands in
       // walk order from the index given, rather than each page pushing the last one
       // down — which is what `index: 0` per document used to do.
@@ -146,7 +146,7 @@ export function MoveDialog({
               checked={target === row.id}
               onChange={() => setTarget(row.id)}
             />
-            <span className={css.destinationName}>{row.title || 'Untitled'}</span>
+            <span className={css.destinationName}>{row.title || "Untitled"}</span>
             <code className={css.destinationPath}>{pathLabel(row)}</code>
           </label>
         ))}
@@ -155,12 +155,12 @@ export function MoveDialog({
         ) : null}
       </div>
     </Dialog>
-  )
+  );
 }
 
 /** The full path, which is what tells two pages with the same title apart — and
  * `design-system.md`'s third commitment says an identifier is a typographic
  * citizen rather than something to hide. */
 function pathLabel(row: StoryMeta): string {
-  return row.path === '' ? '/' : `/${row.path}`
+  return row.path === "" ? "/" : `/${row.path}`;
 }

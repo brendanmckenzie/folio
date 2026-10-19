@@ -19,58 +19,58 @@
  * rows for the same document, delete-then-insert, so the worst case is a row
  * written twice.
  */
-import type { LocaleConfig } from '../core/locales'
-import type { DocumentType, SchemaIndex } from '../core/schema'
-import { contentProjection, indexStatements } from './content-index'
-import type { HookRunner } from './hooks'
-import { publishedDocsAfter } from './stories'
-import type { FolioDb } from './db'
+import type { LocaleConfig } from "../core/locales";
+import type { DocumentType, SchemaIndex } from "../core/schema";
+import { contentProjection, indexStatements } from "./content-index";
+import type { HookRunner } from "./hooks";
+import { publishedDocsAfter } from "./stories";
+import type { FolioDb } from "./db";
 
-const DEFAULT_BATCH = 50
-const MAX_BATCH = 200
+const DEFAULT_BATCH = 50;
+const MAX_BATCH = 200;
 
 export interface ReindexOptions {
   /** How many documents this call may sweep. Default 50, capped at 200. */
-  batch?: number
+  batch?: number;
   /** The previous call's `continueFrom`. */
-  continueFrom?: string | null
+  continueFrom?: string | null;
   /** Computes everything, writes nothing, and answers the same shape. */
-  dryRun?: boolean
+  dryRun?: boolean;
   /** Who asked, for the `reindexed` hook. Off the session, never the body. */
-  actor?: string | null
+  actor?: string | null;
 }
 
 export interface ReindexReport {
   /** Documents examined in this call. */
-  documents: number
+  documents: number;
   /** `content_index` rows written across them. */
-  indexRows: number
+  indexRows: number;
   /** `content_refs` rows written across them. */
-  refRows: number
+  refRows: number;
   /** `content_text` rows written across them — one per locale that has prose. */
-  searchRows: number
+  searchRows: number;
   /**
    * Documents that projected to no rows at all: no indexed field has a value, no
    * outbound edge, and no searchable prose. Counts the full-text half too, so a
    * page whose only content is body text is no longer reported empty.
    */
-  empty: number
+  empty: number;
   /** Pass back as `continueFrom` to sweep the next batch. Null when done. */
-  continueFrom: string | null
-  dryRun: boolean
+  continueFrom: string | null;
+  dryRun: boolean;
   /**
    * On a deployment with `brands` (`multi-brand.md` decision 16): the brand whose
    * scopes this call's batch rebuilt, with that brand's schema. `folio.reindex`
    * walks the brands through `continueFrom`. Absent with no `brands`.
    */
-  brand?: string
+  brand?: string;
 }
 
 export interface ReindexDeps {
-  db: FolioDb
-  schema: SchemaIndex
-  typeOf: (name: string | undefined) => DocumentType | undefined
-  locales?: LocaleConfig
+  db: FolioDb;
+  schema: SchemaIndex;
+  typeOf: (name: string | undefined) => DocumentType | undefined;
+  locales?: LocaleConfig;
   /**
    * Fires `reindexed` once per batch (`../../docs/specs/platform/caching.md`). Optional for
    * the reason `MigrateDeps.hooks` is: absent is what every caller did before
@@ -78,28 +78,28 @@ export interface ReindexDeps {
    * affected — it changes what *every* collection query answers, and which
    * pages hold a collection is precisely what nothing records.
    */
-  hooks?: HookRunner<unknown>
+  hooks?: HookRunner<unknown>;
   /**
    * The scopes of the one brand whose `schema` and `typeOf` these are
    * (`multi-brand.md` decision 16). Absent is every scope, as before brands: a
    * document projected with another brand's schema would index the wrong fields.
    */
-  scopes?: readonly string[]
+  scopes?: readonly string[];
 }
 
 export async function reindex(
   deps: ReindexDeps,
   opts: ReindexOptions = {},
 ): Promise<ReindexReport> {
-  const batch = Math.min(Math.max(Math.trunc(opts.batch ?? DEFAULT_BATCH), 1), MAX_BATCH)
-  const dryRun = opts.dryRun === true
-  const docs = await publishedDocsAfter(deps.db, opts.continueFrom ?? null, batch, deps.scopes)
+  const batch = Math.min(Math.max(Math.trunc(opts.batch ?? DEFAULT_BATCH), 1), MAX_BATCH);
+  const dryRun = opts.dryRun === true;
+  const docs = await publishedDocsAfter(deps.db, opts.continueFrom ?? null, batch, deps.scopes);
 
-  let indexRows = 0
-  let refRows = 0
-  let searchRows = 0
-  let empty = 0
-  const statements: D1PreparedStatement[] = []
+  let indexRows = 0;
+  let refRows = 0;
+  let searchRows = 0;
+  let empty = 0;
+  const statements: D1PreparedStatement[] = [];
 
   for (const row of docs) {
     const projection = contentProjection(
@@ -108,40 +108,40 @@ export async function reindex(
       deps.typeOf(row.type),
       deps.schema,
       deps.locales,
-    )
-    indexRows += projection.index.length
-    refRows += projection.refs.length
-    searchRows += projection.search.length
+    );
+    indexRows += projection.index.length;
+    refRows += projection.refs.length;
+    searchRows += projection.search.length;
     if (
       projection.index.length === 0 &&
       projection.refs.length === 0 &&
       projection.search.length === 0
     ) {
-      empty++
+      empty++;
     }
     // The deletes are emitted even for a document that projects to nothing: that
     // is the case a *removed* `indexed` flag produces — or a `searchable: false`
     // added to a field that already had content — and leaving the old rows behind
     // would keep a field queryable, or findable, that the schema no longer
     // declares.
-    statements.push(...indexStatements(deps.db, row.id, projection))
+    statements.push(...indexStatements(deps.db, row.id, projection));
   }
 
   // One batch for the whole sweep rather than one per document: a partial sweep
   // is recoverable (re-run it), but a partially-rewritten *document* — its deletes
   // landed and its inserts not — is a document silently missing from every
   // collection until somebody notices.
-  if (!dryRun && statements.length > 0) await deps.db.batch(statements)
+  if (!dryRun && statements.length > 0) await deps.db.batch(statements);
 
   // After the write, like every other lifecycle hook, and only when there was
   // one: a dry run and an empty sweep both leave the index exactly as it was.
   if (!dryRun && docs.length > 0) {
     // `site: null`: a reindex rebuilds every scope's rows (`hooks.ts`'s `HookBase.site`).
-    await deps.hooks?.run('reindexed', {
+    await deps.hooks?.run("reindexed", {
       count: docs.length,
       actor: opts.actor ?? null,
       site: null,
-    })
+    });
   }
 
   return {
@@ -154,5 +154,5 @@ export async function reindex(
     // costs one more empty call to find out — the same trade `runMigrations` makes.
     continueFrom: docs.length < batch ? null : (docs[docs.length - 1]?.id ?? null),
     dryRun,
-  }
+  };
 }

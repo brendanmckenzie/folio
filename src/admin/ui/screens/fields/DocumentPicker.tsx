@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { Page } from '../../../../core/pagination'
-import type { StoryRef } from '../../../../core/resolve'
-import type { StoryMeta } from '../../../../core/story'
-import { Badge } from '../../Badge'
-import { Button } from '../../Button'
-import { Dialog } from '../../Dialog'
-import { EmptyState } from '../../EmptyState'
-import { Field, Input } from '../../Field'
-import { scopeOfApiBase } from '../../route'
+import { useEffect, useMemo, useState } from "react";
+import type { Page } from "../../../../core/pagination";
+import type { StoryRef } from "../../../../core/resolve";
+import type { StoryMeta } from "../../../../core/story";
+import { Badge } from "../../Badge";
+import { Button } from "../../Button";
+import { Dialog } from "../../Dialog";
+import { EmptyState } from "../../EmptyState";
+import { Field, Input } from "../../Field";
+import { scopeOfApiBase } from "../../route";
 import {
   CANDIDATE_LIMIT,
   type Candidate,
@@ -15,21 +15,21 @@ import {
   candidateHint,
   narrow,
   useCandidates,
-} from './candidates'
-import css from './fields.module.css'
+} from "./candidates";
+import css from "./fields.module.css";
 
 interface Props {
-  apiBase: string
+  apiBase: string;
   /** Names the field in the dialog's own title, so two pickers opened from one
    * block are told apart by the question rather than by position. */
-  label: string
+  label: string;
   /** Routed pages only — a story link. False offers records too. See `CandidateQuery`. */
-  routed: boolean
-  types?: readonly string[]
+  routed: boolean;
+  types?: readonly string[];
   /** Already picked, and therefore not offered. */
-  exclude?: readonly string[]
-  onPick: (id: string) => void
-  onClose: () => void
+  exclude?: readonly string[];
+  onPick: (id: string) => void;
+  onClose: () => void;
 }
 
 /**
@@ -59,30 +59,30 @@ interface Props {
  * focus to the first tabbable thing in the panel, and the search box is it.
  */
 export function DocumentPicker({ apiBase, label, routed, types, exclude, onPick, onClose }: Props) {
-  const [q, setQ] = useState('')
+  const [q, setQ] = useState("");
   const query: CandidateQuery = {
     q,
     routed,
     ...(types ? { types } : {}),
     ...(exclude ? { exclude } : {}),
-  }
+  };
   // On a deployment with `sites` (an `apiBase` under `~<scope>`) the picker offers the
   // chain — this scope's documents and those above it, each badged with where it
   // lives — through `/search`, which is chain-wide and fenced. The scope's own list
   // routes (`/stories?flat=1`, `/documents`) would offer only its own rows, and a
   // link may point up the chain. Exactly one of the two is asking.
-  const scope = scopeOfApiBase(apiBase)
-  const own = useCandidates(apiBase, query, scope === null)
-  const chain = useChainCandidates(apiBase, query, scope !== null)
-  const candidates: ChainCandidates = scope === null ? own : chain
+  const scope = scopeOfApiBase(apiBase);
+  const own = useCandidates(apiBase, query, scope === null);
+  const chain = useChainCandidates(apiBase, query, scope !== null);
+  const candidates: ChainCandidates = scope === null ? own : chain;
 
   return (
     <Dialog
       title={`Choose a document for ${label}`}
       description={
         routed
-          ? 'Pages only: a document with no URL of its own has nothing to link to.'
-          : 'Pages and records both — a reference resolves content, not a URL.'
+          ? "Pages only: a document with no URL of its own has nothing to link to."
+          : "Pages and records both — a reference resolves content, not a URL."
       }
       size="wide"
       onClose={onClose}
@@ -108,13 +108,13 @@ export function DocumentPicker({ apiBase, label, routed, types, exclude, onPick,
         <EmptyState title="Could not list documents" body={candidates.error} />
       ) : candidates.rows.length === 0 ? (
         <EmptyState
-          title={candidates.loading ? 'Searching…' : 'Nothing matches'}
+          title={candidates.loading ? "Searching…" : "Nothing matches"}
           body={
             candidates.loading
-              ? 'Asking the server.'
+              ? "Asking the server."
               : q
-                ? 'Try a shorter search.'
-                : 'Nothing this field can point at exists yet.'
+                ? "Try a shorter search."
+                : "Nothing this field can point at exists yet."
           }
         />
       ) : (
@@ -122,7 +122,7 @@ export function DocumentPicker({ apiBase, label, routed, types, exclude, onPick,
           {candidates.rows.map((row) => (
             <li key={row.id}>
               <button type="button" className={css.pickerRow} onClick={() => onPick(row.id)}>
-                <span className={css.pickedTitle}>{row.title || 'Untitled'}</span>
+                <span className={css.pickedTitle}>{row.title || "Untitled"}</span>
                 <span className={css.pickedWhere}>{candidateHint(row)}</span>
                 {/* Where it lives, when that is not here — the scope is what tells a
                     shared page from an override of it. */}
@@ -133,14 +133,14 @@ export function DocumentPicker({ apiBase, label, routed, types, exclude, onPick,
         </ul>
       )}
     </Dialog>
-  )
+  );
 }
 
 /** `Candidates`, each row optionally carrying the scope that owns it. */
 interface ChainCandidates {
-  rows: (Candidate & { site?: string })[]
-  loading: boolean
-  error: string | null
+  rows: (Candidate & { site?: string })[];
+  loading: boolean;
+  error: string | null;
 }
 
 /**
@@ -158,46 +158,46 @@ function useChainCandidates(
   enabled: boolean,
 ): ChainCandidates {
   const [state, setState] = useState<{
-    found: StoryMeta[]
-    loading: boolean
-    error: string | null
-  }>({ found: [], loading: false, error: null })
-  const key = JSON.stringify(query)
+    found: StoryMeta[];
+    loading: boolean;
+    error: string | null;
+  }>({ found: [], loading: false, error: null });
+  const key = JSON.stringify(query);
 
   useEffect(() => {
-    if (!enabled) return
-    const wanted = JSON.parse(key) as CandidateQuery
-    const abort = new AbortController()
-    setState((prev) => ({ ...prev, loading: true, error: null }))
+    if (!enabled) return;
+    const wanted = JSON.parse(key) as CandidateQuery;
+    const abort = new AbortController();
+    setState((prev) => ({ ...prev, loading: true, error: null }));
     const timer = setTimeout(() => {
-      const params = new URLSearchParams({ sort: 'title', limit: String(CANDIDATE_LIMIT) })
-      if (wanted.q.trim()) params.set('q', wanted.q.trim())
-      if (wanted.routed) params.set('kind', 'page')
+      const params = new URLSearchParams({ sort: "title", limit: String(CANDIDATE_LIMIT) });
+      if (wanted.q.trim()) params.set("q", wanted.q.trim());
+      if (wanted.routed) params.set("kind", "page");
       fetch(`${apiBase}/search?${params}`, { signal: abort.signal })
         .then(async (res) => {
-          if (!res.ok) throw new Error(`Could not list documents (${res.status})`)
-          return ((await res.json()) as Page<StoryMeta>).rows
+          if (!res.ok) throw new Error(`Could not list documents (${res.status})`);
+          return ((await res.json()) as Page<StoryMeta>).rows;
         })
         .then((found) => setState({ found, loading: false, error: null }))
         .catch((e: Error) => {
-          if (abort.signal.aborted) return
-          setState({ found: [], loading: false, error: e.message })
-        })
-    }, 150)
+          if (abort.signal.aborted) return;
+          setState({ found: [], loading: false, error: e.message });
+        });
+    }, 150);
     return () => {
-      clearTimeout(timer)
-      abort.abort()
-    }
-  }, [apiBase, enabled, key])
+      clearTimeout(timer);
+      abort.abort();
+    };
+  }, [apiBase, enabled, key]);
 
   return useMemo(() => {
-    const sites = new Map(state.found.map((row) => [row.id, row.site]))
+    const sites = new Map(state.found.map((row) => [row.id, row.site]));
     const rows = narrow(state.found, JSON.parse(key) as CandidateQuery).map((candidate) => {
-      const site = sites.get(candidate.id)
-      return site ? { ...candidate, site } : candidate
-    })
-    return { rows, loading: state.loading, error: state.error }
-  }, [state, key])
+      const site = sites.get(candidate.id);
+      return site ? { ...candidate, site } : candidate;
+    });
+    return { rows, loading: state.loading, error: state.error };
+  }, [state, key]);
 }
 
 /**
@@ -214,7 +214,7 @@ export function candidateOf(
   stories: Readonly<Record<string, StoryRef>>,
   id: string,
 ): Candidate | undefined {
-  const ref = stories[id]
-  if (!ref) return undefined
-  return { id, title: ref.title, path: ref.routable ? ref.path : null, type: ref.type }
+  const ref = stories[id];
+  if (!ref) return undefined;
+  return { id, title: ref.title, path: ref.routable ? ref.path : null, type: ref.type };
 }

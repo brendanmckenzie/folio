@@ -1,10 +1,10 @@
-import { env } from 'cloudflare:test'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { collection, defineBlock, multilink, reference, richtext, text } from '../../src/core'
-import type { Doc, Json } from '../../src/core/doc'
-import type { DocumentType } from '../../src/core/schema'
-import { createFolio } from '../../src/server'
-import type { FolioBindings } from '../../src/server'
+import { env } from "cloudflare:test";
+import { beforeAll, describe, expect, it } from "vitest";
+import { collection, defineBlock, multilink, reference, richtext, text } from "../../src/core";
+import type { Doc, Json } from "../../src/core/doc";
+import type { DocumentType } from "../../src/core/schema";
+import { createFolio } from "../../src/server";
+import type { FolioBindings } from "../../src/server";
 
 /**
  * **A single-site host changes nothing** (`docs/specs/foundation/multi-site.md`,
@@ -25,63 +25,63 @@ import type { FolioBindings } from '../../src/server'
  */
 
 const pinPage = defineBlock({
-  name: 'pinPage',
-  label: 'Page',
-  summary: 'title',
+  name: "pinPage",
+  label: "Page",
+  summary: "title",
   fields: {
-    title: text({ label: 'Title' }),
-    next: multilink({ label: 'Next' }),
-    featured: reference({ label: 'Featured', types: ['pinPost'] }),
-    posts: collection({ type: 'pinPost', defaultOrder: { field: 'title', dir: 'asc' } }),
-    body: richtext({ label: 'Body' }),
+    title: text({ label: "Title" }),
+    next: multilink({ label: "Next" }),
+    featured: reference({ label: "Featured", types: ["pinPost"] }),
+    posts: collection({ type: "pinPost", defaultOrder: { field: "title", dir: "asc" } }),
+    body: richtext({ label: "Body" }),
   },
   render: () => null,
-})
+});
 
 const pinPost = defineBlock({
-  name: 'pinPost',
-  label: 'Post',
-  summary: 'title',
-  fields: { title: text({ label: 'Title' }) },
+  name: "pinPost",
+  label: "Post",
+  summary: "title",
+  fields: { title: text({ label: "Title" }) },
   render: () => null,
-})
+});
 
 const pinHeader = defineBlock({
-  name: 'pinHeader',
-  label: 'Header',
-  fields: { tagline: text({ label: 'Tagline' }) },
+  name: "pinHeader",
+  label: "Header",
+  fields: { tagline: text({ label: "Tagline" }) },
   render: () => null,
-})
+});
 
 const types: DocumentType[] = [
-  { name: 'pinPage', label: 'Page', kind: 'page', root: 'pinPage', default: true },
-  { name: 'pinPost', label: 'Post', kind: 'page', root: 'pinPost' },
-  { name: 'pinHeader', label: 'Header', kind: 'singleton', root: 'pinHeader' },
-]
+  { name: "pinPage", label: "Page", kind: "page", root: "pinPage", default: true },
+  { name: "pinPost", label: "Post", kind: "page", root: "pinPost" },
+  { name: "pinHeader", label: "Header", kind: "singleton", root: "pinHeader" },
+];
 
 const bindings = (e: Cloudflare.Env): FolioBindings => ({
   db: e.DB,
   story: e.STORY,
   media: e.MEDIA,
   images: e.IMAGES,
-})
+});
 
 const folio = createFolio<Cloudflare.Env>({
   blocks: [pinPage, pinPost, pinHeader],
   types,
-  globals: ['pinHeader'],
+  globals: ["pinHeader"],
   bindings,
-  basePath: '/folio',
-  assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
-  auth: 'open',
-  route: (p) => (p ? `/${p}` : '/'),
-})
+  basePath: "/folio",
+  assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
+  auth: "open",
+  route: (p) => (p ? `/${p}` : "/"),
+});
 
 function rootDoc(type: string, data: Record<string, Json>): Doc {
   return {
-    root: 'r0',
-    bloks: { r0: { uid: 'r0', type, parent: null, slot: null, order: 'a0', data } },
-  }
+    root: "r0",
+    bloks: { r0: { uid: "r0", type, parent: null, slot: null, order: "a0", data } },
+  };
 }
 
 async function publishRow(
@@ -100,97 +100,97 @@ async function publishRow(
      values (?, ?, ?, ?, ?, ?, ?, 1000, ?, 2000)`,
   )
     .bind(id, type, parentId, slug, path, ord, title, JSON.stringify(doc))
-    .run()
+    .run();
 }
 
 beforeAll(async () => {
   await publishRow(
-    'sty_pin_about',
-    'pinPage',
+    "sty_pin_about",
+    "pinPage",
     null,
-    'pin-about',
-    'pin-about',
-    'a0',
-    'About',
-    rootDoc('pinPage', { title: 'About' }),
-  )
+    "pin-about",
+    "pin-about",
+    "a0",
+    "About",
+    rootDoc("pinPage", { title: "About" }),
+  );
   await publishRow(
-    'sty_pin_post_b',
-    'pinPost',
+    "sty_pin_post_b",
+    "pinPost",
     null,
-    'pin-post-b',
-    'pin-post-b',
-    'a1',
-    'Bravo post',
-    rootDoc('pinPost', { title: 'Bravo post' }),
-  )
+    "pin-post-b",
+    "pin-post-b",
+    "a1",
+    "Bravo post",
+    rootDoc("pinPost", { title: "Bravo post" }),
+  );
   await publishRow(
-    'sty_pin_post_a',
-    'pinPost',
+    "sty_pin_post_a",
+    "pinPost",
     null,
-    'pin-post-a',
-    'pin-post-a',
-    'a2',
-    'Alpha post',
-    rootDoc('pinPost', { title: 'Alpha post' }),
-  )
+    "pin-post-a",
+    "pin-post-a",
+    "a2",
+    "Alpha post",
+    rootDoc("pinPost", { title: "Alpha post" }),
+  );
   await publishRow(
-    'sng_pinHeader',
-    'pinHeader',
+    "sng_pinHeader",
+    "pinHeader",
     null,
-    'pinHeader',
+    "pinHeader",
     null,
-    'a0',
-    'Header',
-    rootDoc('pinHeader', { tagline: 'Hello' }),
-  )
+    "a0",
+    "Header",
+    rootDoc("pinHeader", { tagline: "Hello" }),
+  );
   await publishRow(
-    'sty_pin_team',
-    'pinPage',
-    'sty_pin_about',
-    'team',
-    'pin-about/team',
-    'a0',
-    'Team',
-    rootDoc('pinPage', {
-      title: 'Team',
-      next: { kind: 'story', id: 'sty_pin_post_a' },
-      featured: 'sty_pin_post_b',
+    "sty_pin_team",
+    "pinPage",
+    "sty_pin_about",
+    "team",
+    "pin-about/team",
+    "a0",
+    "Team",
+    rootDoc("pinPage", {
+      title: "Team",
+      next: { kind: "story", id: "sty_pin_post_a" },
+      featured: "sty_pin_post_b",
       body: {
-        type: 'doc',
+        type: "doc",
         content: [
           {
-            type: 'paragraph',
+            type: "paragraph",
             content: [
               {
-                type: 'text',
-                text: 'about us',
-                marks: [{ type: 'link', attrs: { link: { kind: 'story', id: 'sty_pin_about' } } }],
+                type: "text",
+                text: "about us",
+                marks: [{ type: "link", attrs: { link: { kind: "story", id: "sty_pin_about" } } }],
               },
             ],
           },
         ],
       },
     }),
-  )
-})
+  );
+});
 
-describe('a published page on a single-site deployment', () => {
-  it('answers the same Cache-Tag and the same Resolution as before multi-site', async () => {
+describe("a published page on a single-site deployment", () => {
+  it("answers the same Cache-Tag and the same Resolution as before multi-site", async () => {
     const page = await folio
-      .reader(env, new Request('https://example.com/pin-about/team'))
-      .page('pin-about/team')
+      .reader(env, new Request("https://example.com/pin-about/team"))
+      .page("pin-about/team");
 
     expect(page?.headers).toMatchInlineSnapshot(`
       {
         "cache-control": "public, max-age=0, s-maxage=604800, must-revalidate",
         "cache-tag": "global:pinHeader,site,story:sng_pinHeader,story:sty_pin_about,story:sty_pin_post_a,story:sty_pin_post_b,story:sty_pin_team,type:pinPost",
       }
-    `)
+    `);
     // Key order too, which the structural snapshot below sorts away: a byte is a byte.
     expect(JSON.stringify(page?.resolution)).toMatchInlineSnapshot(
       `"{"stories":{"sty_pin_about":{"id":"sty_pin_about","path":"pin-about","url":"/pin-about","title":"About","type":"pinPage","routable":true},"sty_pin_post_b":{"id":"sty_pin_post_b","path":"pin-post-b","url":"/pin-post-b","title":"Bravo post","type":"pinPost","routable":true},"sty_pin_post_a":{"id":"sty_pin_post_a","path":"pin-post-a","url":"/pin-post-a","title":"Alpha post","type":"pinPost","routable":true},"sng_pinHeader":{"id":"sng_pinHeader","path":"","url":"","title":"Header","type":"pinHeader","routable":false}},"assetBase":"/folio/asset","docs":{"sty_pin_post_b":{"root":"r0","bloks":{"r0":{"uid":"r0","type":"pinPost","parent":null,"slot":null,"order":"a0","data":{"title":"Bravo post"}}}}},"globals":{"pinHeader":{"root":"r0","bloks":{"r0":{"uid":"r0","type":"pinHeader","parent":null,"slot":null,"order":"a0","data":{"tagline":"Hello"}}}}},"collections":{"[[\\"pinPost\\"],null,\\"\\",[],[\\"title\\",\\"asc\\"],1,20,\\"\\"]":{"items":[{"id":"sty_pin_post_a","title":"Alpha post","path":"pin-post-a","url":"/pin-post-a","data":{"title":"Alpha post"}},{"id":"sty_pin_post_b","title":"Bravo post","path":"pin-post-b","url":"/pin-post-b","data":{"title":"Bravo post"}}],"total":2,"page":1,"perPage":20,"pages":1}}}"`,
-    )
+    );
     expect(JSON.parse(JSON.stringify(page?.resolution))).toMatchInlineSnapshot(`
       {
         "assetBase": "/folio/asset",
@@ -291,6 +291,6 @@ describe('a published page on a single-site deployment', () => {
           },
         },
       }
-    `)
-  })
-})
+    `);
+  });
+});

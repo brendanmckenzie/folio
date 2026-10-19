@@ -25,8 +25,8 @@ import {
   honeypotName,
   MAX_ROW_CELLS,
   RESERVED_PREFIX,
-} from '../../../core/forms'
-import type { LocaleConfig } from '../../../core/locales'
+} from "../../../core/forms";
+import type { LocaleConfig } from "../../../core/locales";
 
 /* -------------------------------------------------------------- locales --- */
 
@@ -40,63 +40,63 @@ import type { LocaleConfig } from '../../../core/locales'
  * offer one option that is already showing.
  */
 export function showLocaleSwitcher(locales: LocaleConfig | undefined): boolean {
-  return (locales?.available.length ?? 0) > 1
+  return (locales?.available.length ?? 0) > 1;
 }
 
 /* --------------------------------------------------------------- the menu --- */
 
 export interface FieldKindMeta {
-  kind: FormFieldKind
-  label: string
+  kind: FormFieldKind;
+  label: string;
   /** One line for the add menu — what this kind is for, not how it validates. */
-  hint: string
+  hint: string;
 }
 
 /** The thirteen kinds, in the order the add menu offers them — the order a
  *  contact form's questions actually arrive in: identity, then the message,
  *  then the choices, then the exceptional ones. */
 export const FIELD_KINDS: readonly FieldKindMeta[] = [
-  { kind: 'text', label: 'Text', hint: 'A single line — a name, a subject.' },
-  { kind: 'email', label: 'Email', hint: 'Checked for shape, both here and on submit.' },
-  { kind: 'tel', label: 'Phone', hint: 'A single line, no format enforced.' },
-  { kind: 'url', label: 'Website', hint: 'Checked for shape, both here and on submit.' },
-  { kind: 'textarea', label: 'Paragraph', hint: 'A multi-line message.' },
-  { kind: 'number', label: 'Number', hint: 'Coerced and range-checked on submit.' },
-  { kind: 'date', label: 'Date', hint: 'A single date, no time.' },
-  { kind: 'select', label: 'Dropdown', hint: 'One choice from a list.' },
-  { kind: 'radio', label: 'Radio buttons', hint: 'One choice, every option visible.' },
-  { kind: 'checkbox', label: 'Single checkbox', hint: 'A yes/no — "I agree to…".' },
-  { kind: 'checkboxes', label: 'Checkbox group', hint: 'Any number of choices from a list.' },
+  { kind: "text", label: "Text", hint: "A single line — a name, a subject." },
+  { kind: "email", label: "Email", hint: "Checked for shape, both here and on submit." },
+  { kind: "tel", label: "Phone", hint: "A single line, no format enforced." },
+  { kind: "url", label: "Website", hint: "Checked for shape, both here and on submit." },
+  { kind: "textarea", label: "Paragraph", hint: "A multi-line message." },
+  { kind: "number", label: "Number", hint: "Coerced and range-checked on submit." },
+  { kind: "date", label: "Date", hint: "A single date, no time." },
+  { kind: "select", label: "Dropdown", hint: "One choice from a list." },
+  { kind: "radio", label: "Radio buttons", hint: "One choice, every option visible." },
+  { kind: "checkbox", label: "Single checkbox", hint: 'A yes/no — "I agree to…".' },
+  { kind: "checkboxes", label: "Checkbox group", hint: "Any number of choices from a list." },
   {
-    kind: 'file',
-    label: 'File upload',
-    hint: 'Gated: only a signed-in publisher can read it back.',
+    kind: "file",
+    label: "File upload",
+    hint: "Gated: only a signed-in publisher can read it back.",
   },
   {
-    kind: 'hidden',
-    label: 'Hidden value',
+    kind: "hidden",
+    label: "Hidden value",
     hint: "The host's own markup supplies this, not a visitor.",
   },
   {
-    kind: 'statement',
-    label: 'Statement',
-    hint: 'Prose between questions. No input, stores nothing.',
+    kind: "statement",
+    label: "Statement",
+    hint: "Prose between questions. No input, stores nothing.",
   },
-]
+];
 
 const KIND_LABELS: Record<FormFieldKind, string> = Object.fromEntries(
   FIELD_KINDS.map((k) => [k.kind, k.label]),
-) as Record<FormFieldKind, string>
+) as Record<FormFieldKind, string>;
 
 export function fieldKindLabel(kind: FormFieldKind): string {
-  return KIND_LABELS[kind]
+  return KIND_LABELS[kind];
 }
 
 /** The kinds `validateFormFields` requires at least one option for. */
-const OPTION_KINDS: ReadonlySet<FormFieldKind> = new Set(['select', 'radio', 'checkboxes'])
+const OPTION_KINDS: ReadonlySet<FormFieldKind> = new Set(["select", "radio", "checkboxes"]);
 
 export function needsOptions(kind: FormFieldKind): boolean {
-  return OPTION_KINDS.has(kind)
+  return OPTION_KINDS.has(kind);
 }
 
 /* ---------------------------------------------------------------- naming --- */
@@ -116,11 +116,11 @@ export function normaliseFieldName(raw: string): string {
   const stripped = raw
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 64)
-  if (stripped === '') return 'field'
-  return /^[a-z]/.test(stripped) ? stripped : `f_${stripped}`.slice(0, 64)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64);
+  if (stripped === "") return "field";
+  return /^[a-z]/.test(stripped) ? stripped : `f_${stripped}`.slice(0, 64);
 }
 
 /**
@@ -133,11 +133,11 @@ export function normaliseFieldName(raw: string): string {
  * unique in this list" question, asked of a different list.
  */
 export function uniqueFieldName(base: string, existing: readonly string[]): string {
-  const taken = new Set(existing)
-  if (!taken.has(base)) return base
+  const taken = new Set(existing);
+  if (!taken.has(base)) return base;
   for (let i = 2; ; i++) {
-    const candidate = `${base}_${i}`.slice(0, 64)
-    if (!taken.has(candidate)) return candidate
+    const candidate = `${base}_${i}`.slice(0, 64);
+    if (!taken.has(candidate)) return candidate;
   }
 }
 
@@ -159,25 +159,25 @@ export function uniqueFieldName(base: string, existing: readonly string[]): stri
  * one: `normaliseFieldName` never produces a leading underscore, so this only
  * fires for a name a caller constructed by hand.
  */
-const NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/
+const NAME_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 
 export function fieldNameRefusal(
   name: string,
   ctx: { formId: string; otherNames: readonly string[] },
 ): string | null {
   if (!NAME_PATTERN.test(name)) {
-    return 'Use lowercase letters, numbers and underscores, starting with a letter.'
+    return "Use lowercase letters, numbers and underscores, starting with a letter.";
   }
   if (name.startsWith(RESERVED_PREFIX)) {
-    return `Names starting with "${RESERVED_PREFIX}" are reserved by Folio.`
+    return `Names starting with "${RESERVED_PREFIX}" are reserved by Folio.`;
   }
   if (ctx.otherNames.includes(name)) {
-    return 'Another question already uses this name.'
+    return "Another question already uses this name.";
   }
   if (name === honeypotName(ctx.formId, ctx.otherNames)) {
-    return "This name is reserved as this form's spam trap. Pick another."
+    return "This name is reserved as this form's spam trap. Pick another.";
   }
-  return null
+  return null;
 }
 
 /**
@@ -188,8 +188,8 @@ export function fieldNameRefusal(
  * the same read the delete dialog already makes.
  */
 export function renameWarning(hasResponses: boolean): string | null {
-  if (!hasResponses) return null
-  return 'This form already has responses. Renaming keeps old answers under the old name — the table will show "—" for older rows under the new one, and the CSV export will carry both columns.'
+  if (!hasResponses) return null;
+  return 'This form already has responses. Renaming keeps old answers under the old name — the table will show "—" for older rows under the new one, and the CSV export will carry both columns.';
 }
 
 /* ------------------------------------------------------------ blank field --- */
@@ -201,28 +201,28 @@ export function blankField(
   kind: FormFieldKind,
   ctx: { formId: string; existing: readonly FormField[] },
 ): FormField {
-  const names = ctx.existing.map((f) => f.name)
-  const name = uniqueFieldName(normaliseFieldName(kind), names)
-  const label = fieldKindLabel(kind)
-  const field: FormField = { name, kind, label }
+  const names = ctx.existing.map((f) => f.name);
+  const name = uniqueFieldName(normaliseFieldName(kind), names);
+  const label = fieldKindLabel(kind);
+  const field: FormField = { name, kind, label };
   if (needsOptions(kind)) {
-    field.options = [{ value: 'option_1', label: 'Option 1' }]
+    field.options = [{ value: "option_1", label: "Option 1" }];
   }
-  if (kind === 'file') field.accept = 'documents'
-  if (kind === 'statement') field.text = label
-  return field
+  if (kind === "file") field.accept = "documents";
+  if (kind === "statement") field.text = label;
+  return field;
 }
 
 /* ------------------------------------------------------------- reducers --- */
 
-export const MAX_FIELDS_REACHED = (limit: number) => `A form may hold at most ${limit} questions.`
+export const MAX_FIELDS_REACHED = (limit: number) => `A form may hold at most ${limit} questions.`;
 
 export function addField(
   fields: readonly FormField[],
   kind: FormFieldKind,
   formId: string,
 ): FormField[] {
-  return [...fields, blankField(kind, { formId, existing: fields })]
+  return [...fields, blankField(kind, { formId, existing: fields })];
 }
 
 /** Clears a field's own `beside`, if it has one. The one place a reorder or a
@@ -230,10 +230,10 @@ export function addField(
  *  longer has silently re-forms a row with whichever question is now there
  *  instead — `docs/form-layout-approach.md`'s "the builder's one subtle reducer". */
 function detached(field: FormField): FormField {
-  if (!field.beside) return field
-  const next = { ...field }
-  delete next.beside
-  return next
+  if (!field.beside) return field;
+  const next = { ...field };
+  delete next.beside;
+  return next;
 }
 
 /**
@@ -249,53 +249,53 @@ function detached(field: FormField): FormField {
  */
 function detachFirstRealAt(fields: FormField[], at: number): void {
   for (let i = at; i < fields.length; i++) {
-    if (fields[i]!.kind !== 'hidden') {
-      fields[i] = detached(fields[i]!)
-      return
+    if (fields[i]!.kind !== "hidden") {
+      fields[i] = detached(fields[i]!);
+      return;
     }
   }
 }
 
 export function removeField(fields: readonly FormField[], name: string): FormField[] {
-  const index = fields.findIndex((f) => f.name === name)
-  if (index === -1) return [...fields]
+  const index = fields.findIndex((f) => f.name === name);
+  if (index === -1) return [...fields];
   // A removed `hidden` question was never anyone's predecessor (`rowsOf`
   // skips it), so nothing downstream actually changed — only a *real*
   // removal can leave a stale `beside` behind.
-  const removedWasHidden = fields[index]!.kind === 'hidden'
-  const next = fields.filter((f) => f.name !== name)
-  if (!removedWasHidden) detachFirstRealAt(next, index)
-  return next
+  const removedWasHidden = fields[index]!.kind === "hidden";
+  const next = fields.filter((f) => f.name !== name);
+  if (!removedWasHidden) detachFirstRealAt(next, index);
+  return next;
 }
 
 /** Moves the field at `from` to `to`, clamped — a no-op past either end,
  *  matching `ReferencesField.tsx`'s `move`. A general splice, not the
  *  builder's own ↑/↓ semantics — see `moveFieldStep` for those. */
 export function moveField(fields: readonly FormField[], from: number, to: number): FormField[] {
-  if (to < 0 || to >= fields.length || from === to) return [...fields]
-  const next = [...fields]
-  const [moved] = next.splice(from, 1)
-  if (!moved) return next
-  if (moved.kind === 'hidden') {
+  if (to < 0 || to >= fields.length || from === to) return [...fields];
+  const next = [...fields];
+  const [moved] = next.splice(from, 1);
+  if (!moved) return next;
+  if (moved.kind === "hidden") {
     // Transparent to `rowsOf` wherever it sits — moving it changes no real
     // question's predecessor, so nothing needs detaching either side.
-    next.splice(to, 0, moved)
-    return next
+    next.splice(to, 0, moved);
+    return next;
   }
   // Two predecessors just changed: the first real question after the gap
   // this move left, and the first real question after where it landed —
   // both skipped past any `hidden` in between, the same way `rowsOf` does.
-  detachFirstRealAt(next, from)
-  next.splice(to, 0, detached(moved))
-  detachFirstRealAt(next, to + 1)
-  return next
+  detachFirstRealAt(next, from);
+  next.splice(to, 0, detached(moved));
+  detachFirstRealAt(next, to + 1);
+  return next;
 }
 
 /* ----------------------------------------------------------- row-aware move --- */
 
 interface RowBlock {
-  start: number
-  end: number
+  start: number;
+  end: number;
 }
 
 /**
@@ -313,55 +313,55 @@ interface RowBlock {
  * real question opened.
  */
 function rowBlocks(fields: readonly FormField[]): RowBlock[] {
-  const blocks: RowBlock[] = []
-  let current: RowBlock | null = null
-  let cellsInRow = 0
-  let breaksNext = true // the start of the form breaks a row
+  const blocks: RowBlock[] = [];
+  let current: RowBlock | null = null;
+  let cellsInRow = 0;
+  let breaksNext = true; // the start of the form breaks a row
   for (let i = 0; i < fields.length; i++) {
-    const field = fields[i]!
-    if (field.kind === 'hidden') {
-      if (current) current.end = i
+    const field = fields[i]!;
+    if (field.kind === "hidden") {
+      if (current) current.end = i;
       else {
-        current = { start: i, end: i }
-        blocks.push(current)
+        current = { start: i, end: i };
+        blocks.push(current);
       }
-      continue
+      continue;
     }
-    const isStatement = field.kind === 'statement'
-    const joins = !isStatement && !breaksNext && field.beside && cellsInRow < MAX_ROW_CELLS
+    const isStatement = field.kind === "statement";
+    const joins = !isStatement && !breaksNext && field.beside && cellsInRow < MAX_ROW_CELLS;
     if (joins && current) {
-      current.end = i
-      cellsInRow += 1
+      current.end = i;
+      cellsInRow += 1;
     } else {
-      current = { start: i, end: i }
-      blocks.push(current)
-      cellsInRow = 1
+      current = { start: i, end: i };
+      blocks.push(current);
+      cellsInRow = 1;
     }
-    breaksNext = isStatement
+    breaksNext = isStatement;
   }
-  return blocks
+  return blocks;
 }
 
 /** The non-`hidden` indices in `[start, end]`, in order — a row-block's real
  *  questions, the ones a reorder or an edge-exit actually reasons about. */
 function realIndices(fields: readonly FormField[], block: RowBlock): number[] {
-  const out: number[] = []
+  const out: number[] = [];
   for (let i = block.start; i <= block.end; i++) {
-    if (fields[i]!.kind !== 'hidden') out.push(i)
+    if (fields[i]!.kind !== "hidden") out.push(i);
   }
-  return out
+  return out;
 }
 
 function swapped(fields: readonly FormField[], i: number, j: number): FormField[] {
-  const next = [...fields]
-  const tmp = next[i]!
-  next[i] = next[j]!
-  next[j] = tmp
-  return next
+  const next = [...fields];
+  const tmp = next[i]!;
+  next[i] = next[j]!;
+  next[j] = tmp;
+  return next;
 }
 
 function blockOf(blocks: readonly RowBlock[], index: number): number {
-  return blocks.findIndex((b) => index >= b.start && index <= b.end)
+  return blocks.findIndex((b) => index >= b.start && index <= b.end);
 }
 
 /**
@@ -378,17 +378,17 @@ export function canMoveField(
   index: number,
   direction: -1 | 1,
 ): boolean {
-  if (index < 0 || index >= fields.length) return false
-  if (fields[index]!.kind === 'hidden') {
-    const target = index + direction
-    return target >= 0 && target < fields.length
+  if (index < 0 || index >= fields.length) return false;
+  if (fields[index]!.kind === "hidden") {
+    const target = index + direction;
+    return target >= 0 && target < fields.length;
   }
-  const blocks = rowBlocks(fields)
-  const blockIdx = blockOf(blocks, index)
-  const real = realIndices(fields, blocks[blockIdx]!)
-  if (real.length > 1) return true
-  const neighborIdx = blockIdx + direction
-  return neighborIdx >= 0 && neighborIdx < blocks.length
+  const blocks = rowBlocks(fields);
+  const blockIdx = blockOf(blocks, index);
+  const real = realIndices(fields, blocks[blockIdx]!);
+  if (real.length > 1) return true;
+  const neighborIdx = blockIdx + direction;
+  return neighborIdx >= 0 && neighborIdx < blocks.length;
 }
 
 /**
@@ -420,66 +420,66 @@ export function moveFieldStep(
   index: number,
   direction: -1 | 1,
 ): FormField[] {
-  if (index < 0 || index >= fields.length) return [...fields]
+  if (index < 0 || index >= fields.length) return [...fields];
 
-  if (fields[index]!.kind === 'hidden') {
-    const target = index + direction
-    if (target < 0 || target >= fields.length) return [...fields]
-    return swapped(fields, index, target)
+  if (fields[index]!.kind === "hidden") {
+    const target = index + direction;
+    if (target < 0 || target >= fields.length) return [...fields];
+    return swapped(fields, index, target);
   }
 
-  const blocks = rowBlocks(fields)
-  const blockIdx = blockOf(blocks, index)
-  const block = blocks[blockIdx]!
-  const real = realIndices(fields, block)
+  const blocks = rowBlocks(fields);
+  const blockIdx = blockOf(blocks, index);
+  const block = blocks[blockIdx]!;
+  const real = realIndices(fields, block);
 
   if (real.length > 1) {
-    const posInRow = real.indexOf(index)
-    const withinRow = posInRow + direction
+    const posInRow = real.indexOf(index);
+    const withinRow = posInRow + direction;
     if (withinRow >= 0 && withinRow < real.length) {
       // Reorder within the row.
-      const targetIndex = real[withinRow]!
-      const next = swapped(fields, index, targetIndex)
-      const sorted = [...real].sort((a, b) => a - b)
+      const targetIndex = real[withinRow]!;
+      const next = swapped(fields, index, targetIndex);
+      const sorted = [...real].sort((a, b) => a - b);
       for (const [i, arrIndex] of sorted.entries()) {
-        next[arrIndex] = i === 0 ? detached(next[arrIndex]!) : withBeside(next[arrIndex]!, true)
+        next[arrIndex] = i === 0 ? detached(next[arrIndex]!) : withBeside(next[arrIndex]!, true);
       }
-      return next
+      return next;
     }
     // The row's edge: the question leaves it. Moving up off the first slot,
     // it never had `beside` itself — the question after it does, and loses
     // it instead, becoming the row's new first. Moving down off the last
     // slot, it loses its own.
-    const next = [...fields]
+    const next = [...fields];
     if (direction === -1) {
-      const newFirst = real[1]!
-      next[newFirst] = detached(next[newFirst]!)
+      const newFirst = real[1]!;
+      next[newFirst] = detached(next[newFirst]!);
     } else {
-      next[index] = detached(next[index]!)
+      next[index] = detached(next[index]!);
     }
-    return next
+    return next;
   }
 
   // A standalone question: the block next door — swapping with it if that is
   // one slot, jumping clean over it otherwise, so a multi-question row is
   // never landed inside.
-  const neighborIdx = blockIdx + direction
-  if (neighborIdx < 0 || neighborIdx >= blocks.length) return [...fields]
-  const { start: a, end: b } = blocks[neighborIdx]!
+  const neighborIdx = blockIdx + direction;
+  if (neighborIdx < 0 || neighborIdx >= blocks.length) return [...fields];
+  const { start: a, end: b } = blocks[neighborIdx]!;
   if (direction === -1) {
     return [
       ...fields.slice(0, a),
       fields[index]!,
       ...fields.slice(a, index),
       ...fields.slice(index + 1),
-    ]
+    ];
   }
   return [
     ...fields.slice(0, index),
     ...fields.slice(index + 1, b + 1),
     fields[index]!,
     ...fields.slice(b + 1),
-  ]
+  ];
 }
 
 /** Replaces the field currently named `name` with `next` — the one place a
@@ -490,7 +490,7 @@ export function updateField(
   name: string,
   next: FormField,
 ): FormField[] {
-  return fields.map((f) => (f.name === name ? next : f))
+  return fields.map((f) => (f.name === name ? next : f));
 }
 
 /* -------------------------------------------------------------- layout --- */
@@ -499,22 +499,22 @@ export function updateField(
  *  question" toggle. Clearing rather than storing `false`, matching how a
  *  fresh question never carries the key at all (`blankField`). */
 export function withBeside(field: FormField, beside: boolean): FormField {
-  if (beside) return { ...field, beside: true }
-  if (!field.beside) return field
-  const next = { ...field }
-  delete next.beside
-  return next
+  if (beside) return { ...field, beside: true };
+  if (!field.beside) return field;
+  const next = { ...field };
+  delete next.beside;
+  return next;
 }
 
 /** Sets or clears a question's `grow` — its share of the row. Anything other
  *  than 2, 3 or 4 clears the key, the same "1 is the default and is not a
  *  stored value" rule `core/forms.ts`'s `FormField.grow` documents. */
 export function withGrow(field: FormField, grow: number): FormField {
-  if (grow === 2 || grow === 3 || grow === 4) return { ...field, grow }
-  if (field.grow === undefined) return field
-  const next = { ...field }
-  delete next.grow
-  return next
+  if (grow === 2 || grow === 3 || grow === 4) return { ...field, grow };
+  if (field.grow === undefined) return field;
+  const next = { ...field };
+  delete next.grow;
+  return next;
 }
 
 /**
@@ -526,13 +526,13 @@ export function withGrow(field: FormField, grow: number): FormField {
  * `beside` — so the toggle is disabled rather than silently doing nothing.
  */
 export function canJoinPrevious(fields: readonly FormField[], name: string): boolean {
-  let previous: FormField | null = null
+  let previous: FormField | null = null;
   for (const field of fields) {
-    if (field.kind === 'hidden') continue
-    if (field.name === name) return previous !== null && previous.kind !== 'statement'
-    previous = field
+    if (field.kind === "hidden") continue;
+    if (field.name === name) return previous !== null && previous.kind !== "statement";
+    previous = field;
   }
-  return false
+  return false;
 }
 
 /**
@@ -545,16 +545,16 @@ export function canJoinPrevious(fields: readonly FormField[], name: string): boo
  * `hidden` question's own number is, because nothing groups by it either way.
  */
 export function fieldRows(fields: readonly FormField[]): number[][] {
-  const rows: number[][] = []
-  let lastReal: number[] | null = null
-  let breaksNext = true // the start of the form breaks a row
+  const rows: number[][] = [];
+  let lastReal: number[] | null = null;
+  let breaksNext = true; // the start of the form breaks a row
   for (let i = 0; i < fields.length; i++) {
-    const field = fields[i]!
-    if (field.kind === 'hidden') {
-      rows.push([i])
-      continue
+    const field = fields[i]!;
+    if (field.kind === "hidden") {
+      rows.push([i]);
+      continue;
     }
-    const isStatement = field.kind === 'statement'
+    const isStatement = field.kind === "statement";
     if (
       !isStatement &&
       !breaksNext &&
@@ -562,24 +562,24 @@ export function fieldRows(fields: readonly FormField[]): number[][] {
       lastReal &&
       lastReal.length < MAX_ROW_CELLS
     ) {
-      lastReal.push(i)
+      lastReal.push(i);
     } else {
-      const row = [i]
-      rows.push(row)
-      lastReal = row
+      const row = [i];
+      rows.push(row);
+      lastReal = row;
     }
-    breaksNext = isStatement
+    breaksNext = isStatement;
   }
-  return rows
+  return rows;
 }
 
 /* ------------------------------------------------------------ options --- */
 
 export function addOption(field: FormField): FormField {
-  const options = field.options ?? []
-  const values = options.map((o) => o.value)
-  const value = uniqueFieldName(`option_${options.length + 1}`, values)
-  return { ...field, options: [...options, { value, label: `Option ${options.length + 1}` }] }
+  const options = field.options ?? [];
+  const values = options.map((o) => o.value);
+  const value = uniqueFieldName(`option_${options.length + 1}`, values);
+  return { ...field, options: [...options, { value, label: `Option ${options.length + 1}` }] };
 }
 
 /**
@@ -588,18 +588,18 @@ export function addOption(field: FormField): FormField {
  * `b2` passes through `b`), at which point a value match edits both rows.
  */
 export function removeOption(field: FormField, index: number): FormField {
-  return { ...field, options: (field.options ?? []).filter((_, i) => i !== index) }
+  return { ...field, options: (field.options ?? []).filter((_, i) => i !== index) };
 }
 
 export function updateOption(field: FormField, index: number, next: FormFieldOption): FormField {
-  return { ...field, options: (field.options ?? []).map((o, i) => (i === index ? next : o)) }
+  return { ...field, options: (field.options ?? []).map((o, i) => (i === index ? next : o)) };
 }
 
 /* -------------------------------------------------------------- locale --- */
 
 /** The three keys a field's own prose can be translated under
  *  (`FormFieldI18n`; options are keyed separately, by value). */
-export type TranslatableKey = 'label' | 'help' | 'placeholder'
+export type TranslatableKey = "label" | "help" | "placeholder";
 
 /**
  * One string, in whichever locale is active. `source` is the render's source
@@ -615,8 +615,8 @@ export function fieldText(
   locale: string,
   source: string,
 ): string {
-  if (locale === source) return field[key] ?? ''
-  return field.i18n?.[locale]?.[key] ?? ''
+  if (locale === source) return field[key] ?? "";
+  return field.i18n?.[locale]?.[key] ?? "";
 }
 
 /** The inverse of `fieldText`. An empty translation clears the key (and the
@@ -631,27 +631,27 @@ export function withFieldText(
   source: string,
 ): FormField {
   if (locale !== source) {
-    return { ...field, i18n: setI18nKey(field.i18n, locale, key, value) }
+    return { ...field, i18n: setI18nKey(field.i18n, locale, key, value) };
   }
   // `label` is the one of the three that is required, never optional
   // (`validateFormFields` throws on an empty one) — so the source write for it
   // always sets the string, empty or not, rather than deleting the key the way
   // `help` and `placeholder` do.
-  if (key === 'label') return { ...field, label: value }
-  if (key === 'help') {
-    const next = { ...field }
-    if (value === '') {
-      delete next.help
-      return next
+  if (key === "label") return { ...field, label: value };
+  if (key === "help") {
+    const next = { ...field };
+    if (value === "") {
+      delete next.help;
+      return next;
     }
-    return { ...next, help: value }
+    return { ...next, help: value };
   }
-  const next = { ...field }
-  if (value === '') {
-    delete next.placeholder
-    return next
+  const next = { ...field };
+  if (value === "") {
+    delete next.placeholder;
+    return next;
   }
-  return { ...next, placeholder: value }
+  return { ...next, placeholder: value };
 }
 
 export function optionLabel(
@@ -660,8 +660,8 @@ export function optionLabel(
   locale: string,
   source: string,
 ): string {
-  if (locale === source) return field.options?.find((o) => o.value === value)?.label ?? ''
-  return field.i18n?.[locale]?.options?.[value] ?? ''
+  if (locale === source) return field.options?.find((o) => o.value === value)?.label ?? "";
+  return field.i18n?.[locale]?.options?.[value] ?? "";
 }
 
 export function withOptionLabel(
@@ -672,17 +672,17 @@ export function withOptionLabel(
   source: string,
 ): FormField {
   if (locale === source) {
-    const index = (field.options ?? []).findIndex((o) => o.value === value)
-    return index === -1 ? field : updateOption(field, index, { value, label })
+    const index = (field.options ?? []).findIndex((o) => o.value === value);
+    return index === -1 ? field : updateOption(field, index, { value, label });
   }
-  const current = field.i18n?.[locale]?.options ?? {}
-  const options = { ...current }
-  if (label === '') delete options[value]
-  else options[value] = label
-  const entry: FormFieldI18n = { ...field.i18n?.[locale] }
-  if (Object.keys(options).length > 0) entry.options = options
-  else delete entry.options
-  return { ...field, i18n: replaceI18nEntry(field.i18n, locale, entry) }
+  const current = field.i18n?.[locale]?.options ?? {};
+  const options = { ...current };
+  if (label === "") delete options[value];
+  else options[value] = label;
+  const entry: FormFieldI18n = { ...field.i18n?.[locale] };
+  if (Object.keys(options).length > 0) entry.options = options;
+  else delete entry.options;
+  return { ...field, i18n: replaceI18nEntry(field.i18n, locale, entry) };
 }
 
 function setI18nKey(
@@ -691,10 +691,10 @@ function setI18nKey(
   key: TranslatableKey,
   value: string,
 ): Record<string, FormFieldI18n> | undefined {
-  const entry: FormFieldI18n = { ...i18n?.[locale] }
-  if (value === '') delete entry[key]
-  else entry[key] = value
-  return replaceI18nEntry(i18n, locale, entry)
+  const entry: FormFieldI18n = { ...i18n?.[locale] };
+  if (value === "") delete entry[key];
+  else entry[key] = value;
+  return replaceI18nEntry(i18n, locale, entry);
 }
 
 /** Writes `entry` under `locale`, dropping the whole locale key once it holds
@@ -706,10 +706,10 @@ function replaceI18nEntry(
   locale: string,
   entry: FormFieldI18n,
 ): Record<string, FormFieldI18n> | undefined {
-  const next = { ...i18n }
-  if (Object.keys(entry).length > 0) next[locale] = entry
-  else delete next[locale]
-  return Object.keys(next).length > 0 ? next : undefined
+  const next = { ...i18n };
+  if (Object.keys(entry).length > 0) next[locale] = entry;
+  else delete next[locale];
+  return Object.keys(next).length > 0 ? next : undefined;
 }
 
 /* ---------------------------------------------------------- closesAt --- */
@@ -717,10 +717,10 @@ function replaceI18nEntry(
 /** `closesAt` as `<input type="datetime-local">` wants it — local time, no
  *  timezone — or `''` for no closing date at all. */
 export function closesAtInputValue(ms: number | null): string {
-  if (ms === null) return ''
-  const d = new Date(ms)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  if (ms === null) return "";
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** The inverse. `''` is "no closing date", not "midnight of the epoch" — the
@@ -728,7 +728,7 @@ export function closesAtInputValue(ms: number | null): string {
  *  for (absent leaves it alone, `null` clears it; this screen always sends
  *  one or the other, never absent, since the field is always shown). */
 export function closesAtFromInput(value: string): number | null {
-  if (value.trim() === '') return null
-  const ms = new Date(value).getTime()
-  return Number.isFinite(ms) ? ms : null
+  if (value.trim() === "") return null;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
 }

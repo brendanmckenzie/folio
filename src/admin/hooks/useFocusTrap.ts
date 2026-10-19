@@ -1,4 +1,4 @@
-import { type RefObject, useEffect } from 'react'
+import { type RefObject, useEffect } from "react";
 
 /**
  * What the cycle needs to know about a candidate element. Duck-typed rather
@@ -13,14 +13,14 @@ export interface Tabbable {
    * revealed by find-in-page. It is not focusable while hidden, and being
    * truthy it is excluded here for free.
    */
-  hidden?: boolean | 'until-found'
-  disabled?: boolean
+  hidden?: boolean | "until-found";
+  disabled?: boolean;
   /**
    * The DOM *property*, not the attribute: a `<button>` carrying no `tabindex`
    * reads 0, anything holding itself out of the order with `tabindex="-1"`
    * reads -1.
    */
-  tabIndex?: number
+  tabIndex?: number;
 }
 
 /**
@@ -35,16 +35,16 @@ export interface Tabbable {
  * broken rather than as a skipped control.
  */
 export function isTabbable(el: Tabbable): boolean {
-  if (el.hidden || el.disabled) return false
-  return (el.tabIndex ?? 0) >= 0
+  if (el.hidden || el.disabled) return false;
+  return (el.tabIndex ?? 0) >= 0;
 }
 
 /** The element kinds Tab visits, before `isTabbable` narrows them. */
-const CANDIDATES = 'a[href],button,input,select,textarea,[tabindex]'
+const CANDIDATES = "a[href],button,input,select,textarea,[tabindex]";
 
 /** Everything inside `root` that Tab would land on, in document order. */
 export function tabbable(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(CANDIDATES)).filter(isTabbable)
+  return Array.from(root.querySelectorAll<HTMLElement>(CANDIDATES)).filter(isTabbable);
 }
 
 /**
@@ -73,53 +73,53 @@ export function useFocusTrap(panel: RefObject<HTMLElement | null>, onClose: () =
    * so naming it as a dependency does not make this run again.
    */
   useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null
-    const panelEl = panel.current
+    const opener = document.activeElement as HTMLElement | null;
+    const panelEl = panel.current;
     // The first thing Tab would reach. The panel itself is the fallback when
     // there is nothing yet — a grid still loading, every button disabled behind
     // a request in flight.
-    if (panelEl) (tabbable(panelEl)[0] ?? panelEl).focus()
+    if (panelEl) (tabbable(panelEl)[0] ?? panelEl).focus();
     return () => {
       // Only if the opener is still in the document: focusing a detached node
       // quietly sends focus to <body>, which is worse than leaving it alone.
-      if (opener?.isConnected) opener.focus()
-    }
-  }, [panel])
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [panel]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-        return
+      if (e.key === "Escape") {
+        onClose();
+        return;
       }
-      if (e.key !== 'Tab') return
-      const panelEl = panel.current
-      if (!panelEl) return
-      const cycle = tabbable(panelEl)
+      if (e.key !== "Tab") return;
+      const panelEl = panel.current;
+      if (!panelEl) return;
+      const cycle = tabbable(panelEl);
       // Nothing to land on — an empty library mid-upload. Tab still must not
       // walk out into an editor that is unreachable behind the scrim.
       if (cycle.length === 0) {
-        e.preventDefault()
-        panelEl.focus()
-        return
+        e.preventDefault();
+        panelEl.focus();
+        return;
       }
-      const first = cycle[0]!
-      const last = cycle[cycle.length - 1]!
-      const active = document.activeElement
+      const first = cycle[0]!;
+      const last = cycle[cycle.length - 1]!;
+      const active = document.activeElement;
       // Focus outside the panel is a state to recover from, not just an edge:
       // the scrim is a real button and sits outside it.
       if (!panelEl.contains(active)) {
-        e.preventDefault()
-        ;(e.shiftKey ? last : first).focus()
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
       } else if (e.shiftKey && active === first) {
-        e.preventDefault()
-        last.focus()
+        e.preventDefault();
+        last.focus();
       } else if (!e.shiftKey && active === last) {
-        e.preventDefault()
-        first.focus()
+        e.preventDefault();
+        first.focus();
       }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, panel])
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, panel]);
 }

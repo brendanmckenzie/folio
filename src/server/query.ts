@@ -19,8 +19,8 @@
  * and offset is what lets a page render "page 4 of 9" — which keyset cannot without
  * a count anyway. Revisit past ~10k rows in one collection.
  */
-import type { Blok, Doc } from '../core/doc'
-import type { LocaleContext } from '../core/locales'
+import type { Blok, Doc } from "../core/doc";
+import type { LocaleContext } from "../core/locales";
 import {
   BUILT_IN_ORDERS,
   type ContentItem,
@@ -30,39 +30,39 @@ import {
   isRangeOp,
   MAX_PER_PAGE,
   normaliseQuery,
-} from '../core/query'
-import { dataOf } from '../core/locales'
-import { ftsQuery, splitSnippet } from '../core/search-projection'
-import { projectValue } from '../core/index-projection'
-import type { StoryMeta } from '../core/story'
-import { FolioError } from './errors'
-import { SINGLE_SITE_CHAIN } from '../core/sites'
-import { servedClause, STORY_COLS, type StoryRow, toStoryMeta } from './stories'
-import type { FolioDb } from './db'
+} from "../core/query";
+import { dataOf } from "../core/locales";
+import { ftsQuery, splitSnippet } from "../core/search-projection";
+import { projectValue } from "../core/index-projection";
+import type { StoryMeta } from "../core/story";
+import { FolioError } from "./errors";
+import { SINGLE_SITE_CHAIN } from "../core/sites";
+import { servedClause, STORY_COLS, type StoryRow, toStoryMeta } from "./stories";
+import type { FolioDb } from "./db";
 
 /** A statement's text and its binds, kept together so a test can read both. */
 export interface Sql {
-  text: string
-  binds: unknown[]
+  text: string;
+  binds: unknown[];
 }
 
 /** The three columns the search statement adds to a story row. Absent from
  * every non-search query, which is why each is optional here. */
 interface SearchRow {
-  score?: number
-  snippet?: string | null
-  fts_rowid?: number
+  score?: number;
+  snippet?: string | null;
+  fts_rowid?: number;
 }
 
 /** `stories` columns the built-in sort keys name. */
 const BUILT_IN_COLUMNS: Readonly<Record<string, string>> = {
-  publishedAt: 'stories.published_at',
-  ord: 'stories.ord',
-  title: 'stories.title',
-}
+  publishedAt: "stories.published_at",
+  ord: "stories.ord",
+  title: "stories.title",
+};
 
 /** `%`, `_` and the escape character itself, so a filter for "50%" is a filter for "50%". */
-const escapeLike = (value: string) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`)
+const escapeLike = (value: string) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
 /**
  * One `where` clause as an `exists` (or `not exists`) subquery against
@@ -70,49 +70,49 @@ const escapeLike = (value: string) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`
  * key, so each one is an index seek. Several clauses are anded.
  */
 function wherePredicate(w: ContentWhere, locale: string, n: number): Sql {
-  const alias = `ci${n}`
+  const alias = `ci${n}`;
   const head = `select 1 from content_index ${alias}
-     where ${alias}.story_id = stories.id and ${alias}.locale = ? and ${alias}.field = ?`
-  const binds: unknown[] = [locale, w.field]
+     where ${alias}.story_id = stories.id and ${alias}.locale = ? and ${alias}.field = ?`;
+  const binds: unknown[] = [locale, w.field];
 
   if (isRangeOp(w.op)) {
-    const op = w.op === 'gt' ? '>' : w.op === 'gte' ? '>=' : w.op === 'lt' ? '<' : '<='
+    const op = w.op === "gt" ? ">" : w.op === "gte" ? ">=" : w.op === "lt" ? "<" : "<=";
     // A numeric bound compares `num_value`, a string bound `text_value`. An ISO
     // date is stored in both columns, so either spelling of "since March" works.
-    const column = typeof w.value === 'number' ? 'num_value' : 'text_value'
-    binds.push(w.value)
-    return { text: `exists (${head} and ${alias}.${column} ${op} ?)`, binds }
+    const column = typeof w.value === "number" ? "num_value" : "text_value";
+    binds.push(w.value);
+    return { text: `exists (${head} and ${alias}.${column} ${op} ?)`, binds };
   }
 
   switch (w.op) {
-    case 'eq':
-      binds.push(scalar(w.value))
-      return { text: `exists (${head} and ${alias}.text_value = ?)`, binds }
-    case 'ne': {
+    case "eq":
+      binds.push(scalar(w.value));
+      return { text: `exists (${head} and ${alias}.text_value = ?)`, binds };
+    case "ne": {
       // `not exists`, deliberately, so a document with **no value** for the field
       // matches. "topic is not 'ai'" is true of an insight with no topic, and an
       // `exists (… <> ?)` would silently exclude every one of them.
-      binds.push(scalar(w.value))
-      return { text: `not exists (${head} and ${alias}.text_value = ?)`, binds }
+      binds.push(scalar(w.value));
+      return { text: `not exists (${head} and ${alias}.text_value = ?)`, binds };
     }
-    case 'in': {
-      const values = Array.isArray(w.value) ? w.value : [w.value]
-      if (values.length === 0) return { text: '0 = 1', binds: [] }
-      const holes = values.map(() => '?').join(', ')
-      binds.push(...values)
-      return { text: `exists (${head} and ${alias}.text_value in (${holes}))`, binds }
+    case "in": {
+      const values = Array.isArray(w.value) ? w.value : [w.value];
+      if (values.length === 0) return { text: "0 = 1", binds: [] };
+      const holes = values.map(() => "?").join(", ");
+      binds.push(...values);
+      return { text: `exists (${head} and ${alias}.text_value in (${holes}))`, binds };
     }
-    case 'startsWith':
-      binds.push(`${escapeLike(String(scalar(w.value)))}%`)
-      return { text: `exists (${head} and ${alias}.text_value like ? escape '\\')`, binds }
-    case 'contains':
-      binds.push(`%${escapeLike(String(scalar(w.value)))}%`)
-      return { text: `exists (${head} and ${alias}.text_value like ? escape '\\')`, binds }
+    case "startsWith":
+      binds.push(`${escapeLike(String(scalar(w.value)))}%`);
+      return { text: `exists (${head} and ${alias}.text_value like ? escape '\\')`, binds };
+    case "contains":
+      binds.push(`%${escapeLike(String(scalar(w.value)))}%`);
+      return { text: `exists (${head} and ${alias}.text_value like ? escape '\\')`, binds };
   }
 }
 
 const scalar = (value: string | number | readonly string[]): string | number =>
-  Array.isArray(value) ? (value[0] ?? '') : (value as string | number)
+  Array.isArray(value) ? (value[0] ?? "") : (value as string | number);
 
 /**
  * What `contentSql` needs of `ResolvedGate` (`gate.ts`) to scope a search
@@ -122,15 +122,15 @@ const scalar = (value: string | number | readonly string[]): string | number =>
  */
 export interface SearchGate {
   /** The root-block field holding the gate value. `indexed: true`, guaranteed. */
-  field: string
+  field: string;
   /** The one value that means "no gate". */
-  public: string | number | boolean
+  public: string | number | boolean;
   /**
    * The **document type** names whose root declares the field — `stories.type`,
    * which is the only thing SQL can see. Not the root block names: SQL cannot
    * see those, and two types may share one root.
    */
-  types: ReadonlySet<string>
+  types: ReadonlySet<string>;
 }
 
 /**
@@ -152,21 +152,21 @@ export interface SearchGate {
  * fail-closed means here.
  */
 function gatePredicate(gate: SearchGate, locale: string): Sql {
-  const types = [...gate.types]
-  const holes = types.map(() => '?').join(', ')
+  const types = [...gate.types];
+  const holes = types.map(() => "?").join(", ");
   // The value as `content_index` stores it, through the same function publish
   // wrote the row with: a `boolean` is 'true'/'false' there and a `number` is
   // its digits, so comparing against the raw config value would compare a
   // boolean bind to a text column. Null (an empty-string `public`) binds `''`,
   // which no row holds either — the same exclusion, arrived at honestly.
-  const value = projectValue(gate.public)?.text ?? ''
+  const value = projectValue(gate.public)?.text ?? "";
   return {
     text: `(stories.type not in (${holes})
       or exists (select 1 from content_index cg
                   where cg.story_id = stories.id and cg.locale = ?
                     and cg.field = ? and cg.text_value = ?))`,
     binds: [...types, locale, gate.field, value],
-  }
+  };
 }
 
 /**
@@ -204,19 +204,19 @@ export function contentSql(
    */
   chain?: readonly string[],
 ): { count: Sql; page: Sql; normalised: ReturnType<typeof normaliseQuery> } {
-  const n = normaliseQuery(q, perPageMax)
+  const n = normaliseQuery(q, perPageMax);
 
   for (const w of n.where) {
-    if (!indexed.has(w.field)) throw unknownField(w.field, indexed)
+    if (!indexed.has(w.field)) throw unknownField(w.field, indexed);
   }
-  const builtInOrder = n.order.field in BUILT_IN_ORDERS
-  if (!builtInOrder && !indexed.has(n.order.field)) throw unknownField(n.order.field, indexed)
+  const builtInOrder = n.order.field in BUILT_IN_ORDERS;
+  if (!builtInOrder && !indexed.has(n.order.field)) throw unknownField(n.order.field, indexed);
   // `relevance` sorts by a column that is only in the statement when there is a
   // `MATCH` to score. Refused rather than quietly demoted to `publishedAt`: a
   // list silently sorted by something other than what was asked for is the
   // failure nobody notices.
-  if (n.order.field === 'relevance' && n.search === undefined) {
-    throw new FolioError('bad_request', "order 'relevance' needs a search")
+  if (n.order.field === "relevance" && n.search === undefined) {
+    throw new FolioError("bad_request", "order 'relevance' needs a search");
   }
 
   // `contains` is a `like '%x%'`, which cannot use the index — it is a scan of
@@ -228,40 +228,40 @@ export function contentSql(
     n.search !== undefined ||
     n.type.length > 0 ||
     n.parent !== undefined ||
-    n.where.some((w) => w.op !== 'contains')
-  if (n.where.some((w) => w.op === 'contains') && !narrowing) {
+    n.where.some((w) => w.op !== "contains");
+  if (n.where.some((w) => w.op === "contains") && !narrowing) {
     throw new FolioError(
-      'bad_request',
+      "bad_request",
       "A 'contains' filter is a scan; combine it with a type, a parent or another filter",
-    )
+    );
   }
 
   // Visitor input as `MATCH` syntax, or null when it held no token at all
   // (`???`, an emoji). Null is an *answer*, not an error: the statement below
   // gets `0 = 1` and no join, which is an honest empty page rather than a 500
   // or — far worse — everything.
-  const match = n.search === undefined ? null : ftsQuery(n.search)
-  const searching = match !== null
+  const match = n.search === undefined ? null : ftsQuery(n.search);
+  const searching = match !== null;
 
-  const clauses: string[] = ['stories.published_doc is not null']
-  const binds: unknown[] = []
+  const clauses: string[] = ["stories.published_doc is not null"];
+  const binds: unknown[] = [];
 
   if (n.type.length > 0) {
-    clauses.push(`stories.type in (${n.type.map(() => '?').join(', ')})`)
-    binds.push(...n.type)
+    clauses.push(`stories.type in (${n.type.map(() => "?").join(", ")})`);
+    binds.push(...n.type);
   }
   if (n.parent !== undefined) {
-    if (n.parent === null) clauses.push('stories.parent_id is null')
+    if (n.parent === null) clauses.push("stories.parent_id is null");
     else {
-      clauses.push('stories.parent_id = ?')
-      binds.push(n.parent)
+      clauses.push("stories.parent_id = ?");
+      binds.push(n.parent);
     }
   }
   n.where.forEach((w, i) => {
-    const pred = wherePredicate(w, locale, i)
-    clauses.push(pred.text)
-    binds.push(...pred.binds)
-  })
+    const pred = wherePredicate(w, locale, i);
+    clauses.push(pred.text);
+    binds.push(...pred.binds);
+  });
 
   // Decision 11, and its opt-out. A caller who names the gate field in a `where`
   // has taken the scoping on itself — `where: [{ field: 'access', op: 'in',
@@ -270,49 +270,49 @@ export function contentSql(
   // the caller wins. Emitted last, so its binds land last among the where binds.
   if (gate && n.search !== undefined && gate.types.size > 0) {
     if (!n.where.some((w) => w.field === gate.field)) {
-      const pred = gatePredicate(gate, locale)
-      clauses.push(pred.text)
-      binds.push(...pred.binds)
+      const pred = gatePredicate(gate, locale);
+      clauses.push(pred.text);
+      binds.push(...pred.binds);
     }
   }
 
   // Decision 5's empty token set. The clause rather than an early return so
   // every other refusal above has already had its say.
-  if (n.search !== undefined && !searching) clauses.push('0 = 1')
+  if (n.search !== undefined && !searching) clauses.push("0 = 1");
 
   // Last, so every bind above keeps the position it had before scopes existed.
   if (chain) {
-    const served = servedClause(chain)
-    clauses.push(served.sql)
-    binds.push(...served.binds)
+    const served = servedClause(chain);
+    clauses.push(served.sql);
+    binds.push(...served.binds);
   }
 
-  const where = clauses.join(' and ')
-  const dir = n.order.dir === 'asc' ? 'asc' : 'desc'
+  const where = clauses.join(" and ");
+  const dir = n.order.dir === "asc" ? "asc" : "desc";
 
   // `s.id` is appended to every sort, always. Without a total order, offset
   // pagination is free to show one row on two pages and skip another entirely.
-  const orderBinds: unknown[] = []
-  let join = ''
-  let orderBy: string
-  if (n.order.field === 'relevance') {
+  const orderBinds: unknown[] = [];
+  let join = "";
+  let orderBy: string;
+  if (n.order.field === "relevance") {
     // No join to sort by when the term held no token: the page is empty and the
     // id tiebreak is the whole of the order.
-    orderBy = searching ? `fts.score ${dir}, stories.id asc` : 'stories.id asc'
+    orderBy = searching ? `fts.score ${dir}, stories.id asc` : "stories.id asc";
   } else if (builtInOrder) {
-    orderBy = `${BUILT_IN_COLUMNS[n.order.field]} ${dir}, stories.id asc`
+    orderBy = `${BUILT_IN_COLUMNS[n.order.field]} ${dir}, stories.id asc`;
   } else {
     join = `left join content_index co
-              on co.story_id = stories.id and co.locale = ? and co.field = ?`
-    orderBinds.push(locale, n.order.field)
+              on co.story_id = stories.id and co.locale = ? and co.field = ?`;
+    orderBinds.push(locale, n.order.field);
     // `nulls last` spelled out rather than left to SQLite's default: a document
     // with no value for the sort field has no index row, and where it lands must
     // not depend on the direction. `num_value` first so a date or a number sorts
     // numerically, `text_value` behind it for a field that is neither.
-    orderBy = `co.num_value ${dir} nulls last, co.text_value ${dir} nulls last, stories.id asc`
+    orderBy = `co.num_value ${dir} nulls last, co.text_value ${dir} nulls last, stories.id asc`;
   }
 
-  const limit = [n.perPage, (n.page - 1) * n.perPage]
+  const limit = [n.perPage, (n.page - 1) * n.perPage];
 
   /**
    * **What a row has to carry back, and why it is usually not the document.**
@@ -337,9 +337,9 @@ export function contentSql(
    * list. The two cases are indistinguishable without it.
    */
   const projection = n.withDoc
-    ? 'published_doc'
+    ? "published_doc"
     : `(published_doc is not null) as has_doc,
-       json_extract(published_doc, '$.bloks."' || json_extract(published_doc, '$.root') || '"') as root_blok`
+       json_extract(published_doc, '$.bloks."' || json_extract(published_doc, '$.root') || '"') as root_blok`;
 
   if (!searching) {
     return {
@@ -351,7 +351,7 @@ export function contentSql(
         binds: [...orderBinds, ...binds, ...limit],
       },
       normalised: n,
-    }
+    };
   }
 
   // One row per matching (story, locale), and the locale filter is an equality
@@ -363,18 +363,18 @@ export function contentSql(
                       from content_fts
                       join content_text ct on ct.id = content_fts.rowid
                      where content_fts match ? and ct.locale = ?) fts
-                 on fts.story_id = stories.id`
+                 on fts.story_id = stories.id`;
 
   const inner = `select ${STORY_COLS}, ${projection}, fts.score, fts.rowid as fts_rowid
              from stories
-             ${matchJoin('ct.story_id, ct.id as rowid, -bm25(content_fts, 10.0, 1.0) as score')}
+             ${matchJoin("ct.story_id, ct.id as rowid, -bm25(content_fts, 10.0, 1.0) as score")}
              ${join} where ${where}
-             order by ${orderBy} limit ? offset ?`
+             order by ${orderBy} limit ? offset ?`;
 
   return {
     count: {
       text: `select count(*) as n from stories
-             ${matchJoin('ct.story_id')}
+             ${matchJoin("ct.story_id")}
              where ${where}`,
       binds: [match, locale, ...binds],
     },
@@ -395,35 +395,35 @@ export function contentSql(
       binds: [match, match, locale, ...orderBinds, ...binds, ...limit],
     },
     normalised: n,
-  }
+  };
 }
 
 function unknownField(field: string, indexed: ReadonlySet<string>): FolioError {
-  const known = [...indexed].sort().join(', ')
+  const known = [...indexed].sort().join(", ");
   return new FolioError(
-    'bad_request',
+    "bad_request",
     known
       ? `No indexed field named '${field}'. Queryable fields: ${known}`
       : `No indexed field named '${field}'. No field is marked 'indexed: true' on a root block`,
-  )
+  );
 }
 
 export interface QueryDeps {
-  db: FolioDb
+  db: FolioDb;
   /** Field names marked `indexed` on some declared type's root block. */
-  indexed: ReadonlySet<string>
+  indexed: ReadonlySet<string>;
   /** A locale code as `content_index` keys it: `''` for the source or an unknown code. */
-  localeKey: (code: string | undefined) => string
+  localeKey: (code: string | undefined) => string;
   /** A story's public URL, for the item's `url`. `FolioRuntime.withUrls`. */
-  withUrls: <T extends StoryMeta>(story: T) => T
+  withUrls: <T extends StoryMeta>(story: T) => T;
   /** `FolioRuntime.gate`, narrowed — absent on a deployment with no gate.
    * Scopes a `search` and nothing else (decision 11). */
-  gate?: SearchGate
+  gate?: SearchGate;
   /**
    * The chain the query reads (`contentSql`'s `chain`). Defaulted to the
    * single-site chain, which is every row a deployment with no `sites` has.
    */
-  chain?: readonly string[]
+  chain?: readonly string[];
 }
 
 /**
@@ -445,7 +445,7 @@ export async function runQuery(
   // string in every language and a French page and an English one share one
   // canonical form. An HTTP caller has no resolution and names the locale in the
   // query instead.
-  const localeKey = opts.locale ? opts.locale.code : deps.localeKey(q.locale)
+  const localeKey = opts.locale ? opts.locale.code : deps.localeKey(q.locale);
   const { count, page, normalised } = contentSql(
     q,
     deps.indexed,
@@ -453,7 +453,7 @@ export async function runQuery(
     opts.perPageMax,
     deps.gate,
     deps.chain ?? SINGLE_SITE_CHAIN,
-  )
+  );
 
   const [totalRow, rows] = await Promise.all([
     deps.db
@@ -466,36 +466,36 @@ export async function runQuery(
       .all<
         StoryRow &
           SearchRow & {
-            published_doc?: string | null
-            has_doc?: number | null
-            root_blok?: string | null
+            published_doc?: string | null;
+            has_doc?: number | null;
+            root_blok?: string | null;
           }
       >(),
-  ])
+  ]);
 
-  const total = totalRow?.n ?? 0
-  const items: ContentItem[] = []
+  const total = totalRow?.n ?? 0;
+  const items: ContentItem[] = [];
   for (const raw of rows.results) {
-    const { published_doc, has_doc, root_blok, score, snippet, fts_rowid, ...row } = raw
+    const { published_doc, has_doc, root_blok, score, snippet, fts_rowid, ...row } = raw;
     // `contentSql` selects one shape or the other, never both: the whole
     // document when the query asked for it, otherwise `has_doc` plus the root
     // block SQLite projected out of it. The published-or-not test is the same
     // test in both cases and has to come first either way.
-    if (!(normalised.withDoc ? published_doc : has_doc)) continue
-    const doc = published_doc ? (JSON.parse(published_doc) as Doc) : undefined
-    const story = deps.withUrls(toStoryMeta(row))
+    if (!(normalised.withDoc ? published_doc : has_doc)) continue;
+    const doc = published_doc ? (JSON.parse(published_doc) as Doc) : undefined;
+    const story = deps.withUrls(toStoryMeta(row));
     const root: Blok | undefined = doc
       ? doc.bloks[doc.root]
       : root_blok
         ? (JSON.parse(root_blok) as Blok)
-        : undefined
+        : undefined;
     items.push({
       id: story.id,
       title: story.title,
       // `''` for an unrouted document, matching `StoryRef`: a record has no place
       // in the URL namespace, and a block testing `item.url` gets a falsy answer.
-      path: story.path ?? '',
-      url: story.path === null ? '' : (story.url ?? `/${story.path}`),
+      path: story.path ?? "",
+      url: story.path === null ? "" : (story.url ?? `/${story.path}`),
       data: root ? dataOf(root, opts.locale) : {},
       // **Only when the query asked** (`core/query.ts`'s `ContentQuery.withDoc`).
       // `published_doc` is still read and still parsed — `data` is the root
@@ -509,7 +509,7 @@ export async function runQuery(
       ...(normalised.search === undefined
         ? {}
         : { score: score ?? 0, snippet: splitSnippet(snippet ?? null) }),
-    })
+    });
   }
 
   return {
@@ -518,5 +518,5 @@ export async function runQuery(
     page: normalised.page,
     perPage: normalised.perPage,
     pages: Math.ceil(total / normalised.perPage),
-  }
+  };
 }

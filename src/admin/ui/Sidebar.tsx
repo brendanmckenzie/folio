@@ -1,36 +1,36 @@
-import { useState } from 'react'
-import { ICONS } from './icons'
-import { href, type Screen } from './route'
-import css from './Sidebar.module.css'
-import type { NavGroup, ScopeOptionGroup } from './nav'
+import { useState } from "react";
+import { ICONS } from "./icons";
+import { href, type Screen } from "./route";
+import css from "./Sidebar.module.css";
+import type { NavGroup, ScopeOptionGroup } from "./nav";
 
 interface Props {
-  groups: readonly NavGroup[]
+  groups: readonly NavGroup[];
   /** Which item is lit. `nav.ts`'s `activeItem`, which is not always the current
    * screen — an open document lights up the list it came from. */
-  active: Screen
-  mount: string
-  collapsed: boolean
-  onToggle: () => void
+  active: Screen;
+  mount: string;
+  collapsed: boolean;
+  onToggle: () => void;
   /**
    * The scope switcher, or absent. **Absent on a single-site deployment**, and that
    * absence is the whole guarantee that it looks as it always did: `Admin` passes
    * nothing unless `/me` carried `sites` (`showsScopeSwitcher`).
    */
   switcher?: {
-    groups: readonly ScopeOptionGroup[]
+    groups: readonly ScopeOptionGroup[];
     /** The scope being shown, or null on a page that has none. */
-    current: string | null
-    onSwitch: (scope: string) => void
-  }
+    current: string | null;
+    onSwitch: (scope: string) => void;
+  };
 }
 
 const key = (screen: Screen): string =>
-  screen.name === 'documents'
+  screen.name === "documents"
     ? `documents:${screen.type}`
-    : screen.name === 'edit'
+    : screen.name === "edit"
       ? `edit:${screen.id}`
-      : screen.name
+      : screen.name;
 
 /**
  * The left sidebar: labelled, collapsible to a 48px icon rail, and the same on
@@ -46,12 +46,12 @@ const key = (screen: Screen): string =>
  * (`icons.tsx`), which is what keeps that one name from being announced twice.
  */
 export function Sidebar({ groups, active, mount, collapsed, onToggle, switcher }: Props) {
-  const activeKey = key(active)
+  const activeKey = key(active);
   return (
     <nav
-      className={`${css.sidebar} ${collapsed ? css.collapsed : ''}`}
+      className={`${css.sidebar} ${collapsed ? css.collapsed : ""}`}
       aria-label="Sections"
-      data-collapsed={collapsed ? '' : undefined}
+      data-collapsed={collapsed ? "" : undefined}
     >
       <div className={css.brand}>
         {collapsed ? null : <span className={css.wordmark}>Folio</span>}
@@ -59,11 +59,11 @@ export function Sidebar({ groups, active, mount, collapsed, onToggle, switcher }
           type="button"
           className={css.toggle}
           onClick={onToggle}
-          title={`${collapsed ? 'Expand' : 'Collapse'} sidebar (⌘\\)`}
-          aria-label={`${collapsed ? 'Expand' : 'Collapse'} sidebar`}
+          title={`${collapsed ? "Expand" : "Collapse"} sidebar (⌘\\)`}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} sidebar`}
           aria-expanded={!collapsed}
         >
-          {collapsed ? '»' : '«'}
+          {collapsed ? "»" : "«"}
         </button>
       </div>
 
@@ -72,7 +72,7 @@ export function Sidebar({ groups, active, mount, collapsed, onToggle, switcher }
           <span className={css.scopeLabel}>Site</span>
           <select
             className={css.scopeSelect}
-            value={switcher.current ?? ''}
+            value={switcher.current ?? ""}
             onChange={(e) => switcher.onSwitch(e.target.value)}
           >
             {switcher.current === null ? <option value="">Choose a site…</option> : null}
@@ -102,7 +102,7 @@ export function Sidebar({ groups, active, mount, collapsed, onToggle, switcher }
         />
       ))}
     </nav>
-  )
+  );
 }
 
 function Group({
@@ -111,16 +111,16 @@ function Group({
   mount,
   collapsed,
 }: {
-  group: NavGroup
-  activeKey: string
-  mount: string
-  collapsed: boolean
+  group: NavGroup;
+  activeKey: string;
+  mount: string;
+  collapsed: boolean;
 }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(true);
   // A collapsed rail has no room for a heading, so a collapsible group is drawn
   // open: hiding items behind a heading nobody can see would make them
   // unreachable rather than tidy.
-  const shown = collapsed || !group.collapsible || open
+  const shown = collapsed || !group.collapsible || open;
 
   return (
     <div className={css.group}>
@@ -132,7 +132,7 @@ function Group({
             onClick={() => setOpen(!open)}
             aria-expanded={open}
           >
-            <span className={css.chevron} data-open={open ? '' : undefined}>
+            <span className={css.chevron} data-open={open ? "" : undefined}>
               ›
             </span>
             {group.label}
@@ -144,13 +144,13 @@ function Group({
 
       {shown
         ? group.items.map((item) => {
-            const on = key(item.screen) === activeKey
+            const on = key(item.screen) === activeKey;
             return (
               <a
                 key={key(item.screen)}
-                className={`${css.item} ${on ? css.on : ''}`}
+                className={`${css.item} ${on ? css.on : ""}`}
                 href={href(item.screen, mount)}
-                aria-current={on ? 'page' : undefined}
+                aria-current={on ? "page" : undefined}
                 title={collapsed ? item.label : undefined}
               >
                 {/* The lookup lives here, not in `nav.ts`: the nav is data and
@@ -163,9 +163,9 @@ function Group({
                 </span>
                 <span className={collapsed ? css.hidden : css.label}>{item.label}</span>
               </a>
-            )
+            );
           })
         : null}
     </div>
-  )
+  );
 }

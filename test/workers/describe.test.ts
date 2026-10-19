@@ -1,12 +1,12 @@
-import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineBlock, asset, text } from '../../src/core'
-import type { AssetFilter } from '../../src/core/assets'
-import type { BulkSelection } from '../../src/core/bulk'
-import { wasRefused } from '../../src/core/bulk'
-import type { Doc } from '../../src/core/doc'
-import type { DocumentType } from '../../src/core/schema'
-import { createFolio, magicLink } from '../../src/server'
+import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { defineBlock, asset, text } from "../../src/core";
+import type { AssetFilter } from "../../src/core/assets";
+import type { BulkSelection } from "../../src/core/bulk";
+import { wasRefused } from "../../src/core/bulk";
+import type { Doc } from "../../src/core/doc";
+import type { DocumentType } from "../../src/core/schema";
+import { createFolio, magicLink } from "../../src/server";
 import type {
   AuthConfig,
   DescribeInput,
@@ -14,14 +14,14 @@ import type {
   FolioBindings,
   FolioDescribe,
   Role,
-} from '../../src/server'
-import { ensureTag, tagsForAssets } from '../../src/server/asset-tags'
-import { assetById, countAssets, toAssetValue } from '../../src/server/assets'
-import { anthropicDescriber } from '../../src/server/describe-anthropic'
-import { SECURE_COOKIE } from '../../src/server/auth/cookie'
-import { createSession } from '../../src/server/auth/session'
-import { createUser } from '../../src/server/auth/users'
-import type { FolioDb } from '../../src/server/db'
+} from "../../src/server";
+import { ensureTag, tagsForAssets } from "../../src/server/asset-tags";
+import { assetById, countAssets, toAssetValue } from "../../src/server/assets";
+import { anthropicDescriber } from "../../src/server/describe-anthropic";
+import { SECURE_COOKIE } from "../../src/server/auth/cookie";
+import { createSession } from "../../src/server/auth/session";
+import { createUser } from "../../src/server/auth/users";
+import type { FolioDb } from "../../src/server/db";
 import {
   DEFAULT_DESCRIBE_CONCURRENCY,
   type DescribeDeps,
@@ -34,7 +34,7 @@ import {
   matchTags,
   runDescribe,
   validateDescribe,
-} from '../../src/server/describe'
+} from "../../src/server/describe";
 
 /**
  * The describe seam (`docs/specs/content-model/media-library.md` phase 6),
@@ -71,70 +71,70 @@ import {
 /* --------------------------------------------------------------- schema --- */
 
 const pageRoot = defineBlock({
-  name: 'dsPage',
-  label: 'Page',
-  summary: 'title',
+  name: "dsPage",
+  label: "Page",
+  summary: "title",
   fields: { title: text(), hero: asset() },
   render: () => null,
-})
+});
 
 const types: DocumentType[] = [
-  { name: 'dsPageType', label: 'Page', kind: 'page', root: 'dsPage', default: true },
-]
+  { name: "dsPageType", label: "Page", kind: "page", root: "dsPage", default: true },
+];
 
 const bindings = (e: Cloudflare.Env): FolioBindings => ({
   db: e.DB,
   story: e.STORY,
   media: e.MEDIA,
   images: e.IMAGES,
-})
+});
 
 function makeFolio(describeConfig?: FolioDescribe<Cloudflare.Env>) {
   return createFolio<Cloudflare.Env>({
     blocks: [pageRoot],
     types,
     bindings,
-    basePath: '/folio',
-    assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
-    auth: 'open',
-    route: (p) => (p ? `/${p}` : '/'),
+    basePath: "/folio",
+    assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
+    auth: "open",
+    route: (p) => (p ? `/${p}` : "/"),
     ...(describeConfig ? { describe: describeConfig } : {}),
-  })
+  });
 }
 
-const ORIGIN = 'https://example.com'
+const ORIGIN = "https://example.com";
 
 /* ------------------------------------------------------------- fixtures --- */
 
-let minted = 0
+let minted = 0;
 
 async function reset(): Promise<void> {
   await env.DB.batch([
-    env.DB.prepare('delete from asset_taggings'),
-    env.DB.prepare('delete from asset_tags'),
-    env.DB.prepare('delete from assets'),
-    env.DB.prepare('delete from stories'),
-  ])
+    env.DB.prepare("delete from asset_taggings"),
+    env.DB.prepare("delete from asset_tags"),
+    env.DB.prepare("delete from assets"),
+    env.DB.prepare("delete from stories"),
+  ]);
 }
 
 /** One library row plus its object, so `bytes()` has something real to read. */
 async function seedAsset(
   opts: {
-    filename?: string
-    contentType?: string
-    alt?: string
-    body?: string
+    filename?: string;
+    contentType?: string;
+    alt?: string;
+    body?: string;
     /** The `size` column, where a test needs a realistic one without putting
      * twenty megabytes in R2. Defaults to the body's own length. */
-    size?: number
+    size?: number;
   } = {},
 ): Promise<string> {
-  minted += 1
-  const id = `ast_ds${String(minted).padStart(8, '0')}`
-  const filename = opts.filename ?? 'shoot.png'
-  const key = `${id}-${filename}`
-  const body = opts.body ?? 'PNGBYTES'
-  await env.MEDIA.put(key, body)
+  minted += 1;
+  const id = `ast_ds${String(minted).padStart(8, "0")}`;
+  const filename = opts.filename ?? "shoot.png";
+  const key = `${id}-${filename}`;
+  const body = opts.body ?? "PNGBYTES";
+  await env.MEDIA.put(key, body);
   await env.DB.prepare(
     `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at)
      values (?, ?, ?, ?, ?, 1200, 800, ?, ?)`,
@@ -143,13 +143,13 @@ async function seedAsset(
       id,
       key,
       filename,
-      opts.contentType ?? 'image/png',
+      opts.contentType ?? "image/png",
       opts.size ?? body.length,
-      opts.alt ?? '',
+      opts.alt ?? "",
       Date.now(),
     )
-    .run()
-  return id
+    .run();
+  return id;
 }
 
 /** Deps around a stub, with no `images` binding — the bare `wrangler dev` shape
@@ -158,8 +158,8 @@ function depsFor(
   fn: (input: DescribeInput, env: unknown) => Promise<DescribeResult>,
   images?: ImagesBinding,
 ): DescribeDeps {
-  const describe = validateDescribe<unknown>({ fn })
-  if (!describe) throw new Error('unreachable: a config was passed')
+  const describe = validateDescribe<unknown>({ fn });
+  if (!describe) throw new Error("unreachable: a config was passed");
   return {
     db: env.DB,
     media: env.MEDIA,
@@ -167,51 +167,53 @@ function depsFor(
     assetBase: `${ORIGIN}/folio/asset`,
     describe,
     env: {},
-  }
+  };
 }
 
 /** The stored row, straight from D1, so an assertion reads the columns rather
  * than whatever the outcome claims about them. */
 async function stored(id: string) {
-  const row = await assetById(env.DB, id)
-  if (!row) throw new Error(`no such asset ${id}`)
-  return row
+  const row = await assetById(env.DB, id);
+  if (!row) throw new Error(`no such asset ${id}`);
+  return row;
 }
 
-beforeEach(reset)
+beforeEach(reset);
 
 /* --------------------------------------------------------- construction --- */
 
-describe('config validation', () => {
-  it('defaults concurrency and onUpload', () => {
-    const resolved = validateDescribe<unknown>({ fn: async () => ({}) })
-    expect(resolved?.concurrency).toBe(DEFAULT_DESCRIBE_CONCURRENCY)
-    expect(resolved?.onUpload).toBe(true)
-  })
+describe("config validation", () => {
+  it("defaults concurrency and onUpload", () => {
+    const resolved = validateDescribe<unknown>({ fn: async () => ({}) });
+    expect(resolved?.concurrency).toBe(DEFAULT_DESCRIBE_CONCURRENCY);
+    expect(resolved?.onUpload).toBe(true);
+  });
 
-  it('is null for a host that configured none', () => {
-    expect(validateDescribe(undefined)).toBeNull()
-  })
+  it("is null for a host that configured none", () => {
+    expect(validateDescribe(undefined)).toBeNull();
+  });
 
-  it('takes onUpload false at its word', () => {
+  it("takes onUpload false at its word", () => {
     expect(validateDescribe<unknown>({ fn: async () => ({}), onUpload: false })?.onUpload).toBe(
       false,
-    )
-  })
+    );
+  });
 
-  it('refuses an unknown key, a non-function fn, and a concurrency out of range', () => {
-    const fn = async () => ({})
+  it("refuses an unknown key, a non-function fn, and a concurrency out of range", () => {
+    const fn = async () => ({});
     expect(() =>
       validateDescribe({ fn, onUploaded: true } as unknown as FolioDescribe<unknown>),
-    ).toThrow(/unknown `describe` key "onUploaded"/)
+    ).toThrow(/unknown `describe` key "onUploaded"/);
     expect(() =>
-      validateDescribe({ fn: 'anthropic' } as unknown as FolioDescribe<unknown>),
-    ).toThrow(/`describe.fn` must be a function/)
+      validateDescribe({ fn: "anthropic" } as unknown as FolioDescribe<unknown>),
+    ).toThrow(/`describe.fn` must be a function/);
     for (const concurrency of [0, 9, 1.5, Number.NaN]) {
-      expect(() => validateDescribe<unknown>({ fn, concurrency })).toThrow(/`describe.concurrency`/)
+      expect(() => validateDescribe<unknown>({ fn, concurrency })).toThrow(
+        /`describe.concurrency`/,
+      );
     }
-    expect(validateDescribe<unknown>({ fn, concurrency: 8 })?.concurrency).toBe(8)
-  })
+    expect(validateDescribe<unknown>({ fn, concurrency: 8 })?.concurrency).toBe(8);
+  });
 
   /**
    * The timing is the claim, not the message: `validateGate`'s reason applies
@@ -220,70 +222,70 @@ describe('config validation', () => {
    * upload, where nobody is watching and the symptom is alt text that never
    * appears.
    */
-  it('throws at construction rather than on the first request', () => {
+  it("throws at construction rather than on the first request", () => {
     expect(() =>
       makeFolio({ fn: async () => ({}), concurrency: 40 } as FolioDescribe<Cloudflare.Env>),
-    ).toThrow(/`describe.concurrency`/)
-  })
-})
+    ).toThrow(/`describe.concurrency`/);
+  });
+});
 
 /* ---------------------------------------------------------------- input --- */
 
-describe('what the host is handed', () => {
-  it('sends a transformed URL when images is bound and the original when it is not', async () => {
-    const row = await stored(await seedAsset({ filename: 'a b.png' }))
+describe("what the host is handed", () => {
+  it("sends a transformed URL when images is bound and the original when it is not", async () => {
+    const row = await stored(await seedAsset({ filename: "a b.png" }));
     // Encoded segment by segment, matching `core/resolve.ts`: a space in a key
     // that reached a model API unencoded would truncate the URL.
     expect(describeUrl(`${ORIGIN}/folio/asset`, row, undefined)).toBe(
       `${ORIGIN}/folio/asset/${row.id}-a%20b.png`,
-    )
+    );
     expect(describeUrl(`${ORIGIN}/folio/asset`, row, {} as ImagesBinding)).toBe(
       `${ORIGIN}/folio/asset/${row.id}-a%20b.png?w=512&f=webp`,
-    )
-  })
+    );
+  });
 
-  it('hands over the row, the vocabulary, and bytes it does not read unless asked', async () => {
-    await ensureTag(env.DB, 'Headshot')
-    const id = await seedAsset({ body: 'REALBYTES' })
+  it("hands over the row, the vocabulary, and bytes it does not read unless asked", async () => {
+    await ensureTag(env.DB, "Headshot");
+    const id = await seedAsset({ body: "REALBYTES" });
 
     // A bucket that counts its reads. The laziness is the assertion that
     // matters: at `concurrency: 4` against a 20MB ceiling, eagerly reading every
     // one would put 80MB of ArrayBuffer live in one isolate per batch.
-    const gets = vi.fn((key: string) => env.MEDIA.get(key))
-    const counting = { ...env.MEDIA, get: gets } as unknown as R2Bucket
+    const gets = vi.fn((key: string) => env.MEDIA.get(key));
+    const counting = { ...env.MEDIA, get: gets } as unknown as R2Bucket;
 
-    const seen: DescribeInput[] = []
+    const seen: DescribeInput[] = [];
     await describeAsset(
       { ...depsFor(async () => ({})), media: counting },
       await stored(id),
       undefined,
-    )
+    );
     await describeAsset(
       depsFor(async (input) => {
-        seen.push(input)
-        return {}
+        seen.push(input);
+        return {};
       }),
       await stored(id),
-    )
+    );
 
-    const [input] = seen
-    expect(input?.id).toBe(id)
-    expect(input?.filename).toBe('shoot.png')
-    expect(input?.contentType).toBe('image/png')
-    expect(input?.width).toBe(1200)
-    expect(input?.height).toBe(800)
-    expect(input?.url).toBe(`${ORIGIN}/folio/asset/${id}-shoot.png`)
-    expect(input?.tags).toEqual([{ id: expect.any(String), name: 'Headshot' }])
-    expect(gets).not.toHaveBeenCalled()
+    const [input] = seen;
+    expect(input?.id).toBe(id);
+    expect(input?.filename).toBe("shoot.png");
+    expect(input?.contentType).toBe("image/png");
+    expect(input?.width).toBe(1200);
+    expect(input?.height).toBe(800);
+    expect(input?.url).toBe(`${ORIGIN}/folio/asset/${id}-shoot.png`);
+    expect(input?.tags).toEqual([{ id: expect.any(String), name: "Headshot" }]);
+    expect(gets).not.toHaveBeenCalled();
 
     // Lazy, but real: the host that does call it gets the object. No Images
     // binding in this fixture, so the rendition *is* the original and the media
     // type is the row's.
-    const { media, bytes } = await input!.inline()
-    expect(new TextDecoder().decode(bytes)).toBe('REALBYTES')
-    expect(media).toBe('image/png')
-  })
-})
+    const { media, bytes } = await input!.inline();
+    expect(new TextDecoder().decode(bytes)).toBe("REALBYTES");
+    expect(media).toBe("image/png");
+  });
+});
 
 /**
  * `renditionOf`, reached the only way a host can reach it: `input.inline()`.
@@ -301,309 +303,309 @@ describe('what the host is handed', () => {
  * and `blames the resize, not a binding it cannot see` goes red with the exact
  * message from the report.
  */
-describe('the bytes a provider is sent', () => {
+describe("the bytes a provider is sent", () => {
   function fakeImages(outcome: { bytes: ArrayBuffer; contentType: string } | Error) {
-    let inputs = 0
+    let inputs = 0;
     const transformer: ImageTransformer = {
       transform: () => transformer,
       draw: () => transformer,
       output: async () => {
-        if (outcome instanceof Error) throw outcome
+        if (outcome instanceof Error) throw outcome;
         return {
           response: () =>
-            new Response(outcome.bytes, { headers: { 'content-type': outcome.contentType } }),
+            new Response(outcome.bytes, { headers: { "content-type": outcome.contentType } }),
           contentType: () => outcome.contentType,
           image: () => new ReadableStream(),
-        }
+        };
       },
-    }
+    };
     const images = {
       input: () => {
-        inputs += 1
-        return transformer
+        inputs += 1;
+        return transformer;
       },
       info: async () => {
-        throw new Error('not exercised by this test')
+        throw new Error("not exercised by this test");
       },
       hosted: {},
-    } as unknown as ImagesBinding
-    return { images, inputs: () => inputs }
+    } as unknown as ImagesBinding;
+    return { images, inputs: () => inputs };
   }
 
   /** The `DescribeInput` a `fn` would be handed, without describing anything. */
   async function inputFor(deps: DescribeDeps, id: string): Promise<DescribeInput> {
-    let seen: DescribeInput | undefined
+    let seen: DescribeInput | undefined;
     await describeAsset(
       {
         ...deps,
         describe: validateDescribe<unknown>({
           fn: async (input) => {
-            seen = input
-            return {}
+            seen = input;
+            return {};
           },
         })!,
       },
       await stored(id),
-    )
-    if (!seen) throw new Error('unreachable: the stub was not called')
-    return seen
+    );
+    if (!seen) throw new Error("unreachable: the stub was not called");
+    return seen;
   }
 
-  it('hands over what the transform produced, with the media type of those bytes', async () => {
-    const id = await seedAsset({ filename: 'portrait.jpg', contentType: 'image/jpeg' })
-    const webp = new Uint8Array([1, 2, 3, 4]).buffer
-    const { images, inputs } = fakeImages({ bytes: webp, contentType: 'image/webp' })
+  it("hands over what the transform produced, with the media type of those bytes", async () => {
+    const id = await seedAsset({ filename: "portrait.jpg", contentType: "image/jpeg" });
+    const webp = new Uint8Array([1, 2, 3, 4]).buffer;
+    const { images, inputs } = fakeImages({ bytes: webp, contentType: "image/webp" });
 
     const input = await inputFor(
       depsFor(async () => ({}), images),
       id,
-    )
-    const rendition = await input.inline()
+    );
+    const rendition = await input.inline();
 
-    expect(inputs()).toBe(1)
+    expect(inputs()).toBe(1);
     // The row says JPEG and the bytes are WebP. Reporting the row's type here
     // is a 400 from the provider about a mismatch rather than about anything.
-    expect(rendition.media).toBe('image/webp')
-    expect(new Uint8Array(rendition.bytes)).toEqual(new Uint8Array([1, 2, 3, 4]))
-  })
+    expect(rendition.media).toBe("image/webp");
+    expect(new Uint8Array(rendition.bytes)).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
 
-  it('blames the resize, not a binding it cannot see, when the transform fails', async () => {
+  it("blames the resize, not a binding it cannot see, when the transform fails", async () => {
     // The reported case: 20,096,380 bytes, 6000x4000, about 96kB over the
     // binding's own 20MB `.input()` ceiling, on a Worker whose binding had just
     // described 86 other assets.
     const id = await seedAsset({
-      filename: 'safari.jpg',
-      contentType: 'image/jpeg',
+      filename: "safari.jpg",
+      contentType: "image/jpeg",
       size: 20_096_380,
-    })
-    const { images } = fakeImages(new Error('ERROR 9412: Image too large'))
-    const row = await stored(id)
+    });
+    const { images } = fakeImages(new Error("ERROR 9412: Image too large"));
+    const row = await stored(id);
 
     const input = await inputFor(
       depsFor(async () => ({}), images),
       id,
-    )
+    );
     const failure = await input.inline().then(
       () => null,
       (e: unknown) => e as Error,
-    )
+    );
 
-    expect(failure).not.toBeNull()
+    expect(failure).not.toBeNull();
     // The key, the size and the binding's own words: everything a person needs
     // to see that the file, not the configuration, is the problem.
-    expect(failure!.message).toContain(row.key)
-    expect(failure!.message).toContain('19.2MB')
-    expect(failure!.message).toContain('ERROR 9412: Image too large')
+    expect(failure!.message).toContain(row.key);
+    expect(failure!.message).toContain("19.2MB");
+    expect(failure!.message).toContain("ERROR 9412: Image too large");
     // The half that was wrong: it must not send somebody to configure a binding
     // that is configured, and it must not answer bytes that cannot be sent.
-    expect(failure!.message).not.toMatch(/configure an Images binding/)
-  })
+    expect(failure!.message).not.toMatch(/configure an Images binding/);
+  });
 
-  it('records that failure on the row rather than throwing out of the run', async () => {
+  it("records that failure on the row rather than throwing out of the run", async () => {
     const id = await seedAsset({
-      filename: 'safari.jpg',
-      contentType: 'image/jpeg',
+      filename: "safari.jpg",
+      contentType: "image/jpeg",
       size: 20_096_380,
-    })
-    const { images } = fakeImages(new Error('ERROR 9412: Image too large'))
+    });
+    const { images } = fakeImages(new Error("ERROR 9412: Image too large"));
 
     // A `fn` that reads the pixels, which is every real one.
     const outcome = await describeAsset(
       depsFor(async (input) => {
-        await input.inline()
-        return { alt: 'never reached' }
+        await input.inline();
+        return { alt: "never reached" };
       }, images),
       await stored(id),
-    )
+    );
 
-    expect(outcome.error).toMatch(/could not resize/)
-    const row = await stored(id)
-    expect(row.describeError).toMatch(/ERROR 9412/)
+    expect(outcome.error).toMatch(/could not resize/);
+    const row = await stored(id);
+    expect(row.describeError).toMatch(/ERROR 9412/);
     // Tried and failed, not never tried: it leaves the backlog and a run over
     // `describe_error is not null` is what brings it back.
-    expect(row.describedAt).not.toBeNull()
+    expect(row.describedAt).not.toBeNull();
     // Nothing the model never said reached a column.
-    expect(row.altAuto).toBe('')
-  })
+    expect(row.altAuto).toBe("");
+  });
 
-  it('treats an empty transform output as a failure, not as an image with no pixels', async () => {
-    const id = await seedAsset({ filename: 'blank.png' })
-    const { images } = fakeImages({ bytes: new ArrayBuffer(0), contentType: 'image/webp' })
+  it("treats an empty transform output as a failure, not as an image with no pixels", async () => {
+    const id = await seedAsset({ filename: "blank.png" });
+    const { images } = fakeImages({ bytes: new ArrayBuffer(0), contentType: "image/webp" });
 
     const input = await inputFor(
       depsFor(async () => ({}), images),
       id,
-    )
+    );
 
     // A 200 with a zero-length body is the trap `serveAsset` buffers to catch.
     // Sending it would be a paid call about nothing.
-    await expect(input.inline()).rejects.toThrow(/Transform produced no output/)
-  })
+    await expect(input.inline()).rejects.toThrow(/Transform produced no output/);
+  });
 
-  it('still stands the original in for a type there is no sense resizing', async () => {
+  it("still stands the original in for a type there is no sense resizing", async () => {
     // SVG is deliberately outside `SERVED_CONTENT_TYPES`: vector, and the
     // binding has no business parsing attacker-supplied XML. So this is the
     // fallback with a binding present, and it survives — the original is the
     // best bytes that exist, and `imageBlock` refuses the *type* by name.
     const id = await seedAsset({
-      filename: 'logo.svg',
-      contentType: 'image/svg+xml',
-      body: '<svg/>',
-    })
-    const { images, inputs } = fakeImages(new Error('never invoked'))
+      filename: "logo.svg",
+      contentType: "image/svg+xml",
+      body: "<svg/>",
+    });
+    const { images, inputs } = fakeImages(new Error("never invoked"));
 
     const input = await inputFor(
       depsFor(async () => ({}), images),
       id,
-    )
-    const { media, bytes } = await input.inline()
+    );
+    const { media, bytes } = await input.inline();
 
-    expect(inputs()).toBe(0)
-    expect(media).toBe('image/svg+xml')
-    expect(new TextDecoder().decode(bytes)).toBe('<svg/>')
-  })
-})
+    expect(inputs()).toBe(0);
+    expect(media).toBe("image/svg+xml");
+    expect(new TextDecoder().decode(bytes)).toBe("<svg/>");
+  });
+});
 
 /* -------------------------------------------------------- what it stores --- */
 
-describe('describing one asset', () => {
-  it('writes the machine columns and stamps described_at', async () => {
-    const id = await seedAsset()
+describe("describing one asset", () => {
+  it("writes the machine columns and stamps described_at", async () => {
+    const id = await seedAsset();
     const outcome = await describeAsset(
       depsFor(async () => ({
-        alt: 'A cyclist by a red brick wall',
-        description: 'A street scene',
+        alt: "A cyclist by a red brick wall",
+        description: "A street scene",
       })),
       await stored(id),
-    )
+    );
 
-    expect(outcome.skipped).toBe(false)
-    expect(outcome.error).toBeNull()
-    const row = await stored(id)
-    expect(row.altAuto).toBe('A cyclist by a red brick wall')
-    expect(row.descriptionAuto).toBe('A street scene')
-    expect(row.describedAt).toBeGreaterThan(0)
-    expect(row.describeError).toBeNull()
-  })
+    expect(outcome.skipped).toBe(false);
+    expect(outcome.error).toBeNull();
+    const row = await stored(id);
+    expect(row.altAuto).toBe("A cyclist by a red brick wall");
+    expect(row.descriptionAuto).toBe("A street scene");
+    expect(row.describedAt).toBeGreaterThan(0);
+    expect(row.describeError).toBeNull();
+  });
 
   /**
    * The acceptance criterion, in full: an editor's text is never clobbered, the
    * machine text lands beside it, `toAssetValue` answers the editor's, and the
    * published document does not move by a byte.
    */
-  it('cannot clobber a human, and cannot touch a published page', async () => {
-    const id = await seedAsset({ alt: 'Ama outside the studio, Accra' })
-    const row = await stored(id)
+  it("cannot clobber a human, and cannot touch a published page", async () => {
+    const id = await seedAsset({ alt: "Ama outside the studio, Accra" });
+    const row = await stored(id);
 
     const doc: Doc = {
-      root: 'd0',
+      root: "d0",
       bloks: {
         d0: {
-          uid: 'd0',
-          type: 'dsPage',
+          uid: "d0",
+          type: "dsPage",
           parent: null,
           slot: null,
-          order: 'a0',
+          order: "a0",
           data: {
-            title: 'Team',
+            title: "Team",
             hero: {
               key: row.key,
               filename: row.filename,
-              contentType: 'image/png',
+              contentType: "image/png",
               size: 8,
-              alt: 'Ama outside the studio, Accra',
+              alt: "Ama outside the studio, Accra",
             },
           },
         },
       },
-    }
-    const published = JSON.stringify(doc)
+    };
+    const published = JSON.stringify(doc);
     await env.DB.prepare(
       `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at,
                             published_doc, published_at)
        values ('sty_ds1', 'dsPageType', null, 'team', 'team', 'a0', 'Team', ?, ?, ?)`,
     )
       .bind(Date.now(), published, Date.now())
-      .run()
+      .run();
 
     await describeAsset(
-      depsFor(async () => ({ alt: 'A woman standing outside a building' })),
+      depsFor(async () => ({ alt: "A woman standing outside a building" })),
       row,
-    )
+    );
 
-    const after = await stored(id)
-    expect(after.alt).toBe('Ama outside the studio, Accra')
-    expect(after.altAuto).toBe('A woman standing outside a building')
-    expect(toAssetValue(after).alt).toBe('Ama outside the studio, Accra')
+    const after = await stored(id);
+    expect(after.alt).toBe("Ama outside the studio, Accra");
+    expect(after.altAuto).toBe("A woman standing outside a building");
+    expect(toAssetValue(after).alt).toBe("Ama outside the studio, Accra");
 
-    const story = await env.DB.prepare('select published_doc from stories where id = ?')
-      .bind('sty_ds1')
-      .first<{ published_doc: string }>()
-    expect(story?.published_doc).toBe(published)
-  })
+    const story = await env.DB.prepare("select published_doc from stories where id = ?")
+      .bind("sty_ds1")
+      .first<{ published_doc: string }>();
+    expect(story?.published_doc).toBe(published);
+  });
 
-  it('falls back to the machine text once an editor clears their own', async () => {
-    const id = await seedAsset({ alt: 'Typed by hand' })
+  it("falls back to the machine text once an editor clears their own", async () => {
+    const id = await seedAsset({ alt: "Typed by hand" });
     await describeAsset(
-      depsFor(async () => ({ alt: 'Written by a model' })),
+      depsFor(async () => ({ alt: "Written by a model" })),
       await stored(id),
-    )
-    expect(toAssetValue(await stored(id)).alt).toBe('Typed by hand')
+    );
+    expect(toAssetValue(await stored(id)).alt).toBe("Typed by hand");
 
-    await env.DB.prepare("update assets set alt = '' where id = ?").bind(id).run()
-    expect(toAssetValue(await stored(id)).alt).toBe('Written by a model')
-  })
+    await env.DB.prepare("update assets set alt = '' where id = ?").bind(id).run();
+    expect(toAssetValue(await stored(id)).alt).toBe("Written by a model");
+  });
 
-  it('leaves a column the model said nothing about alone', async () => {
-    const id = await seedAsset()
+  it("leaves a column the model said nothing about alone", async () => {
+    const id = await seedAsset();
     await describeAsset(
-      depsFor(async () => ({ alt: 'First pass', description: 'A description' })),
+      depsFor(async () => ({ alt: "First pass", description: "A description" })),
       await stored(id),
-    )
+    );
     // A re-run answering only a description must not wipe the alt text the
     // first one produced — `AssetPatchBody`'s "absent is not empty", applied to
     // a caller that happens to be a model.
     await describeAsset(
-      depsFor(async () => ({ description: 'Second pass' })),
+      depsFor(async () => ({ description: "Second pass" })),
       await stored(id),
-    )
+    );
 
-    const row = await stored(id)
-    expect(row.altAuto).toBe('First pass')
-    expect(row.descriptionAuto).toBe('Second pass')
-  })
-})
+    const row = await stored(id);
+    expect(row.altAuto).toBe("First pass");
+    expect(row.descriptionAuto).toBe("Second pass");
+  });
+});
 
 /* ----------------------------------------------------------------- tags --- */
 
-describe('the vocabulary constraint', () => {
-  it('matches on the slug, so a display spelling still finds the tag', () => {
-    const vocabulary = [{ id: 'tag_1', name: 'Head Shots', slug: 'headshots' }]
-    expect(matchTags(['  HEAD  SHOTS '], vocabulary)).toEqual({
+describe("the vocabulary constraint", () => {
+  it("matches on the slug, so a display spelling still finds the tag", () => {
+    const vocabulary = [{ id: "tag_1", name: "Head Shots", slug: "headshots" }];
+    expect(matchTags(["  HEAD  SHOTS "], vocabulary)).toEqual({
       tags: vocabulary,
       ignored: 0,
-    })
-  })
+    });
+  });
 
-  it('counts a drop once however many ways the model spelled it', () => {
-    const vocabulary = [{ id: 'tag_1', name: 'Headshot', slug: 'headshot' }]
+  it("counts a drop once however many ways the model spelled it", () => {
+    const vocabulary = [{ id: "tag_1", name: "Headshot", slug: "headshot" }];
     // Two spellings of one real tag are one match, not a match plus a drop;
     // two spellings of one absent tag are one drop, not two.
-    expect(matchTags(['Headshot', 'headshot', 'product-shot', 'product-shot'], vocabulary)).toEqual(
+    expect(matchTags(["Headshot", "headshot", "product-shot", "product-shot"], vocabulary)).toEqual(
       {
         tags: vocabulary,
         ignored: 1,
       },
-    )
-  })
+    );
+  });
 
-  it('treats a tag list that did not come back as a list as nothing at all', () => {
-    expect(matchTags('headshot' as unknown as string[], [])).toEqual({ tags: [], ignored: 0 })
-    expect(matchTags(undefined, [])).toEqual({ tags: [], ignored: 0 })
+  it("treats a tag list that did not come back as a list as nothing at all", () => {
+    expect(matchTags("headshot" as unknown as string[], [])).toEqual({ tags: [], ignored: 0 });
+    expect(matchTags(undefined, [])).toEqual({ tags: [], ignored: 0 });
     // An entry that is not a string, or is punctuation only, is a *drop*: the
     // model answered and it was not usable.
-    expect(matchTags([42 as unknown as string, '  '], [])).toEqual({ tags: [], ignored: 2 })
-  })
+    expect(matchTags([42 as unknown as string, "  "], [])).toEqual({ tags: [], ignored: 2 });
+  });
 
   /**
    * Decision 11's acceptance criterion, and the reason the enrichment and the
@@ -611,209 +613,213 @@ describe('the vocabulary constraint', () => {
    * unmatched slug as if it had matched — this fails on `tagsIgnored` and on the
    * tag list together.
    */
-  it('the model may not invent a tag', async () => {
-    const { tag: headshot } = await ensureTag(env.DB, 'headshot')
-    await ensureTag(env.DB, 'bw')
-    const id = await seedAsset()
+  it("the model may not invent a tag", async () => {
+    const { tag: headshot } = await ensureTag(env.DB, "headshot");
+    await ensureTag(env.DB, "bw");
+    const id = await seedAsset();
 
     const outcome = await describeAsset(
-      depsFor(async () => ({ tags: ['headshot', 'product-shot'] })),
+      depsFor(async () => ({ tags: ["headshot", "product-shot"] })),
       await stored(id),
-    )
+    );
 
-    expect(outcome.tagged).toEqual(['headshot'])
-    expect(outcome.tagsIgnored).toBe(1)
+    expect(outcome.tagged).toEqual(["headshot"]);
+    expect(outcome.tagsIgnored).toBe(1);
 
-    const carried = (await tagsForAssets(env.DB, [id])).get(id) ?? []
-    expect(carried.map((t) => t.slug)).toEqual(['headshot'])
-    expect(carried[0]?.id).toBe(headshot.id)
+    const carried = (await tagsForAssets(env.DB, [id])).get(id) ?? [];
+    expect(carried.map((t) => t.slug)).toEqual(["headshot"]);
+    expect(carried[0]?.id).toBe(headshot.id);
 
     // Nothing was created: the vocabulary is still the two an editor curated.
-    const all = await env.DB.prepare('select slug from asset_tags order by slug').all<{
-      slug: string
-    }>()
-    expect(all.results.map((r) => r.slug)).toEqual(['bw', 'headshot'])
-  })
+    const all = await env.DB.prepare("select slug from asset_tags order by slug").all<{
+      slug: string;
+    }>();
+    expect(all.results.map((r) => r.slug)).toEqual(["bw", "headshot"]);
+  });
 
-  it('adds without replacing, so a tag an editor applied by hand survives', async () => {
-    const { tag: byHand } = await ensureTag(env.DB, 'approved')
-    const { tag: model } = await ensureTag(env.DB, 'headshot')
-    const id = await seedAsset()
-    await env.DB.prepare('insert into asset_taggings (asset_id, tag_id) values (?, ?)')
+  it("adds without replacing, so a tag an editor applied by hand survives", async () => {
+    const { tag: byHand } = await ensureTag(env.DB, "approved");
+    const { tag: model } = await ensureTag(env.DB, "headshot");
+    const id = await seedAsset();
+    await env.DB.prepare("insert into asset_taggings (asset_id, tag_id) values (?, ?)")
       .bind(id, byHand.id)
-      .run()
+      .run();
 
     await describeAsset(
-      depsFor(async () => ({ tags: ['headshot'] })),
+      depsFor(async () => ({ tags: ["headshot"] })),
       await stored(id),
-    )
+    );
 
-    const carried = (await tagsForAssets(env.DB, [id])).get(id) ?? []
-    expect(carried.map((t) => t.id).sort()).toEqual([byHand.id, model.id].sort())
-  })
+    const carried = (await tagsForAssets(env.DB, [id])).get(id) ?? [];
+    expect(carried.map((t) => t.id).sort()).toEqual([byHand.id, model.id].sort());
+  });
 
-  it('is a success when the asset already carries the tag', async () => {
-    const { tag } = await ensureTag(env.DB, 'headshot')
-    const id = await seedAsset()
+  it("is a success when the asset already carries the tag", async () => {
+    const { tag } = await ensureTag(env.DB, "headshot");
+    const id = await seedAsset();
     await describeAsset(
-      depsFor(async () => ({ tags: ['headshot'] })),
+      depsFor(async () => ({ tags: ["headshot"] })),
       await stored(id),
-    )
+    );
     const outcome = await describeAsset(
-      depsFor(async () => ({ tags: ['Headshot'] })),
+      depsFor(async () => ({ tags: ["Headshot"] })),
       await stored(id),
-    )
+    );
 
-    expect(outcome.error).toBeNull()
-    expect(outcome.tagged).toEqual(['headshot'])
-    const carried = (await tagsForAssets(env.DB, [id])).get(id) ?? []
-    expect(carried.map((t) => t.id)).toEqual([tag.id])
-  })
-})
+    expect(outcome.error).toBeNull();
+    expect(outcome.tagged).toEqual(["headshot"]);
+    const carried = (await tagsForAssets(env.DB, [id])).get(id) ?? [];
+    expect(carried.map((t) => t.id)).toEqual([tag.id]);
+  });
+});
 
 /* ------------------------------------------------------- clamp and bound --- */
 
-describe('a model is a caller', () => {
-  it('truncates over-long text rather than discarding the whole answer', async () => {
-    const id = await seedAsset()
+describe("a model is a caller", () => {
+  it("truncates over-long text rather than discarding the whole answer", async () => {
+    const id = await seedAsset();
     await describeAsset(
-      depsFor(async () => ({ alt: 'a'.repeat(4000), description: 'b'.repeat(4000) })),
+      depsFor(async () => ({ alt: "a".repeat(4000), description: "b".repeat(4000) })),
       await stored(id),
-    )
+    );
 
-    const row = await stored(id)
-    expect(row.altAuto).toHaveLength(500)
-    expect(row.descriptionAuto).toHaveLength(MAX_DESCRIBE_DESCRIPTION)
+    const row = await stored(id);
+    expect(row.altAuto).toHaveLength(500);
+    expect(row.descriptionAuto).toHaveLength(MAX_DESCRIBE_DESCRIPTION);
     // The alt text still landed, which is the point of clamping rather than
     // refusing: one over-long field must not throw away a paid-for call.
-    expect(row.describeError).toBeNull()
-  })
+    expect(row.describeError).toBeNull();
+  });
 
-  it('ignores a field that is not a string and strips what a stored string may not hold', async () => {
-    const id = await seedAsset()
+  it("ignores a field that is not a string and strips what a stored string may not hold", async () => {
+    const id = await seedAsset();
     await describeAsset(
       depsFor(async () => ({
-        alt: { text: 'nope' } as unknown as string,
-        description: '  A caption\u0000 with a \u202e bidi override  ',
+        alt: { text: "nope" } as unknown as string,
+        description: "  A caption\u0000 with a \u202e bidi override  ",
       })),
       await stored(id),
-    )
+    );
 
-    const row = await stored(id)
+    const row = await stored(id);
     // A non-string is "the model said nothing about this field", not an error.
-    expect(row.altAuto).toBe('')
+    expect(row.altAuto).toBe("");
     // The characters `bounded()` refuses a person for are stripped rather than
     // fatal, and the result is trimmed: there is nobody to show a message to.
-    expect(row.descriptionAuto).toBe('A caption with a  bidi override')
-    expect(row.describedAt).toBeGreaterThan(0)
-  })
+    expect(row.descriptionAuto).toBe("A caption with a  bidi override");
+    expect(row.describedAt).toBeGreaterThan(0);
+  });
 
-  it('records a throwing fn instead of propagating it', async () => {
-    const id = await seedAsset()
+  it("records a throwing fn instead of propagating it", async () => {
+    const id = await seedAsset();
     const outcome = await describeAsset(
       depsFor(async () => {
-        throw new Error('429 rate limited by the provider')
+        throw new Error("429 rate limited by the provider");
       }),
       await stored(id),
-    )
+    );
 
-    expect(outcome.error).toBe('429 rate limited by the provider')
-    const row = await stored(id)
-    expect(row.describeError).toBe('429 rate limited by the provider')
+    expect(outcome.error).toBe("429 rate limited by the provider");
+    const row = await stored(id);
+    expect(row.describeError).toBe("429 rate limited by the provider");
     // Stamped anyway: "tried and failed" has to be distinguishable from "never
     // tried", or a backlog walk offers the same broken asset forever.
-    expect(row.describedAt).toBeGreaterThan(0)
-    expect(row.altAuto).toBe('')
-  })
+    expect(row.describedAt).toBeGreaterThan(0);
+    expect(row.altAuto).toBe("");
+  });
 
-  it('records junk that did not throw', async () => {
-    const id = await seedAsset()
+  it("records junk that did not throw", async () => {
+    const id = await seedAsset();
     const outcome = await describeAsset(
       depsFor(async () => null as unknown as DescribeResult),
       await stored(id),
-    )
-    expect(outcome.error).toMatch(/did not return a result object/)
-    expect((await stored(id)).describeError).toMatch(/did not return a result object/)
-  })
+    );
+    expect(outcome.error).toMatch(/did not return a result object/);
+    expect((await stored(id)).describeError).toMatch(/did not return a result object/);
+  });
 
-  it('skips a non-image without calling fn, and still stamps it', async () => {
-    const id = await seedAsset({ filename: 'deck.pdf', contentType: 'application/pdf' })
-    const fn = vi.fn(async () => ({ alt: 'should never be written' }))
+  it("skips a non-image without calling fn, and still stamps it", async () => {
+    const id = await seedAsset({ filename: "deck.pdf", contentType: "application/pdf" });
+    const fn = vi.fn(async () => ({ alt: "should never be written" }));
 
-    const outcome = await describeAsset(depsFor(fn), await stored(id))
+    const outcome = await describeAsset(depsFor(fn), await stored(id));
 
-    expect(fn).not.toHaveBeenCalled()
-    expect(outcome.skipped).toBe(true)
-    const row = await stored(id)
-    expect(row.altAuto).toBe('')
-    expect(row.describedAt).toBeGreaterThan(0)
-    expect(row.describeError).toBeNull()
-  })
-})
+    expect(fn).not.toHaveBeenCalled();
+    expect(outcome.skipped).toBe(true);
+    const row = await stored(id);
+    expect(row.altAuto).toBe("");
+    expect(row.describedAt).toBeGreaterThan(0);
+    expect(row.describeError).toBeNull();
+  });
+});
 
 /* ---------------------------------------------------------------- route --- */
 
-describe('POST {base}/api/assets/:id/describe', () => {
+describe("POST {base}/api/assets/:id/describe", () => {
   const post = (folio: ReturnType<typeof makeFolio>, path: string) =>
-    folio.handle(new Request(`${ORIGIN}${path}`, { method: 'POST' }), env, createExecutionContext())
+    folio.handle(
+      new Request(`${ORIGIN}${path}`, { method: "POST" }),
+      env,
+      createExecutionContext(),
+    );
 
-  it('is a legible refusal with nothing configured', async () => {
-    const id = await seedAsset()
-    const res = await post(makeFolio(), `/folio/api/assets/${id}/describe`)
-    expect(res?.status).toBe(501)
-    const body = (await res!.json()) as { error: { code: string; message: string } }
-    expect(body.error.code).toBe('unsupported')
+  it("is a legible refusal with nothing configured", async () => {
+    const id = await seedAsset();
+    const res = await post(makeFolio(), `/folio/api/assets/${id}/describe`);
+    expect(res?.status).toBe(501);
+    const body = (await res!.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("unsupported");
     // Names the config key, so the fix is in the message.
-    expect(body.error.message).toMatch(/describe/)
-  })
+    expect(body.error.message).toMatch(/describe/);
+  });
 
-  it('describes one asset and reports what it ignored', async () => {
-    await ensureTag(env.DB, 'headshot')
-    const id = await seedAsset()
+  it("describes one asset and reports what it ignored", async () => {
+    await ensureTag(env.DB, "headshot");
+    const id = await seedAsset();
     const folio = makeFolio({
       async fn(input) {
         // The URL is absolute and points back at this deployment's own asset
         // route, which is the half a host cannot supply for itself.
-        expect(input.url.startsWith(`${ORIGIN}/folio/asset/`)).toBe(true)
-        return { alt: 'A portrait', tags: ['headshot', 'product-shot'] }
+        expect(input.url.startsWith(`${ORIGIN}/folio/asset/`)).toBe(true);
+        return { alt: "A portrait", tags: ["headshot", "product-shot"] };
       },
-    })
+    });
 
-    const res = await post(folio, `/folio/api/assets/${id}/describe`)
-    expect(res?.status).toBe(200)
+    const res = await post(folio, `/folio/api/assets/${id}/describe`);
+    expect(res?.status).toBe(200);
     const body = (await res!.json()) as {
-      asset: { alt: string; altAuto: string; tags: { slug: string }[] }
-      tagsIgnored: number
-      tagged: string[]
-      error: string | null
-    }
-    expect(body.asset.altAuto).toBe('A portrait')
-    expect(body.asset.alt).toBe('')
-    expect(body.asset.tags.map((t) => t.slug)).toEqual(['headshot'])
-    expect(body.tagsIgnored).toBe(1)
-    expect(body.error).toBeNull()
-  })
+      asset: { alt: string; altAuto: string; tags: { slug: string }[] };
+      tagsIgnored: number;
+      tagged: string[];
+      error: string | null;
+    };
+    expect(body.asset.altAuto).toBe("A portrait");
+    expect(body.asset.alt).toBe("");
+    expect(body.asset.tags.map((t) => t.slug)).toEqual(["headshot"]);
+    expect(body.tagsIgnored).toBe(1);
+    expect(body.error).toBeNull();
+  });
 
-  it('answers 200 with the recorded failure rather than 500', async () => {
-    const id = await seedAsset()
+  it("answers 200 with the recorded failure rather than 500", async () => {
+    const id = await seedAsset();
     const folio = makeFolio({
       async fn() {
-        throw new Error('the provider timed out')
+        throw new Error("the provider timed out");
       },
-    })
-    const res = await post(folio, `/folio/api/assets/${id}/describe`)
-    expect(res?.status).toBe(200)
+    });
+    const res = await post(folio, `/folio/api/assets/${id}/describe`);
+    expect(res?.status).toBe(200);
     expect((await res!.json()) as { error: string }).toMatchObject({
-      error: 'the provider timed out',
-    })
-  })
+      error: "the provider timed out",
+    });
+  });
 
-  it('404s an unknown id', async () => {
-    const folio = makeFolio({ fn: async () => ({}) })
-    const res = await post(folio, '/folio/api/assets/ast_ds99999999/describe')
-    expect(res?.status).toBe(404)
-  })
-})
+  it("404s an unknown id", async () => {
+    const folio = makeFolio({ fn: async () => ({}) });
+    const res = await post(folio, "/folio/api/assets/ast_ds99999999/describe");
+    expect(res?.status).toBe(404);
+  });
+});
 
 /* ------------------------------------------------------------------- run --- */
 
@@ -847,22 +853,22 @@ function runDeps(
   const describe = validateDescribe<unknown>({
     fn,
     ...(over.concurrency === undefined ? {} : { concurrency: over.concurrency }),
-  })
-  if (!describe) throw new Error('unreachable: a config was passed')
+  });
+  if (!describe) throw new Error("unreachable: a config was passed");
   return {
     db: over.db ?? env.DB,
     media: env.MEDIA,
     assetBase: `${ORIGIN}/folio/asset`,
     describe,
     env: {},
-  }
+  };
 }
 
 /** A report, or a thrown assertion — the refusal branch is tested where it is
  * expected rather than absorbed everywhere. */
 function reported(outcome: DescribeRunOutcome): DescribeRunReport {
-  if (wasRefused(outcome)) throw new Error(`refused: expected ${outcome.expected}`)
-  return outcome
+  if (wasRefused(outcome)) throw new Error(`refused: expected ${outcome.expected}`);
+  return outcome;
 }
 
 /**
@@ -874,57 +880,57 @@ async function drive(
   selection: BulkSelection<AssetFilter>,
   opts: { batch?: number; dryRun?: boolean } = {},
 ): Promise<{
-  calls: number
-  done: number
-  skipped: number
-  tagsIgnored: number
-  failed: string[]
+  calls: number;
+  done: number;
+  skipped: number;
+  tagsIgnored: number;
+  failed: string[];
 }> {
-  let continueFrom: string | null = null
-  const totals = { calls: 0, done: 0, skipped: 0, tagsIgnored: 0, failed: [] as string[] }
+  let continueFrom: string | null = null;
+  const totals = { calls: 0, done: 0, skipped: 0, tagsIgnored: 0, failed: [] as string[] };
   for (;;) {
     const report = reported(
       await runDescribe(deps, selection, { ...opts, ...(continueFrom ? { continueFrom } : {}) }),
-    )
-    totals.calls++
-    totals.done += report.done
-    totals.skipped += report.skipped
-    totals.tagsIgnored += report.tagsIgnored
-    totals.failed.push(...report.failed.map((one) => one.message))
+    );
+    totals.calls++;
+    totals.done += report.done;
+    totals.skipped += report.skipped;
+    totals.tagsIgnored += report.tagsIgnored;
+    totals.failed.push(...report.failed.map((one) => one.message));
     if (report.continueFrom === null || report.continueFrom === continueFrom) {
-      expect(report.seen).toBe(report.total)
-      return totals
+      expect(report.seen).toBe(report.total);
+      return totals;
     }
-    continueFrom = report.continueFrom
+    continueFrom = report.continueFrom;
     // A wedged cursor is a hang, not a failure, so the loop is bounded.
-    expect(totals.calls).toBeLessThan(50)
+    expect(totals.calls).toBeLessThan(50);
   }
 }
 
-describe('runDescribe', () => {
-  it('walks a selection in batches and stops on a null cursor', async () => {
-    const ids: string[] = []
-    for (let i = 0; i < 7; i++) ids.push(await seedAsset({ filename: `shot-${i}.png` }))
-    const fn = vi.fn(async () => ({ alt: 'A photograph' }))
+describe("runDescribe", () => {
+  it("walks a selection in batches and stops on a null cursor", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i++) ids.push(await seedAsset({ filename: `shot-${i}.png` }));
+    const fn = vi.fn(async () => ({ alt: "A photograph" }));
 
-    const totals = await drive(runDeps(fn), { ids }, { batch: 3 })
+    const totals = await drive(runDeps(fn), { ids }, { batch: 3 });
 
     // Seven files, three at a time: 3 + 3 + 1, and the fourth call is the one
     // that answers a null cursor rather than a fourth batch of nothing.
-    expect(totals.calls).toBe(3)
-    expect(totals.done).toBe(7)
-    expect(fn).toHaveBeenCalledTimes(7)
-    for (const id of ids) expect((await stored(id)).altAuto).toBe('A photograph')
-  })
+    expect(totals.calls).toBe(3);
+    expect(totals.done).toBe(7);
+    expect(fn).toHaveBeenCalledTimes(7);
+    for (const id of ids) expect((await stored(id)).altAuto).toBe("A photograph");
+  });
 
-  it('walks a captured filter, and the count guard refuses a set that moved', async () => {
-    for (let i = 0; i < 4; i++) await seedAsset({ filename: `filtered-${i}.png` })
-    const filter: AssetFilter = { q: 'filtered' }
-    const expected = await countAssets(env.DB, filter)
-    expect(expected).toBe(4)
+  it("walks a captured filter, and the count guard refuses a set that moved", async () => {
+    for (let i = 0; i < 4; i++) await seedAsset({ filename: `filtered-${i}.png` });
+    const filter: AssetFilter = { q: "filtered" };
+    const expected = await countAssets(env.DB, filter);
+    expect(expected).toBe(4);
 
     // The number somebody read, then three more files arrive underneath them.
-    await seedAsset({ filename: 'filtered-late.png' })
+    await seedAsset({ filename: "filtered-late.png" });
     const refusal = await runDescribe(
       runDeps(async () => ({})),
       {
@@ -932,359 +938,365 @@ describe('runDescribe', () => {
         filter,
         expected,
       },
-    )
+    );
     expect(wasRefused(refusal) && refusal).toMatchObject({
-      refused: 'count',
+      refused: "count",
       expected: 4,
       actual: 5,
-    })
+    });
 
     // A door, not a wall: re-confirming at the new count runs.
-    const fn = vi.fn(async () => ({ alt: 'Described' }))
-    const totals = await drive(runDeps(fn), { all: true, filter, expected: 5 }, { batch: 2 })
-    expect(totals.done).toBe(5)
-    expect(fn).toHaveBeenCalledTimes(5)
-  })
+    const fn = vi.fn(async () => ({ alt: "Described" }));
+    const totals = await drive(runDeps(fn), { all: true, filter, expected: 5 }, { batch: 2 });
+    expect(totals.done).toBe(5);
+    expect(fn).toHaveBeenCalledTimes(5);
+  });
 
-  it('honours the ticked-off half of a select-all', async () => {
-    const ids: string[] = []
-    for (let i = 0; i < 4; i++) ids.push(await seedAsset({ filename: `excl-${i}.png` }))
-    const filter: AssetFilter = { q: 'excl-' }
-    const fn = vi.fn(async () => ({ alt: 'Described' }))
+  it("honours the ticked-off half of a select-all", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) ids.push(await seedAsset({ filename: `excl-${i}.png` }));
+    const filter: AssetFilter = { q: "excl-" };
+    const fn = vi.fn(async () => ({ alt: "Described" }));
 
     const totals = await drive(
       runDeps(fn),
       { all: true, filter, expected: 4, exclude: [ids[0] as string, ids[3] as string] },
       { batch: 4 },
-    )
+    );
 
-    expect(totals.done).toBe(2)
-    expect(fn).toHaveBeenCalledTimes(2)
-    expect((await stored(ids[0] as string)).describedAt).toBeNull()
-    expect((await stored(ids[1] as string)).altAuto).toBe('Described')
-  })
+    expect(totals.done).toBe(2);
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect((await stored(ids[0] as string)).describedAt).toBeNull();
+    expect((await stored(ids[1] as string)).altAuto).toBe("Described");
+  });
 
   /**
    * The expensive assertion, and it is on the **call count**: a dry run that
    * asked the model and discarded the answer would leave the columns exactly as
    * clean as this one does.
    */
-  it('costs nothing on a dry run and still says how many and how many are free', async () => {
+  it("costs nothing on a dry run and still says how many and how many are free", async () => {
     const ids = [
-      await seedAsset({ filename: 'a.png' }),
-      await seedAsset({ filename: 'b.png' }),
-      await seedAsset({ filename: 'deck.pdf', contentType: 'application/pdf' }),
-    ]
-    const fn = vi.fn(async () => ({ alt: 'Never written' }))
+      await seedAsset({ filename: "a.png" }),
+      await seedAsset({ filename: "b.png" }),
+      await seedAsset({ filename: "deck.pdf", contentType: "application/pdf" }),
+    ];
+    const fn = vi.fn(async () => ({ alt: "Never written" }));
 
-    const report = reported(await runDescribe(runDeps(fn), { ids }, { dryRun: true }))
+    const report = reported(await runDescribe(runDeps(fn), { ids }, { dryRun: true }));
 
-    expect(fn).toHaveBeenCalledTimes(0)
-    expect(report.dryRun).toBe(true)
-    expect(report.total).toBe(3)
-    expect(report.done).toBe(3)
+    expect(fn).toHaveBeenCalledTimes(0);
+    expect(report.dryRun).toBe(true);
+    expect(report.total).toBe(3);
+    expect(report.done).toBe(3);
     // The PDF is the one that would cost nothing, and saying so is the whole
     // point of counting it separately from `done`.
-    expect(report.skipped).toBe(1)
+    expect(report.skipped).toBe(1);
     for (const id of ids) {
-      const row = await stored(id)
-      expect([row.altAuto, row.describedAt]).toEqual(['', null])
+      const row = await stored(id);
+      expect([row.altAuto, row.describedAt]).toEqual(["", null]);
     }
-  })
+  });
 
-  it('runs at most `concurrency` model calls at once', async () => {
-    const ids: string[] = []
-    for (let i = 0; i < 6; i++) ids.push(await seedAsset({ filename: `c-${i}.png` }))
+  it("runs at most `concurrency` model calls at once", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) ids.push(await seedAsset({ filename: `c-${i}.png` }));
 
     const peakAt = async (concurrency: number) => {
-      let live = 0
-      let peak = 0
+      let live = 0;
+      let peak = 0;
       const deps = runDeps(
         async () => {
-          live++
-          peak = Math.max(peak, live)
-          await new Promise((resolve) => setTimeout(resolve, 2))
-          live--
-          return {}
+          live++;
+          peak = Math.max(peak, live);
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          live--;
+          return {};
         },
         { concurrency },
-      )
-      await drive(deps, { ids }, { batch: 6 })
-      return peak
-    }
+      );
+      await drive(deps, { ids }, { batch: 6 });
+      return peak;
+    };
 
     // Exactly, not "at most": a pool that never fills is a run four times
     // slower than the host asked for, and a ceiling that leaks is a bill.
-    expect(await peakAt(2)).toBe(2)
-    expect(await peakAt(1)).toBe(1)
-  })
+    expect(await peakAt(2)).toBe(2);
+    expect(await peakAt(1)).toBe(1);
+  });
 
-  it('reads the tag vocabulary once per call, not once per asset', async () => {
-    await ensureTag(env.DB, 'headshot')
-    const ids: string[] = []
-    for (let i = 0; i < 5; i++) ids.push(await seedAsset({ filename: `v-${i}.png` }))
+  it("reads the tag vocabulary once per call, not once per asset", async () => {
+    await ensureTag(env.DB, "headshot");
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) ids.push(await seedAsset({ filename: `v-${i}.png` }));
 
-    let reads = 0
+    let reads = 0;
     const db = new Proxy(env.DB, {
       get(t, prop, receiver) {
-        const value = Reflect.get(t, prop, receiver)
-        if (prop !== 'prepare') return value
+        const value = Reflect.get(t, prop, receiver);
+        if (prop !== "prepare") return value;
         return (...args: unknown[]) => {
           // The vocabulary read, and nothing else: `asset_taggings` is a
           // different table and the insert below must not be counted as one.
-          if (typeof args[0] === 'string' && /from asset_tags\b/.test(args[0])) reads++
-          return (value as (...a: unknown[]) => D1PreparedStatement).apply(t, args)
-        }
+          if (typeof args[0] === "string" && /from asset_tags\b/.test(args[0])) reads++;
+          return (value as (...a: unknown[]) => D1PreparedStatement).apply(t, args);
+        };
       },
-    }) as unknown as FolioDb
+    }) as unknown as FolioDb;
 
     const report = reported(
       await runDescribe(
-        runDeps(async () => ({ tags: ['headshot'] }), { db }),
+        runDeps(async () => ({ tags: ["headshot"] }), { db }),
         { ids },
         { batch: 5 },
       ),
-    )
+    );
 
-    expect(report.done).toBe(5)
-    expect(reads).toBe(1)
-  })
+    expect(report.done).toBe(5);
+    expect(reads).toBe(1);
+  });
 
-  it('finishes the batch when one file fails, and names it', async () => {
-    const ids: string[] = []
-    for (let i = 0; i < 4; i++) ids.push(await seedAsset({ filename: `f-${i}.png` }))
+  it("finishes the batch when one file fails, and names it", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 4; i++) ids.push(await seedAsset({ filename: `f-${i}.png` }));
     const fn = vi.fn(async (input: DescribeInput) => {
-      if (input.filename === 'f-1.png') throw new Error('429 rate limited by the provider')
-      return { alt: 'Described' }
-    })
+      if (input.filename === "f-1.png") throw new Error("429 rate limited by the provider");
+      return { alt: "Described" };
+    });
 
-    const totals = await drive(runDeps(fn), { ids }, { batch: 4 })
+    const totals = await drive(runDeps(fn), { ids }, { batch: 4 });
 
-    expect(fn).toHaveBeenCalledTimes(4)
+    expect(fn).toHaveBeenCalledTimes(4);
     // Three described, one named — not three described and one silently
     // counted as a success, which is what `done` would say if a recorded model
     // failure were not lifted into `failed`.
-    expect(totals.done).toBe(3)
-    expect(totals.failed).toEqual(['429 rate limited by the provider'])
-    expect((await stored(ids[3] as string)).altAuto).toBe('Described')
-    const failed = await stored(ids[1] as string)
-    expect(failed.describeError).toBe('429 rate limited by the provider')
+    expect(totals.done).toBe(3);
+    expect(totals.failed).toEqual(["429 rate limited by the provider"]);
+    expect((await stored(ids[3] as string)).altAuto).toBe("Described");
+    const failed = await stored(ids[1] as string);
+    expect(failed.describeError).toBe("429 rate limited by the provider");
     // Stamped anyway, so the backlog does not offer it forever.
-    expect(failed.describedAt).toBeGreaterThan(0)
-  })
+    expect(failed.describedAt).toBeGreaterThan(0);
+  });
 
-  it('reports an id with no row behind it rather than stopping', async () => {
-    const id = await seedAsset()
+  it("reports an id with no row behind it rather than stopping", async () => {
+    const id = await seedAsset();
     const totals = await drive(
-      runDeps(async () => ({ alt: 'Described' })),
+      runDeps(async () => ({ alt: "Described" })),
       {
-        ids: ['ast_ds77777777', id],
+        ids: ["ast_ds77777777", id],
       },
-    )
-    expect(totals.done).toBe(1)
-    expect(totals.failed).toEqual(['No such file'])
-  })
+    );
+    expect(totals.done).toBe(1);
+    expect(totals.failed).toEqual(["No such file"]);
+  });
 
-  it('sums tagsIgnored across a batch, so a prompt proposing a missing tag is visible', async () => {
-    await ensureTag(env.DB, 'headshot')
-    const ids = [await seedAsset({ filename: 't-0.png' }), await seedAsset({ filename: 't-1.png' })]
+  it("sums tagsIgnored across a batch, so a prompt proposing a missing tag is visible", async () => {
+    await ensureTag(env.DB, "headshot");
+    const ids = [
+      await seedAsset({ filename: "t-0.png" }),
+      await seedAsset({ filename: "t-1.png" }),
+    ];
 
     const totals = await drive(
-      runDeps(async () => ({ tags: ['headshot', 'product-shot', 'lifestyle'] })),
+      runDeps(async () => ({ tags: ["headshot", "product-shot", "lifestyle"] })),
       { ids },
       { batch: 1 },
-    )
+    );
 
-    expect(totals.done).toBe(2)
+    expect(totals.done).toBe(2);
     // Two files, two drops each, and the count survives being summed across two
     // separate calls of the run.
-    expect(totals.calls).toBe(2)
-    expect(totals.tagsIgnored).toBe(4)
-  })
+    expect(totals.calls).toBe(2);
+    expect(totals.tagsIgnored).toBe(4);
+  });
 
-  it('walks only the backlog when the captured filter says undescribed', async () => {
-    const done = await seedAsset({ filename: 'u-done.png' })
-    const waiting = await seedAsset({ filename: 'u-waiting.png' })
-    await env.DB.prepare('update assets set described_at = ? where id = ?')
+  it("walks only the backlog when the captured filter says undescribed", async () => {
+    const done = await seedAsset({ filename: "u-done.png" });
+    const waiting = await seedAsset({ filename: "u-waiting.png" });
+    await env.DB.prepare("update assets set described_at = ? where id = ?")
       .bind(Date.now(), done)
-      .run()
+      .run();
 
-    const filter: AssetFilter = { undescribed: true }
-    const expected = await countAssets(env.DB, filter)
-    expect(expected).toBe(1)
+    const filter: AssetFilter = { undescribed: true };
+    const expected = await countAssets(env.DB, filter);
+    expect(expected).toBe(1);
 
-    const fn = vi.fn(async () => ({ alt: 'From the backlog' }))
-    const totals = await drive(runDeps(fn), { all: true, filter, expected })
+    const fn = vi.fn(async () => ({ alt: "From the backlog" }));
+    const totals = await drive(runDeps(fn), { all: true, filter, expected });
 
-    expect(totals.done).toBe(1)
-    expect(fn).toHaveBeenCalledTimes(1)
-    expect((await stored(waiting)).altAuto).toBe('From the backlog')
+    expect(totals.done).toBe(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect((await stored(waiting)).altAuto).toBe("From the backlog");
     // A failed attempt is *not* in the backlog — `described_at` is stamped on
     // that path too — so it is not swept again by the default run.
-    expect((await stored(done)).altAuto).toBe('')
-  })
+    expect((await stored(done)).altAuto).toBe("");
+  });
 
-  it('walks only the failed set when the captured filter says failed, and a successful retry clears the error', async () => {
-    const failed = await seedAsset({ filename: 'f-failed.png' })
-    const waiting = await seedAsset({ filename: 'f-waiting.png' })
-    await env.DB.prepare('update assets set described_at = ?, describe_error = ? where id = ?')
-      .bind(Date.now(), 'The describe function failed', failed)
-      .run()
+  it("walks only the failed set when the captured filter says failed, and a successful retry clears the error", async () => {
+    const failed = await seedAsset({ filename: "f-failed.png" });
+    const waiting = await seedAsset({ filename: "f-waiting.png" });
+    await env.DB.prepare("update assets set described_at = ?, describe_error = ? where id = ?")
+      .bind(Date.now(), "The describe function failed", failed)
+      .run();
 
-    const filter: AssetFilter = { failed: true }
-    const expected = await countAssets(env.DB, filter)
-    expect(expected).toBe(1)
+    const filter: AssetFilter = { failed: true };
+    const expected = await countAssets(env.DB, filter);
+    expect(expected).toBe(1);
 
-    const fn = vi.fn(async () => ({ alt: 'Fixed on retry' }))
-    const totals = await drive(runDeps(fn), { all: true, filter, expected })
+    const fn = vi.fn(async () => ({ alt: "Fixed on retry" }));
+    const totals = await drive(runDeps(fn), { all: true, filter, expected });
 
-    expect(totals.done).toBe(1)
-    expect(fn).toHaveBeenCalledTimes(1)
+    expect(totals.done).toBe(1);
+    expect(fn).toHaveBeenCalledTimes(1);
     // The retry succeeded, so `describe_error` is cleared (`stamp` writes it on
     // every path, error or not) — the row this filter named leaves the failed
     // set on its own, with nobody having to untick it.
-    const row = await stored(failed)
-    expect(row.altAuto).toBe('Fixed on retry')
-    expect(row.describeError).toBeNull()
+    const row = await stored(failed);
+    expect(row.altAuto).toBe("Fixed on retry");
+    expect(row.describeError).toBeNull();
     // A file that was never attempted is untouched by a run scoped to `failed`.
-    expect((await stored(waiting)).altAuto).toBe('')
-  })
-})
+    expect((await stored(waiting)).altAuto).toBe("");
+  });
+});
 
 /* ------------------------------------------------- POST /assets/describe --- */
 
-describe('POST {base}/api/assets/describe', () => {
+describe("POST {base}/api/assets/describe", () => {
   const run = (folio: ReturnType<typeof makeFolio>, body: unknown) =>
     folio.handle(
       new Request(`${ORIGIN}/folio/api/assets/describe`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: "POST",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       }),
       env,
       createExecutionContext(),
-    )
+    );
 
-  it('is a legible refusal with nothing configured', async () => {
-    const res = await run(makeFolio(), { selection: { ids: [await seedAsset()] } })
-    expect(res?.status).toBe(501)
-    const body = (await res!.json()) as { error: { code: string; message: string } }
-    expect(body.error.code).toBe('unsupported')
-    expect(body.error.message).toMatch(/describe/)
-  })
+  it("is a legible refusal with nothing configured", async () => {
+    const res = await run(makeFolio(), { selection: { ids: [await seedAsset()] } });
+    expect(res?.status).toBe(501);
+    const body = (await res!.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("unsupported");
+    expect(body.error.message).toMatch(/describe/);
+  });
 
-  it('answers a report, and a dry run that spent nothing', async () => {
-    const ids = [await seedAsset({ filename: 'r-0.png' }), await seedAsset({ filename: 'r-1.png' })]
-    const fn = vi.fn(async () => ({ alt: 'A photograph' }))
-    const folio = makeFolio({ fn })
+  it("answers a report, and a dry run that spent nothing", async () => {
+    const ids = [
+      await seedAsset({ filename: "r-0.png" }),
+      await seedAsset({ filename: "r-1.png" }),
+    ];
+    const fn = vi.fn(async () => ({ alt: "A photograph" }));
+    const folio = makeFolio({ fn });
 
-    const dry = await run(folio, { selection: { ids }, dryRun: true })
-    expect(dry?.status).toBe(200)
+    const dry = await run(folio, { selection: { ids }, dryRun: true });
+    expect(dry?.status).toBe(200);
     expect((await dry!.json()) as DescribeRunReport).toMatchObject({
-      action: 'describe',
+      action: "describe",
       dryRun: true,
       total: 2,
       done: 2,
       continueFrom: null,
-    })
-    expect(fn).toHaveBeenCalledTimes(0)
+    });
+    expect(fn).toHaveBeenCalledTimes(0);
 
-    const real = await run(folio, { selection: { ids } })
-    expect(((await real!.json()) as DescribeRunReport).done).toBe(2)
-    expect(fn).toHaveBeenCalledTimes(2)
-  })
+    const real = await run(folio, { selection: { ids } });
+    expect(((await real!.json()) as DescribeRunReport).done).toBe(2);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
 
-  it('keeps `undescribed` through the validator rather than stripping it', async () => {
-    const described = await seedAsset({ filename: 'v-done.png' })
-    await seedAsset({ filename: 'v-waiting.png' })
-    await env.DB.prepare('update assets set described_at = ? where id = ?')
+  it("keeps `undescribed` through the validator rather than stripping it", async () => {
+    const described = await seedAsset({ filename: "v-done.png" });
+    await seedAsset({ filename: "v-waiting.png" });
+    await env.DB.prepare("update assets set described_at = ? where id = ?")
       .bind(Date.now(), described)
-      .run()
+      .run();
 
-    const fn = vi.fn(async () => ({ alt: 'Backlog only' }))
+    const fn = vi.fn(async () => ({ alt: "Backlog only" }));
     const res = await run(makeFolio({ fn }), {
       selection: { all: true, filter: { undescribed: true }, expected: 1 },
-    })
+    });
 
     // A stripped key would make this a run over both files: the count guard
     // would refuse it (2 !== 1), and if the number happened to agree it would
     // describe the one an editor already paid for.
-    expect(res?.status).toBe(200)
-    expect(((await res!.json()) as DescribeRunReport).done).toBe(1)
-    expect(fn).toHaveBeenCalledTimes(1)
-    expect((await stored(described)).altAuto).toBe('')
-  })
+    expect(res?.status).toBe(200);
+    expect(((await res!.json()) as DescribeRunReport).done).toBe(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect((await stored(described)).altAuto).toBe("");
+  });
 
-  it('keeps `failed` through the validator rather than stripping it', async () => {
-    const broken = await seedAsset({ filename: 'v-broken.png' })
-    await seedAsset({ filename: 'v-fine.png' })
-    await env.DB.prepare('update assets set described_at = ?, describe_error = ? where id = ?')
-      .bind(Date.now(), 'a previous run failed', broken)
-      .run()
+  it("keeps `failed` through the validator rather than stripping it", async () => {
+    const broken = await seedAsset({ filename: "v-broken.png" });
+    await seedAsset({ filename: "v-fine.png" });
+    await env.DB.prepare("update assets set described_at = ?, describe_error = ? where id = ?")
+      .bind(Date.now(), "a previous run failed", broken)
+      .run();
 
-    const fn = vi.fn(async () => ({ alt: 'Retried' }))
+    const fn = vi.fn(async () => ({ alt: "Retried" }));
     const res = await run(makeFolio({ fn }), {
       selection: { all: true, filter: { failed: true }, expected: 1 },
-    })
+    });
 
     // A stripped key would make this a run over both files: the count guard
     // would refuse it (2 !== 1), and if the number happened to agree it would
     // spend a call on the file that was already fine.
-    expect(res?.status).toBe(200)
-    expect(((await res!.json()) as DescribeRunReport).done).toBe(1)
-    expect(fn).toHaveBeenCalledTimes(1)
-    expect((await stored(broken)).altAuto).toBe('Retried')
-    expect((await stored(broken)).describeError).toBeNull()
-  })
+    expect(res?.status).toBe(200);
+    expect(((await res!.json()) as DescribeRunReport).done).toBe(1);
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect((await stored(broken)).altAuto).toBe("Retried");
+    expect((await stored(broken)).describeError).toBeNull();
+  });
 
-  it('answers 409 with the new count when the set moved', async () => {
-    await seedAsset({ filename: 'moved-0.png' })
-    await seedAsset({ filename: 'moved-1.png' })
+  it("answers 409 with the new count when the set moved", async () => {
+    await seedAsset({ filename: "moved-0.png" });
+    await seedAsset({ filename: "moved-1.png" });
     const res = await run(makeFolio({ fn: async () => ({}) }), {
-      selection: { all: true, filter: { q: 'moved-' }, expected: 1 },
-    })
-    expect(res?.status).toBe(409)
+      selection: { all: true, filter: { q: "moved-" }, expected: 1 },
+    });
+    expect(res?.status).toBe(409);
     expect((await res!.json()) as { refused: string; actual: number }).toMatchObject({
-      refused: 'count',
+      refused: "count",
       expected: 1,
       actual: 2,
-    })
-  })
+    });
+  });
 
-  it('refuses a batch larger than a run may ask for', async () => {
+  it("refuses a batch larger than a run may ask for", async () => {
     const res = await run(makeFolio({ fn: async () => ({}) }), {
       selection: { ids: [await seedAsset()] },
       batch: 200,
-    })
-    expect(res?.status).toBe(400)
-  })
+    });
+    expect(res?.status).toBe(400);
+  });
 
-  it('reports whether it is configured, and whether images will keep it cheap', async () => {
+  it("reports whether it is configured, and whether images will keep it cheap", async () => {
     const get = (folio: ReturnType<typeof makeFolio>) =>
       folio.handle(
         new Request(`${ORIGIN}/folio/api/assets/describe`),
         env,
         createExecutionContext(),
-      )
+      );
 
     // No config: the admin draws no control at all, rather than one that 501s
     // when it is pressed.
-    expect(await (await get(makeFolio()))!.json()).toEqual({ configured: false })
+    expect(await (await get(makeFolio()))!.json()).toEqual({ configured: false });
 
     const body = (await (await get(
       makeFolio({ fn: async () => ({}), onUpload: false }),
     ))!.json()) as {
-      configured: boolean
-      onUpload: boolean
-      images: boolean
-    }
-    expect(body.configured).toBe(true)
-    expect(body.onUpload).toBe(false)
+      configured: boolean;
+      onUpload: boolean;
+      images: boolean;
+    };
+    expect(body.configured).toBe(true);
+    expect(body.onUpload).toBe(false);
     // This test environment binds no Images, which is the bare `wrangler dev`
     // shape: originals are described and the run panel says it costs more.
-    expect(body.images).toBe(false)
-  })
-})
+    expect(body.images).toBe(false);
+  });
+});
 
 /* -------------------------------------------------------------- role gate --- */
 
@@ -1298,66 +1310,72 @@ describe('POST {base}/api/assets/describe', () => {
  * Its own `createFolio` with a provider configured, for `bulk.test.ts`'s reason:
  * the folio built above runs `auth: 'open'`, where there is nothing to refuse.
  */
-describe('the run is ADMIN and the single asset is ASSETS', () => {
+describe("the run is ADMIN and the single asset is ASSETS", () => {
   const auth: AuthConfig<Cloudflare.Env> = {
     providers: [magicLink<Cloudflare.Env>({ send: () => {} })],
-  }
+  };
 
   const gated = createFolio<Cloudflare.Env>({
     blocks: [pageRoot],
     types,
     bindings,
-    basePath: '/folio',
-    assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
+    basePath: "/folio",
+    assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
     auth,
-    route: (p) => (p ? `/${p}` : '/'),
-    describe: { fn: async () => ({ alt: 'A photograph' }) },
-  })
+    route: (p) => (p ? `/${p}` : "/"),
+    describe: { fn: async () => ({ alt: "A photograph" }) },
+  });
 
-  let people = 0
+  let people = 0;
   async function cookieFor(role: Role): Promise<string> {
-    people += 1
+    people += 1;
     const user = await createUser(env.DB, {
       email: `${role}-${people}@describe.test`,
       name: role,
       role,
-    })
-    const session = await createSession(env.DB, user.id)
-    return `${SECURE_COOKIE}=${session.token}`
+    });
+    const session = await createSession(env.DB, user.id);
+    return `${SECURE_COOKIE}=${session.token}`;
   }
 
   const call = (path: string, cookie: string, body?: unknown) =>
     gated.handle(
       new Request(`${ORIGIN}/folio/api${path}`, {
-        method: 'POST',
-        headers: { cookie, 'content-type': 'application/json' },
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
       env,
       createExecutionContext(),
-    )
+    );
 
-  it('lets an editor describe one file and refuses them the run', async () => {
-    const cookie = await cookieFor('editor')
-    const id = await seedAsset()
-    expect((await call(`/assets/${id}/describe`, cookie))?.status).toBe(200)
-    expect((await call('/assets/describe', cookie, { selection: { ids: [id] } }))?.status).toBe(403)
-  })
+  it("lets an editor describe one file and refuses them the run", async () => {
+    const cookie = await cookieFor("editor");
+    const id = await seedAsset();
+    expect((await call(`/assets/${id}/describe`, cookie))?.status).toBe(200);
+    expect((await call("/assets/describe", cookie, { selection: { ids: [id] } }))?.status).toBe(
+      403,
+    );
+  });
 
-  it('lets an admin do both', async () => {
-    const cookie = await cookieFor('admin')
-    const id = await seedAsset()
-    expect((await call('/assets/describe', cookie, { selection: { ids: [id] } }))?.status).toBe(200)
-    expect((await stored(id)).altAuto).toBe('A photograph')
-  })
+  it("lets an admin do both", async () => {
+    const cookie = await cookieFor("admin");
+    const id = await seedAsset();
+    expect((await call("/assets/describe", cookie, { selection: { ids: [id] } }))?.status).toBe(
+      200,
+    );
+    expect((await stored(id)).altAuto).toBe("A photograph");
+  });
 
-  it('refuses a viewer both', async () => {
-    const cookie = await cookieFor('viewer')
-    const id = await seedAsset()
-    expect((await call(`/assets/${id}/describe`, cookie))?.status).toBe(403)
-    expect((await call('/assets/describe', cookie, { selection: { ids: [id] } }))?.status).toBe(403)
-  })
-})
+  it("refuses a viewer both", async () => {
+    const cookie = await cookieFor("viewer");
+    const id = await seedAsset();
+    expect((await call(`/assets/${id}/describe`, cookie))?.status).toBe(403);
+    expect((await call("/assets/describe", cookie, { selection: { ids: [id] } }))?.status).toBe(
+      403,
+    );
+  });
+});
 
 /* -------------------------------------------------------------- on upload --- */
 
@@ -1366,10 +1384,10 @@ describe('the run is ADMIN and the single asset is ASSETS', () => {
  * describe skips anything that is not an image before `fn` is reached. */
 const PNG_1X1 = Uint8Array.from(
   atob(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   ),
   (ch) => ch.charCodeAt(0),
-)
+);
 
 /**
  * **Both upload routes, and the same four assertions over each.**
@@ -1384,70 +1402,70 @@ const PNG_1X1 = Uint8Array.from(
  * rather than tested once and assumed.
  */
 describe.each([
-  ['the admin route', '/folio/api/assets'],
-  ['the versioned route', '/folio/api/v1/assets'],
-])('describing a new upload through %s', (_label, path) => {
+  ["the admin route", "/folio/api/assets"],
+  ["the versioned route", "/folio/api/v1/assets"],
+])("describing a new upload through %s", (_label, path) => {
   const upload = async (folio: ReturnType<typeof makeFolio>) => {
-    const ctx = createExecutionContext()
+    const ctx = createExecutionContext();
     const res = await folio.handle(
       new Request(`${ORIGIN}${path}?filename=uploaded.png`, {
-        method: 'POST',
-        headers: { 'content-type': 'image/png' },
+        method: "POST",
+        headers: { "content-type": "image/png" },
         body: PNG_1X1,
       }),
       env,
       ctx,
-    )
+    );
     // The background work is what `waitUntil` holds, so a test that did not
     // wait on the context would assert against a describe still in flight.
-    await waitOnExecutionContext(ctx)
-    return res
-  }
+    await waitOnExecutionContext(ctx);
+    return res;
+  };
 
-  it('describes it in the background without slowing or failing the upload', async () => {
-    const fn = vi.fn(async () => ({ alt: 'A tiny transparent square' }))
-    const res = await upload(makeFolio({ fn }))
+  it("describes it in the background without slowing or failing the upload", async () => {
+    const fn = vi.fn(async () => ({ alt: "A tiny transparent square" }));
+    const res = await upload(makeFolio({ fn }));
 
-    expect(res?.status).toBe(201)
-    const { asset } = (await res!.json()) as { asset: { id: string; altAuto: string } }
+    expect(res?.status).toBe(201);
+    const { asset } = (await res!.json()) as { asset: { id: string; altAuto: string } };
     // The response is the row as it was written, *before* the describe: the
     // upload does not wait for a model call and its body cannot claim to.
-    expect(asset.altAuto).toBe('')
-    expect(fn).toHaveBeenCalledTimes(1)
-    expect((await stored(asset.id)).altAuto).toBe('A tiny transparent square')
-  })
+    expect(asset.altAuto).toBe("");
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect((await stored(asset.id)).altAuto).toBe("A tiny transparent square");
+  });
 
-  it('does not describe it when the host turned onUpload off', async () => {
-    const fn = vi.fn(async () => ({ alt: 'Never asked for' }))
-    const res = await upload(makeFolio({ fn, onUpload: false }))
+  it("does not describe it when the host turned onUpload off", async () => {
+    const fn = vi.fn(async () => ({ alt: "Never asked for" }));
+    const res = await upload(makeFolio({ fn, onUpload: false }));
 
-    expect(res?.status).toBe(201)
-    expect(fn).toHaveBeenCalledTimes(0)
-    const { asset } = (await res!.json()) as { asset: { id: string } }
-    expect((await stored(asset.id)).describedAt).toBeNull()
-  })
+    expect(res?.status).toBe(201);
+    expect(fn).toHaveBeenCalledTimes(0);
+    const { asset } = (await res!.json()) as { asset: { id: string } };
+    expect((await stored(asset.id)).describedAt).toBeNull();
+  });
 
-  it('does not describe anything at all with no describe configured', async () => {
-    const res = await upload(makeFolio())
-    expect(res?.status).toBe(201)
-    const { asset } = (await res!.json()) as { asset: { id: string } }
-    expect((await stored(asset.id)).describedAt).toBeNull()
-  })
+  it("does not describe anything at all with no describe configured", async () => {
+    const res = await upload(makeFolio());
+    expect(res?.status).toBe(201);
+    const { asset } = (await res!.json()) as { asset: { id: string } };
+    expect((await stored(asset.id)).describedAt).toBeNull();
+  });
 
-  it('is a 201 even when the model call fails, and records why', async () => {
+  it("is a 201 even when the model call fails, and records why", async () => {
     const res = await upload(
       makeFolio({
         async fn() {
-          throw new Error('the provider timed out')
+          throw new Error("the provider timed out");
         },
       }),
-    )
+    );
 
-    expect(res?.status).toBe(201)
-    const { asset } = (await res!.json()) as { asset: { id: string } }
-    expect((await stored(asset.id)).describeError).toBe('the provider timed out')
-  })
-})
+    expect(res?.status).toBe(201);
+    const { asset } = (await res!.json()) as { asset: { id: string } };
+    expect((await stored(asset.id)).describeError).toBe("the provider timed out");
+  });
+});
 
 /**
  * The adapter, once, through the real seam — because everything else about it
@@ -1462,32 +1480,32 @@ describe.each([
  * tagging row through the same clamping and vocabulary matching every other
  * `fn` goes through.
  */
-describe('anthropicDescriber, through the seam', () => {
+describe("anthropicDescriber, through the seam", () => {
   afterEach(() => {
-    vi.unstubAllGlobals()
-  })
+    vi.unstubAllGlobals();
+  });
 
-  it('is a `describe.fn`, and what it answers is clamped and matched like any other', async () => {
-    const { tag: headshot } = await ensureTag(env.DB, 'Headshot')
-    const id = await seedAsset({ filename: 'portrait.png' })
+  it("is a `describe.fn`, and what it answers is clamped and matched like any other", async () => {
+    const { tag: headshot } = await ensureTag(env.DB, "Headshot");
+    const id = await seedAsset({ filename: "portrait.png" });
 
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(
         async () =>
           new Response(
             JSON.stringify({
-              stop_reason: 'end_turn',
+              stop_reason: "end_turn",
               content: [
                 {
-                  type: 'text',
+                  type: "text",
                   text: `Here you are:\n\`\`\`json\n${JSON.stringify({
-                    alt: 'A man in a grey coat',
+                    alt: "A man in a grey coat",
                     // Over the 2,000-character cap: clamped, not refused, by
                     // the same `clampText` a hand-written `fn` meets.
-                    description: 'x'.repeat(2_400),
+                    description: "x".repeat(2_400),
                     // One that exists, spelled as a name, and one that does not.
-                    tags: ['headshot', 'product-shot'],
+                    tags: ["headshot", "product-shot"],
                   })}\n\`\`\``,
                 },
               ],
@@ -1495,49 +1513,49 @@ describe('anthropicDescriber, through the seam', () => {
             { status: 200 },
           ),
       ),
-    )
+    );
 
     const outcome = await describeAsset(
-      depsFor(anthropicDescriber({ apiKey: 'sk-ant-test' })),
+      depsFor(anthropicDescriber({ apiKey: "sk-ant-test" })),
       await stored(id),
-    )
+    );
 
-    expect(outcome.error).toBeNull()
-    expect(outcome.tagsIgnored).toBe(1)
-    const row = await stored(id)
-    expect(row.altAuto).toBe('A man in a grey coat')
-    expect(row.descriptionAuto).toHaveLength(MAX_DESCRIBE_DESCRIPTION)
+    expect(outcome.error).toBeNull();
+    expect(outcome.tagsIgnored).toBe(1);
+    const row = await stored(id);
+    expect(row.altAuto).toBe("A man in a grey coat");
+    expect(row.descriptionAuto).toHaveLength(MAX_DESCRIBE_DESCRIPTION);
     // The human columns are untouched, which is the property the whole feature
     // rests on and is no different for an adapter than for anything else.
-    expect(row.alt).toBe('')
-    expect(row.description).toBe('')
+    expect(row.alt).toBe("");
+    expect(row.description).toBe("");
     expect(await tagsForAssets(env.DB, [id])).toEqual(
       new Map([[id, [expect.objectContaining({ id: headshot.id })]]]),
-    )
-  })
+    );
+  });
 
-  it('records a provider failure in the column rather than throwing out of the run', async () => {
-    const id = await seedAsset({ filename: 'portrait.png' })
+  it("records a provider failure in the column rather than throwing out of the run", async () => {
+    const id = await seedAsset({ filename: "portrait.png" });
     vi.stubGlobal(
-      'fetch',
+      "fetch",
       vi.fn(async () => new Response('{"error":{"message":"overloaded"}}', { status: 529 })),
-    )
+    );
 
     const outcome = await describeAsset(
-      depsFor(anthropicDescriber({ apiKey: 'sk-ant-test' })),
+      depsFor(anthropicDescriber({ apiKey: "sk-ant-test" })),
       await stored(id),
-    )
+    );
 
-    expect(outcome.error).toMatch(/^anthropic: 529/)
-    const row = await stored(id)
+    expect(outcome.error).toMatch(/^anthropic: 529/);
+    const row = await stored(id);
     // Tried and failed, which is a different row from never tried: it leaves
     // the backlog, and an explicit run over `describe_error is not null` is
     // what brings it back.
-    expect(row.describedAt).not.toBeNull()
-    expect(row.describeError).toMatch(/overloaded/)
-  })
+    expect(row.describedAt).not.toBeNull();
+    expect(row.describeError).toMatch(/overloaded/);
+  });
 
-  it('reports the resize that failed, not the binding, and spends no call doing it', async () => {
+  it("reports the resize that failed, not the binding, and spends no call doing it", async () => {
     // #21 end to end, which is the only place the two halves meet: a file the
     // Images binding refuses used to arrive at `imageBlock` as the full-size
     // original, fail the 5MB inline check, and be reported as a missing binding
@@ -1545,45 +1563,45 @@ describe('anthropicDescriber, through the seam', () => {
     // the ceiling, so this is the reported failure rather than a description of
     // it — under the old fallback the row reads "the image is 6.0MB, over the
     // API's 5MB inline limit" and no assertion below survives.
-    const oversized = 'x'.repeat(6 * 1024 * 1024)
+    const oversized = "x".repeat(6 * 1024 * 1024);
     const id = await seedAsset({
-      filename: 'safari.jpg',
-      contentType: 'image/jpeg',
+      filename: "safari.jpg",
+      contentType: "image/jpeg",
       body: oversized,
-    })
+    });
     const transformer = {
       transform: () => transformer,
       draw: () => transformer,
       output: async () => {
-        throw new Error('ERROR 9412: Image too large')
+        throw new Error("ERROR 9412: Image too large");
       },
-    } as unknown as ImageTransformer
+    } as unknown as ImageTransformer;
     const images = {
       input: () => transformer,
       info: async () => {
-        throw new Error('not exercised by this test')
+        throw new Error("not exercised by this test");
       },
       hosted: {},
-    } as unknown as ImagesBinding
+    } as unknown as ImagesBinding;
 
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }))
-    vi.stubGlobal('fetch', fetchMock)
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
 
     const outcome = await describeAsset(
-      depsFor(anthropicDescriber({ apiKey: 'sk-ant-test' }), images),
+      depsFor(anthropicDescriber({ apiKey: "sk-ant-test" }), images),
       await stored(id),
-    )
+    );
 
-    expect(outcome.error).toMatch(/Images binding could not resize/)
-    expect(outcome.error).toMatch(/ERROR 9412/)
-    expect(outcome.error).not.toMatch(/over the API's 5MB/)
-    expect(outcome.error).not.toMatch(/configure an Images binding/)
+    expect(outcome.error).toMatch(/Images binding could not resize/);
+    expect(outcome.error).toMatch(/ERROR 9412/);
+    expect(outcome.error).not.toMatch(/over the API's 5MB/);
+    expect(outcome.error).not.toMatch(/configure an Images binding/);
     // Not one paid request: the failure is known before the body is built.
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-})
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
 
-describe('describing a new upload', () => {
+describe("describing a new upload", () => {
   /**
    * The half a route test cannot reach: `describeAsset` records a *model*
    * failure, but a D1 or R2 failure it propagates — and by the time this runs
@@ -1591,17 +1609,17 @@ describe('describing a new upload', () => {
    * promise handed to `waitUntil` is an unhandled rejection in the host's Worker
    * for an upload that succeeded, so the wrapper has to swallow it.
    */
-  it('swallows a platform failure rather than rejecting inside waitUntil', async () => {
+  it("swallows a platform failure rather than rejecting inside waitUntil", async () => {
     const broken = {
       prepare() {
-        throw new Error('D1 is having a day')
+        throw new Error("D1 is having a day");
       },
       batch: async () => [],
-    } as unknown as FolioDb
-    const row = await stored(await seedAsset())
+    } as unknown as FolioDb;
+    const row = await stored(await seedAsset());
 
     await expect(
-      describeOnUpload({ ...runDeps(async () => ({ alt: 'x' })), db: broken }, row),
-    ).resolves.toBeUndefined()
-  })
-})
+      describeOnUpload({ ...runDeps(async () => ({ alt: "x" })), db: broken }, row),
+    ).resolves.toBeUndefined();
+  });
+});

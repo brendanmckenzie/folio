@@ -38,15 +38,15 @@
  * in *Unfiled*. Filing is meant to be cheap to undo: an editor who miscategorised
  * forty photographs must not be able to delete them by tidying up.
  */
-import type { AssetFolder } from '../core/assets'
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
-import { DEFAULT_SITE } from '../core/sites'
-import { slugify } from '../core/story'
-import type { FolioDb } from './db'
-import { FolioError } from './errors'
-import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
+import type { AssetFolder } from "../core/assets";
+import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
+import { DEFAULT_SITE } from "../core/sites";
+import { slugify } from "../core/story";
+import type { FolioDb } from "./db";
+import { FolioError } from "./errors";
+import { type Keyset, keysetWhere, orderBy, whereOf } from "./keyset";
 
-const COLS = `id, parent_id as parentId, name, path, created_at as createdAt`
+const COLS = `id, parent_id as parentId, name, path, created_at as createdAt`;
 
 /**
  * The one ordering, and the only list in this repo whose keyset is a single
@@ -54,11 +54,11 @@ const COLS = `id, parent_id as parentId, name, path, created_at as createdAt`
  * of a lone component. It is also the whole point of decision 3: this ordering
  * *is* tree order, so paging it needs no second column and no client-side sort.
  */
-const FOLDER_ORDER: Keyset = { columns: ['path'], direction: 'asc' }
+const FOLDER_ORDER: Keyset = { columns: ["path"], direction: "asc" };
 
 /** `fld_<12 hex>`, minted exactly the way `uploadAsset` mints an asset id. */
 export function newFolderId(): string {
-  return `fld_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+  return `fld_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
 /**
@@ -78,7 +78,7 @@ export function subtreeWhere(column: string, path: string): { sql: string; binds
   return {
     sql: `(${column} = ? or (${column} > ? and ${column} < ?))`,
     binds: [path, `${path}/`, `${path}0`],
-  }
+  };
 }
 
 /**
@@ -92,17 +92,17 @@ export function subtreeWhere(column: string, path: string): { sql: string; binds
  * decision at each call site and a boolean argument hides which one was meant.
  */
 export function descendantsWhere(column: string, path: string): { sql: string; binds: string[] } {
-  return { sql: `(${column} > ? and ${column} < ?)`, binds: [`${path}/`, `${path}0`] }
+  return { sql: `(${column} > ? and ${column} < ?)`, binds: [`${path}/`, `${path}0`] };
 }
 
 /** Where a folder named `name` sits under `parentPath` (null for the top level). */
 function childPath(parentPath: string | null, name: string): string {
-  const slug = slugify(name)
-  return parentPath ? `${parentPath}/${slug}` : slug
+  const slug = slugify(name);
+  return parentPath ? `${parentPath}/${slug}` : slug;
 }
 
 export async function folderById(db: FolioDb, id: string): Promise<AssetFolder | null> {
-  return db.prepare(`select ${COLS} from asset_folders where id = ?`).bind(id).first<AssetFolder>()
+  return db.prepare(`select ${COLS} from asset_folders where id = ?`).bind(id).first<AssetFolder>();
 }
 
 /**
@@ -112,10 +112,10 @@ export async function folderById(db: FolioDb, id: string): Promise<AssetFolder |
  */
 export async function folderSiteOf(db: FolioDb, id: string): Promise<string | null> {
   const row = await db
-    .prepare('select site_id as site from asset_folders where id = ?')
+    .prepare("select site_id as site from asset_folders where id = ?")
     .bind(id)
-    .first<{ site: string }>()
-  return row?.site ?? null
+    .first<{ site: string }>();
+  return row?.site ?? null;
 }
 
 /**
@@ -130,7 +130,7 @@ export async function folderByPath(
   return db
     .prepare(`select ${COLS} from asset_folders where site_id = ? and path = ?`)
     .bind(site, path)
-    .first<AssetFolder>()
+    .first<AssetFolder>();
 }
 
 /**
@@ -142,7 +142,7 @@ async function ownFolder(db: FolioDb, id: string, site: string): Promise<AssetFo
   return db
     .prepare(`select ${COLS} from asset_folders where id = ? and site_id = ?`)
     .bind(id, site)
-    .first<AssetFolder>()
+    .first<AssetFolder>();
 }
 
 export interface ListFoldersOptions {
@@ -151,12 +151,12 @@ export interface ListFoldersOptions {
    * and an asset is only ever filed in a folder of its own scope. Defaults to
    * `default`; bound either way, because `asset_folders_path` leads with `site_id`.
    */
-  site?: string
-  limit?: number
-  cursor?: string
+  site?: string;
+  limit?: number;
+  cursor?: string;
   /** Adds `total`. One extra `count(*)`, only when asked
    * (`../../docs/specs/foundation/pagination.md` decision 5). */
-  count?: boolean
+  count?: boolean;
 }
 
 /**
@@ -173,15 +173,15 @@ export async function listFolders(
   db: FolioDb,
   opts: ListFoldersOptions = {},
 ): Promise<Page<AssetFolder>> {
-  const limit = clampLimit(opts.limit, 100, 500)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const resume = keysetWhere(FOLDER_ORDER, cursor)
-  const site = opts.site ?? DEFAULT_SITE
+  const limit = clampLimit(opts.limit, 100, 500);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const resume = keysetWhere(FOLDER_ORDER, cursor);
+  const site = opts.site ?? DEFAULT_SITE;
 
   const [rows, total] = await Promise.all([
     db
       .prepare(
-        `select ${COLS} from asset_folders ${whereOf('site_id = ?', resume.sql)} ${orderBy(FOLDER_ORDER)} limit ?`,
+        `select ${COLS} from asset_folders ${whereOf("site_id = ?", resume.sql)} ${orderBy(FOLDER_ORDER)} limit ?`,
       )
       .bind(site, ...resume.binds, limit + 1)
       .all<AssetFolder>(),
@@ -189,14 +189,14 @@ export async function listFolders(
     // counts the whole scope, which is what a header means by "of 43".
     opts.count
       ? db
-          .prepare('select count(*) as n from asset_folders where site_id = ?')
+          .prepare("select count(*) as n from asset_folders where site_id = ?")
           .bind(site)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  const page = paginate(rows.results, limit, (row) => [row.path])
-  return total ? { ...page, total: total.n } : page
+  const page = paginate(rows.results, limit, (row) => [row.path]);
+  return total ? { ...page, total: total.n } : page;
 }
 
 /**
@@ -216,17 +216,17 @@ async function refuseCollision(
   exceptId: string | null,
 ): Promise<void> {
   const clash = await db
-    .prepare('select id, name from asset_folders where site_id = ? and path = ?')
+    .prepare("select id, name from asset_folders where site_id = ? and path = ?")
     .bind(site, path)
-    .first<{ id: string; name: string }>()
+    .first<{ id: string; name: string }>();
   if (clash && clash.id !== exceptId) {
-    throw new FolioError('conflict', `A folder named '${clash.name}' already occupies '${path}'`)
+    throw new FolioError("conflict", `A folder named '${clash.name}' already occupies '${path}'`);
   }
 }
 
 export interface CreateFolderInput {
-  name: string
-  parentId?: string | null
+  name: string;
+  parentId?: string | null;
 }
 
 export async function createFolder(
@@ -235,12 +235,12 @@ export async function createFolder(
   /** The scope the folder is created in. A parent in another scope is an unknown one. */
   site: string = DEFAULT_SITE,
 ): Promise<AssetFolder> {
-  const parentId = input.parentId ?? null
-  const parent = parentId === null ? null : await ownFolder(db, parentId, site)
-  if (parentId !== null && !parent) throw new FolioError('bad_request', 'Unknown parent folder')
+  const parentId = input.parentId ?? null;
+  const parent = parentId === null ? null : await ownFolder(db, parentId, site);
+  if (parentId !== null && !parent) throw new FolioError("bad_request", "Unknown parent folder");
 
-  const path = childPath(parent?.path ?? null, input.name)
-  await refuseCollision(db, site, path, null)
+  const path = childPath(parent?.path ?? null, input.name);
+  await refuseCollision(db, site, path, null);
 
   const row: AssetFolder = {
     id: newFolderId(),
@@ -248,22 +248,22 @@ export async function createFolder(
     name: input.name,
     path,
     createdAt: Date.now(),
-  }
+  };
   await db
     .prepare(
       `insert into asset_folders (id, parent_id, name, path, created_at, site_id)
        values (?, ?, ?, ?, ?, ?)`,
     )
     .bind(row.id, row.parentId, row.name, row.path, row.createdAt, site)
-    .run()
-  return row
+    .run();
+  return row;
 }
 
 export interface FolderPatch {
-  name?: string
+  name?: string;
   /** `null` is the top level. Absent means "leave the parent alone", which is
    * why this is checked with `!== undefined` and never for truthiness. */
-  parentId?: string | null
+  parentId?: string | null;
 }
 
 /**
@@ -306,32 +306,32 @@ export async function updateFolder(
   /** The scope the folder must be in: another scope's is absent (null). */
   site: string = DEFAULT_SITE,
 ): Promise<AssetFolder | null> {
-  const row = await ownFolder(db, id, site)
-  if (!row) return null
+  const row = await ownFolder(db, id, site);
+  if (!row) return null;
 
-  const name = patch.name ?? row.name
-  const parentId = patch.parentId !== undefined ? patch.parentId : row.parentId
+  const name = patch.name ?? row.name;
+  const parentId = patch.parentId !== undefined ? patch.parentId : row.parentId;
 
-  let parentPath: string | null = null
+  let parentPath: string | null = null;
   if (parentId !== null) {
-    const parent = await ownFolder(db, parentId, site)
-    if (!parent) throw new FolioError('bad_request', 'Unknown parent folder')
+    const parent = await ownFolder(db, parentId, site);
+    if (!parent) throw new FolioError("bad_request", "Unknown parent folder");
     if (parent.path === row.path || parent.path.startsWith(`${row.path}/`)) {
       throw new FolioError(
-        'conflict',
+        "conflict",
         parent.id === id
           ? `Cannot move '${row.name}' into itself ('${row.path}')`
           : `Cannot move '${row.name}' into its own descendant ('${parent.path}')`,
-      )
+      );
     }
-    parentPath = parent.path
+    parentPath = parent.path;
   }
 
-  const path = childPath(parentPath, name)
-  if (path === row.path && name === row.name && parentId === row.parentId) return row
-  if (path !== row.path) await refuseCollision(db, site, path, id)
+  const path = childPath(parentPath, name);
+  if (path === row.path && name === row.name && parentId === row.parentId) return row;
+  if (path !== row.path) await refuseCollision(db, site, path, id);
 
-  const range = subtreeWhere('path', row.path)
+  const range = subtreeWhere("path", row.path);
   await db.batch([
     // Within the scope: another site's `press/…` is not this subtree, whatever its
     // path says.
@@ -344,10 +344,10 @@ export async function updateFolder(
     // By id, and after the rewrite, which matched on the old path. `name` and
     // `parent_id` are the structure; `path` is the query key derived from it.
     db
-      .prepare('update asset_folders set parent_id = ?, name = ? where id = ?')
+      .prepare("update asset_folders set parent_id = ?, name = ? where id = ?")
       .bind(parentId, name, id),
-  ])
-  return { ...row, name, parentId, path }
+  ]);
+  return { ...row, name, parentId, path };
 }
 
 /** `updateFolder` under the name the spec's phase plan uses. One implementation
@@ -358,7 +358,7 @@ export function renameFolder(
   name: string,
   site: string = DEFAULT_SITE,
 ): Promise<AssetFolder | null> {
-  return updateFolder(db, id, { name }, site)
+  return updateFolder(db, id, { name }, site);
 }
 
 /** The same. `null` moves the folder to the top level. */
@@ -368,14 +368,14 @@ export function moveFolder(
   parentId: string | null,
   site: string = DEFAULT_SITE,
 ): Promise<AssetFolder | null> {
-  return updateFolder(db, id, { parentId }, site)
+  return updateFolder(db, id, { parentId }, site);
 }
 
 export interface FolderDeletion {
   /** Direct children lifted to this folder's own parent. */
-  reparented: number
+  reparented: number;
   /** Assets filed directly here, now back in *Unfiled*. **Not deleted.** */
-  unfiled: number
+  unfiled: number;
 }
 
 /**
@@ -407,15 +407,15 @@ export async function deleteFolder(
   /** The scope the folder must be in: another scope's is absent (null). */
   site: string = DEFAULT_SITE,
 ): Promise<FolderDeletion | null> {
-  const row = await ownFolder(db, id, site)
-  if (!row) return null
+  const row = await ownFolder(db, id, site);
+  if (!row) return null;
 
   // The parent's path taken from my own, rather than by reading the parent row:
   // the rewrite operates on paths, so deriving the prefix from the path it is
   // rewriting cannot disagree with itself even if `parent_id` were dangling.
-  const cut = row.path.lastIndexOf('/')
-  const prefix = cut === -1 ? '' : `${row.path.slice(0, cut)}/`
-  const range = descendantsWhere('path', row.path)
+  const cut = row.path.lastIndexOf("/");
+  const prefix = cut === -1 ? "" : `${row.path.slice(0, cut)}/`;
+  const range = descendantsWhere("path", row.path);
 
   // A child whose lifted path is already taken — delete `a/x` where both `a/x/y`
   // and `a/y` exist — refused before anything is written, and named. Only direct
@@ -430,24 +430,24 @@ export async function deleteFolder(
         where c.parent_id = ? and o.id <> c.id`,
     )
     .bind(prefix, row.path, id)
-    .first<{ name: string; at: string }>()
+    .first<{ name: string; at: string }>();
   if (clash) {
     throw new FolioError(
-      'conflict',
+      "conflict",
       `Cannot delete '${row.name}': its subfolder '${clash.name}' would collide with '${clash.at}'`,
-    )
+    );
   }
 
   const [children, assets] = await Promise.all([
     db
-      .prepare('select count(*) as n from asset_folders where parent_id = ?')
+      .prepare("select count(*) as n from asset_folders where parent_id = ?")
       .bind(id)
       .first<{ n: number }>(),
     db
-      .prepare('select count(*) as n from assets where folder_id = ?')
+      .prepare("select count(*) as n from assets where folder_id = ?")
       .bind(id)
       .first<{ n: number }>(),
-  ])
+  ]);
 
   await db.batch([
     // `+ 2` rather than `+ 1`: this drops the separator too, because the segment
@@ -458,10 +458,10 @@ export async function deleteFolder(
          where site_id = ? and ${range.sql}`,
       )
       .bind(prefix, row.path, site, ...range.binds),
-    db.prepare('update asset_folders set parent_id = ? where parent_id = ?').bind(row.parentId, id),
-    db.prepare('update assets set folder_id = null where folder_id = ?').bind(id),
-    db.prepare('delete from asset_folders where id = ? and site_id = ?').bind(id, site),
-  ])
+    db.prepare("update asset_folders set parent_id = ? where parent_id = ?").bind(row.parentId, id),
+    db.prepare("update assets set folder_id = null where folder_id = ?").bind(id),
+    db.prepare("delete from asset_folders where id = ? and site_id = ?").bind(id, site),
+  ]);
 
-  return { reparented: children?.n ?? 0, unfiled: assets?.n ?? 0 }
+  return { reparented: children?.n ?? 0, unfiled: assets?.n ?? 0 };
 }

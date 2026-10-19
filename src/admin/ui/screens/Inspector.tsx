@@ -1,16 +1,16 @@
-import { useState } from 'react'
-import type { Blok, Doc } from '../../../core/doc'
-import type { LocaleConfig } from '../../../core/locales'
-import type { Resolution } from '../../../core/resolve'
-import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import type { StoryMeta } from '../../../core/story'
-import type { Blocks } from '../../hooks/useBlocks'
-import { type StoryStore, useStoreState } from '../../store'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
-import { FieldRow } from './fields/FieldRow'
-import { PageAddress } from './fields/PageAddress'
-import css from './Inspector.module.css'
+import { useState } from "react";
+import type { Blok, Doc } from "../../../core/doc";
+import type { LocaleConfig } from "../../../core/locales";
+import type { Resolution } from "../../../core/resolve";
+import type { DocumentType, SchemaIndex } from "../../../core/schema";
+import type { StoryMeta } from "../../../core/story";
+import type { Blocks } from "../../hooks/useBlocks";
+import { type StoryStore, useStoreState } from "../../store";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
+import { FieldRow } from "./fields/FieldRow";
+import { PageAddress } from "./fields/PageAddress";
+import css from "./Inspector.module.css";
 import {
   belowBlok,
   canFocus,
@@ -23,7 +23,7 @@ import {
   layerMutations,
   layerPrefix,
   visibleEntries,
-} from './inspector-model'
+} from "./inspector-model";
 
 /**
  * What the inspector needs, which is a subset of `EditorShell.tsx`'s `EditorSlot` —
@@ -35,40 +35,40 @@ import {
 export interface InspectorProps {
   /** For presence and for the focused-field record. Never for reads of the document:
    * `blok` is out of `shownDoc`, which is the version being viewed when one is. */
-  store: StoryStore
-  schema: SchemaIndex
-  types: readonly DocumentType[]
-  apiBase: string
+  store: StoryStore;
+  schema: SchemaIndex;
+  types: readonly DocumentType[];
+  apiBase: string;
   /** The bare mount, for `/asset/:key`. */
-  mount: string
-  locales: LocaleConfig | undefined
-  locale: string
-  isSourceLocale: boolean
-  resolution: Resolution
+  mount: string;
+  locales: LocaleConfig | undefined;
+  locale: string;
+  isSourceLocale: boolean;
+  resolution: Resolution;
   /** The blok to draw: out of the version being viewed, when one is on screen. */
-  blok: Blok | null
+  blok: Blok | null;
   /** Viewing a past version, or a role that may not edit. */
-  readOnly: boolean
-  blocks: Blocks
-  story: StoryMeta
+  readOnly: boolean;
+  blocks: Blocks;
+  story: StoryMeta;
   /** The document has a URL of its own, so the root block's row also edits its
    * address. False for a record and for a global. */
-  routed: boolean
+  routed: boolean;
   /** The selection is the document root, and it is editable. */
-  isRootBlok: boolean
+  isRootBlok: boolean;
   /** A block inside a global was clicked while previewing something else. */
-  globalHint: { name: string; label: string } | null
-  onEditGlobal: (name: string) => void
-  onNotice: (message: string) => void
+  globalHint: { name: string; label: string } | null;
+  onEditGlobal: (name: string) => void;
+  onNotice: (message: string) => void;
   /**
    * There is no stage: this document is a form, so the inspector *is* the screen. The
    * fields do not change; what changes is that nothing above draws the block's label,
    * so this does.
    */
-  form: boolean
+  form: boolean;
   /** The caller's story row is stale after a rename. Optional: without it the slug
    * still changes, and only the URL line beside it goes stale. */
-  onStoryChanged?: () => void
+  onStoryChanged?: () => void;
   /**
    * Focus mode, when the **shell** owns which field is open — which it must, because
    * `⌘⏎` is one entry in `ui/shortcuts.ts` and not a chord this component binds.
@@ -79,7 +79,7 @@ export interface InspectorProps {
    * Absent means this component owns it, which is what makes the expand control in a
    * richtext toolbar work before the chord is wired.
    */
-  focus?: { field: string | null; open: (field: string | null) => void }
+  focus?: { field: string | null; open: (field: string | null) => void };
   /**
    * The document `blok` is drawn out of, and — on a deployment with `sites`, for a
    * global's layer — how each field stands against the layers below it
@@ -87,8 +87,8 @@ export interface InspectorProps {
    * record or the shared scope's own layer, and then no field carries a label or an
    * action**: `layers` is the only thing that switches them on.
    */
-  doc?: Doc | null
-  layers?: LayerInfo
+  doc?: Doc | null;
+  layers?: LayerInfo;
 }
 
 /**
@@ -118,8 +118,8 @@ export interface InspectorProps {
  *    getting away with not having.
  */
 export function Inspector(props: InspectorProps) {
-  const { store, schema, blok, readOnly, blocks, locale, isSourceLocale, locales } = props
-  const state = useStoreState(store)
+  const { store, schema, blok, readOnly, blocks, locale, isSourceLocale, locales } = props;
+  const state = useStoreState(store);
 
   /**
    * Which field focus mode holds. Uncontrolled by default and controlled when the
@@ -127,15 +127,15 @@ export function Inspector(props: InspectorProps) {
    * shell has to be able to *open* this from `⌘⏎`, and a ref API for one boolean is
    * more machinery than a prop.
    */
-  const own = useState<string | null>(null)
-  const expandedField = props.focus ? props.focus.field : own[0]
-  const setExpandedField = props.focus ? props.focus.open : own[1]
+  const own = useState<string | null>(null);
+  const expandedField = props.focus ? props.focus.field : own[0];
+  const setExpandedField = props.focus ? props.focus.open : own[1];
 
-  const localeLabel = locales?.available.find((l) => l.code === locale)?.label ?? locale
+  const localeLabel = locales?.available.find((l) => l.code === locale)?.label ?? locale;
   const sourceLabel =
     locales?.available.find((l) => l.code === locales.default)?.label ??
     locales?.default ??
-    'source'
+    "source";
 
   if (props.globalHint) {
     return (
@@ -154,7 +154,7 @@ export function Inspector(props: InspectorProps) {
           }
         />
       </div>
-    )
+    );
   }
 
   if (!blok) {
@@ -165,10 +165,10 @@ export function Inspector(props: InspectorProps) {
           body="Pick a block in the preview or in the rail beside it."
         />
       </div>
-    )
+    );
   }
 
-  const def = schema[blok.type]
+  const def = schema[blok.type];
   if (!def) {
     // The same posture an unknown collection type gets: say so, do not pretend. A
     // block whose type no schema declares still has data, and hiding it is how content
@@ -180,10 +180,10 @@ export function Inspector(props: InspectorProps) {
           body="No block by that name is declared. Its content is untouched — a schema migration is what reaches it."
         />
       </div>
-    )
+    );
   }
 
-  const entries = visibleEntries(def.fields, blok.data)
+  const entries = visibleEntries(def.fields, blok.data);
 
   return (
     // The gutter and the rhythm are the panel's, and form mode widens both: the same
@@ -225,7 +225,7 @@ export function Inspector(props: InspectorProps) {
           />
           <p className={css.url}>
             <span>URL</span>
-            <code>{props.story.url ?? `/${props.story.path ?? ''}`}</code>
+            <code>{props.story.url ?? `/${props.story.path ?? ""}`}</code>
           </p>
         </div>
       ) : null}
@@ -278,7 +278,7 @@ export function Inspector(props: InspectorProps) {
         ))}
       </fieldset>
     </div>
-  )
+  );
 }
 
 /**
@@ -287,12 +287,12 @@ export function Inspector(props: InspectorProps) {
  * fields the layers do not label (`layerPrefix`).
  */
 function layerFor(props: InspectorProps, blok: Blok, name: string): FieldLayerInput | undefined {
-  const { layers, doc, schema, readOnly, store } = props
-  if (!layers || !doc) return undefined
-  const prefix = layerPrefix(doc, schema, blok)
-  const state = prefix === null ? undefined : layers.states[`${prefix}${name}`]
-  if (!state) return undefined
-  const inherited = belowBlok(doc, layers.below, blok)
+  const { layers, doc, schema, readOnly, store } = props;
+  if (!layers || !doc) return undefined;
+  const prefix = layerPrefix(doc, schema, blok);
+  const state = prefix === null ? undefined : layers.states[`${prefix}${name}`];
+  if (!state) return undefined;
+  const inherited = belowBlok(doc, layers.below, blok);
   return {
     state: state.state,
     label: layerLabel(state, layers.nameOf),
@@ -302,10 +302,10 @@ function layerFor(props: InspectorProps, blok: Blok, name: string): FieldLayerIn
     })),
     value: inheritedValue(state.state, inherited, name),
     onAction: (action) => {
-      const mutations = layerMutations(action, blok, name, inherited)
-      if (mutations.length > 0) store.tx(mutations)
+      const mutations = layerMutations(action, blok, name, inherited);
+      if (mutations.length > 0) store.tx(mutations);
     },
-  }
+  };
 }
 
 /**
@@ -314,4 +314,4 @@ function layerFor(props: InspectorProps, blok: Blok, name: string): FieldLayerIn
  * calls `focus.open(name)`. Both halves imported from one module means the wiring
  * cannot pick up one without the other.
  */
-export { canFocus }
+export { canFocus };

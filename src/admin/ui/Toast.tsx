@@ -1,5 +1,5 @@
-import css from './Toast.module.css'
-import { scoped } from './scope'
+import css from "./Toast.module.css";
+import { scoped } from "./scope";
 
 /**
  * The transient message. Carried over from `admin.css` rather than redesigned,
@@ -31,5 +31,5 @@ export function Toast({ message }: { message: string | null }) {
     <div className={scoped(css.toast)} role="status" aria-live="polite">
       {message}
     </div>
-  )
+  );
 }

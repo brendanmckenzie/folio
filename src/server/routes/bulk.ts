@@ -21,13 +21,13 @@
  * What is *not* duplicated is the work: one `runBulk` behind all five, and the
  * per-document workflows are the same functions the single-document routes call.
  */
-import type { Context } from 'hono'
-import { Hono } from 'hono'
-import { type BulkOutcome, type BulkSelection, wasRefused } from '../../core/bulk'
-import type { StoryBulkAction } from '../../core/story'
-import { type Access, actorString, CREATE, MANAGE, PUBLISH } from '../auth/roles'
-import { type BulkDeps, type BulkOptions, runBulk } from '../bulk'
-import { FolioError } from '../errors'
+import type { Context } from "hono";
+import { Hono } from "hono";
+import { type BulkOutcome, type BulkSelection, wasRefused } from "../../core/bulk";
+import type { StoryBulkAction } from "../../core/story";
+import { type Access, actorString, CREATE, MANAGE, PUBLISH } from "../auth/roles";
+import { type BulkDeps, type BulkOptions, runBulk } from "../bulk";
+import { FolioError } from "../errors";
 import {
   chainResolver,
   fenceParent,
@@ -35,15 +35,15 @@ import {
   requestChain,
   requestScope,
   requireAccess,
-} from '../middleware'
-import type { FolioRuntime } from '../runtime'
-import { storiesFor } from '../stories'
-import type { FolioEnv } from '../types'
-import { BulkBody, BulkDeleteBody, BulkMoveBody, parseBody, requireCursor } from '../validate'
-import { brandOf } from './stories'
+} from "../middleware";
+import type { FolioRuntime } from "../runtime";
+import { storiesFor } from "../stories";
+import type { FolioEnv } from "../types";
+import { BulkBody, BulkDeleteBody, BulkMoveBody, parseBody, requireCursor } from "../validate";
+import { brandOf } from "./stories";
 
 export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * `PublishDeps` plus the two fields the tree-shaped actions need. Assembled here
@@ -52,15 +52,15 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `DELETE {base}/api/stories/:id` reaches.
    */
   const deps = (c: Context<FolioEnv<Env>>): BulkDeps => {
-    const bindings = c.var.bindings()
-    const brand = brandOf(c)
+    const bindings = c.var.bindings();
+    const brand = brandOf(c);
     return {
       ...brand.publishDeps(bindings, hookCtx(c)),
       types: brand.types,
       stub: (id: string) => rt.stub(bindings, id),
       chainOf: chainResolver(c, rt),
-    }
-  }
+    };
+  };
 
   /**
    * One run, and the two shapes it can answer with.
@@ -77,11 +77,11 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `StoryDO.commit` answers a rejection).
    */
   const answer = (c: Context<FolioEnv<Env>>, outcome: BulkOutcome<StoryBulkAction>): Response => {
-    if (!wasRefused(outcome)) return c.json(outcome)
+    if (!wasRefused(outcome)) return c.json(outcome);
     return c.json(
       {
         error: {
-          code: 'conflict',
+          code: "conflict",
           message: `${outcome.expected} documents matched when you chose them and ${outcome.actual} match now. Check the number and try again.`,
         },
         refused: outcome.refused,
@@ -89,8 +89,8 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         actual: outcome.actual,
       },
       409,
-    )
-  }
+    );
+  };
 
   /**
    * Every id in the request's scope (`multi-site.md`'s route table: "`/bulk/*`:
@@ -107,16 +107,16 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const inScope = async (
     c: Context<FolioEnv<Env>>,
     selection: BulkSelection<unknown>,
-    reach: 'read' | 'write' = 'write',
+    reach: "read" | "write" = "write",
   ): Promise<void> => {
-    if (!rt.sites || selection.all) return
-    const scope = requestScope(c, rt)
-    const within = reach === 'read' ? await requestChain(c, rt) : scope ? [scope] : []
-    const rows = await storiesFor(c.var.bindings().db, selection.ids, [], within)
+    if (!rt.sites || selection.all) return;
+    const scope = requestScope(c, rt);
+    const within = reach === "read" ? await requestChain(c, rt) : scope ? [scope] : [];
+    const rows = await storiesFor(c.var.bindings().db, selection.ids, [], within);
     if (rows.length !== new Set(selection.ids).size) {
-      throw new FolioError('not_found', 'One or more of those documents is not in this site')
+      throw new FolioError("not_found", "One or more of those documents is not in this site");
     }
-  }
+  };
 
   /** The job-control fields, off any of the three bodies. `actor` is the session's
    * and never the body's: "who published this" is not a value anybody may type. */
@@ -124,17 +124,17 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     c: Context<FolioEnv<Env>>,
     body: { dryRun?: boolean; continueFrom?: string | null; batch?: number },
   ): BulkOptions => {
-    requireCursor(body.continueFrom ?? undefined)
+    requireCursor(body.continueFrom ?? undefined);
     return {
       // The request's scope: what a filter selection is read against and where a
       // duplicate's copies land (`BulkOptions.scope`). Only with `sites`.
-      ...(rt.sites ? { scope: requestScope(c, rt) ?? '' } : {}),
+      ...(rt.sites ? { scope: requestScope(c, rt) ?? "" } : {}),
       ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
       ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
       ...(body.batch === undefined ? {} : { batch: body.batch }),
       actor: actorString(c.var.actor),
-    }
-  }
+    };
+  };
 
   /**
    * The three actions whose only argument is the selection.
@@ -144,19 +144,19 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * copies is where the fourth one forgets `requireCursor`.
    */
   const PLAIN: [StoryBulkAction, Access][] = [
-    ['publish', PUBLISH],
-    ['unpublish', PUBLISH],
+    ["publish", PUBLISH],
+    ["unpublish", PUBLISH],
     // `CREATE` (editor+), matching `POST {base}/api/stories/:id/duplicate`: a copy is
     // an unpublished draft at a path nothing links to yet.
-    ['duplicate', CREATE],
-  ]
+    ["duplicate", CREATE],
+  ];
 
   for (const [action, access] of PLAIN) {
     app.post(`/bulk/${action}`, requireAccess<Env>(rt, access), async (c) => {
-      const body = await parseBody(c.req, BulkBody)
-      await inScope(c, body.selection, action === 'duplicate' ? 'read' : 'write')
-      return answer(c, await runBulk(deps(c), action, body.selection, control(c, body)))
-    })
+      const body = await parseBody(c.req, BulkBody);
+      await inScope(c, body.selection, action === "duplicate" ? "read" : "write");
+      return answer(c, await runBulk(deps(c), action, body.selection, control(c, body)));
+    });
   }
 
   /**
@@ -168,35 +168,35 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * under a type its `under` forbids) is one named line in the report rather than a
    * failed request.
    */
-  app.post('/bulk/move', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const body = await parseBody(c.req, BulkMoveBody)
-    await fenceParent(c, rt, body.parentId)
-    await inScope(c, body.selection)
+  app.post("/bulk/move", requireAccess<Env>(rt, MANAGE), async (c) => {
+    const body = await parseBody(c.req, BulkMoveBody);
+    await fenceParent(c, rt, body.parentId);
+    await inScope(c, body.selection);
     return answer(
       c,
-      await runBulk(deps(c), 'move', body.selection, {
+      await runBulk(deps(c), "move", body.selection, {
         ...control(c, body),
         destination: {
           parentId: body.parentId,
           ...(body.index === undefined ? {} : { index: body.index }),
         },
       }),
-    )
-  })
+    );
+  });
 
   /** Delete, with `redirect` defaulting to true so a bulk delete leaves the same
    * redirects a hundred single deletes would (`../../../docs/specs/platform/redirects.md`). */
-  app.post('/bulk/delete', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const body = await parseBody(c.req, BulkDeleteBody)
-    await inScope(c, body.selection)
+  app.post("/bulk/delete", requireAccess<Env>(rt, MANAGE), async (c) => {
+    const body = await parseBody(c.req, BulkDeleteBody);
+    await inScope(c, body.selection);
     return answer(
       c,
-      await runBulk(deps(c), 'delete', body.selection, {
+      await runBulk(deps(c), "delete", body.selection, {
         ...control(c, body),
         ...(body.redirect === undefined ? {} : { redirect: body.redirect }),
       }),
-    )
-  })
+    );
+  });
 
-  return app
+  return app;
 }

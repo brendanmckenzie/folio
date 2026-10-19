@@ -1,23 +1,23 @@
-import { createExecutionContext, env } from 'cloudflare:test'
-import { Hono } from 'hono'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { defineBlock, text } from '../../src/core'
-import { defineMigration, field } from '../../src/core/migrate'
-import type { Doc } from '../../src/core/doc'
-import type { DocumentType } from '../../src/core/schema'
-import { chain, layerSeed, type SiteRef } from '../../src/core/sites'
-import type { FolioBindings, FolioBrand, FolioConfig } from '../../src/server'
-import { createFolio, magicLink } from '../../src/server'
-import { createApp } from '../../src/server/app'
-import { createToken } from '../../src/server/auth/tokens'
-import { envelope, FolioError } from '../../src/server/errors'
-import { withActor, withBindings, withScope } from '../../src/server/middleware'
-import { MCP_PROTOCOL_VERSION } from '../../src/server/mcp/rpc'
-import { accessRoutes } from '../../src/server/routes/access'
-import { siteRoutes } from '../../src/server/routes/sites'
-import { createRuntime, type FolioRuntime } from '../../src/server/runtime'
-import { SCOPE_HEADER, SITE_HEADER, SURFACE_HEADER, updateSite } from '../../src/server/sites'
-import type { FolioEnv } from '../../src/server/types'
+import { createExecutionContext, env } from "cloudflare:test";
+import { Hono } from "hono";
+import { beforeAll, describe, expect, it } from "vitest";
+import { defineBlock, text } from "../../src/core";
+import { defineMigration, field } from "../../src/core/migrate";
+import type { Doc } from "../../src/core/doc";
+import type { DocumentType } from "../../src/core/schema";
+import { chain, layerSeed, type SiteRef } from "../../src/core/sites";
+import type { FolioBindings, FolioBrand, FolioConfig } from "../../src/server";
+import { createFolio, magicLink } from "../../src/server";
+import { createApp } from "../../src/server/app";
+import { createToken } from "../../src/server/auth/tokens";
+import { envelope, FolioError } from "../../src/server/errors";
+import { withActor, withBindings, withScope } from "../../src/server/middleware";
+import { MCP_PROTOCOL_VERSION } from "../../src/server/mcp/rpc";
+import { accessRoutes } from "../../src/server/routes/access";
+import { siteRoutes } from "../../src/server/routes/sites";
+import { createRuntime, type FolioRuntime } from "../../src/server/runtime";
+import { SCOPE_HEADER, SITE_HEADER, SURFACE_HEADER, updateSite } from "../../src/server/sites";
+import type { FolioEnv } from "../../src/server/types";
 
 /**
  * Many brands in one deployment, phase 3 (`docs/specs/foundation/multi-brand.md`):
@@ -36,74 +36,74 @@ import type { FolioEnv } from '../../src/server/types'
  */
 
 const aaaRoot = defineBlock({
-  name: 'pageRoot',
-  label: 'Page',
+  name: "pageRoot",
+  label: "Page",
   fields: { title: text(), strap: text() },
   render: () => null,
-})
+});
 const aaaProse = defineBlock({
-  name: 'prose',
-  label: 'Prose',
+  name: "prose",
+  label: "Prose",
   fields: { body: text() },
   render: () => null,
-})
+});
 const aaaHeader = defineBlock({
-  name: 'header',
-  label: 'Header',
-  fields: { tagline: text({ default: 'Karibu' }) },
+  name: "header",
+  label: "Header",
+  fields: { tagline: text({ default: "Karibu" }) },
   render: () => null,
-})
+});
 const tgoRoot = defineBlock({
-  name: 'pageRoot',
-  label: 'Page',
+  name: "pageRoot",
+  label: "Page",
   fields: { heading: text() },
   render: () => null,
-})
+});
 const tgoProse = defineBlock({
-  name: 'prose',
-  label: 'Prose',
+  name: "prose",
+  label: "Prose",
   fields: { copy: text() },
   render: () => null,
-})
+});
 
 const aaaTypes: DocumentType[] = [
-  { name: 'page', label: 'Page', kind: 'page', root: 'pageRoot', default: true },
-  { name: 'header', label: 'Header', kind: 'singleton', root: 'header' },
-]
+  { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
+  { name: "header", label: "Header", kind: "singleton", root: "header" },
+];
 const tgoTypes: DocumentType[] = [
-  { name: 'page', label: 'Page', kind: 'page', root: 'pageRoot', default: true },
-]
+  { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
+];
 
 const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
   allaboutafrica: {
-    label: 'All About Africa',
+    label: "All About Africa",
     blocks: [aaaRoot, aaaProse, aaaHeader],
     types: aaaTypes,
-    globals: ['header'],
+    globals: ["header"],
   },
-  takeoffgo: { label: 'Take Off Go', blocks: [tgoRoot, tgoProse], types: tgoTypes },
-}
+  takeoffgo: { label: "Take Off Go", blocks: [tgoRoot, tgoProse], types: tgoTypes },
+};
 
 const bindings = (e: Cloudflare.Env): FolioBindings => ({
   db: e.DB,
   story: e.STORY,
   media: e.MEDIA,
   images: e.IMAGES,
-})
+});
 
-const ADMIN = 'https://cms.example'
+const ADMIN = "https://cms.example";
 
 const config: FolioConfig<Cloudflare.Env> = {
   brands,
   sites: { admin: ADMIN },
   bindings,
-  basePath: '/folio',
+  basePath: "/folio",
   auth: { providers: [magicLink<Cloudflare.Env>({ send: () => {} })] },
   route: (p, _locale, site) =>
-    site ? `https://${site.hosts[0] ?? `${site.id}.invalid`}/${p}` : p ? `/${p}` : '/',
-}
+    site ? `https://${site.hosts[0] ?? `${site.id}.invalid`}/${p}` : p ? `/${p}` : "/",
+};
 
-const rt: FolioRuntime = createRuntime(config)
+const rt: FolioRuntime = createRuntime(config);
 
 /**
  * The middleware every Folio request passes, and the registry routes, in the order
@@ -111,55 +111,55 @@ const rt: FolioRuntime = createRuntime(config)
  * internal headers are written here the way `handle()` writes them.
  */
 function mount(on: FolioRuntime, cfg: FolioConfig<Cloudflare.Env> = config) {
-  const app = new Hono<FolioEnv<Cloudflare.Env>>().basePath('/folio')
+  const app = new Hono<FolioEnv<Cloudflare.Env>>().basePath("/folio");
   app.onError((err, c) =>
     err instanceof FolioError
       ? c.json(envelope(err), err.status)
       : c.json({ err: String(err) }, 500),
-  )
-  app.use('*', withBindings(cfg))
-  app.use('*', withScope(on))
-  app.use('*', withActor(on))
-  app.get('/probe', (c) =>
+  );
+  app.use("*", withBindings(cfg));
+  app.use("*", withScope(on));
+  app.use("*", withActor(on));
+  app.get("/probe", (c) =>
     c.json({ scope: c.var.scope, brand: c.var.brand?.brand ?? null, has: c.var.brand !== null }),
-  )
-  app.route('/api', siteRoutes(on))
-  app.route('/api', accessRoutes(on))
-  return app
+  );
+  app.route("/api", siteRoutes(on));
+  app.route("/api", accessRoutes(on));
+  return app;
 }
 
-const app = mount(rt)
+const app = mount(rt);
 
 async function call(
   path: string,
   init: { method?: string; body?: unknown; scope?: string; site?: string } = {},
 ) {
-  const headers = new Headers({ 'content-type': 'application/json', ...(await auth()) })
-  if (init.scope) headers.set(SCOPE_HEADER, init.scope)
+  const headers = new Headers({ "content-type": "application/json", ...(await auth()) });
+  if (init.scope) headers.set(SCOPE_HEADER, init.scope);
   if (init.site) {
-    headers.set(SITE_HEADER, init.site)
-    headers.set(SURFACE_HEADER, 'live')
+    headers.set(SITE_HEADER, init.site);
+    headers.set(SURFACE_HEADER, "live");
   }
   const res = await app.request(
     `${ADMIN}/folio${path}`,
     {
-      method: init.method ?? 'GET',
+      method: init.method ?? "GET",
       headers,
       ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     },
     env,
-  )
-  return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  );
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
-let token: string | undefined
+let token: string | undefined;
 async function auth(): Promise<Record<string, string>> {
-  token ??= (await createToken(env.DB, { name: 'platform', scopes: ['admin'] })).token
-  return { authorization: `Bearer ${token}` }
+  token ??= (await createToken(env.DB, { name: "platform", scopes: ["admin"] })).token;
+  return { authorization: `Bearer ${token}` };
 }
 
 const errorOf = (body: Record<string, unknown>) =>
-  (body as { error?: { code: string; message: string } }).error
+  (body as { error?: { code: string; message: string } }).error;
 
 beforeAll(async () => {
   await env.DB.batch([
@@ -181,21 +181,21 @@ beforeAll(async () => {
       `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id)
        values ('sty_tgo_home', 'page', null, 'home', 'home', 'a0', 'Home', 1, 'takeoffgo')`,
     ),
-  ])
-  rt.sites?.drop()
-})
+  ]);
+  rt.sites?.drop();
+});
 
 /* ------------------------------------------------------------ construction --- */
 
-describe('construction', () => {
-  it('refuses through createFolio exactly as through the runtime', () => {
-    const { sites: _sites, ...noSites } = config
+describe("construction", () => {
+  it("refuses through createFolio exactly as through the runtime", () => {
+    const { sites: _sites, ...noSites } = config;
     expect(() => createFolio(noSites as FolioConfig<Cloudflare.Env>)).toThrow(
       /'brands' needs 'sites'/,
-    )
+    );
     expect(() =>
       createFolio({ ...config, blocks: [aaaRoot] } as unknown as FolioConfig<Cloudflare.Env>),
-    ).toThrow(/'blocks' belongs to a brand beside 'brands'/)
+    ).toThrow(/'blocks' belongs to a brand beside 'brands'/);
     expect(() =>
       createFolio({
         ...config,
@@ -203,342 +203,342 @@ describe('construction', () => {
           ...brands,
           takeoffgo: {
             ...brands.takeoffgo!,
-            migrations: [{ id: '0001-x', description: 'x', up: () => [] }],
+            migrations: [{ id: "0001-x", description: "x", up: () => [] }],
           },
         },
       }),
-    ).toThrow(/brand 'takeoffgo': migration id '0001-x' must start with its brand/)
+    ).toThrow(/brand 'takeoffgo': migration id '0001-x' must start with its brand/);
     expect(() =>
       createFolio({
         ...config,
-        assets: { admin: '/a.js', brands: { allaboutafrica: { preview: '/p.js' } } },
+        assets: { admin: "/a.js", brands: { allaboutafrica: { preview: "/p.js" } } },
       }),
-    ).toThrow(/'assets.brands' must name exactly the brands/)
-  })
+    ).toThrow(/'assets.brands' must name exactly the brands/);
+  });
 
-  it('builds one brand runtime per brand, each with its own pageRoot and prose', () => {
-    expect([...rt.brands.keys()]).toEqual(['allaboutafrica', 'takeoffgo'])
-    expect(Object.keys(rt.brands.get('allaboutafrica')!.schema.pageRoot!.fields)).toEqual([
-      'title',
-      'strap',
-    ])
-    expect(Object.keys(rt.brands.get('takeoffgo')!.schema.pageRoot!.fields)).toEqual(['heading'])
-  })
-})
+  it("builds one brand runtime per brand, each with its own pageRoot and prose", () => {
+    expect([...rt.brands.keys()]).toEqual(["allaboutafrica", "takeoffgo"]);
+    expect(Object.keys(rt.brands.get("allaboutafrica")!.schema.pageRoot!.fields)).toEqual([
+      "title",
+      "strap",
+    ]);
+    expect(Object.keys(rt.brands.get("takeoffgo")!.schema.pageRoot!.fields)).toEqual(["heading"]);
+  });
+});
 
 /* ---------------------------------------------------------------- registry --- */
 
-describe('the registry routes under brands (decision 4)', () => {
-  it('lists every row with its brand, the ones that serve nothing included', async () => {
-    const listed = await call('/api/sites')
-    const sites = listed.body.sites as SiteRef[]
-    const brandOf = (id: string) => sites.find((s) => s.id === id)?.brand
-    expect(brandOf('kenya')).toBe('allaboutafrica')
-    expect(brandOf('orphan')).toBeNull()
-    expect(brandOf('ghost')).toBe('retired')
-    expect(listed.body.shared).toBe(false)
-  })
+describe("the registry routes under brands (decision 4)", () => {
+  it("lists every row with its brand, the ones that serve nothing included", async () => {
+    const listed = await call("/api/sites");
+    const sites = listed.body.sites as SiteRef[];
+    const brandOf = (id: string) => sites.find((s) => s.id === id)?.brand;
+    expect(brandOf("kenya")).toBe("allaboutafrica");
+    expect(brandOf("orphan")).toBeNull();
+    expect(brandOf("ghost")).toBe("retired");
+    expect(listed.body.shared).toBe(false);
+  });
 
-  it('requires a brand on create, for a site and for a group', async () => {
-    const site = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'uganda', kind: 'site', name: 'Uganda' },
-    })
-    expect(site.status).toBe(400)
-    expect(errorOf(site.body)?.message).toMatch(/brand is required/)
-    const group = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'west', kind: 'group', name: 'West' },
-    })
-    expect(group.status).toBe(400)
-  })
+  it("requires a brand on create, for a site and for a group", async () => {
+    const site = await call("/api/sites", {
+      method: "POST",
+      body: { id: "uganda", kind: "site", name: "Uganda" },
+    });
+    expect(site.status).toBe(400);
+    expect(errorOf(site.body)?.message).toMatch(/brand is required/);
+    const group = await call("/api/sites", {
+      method: "POST",
+      body: { id: "west", kind: "group", name: "West" },
+    });
+    expect(group.status).toBe(400);
+  });
 
-  it('refuses a brand nobody configured, on create and on edit', async () => {
-    const created = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'uganda', kind: 'site', name: 'Uganda', brand: 'retired' },
-    })
-    expect(created.status).toBe(400)
-    expect(errorOf(created.body)?.message).toMatch(/No brand 'retired'/)
-    const edited = await call('/api/sites/kenya', { method: 'PATCH', body: { brand: 'nobody' } })
-    expect(edited.status).toBe(400)
-  })
+  it("refuses a brand nobody configured, on create and on edit", async () => {
+    const created = await call("/api/sites", {
+      method: "POST",
+      body: { id: "uganda", kind: "site", name: "Uganda", brand: "retired" },
+    });
+    expect(created.status).toBe(400);
+    expect(errorOf(created.body)?.message).toMatch(/No brand 'retired'/);
+    const edited = await call("/api/sites/kenya", { method: "PATCH", body: { brand: "nobody" } });
+    expect(edited.status).toBe(400);
+  });
 
-  it('creates a site and a group with a configured brand', async () => {
-    const group = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'tgo-group', kind: 'group', name: 'TG', brand: 'takeoffgo' },
-    })
+  it("creates a site and a group with a configured brand", async () => {
+    const group = await call("/api/sites", {
+      method: "POST",
+      body: { id: "tgo-group", kind: "group", name: "TG", brand: "takeoffgo" },
+    });
     expect(group).toEqual({
       status: 201,
-      body: { id: 'tgo-group', name: 'TG', brand: 'takeoffgo' },
-    })
-    const site = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'tgo-au', kind: 'site', name: 'TG AU', group: 'tgo-group', brand: 'takeoffgo' },
-    })
-    expect(site.status).toBe(201)
-    expect(site.body.brand).toBe('takeoffgo')
-    const row = await env.DB.prepare("select brand from sites where id = 'tgo-au'").first()
-    expect(row).toEqual({ brand: 'takeoffgo' })
-  })
+      body: { id: "tgo-group", name: "TG", brand: "takeoffgo" },
+    });
+    const site = await call("/api/sites", {
+      method: "POST",
+      body: { id: "tgo-au", kind: "site", name: "TG AU", group: "tgo-group", brand: "takeoffgo" },
+    });
+    expect(site.status).toBe(201);
+    expect(site.body.brand).toBe("takeoffgo");
+    const row = await env.DB.prepare("select brand from sites where id = 'tgo-au'").first();
+    expect(row).toEqual({ brand: "takeoffgo" });
+  });
 
-  it('refuses a site joining a group of another brand: 400, on create and on edit', async () => {
-    const created = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'rwanda', kind: 'site', name: 'Rwanda', group: 'east', brand: 'takeoffgo' },
-    })
-    expect(created.status).toBe(400)
-    expect(errorOf(created.body)?.message).toMatch(/Group 'east' is brand 'allaboutafrica'/)
-    const joined = await call('/api/sites/takeoffgo', { method: 'PATCH', body: { group: 'east' } })
-    expect(joined.status).toBe(400)
+  it("refuses a site joining a group of another brand: 400, on create and on edit", async () => {
+    const created = await call("/api/sites", {
+      method: "POST",
+      body: { id: "rwanda", kind: "site", name: "Rwanda", group: "east", brand: "takeoffgo" },
+    });
+    expect(created.status).toBe(400);
+    expect(errorOf(created.body)?.message).toMatch(/Group 'east' is brand 'allaboutafrica'/);
+    const joined = await call("/api/sites/takeoffgo", { method: "PATCH", body: { group: "east" } });
+    expect(joined.status).toBe(400);
     // Nothing was written.
-    const row = await env.DB.prepare("select group_id from sites where id = 'takeoffgo'").first()
-    expect(row).toEqual({ group_id: null })
-  })
+    const row = await env.DB.prepare("select group_id from sites where id = 'takeoffgo'").first();
+    expect(row).toEqual({ group_id: null });
+  });
 
-  it('refuses a brand change on a scope that holds a story: 409', async () => {
-    const res = await call('/api/sites/takeoffgo', {
-      method: 'PATCH',
-      body: { brand: 'allaboutafrica' },
-    })
-    expect(res.status).toBe(409)
-    expect(errorOf(res.body)).toMatchObject({ code: 'conflict' })
-    expect(errorOf(res.body)?.message).toMatch(/still owns stories/)
-    const row = await env.DB.prepare("select brand from sites where id = 'takeoffgo'").first()
-    expect(row).toEqual({ brand: 'takeoffgo' })
-  })
+  it("refuses a brand change on a scope that holds a story: 409", async () => {
+    const res = await call("/api/sites/takeoffgo", {
+      method: "PATCH",
+      body: { brand: "allaboutafrica" },
+    });
+    expect(res.status).toBe(409);
+    expect(errorOf(res.body)).toMatchObject({ code: "conflict" });
+    expect(errorOf(res.body)?.message).toMatch(/still owns stories/);
+    const row = await env.DB.prepare("select brand from sites where id = 'takeoffgo'").first();
+    expect(row).toEqual({ brand: "takeoffgo" });
+  });
 
-  it('refuses a brand change on a group that has sites: 409', async () => {
-    const res = await call('/api/sites/east', { method: 'PATCH', body: { brand: 'takeoffgo' } })
-    expect(res.status).toBe(409)
-    expect(errorOf(res.body)?.message).toMatch(/still has sites/)
-  })
+  it("refuses a brand change on a group that has sites: 409", async () => {
+    const res = await call("/api/sites/east", { method: "PATCH", body: { brand: "takeoffgo" } });
+    expect(res.status).toBe(409);
+    expect(errorOf(res.body)?.message).toMatch(/still has sites/);
+  });
 
-  it('refuses a brand change when a story lands between any probe and the write', async () => {
+  it("refuses a brand change when a story lands between any probe and the write", async () => {
     // A concurrent create, simulated: a story is inserted just before the batch
     // that carries the brand's \`update\` runs. A probe made before it saw an empty
     // scope; only a check inside the update itself sees the story.
-    const created = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'zambia', kind: 'site', name: 'Zambia', brand: 'allaboutafrica' },
-    })
-    expect(created.status).toBe(201)
-    let pending: string[] = []
+    const created = await call("/api/sites", {
+      method: "POST",
+      body: { id: "zambia", kind: "site", name: "Zambia", brand: "allaboutafrica" },
+    });
+    expect(created.status).toBe(201);
+    let pending: string[] = [];
     const racing = {
       prepare: (sql: string) => {
-        pending.push(sql)
-        return env.DB.prepare(sql)
+        pending.push(sql);
+        return env.DB.prepare(sql);
       },
       batch: async (statements: D1PreparedStatement[]) => {
-        if (pending.some((sql) => sql.trim().startsWith('update sites set'))) {
+        if (pending.some((sql) => sql.trim().startsWith("update sites set"))) {
           await env.DB.prepare(
             `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id)
              values ('sty_zm_race', 'page', null, 'race', 'race', 'a0', 'Race', 1, 'zambia')`,
-          ).run()
+          ).run();
         }
-        pending = []
-        return env.DB.batch(statements)
+        pending = [];
+        return env.DB.batch(statements);
       },
-    }
-    const registry = await rt.sites!.fresh(env)
+    };
+    const registry = await rt.sites!.fresh(env);
     await expect(
       updateSite(
         racing as unknown as Parameters<typeof updateSite>[0],
         registry,
-        'zambia',
-        { brand: 'takeoffgo' },
+        "zambia",
+        { brand: "takeoffgo" },
         {
           sites: rt.sites!,
           route: rt.route,
           brands: rt.sites!.brands,
         },
       ),
-    ).rejects.toMatchObject({ status: 409 })
-    const row = await env.DB.prepare("select brand from sites where id = 'zambia'").first()
-    expect(row).toEqual({ brand: 'allaboutafrica' })
-  })
+    ).rejects.toMatchObject({ status: 409 });
+    const row = await env.DB.prepare("select brand from sites where id = 'zambia'").first();
+    expect(row).toEqual({ brand: "allaboutafrica" });
+  });
 
-  it('changes the brand of an empty site, which then leaves its old chain', async () => {
-    const created = await call('/api/sites', {
-      method: 'POST',
-      body: { id: 'tanzania', kind: 'site', name: 'Tanzania', brand: 'allaboutafrica' },
-    })
-    expect(created.status).toBe(201)
-    const moved = await call('/api/sites/tanzania', {
-      method: 'PATCH',
-      body: { brand: 'takeoffgo', group: 'tgo-group' },
-    })
-    expect(moved.status).toBe(200)
-    expect(moved.body).toMatchObject({ brand: 'takeoffgo', group: 'tgo-group' })
-    expect((await call('/probe', { scope: 'tanzania' })).body.brand).toEqual({
-      id: 'takeoffgo',
-      label: 'Take Off Go',
-    })
-  })
-})
+  it("changes the brand of an empty site, which then leaves its old chain", async () => {
+    const created = await call("/api/sites", {
+      method: "POST",
+      body: { id: "tanzania", kind: "site", name: "Tanzania", brand: "allaboutafrica" },
+    });
+    expect(created.status).toBe(201);
+    const moved = await call("/api/sites/tanzania", {
+      method: "PATCH",
+      body: { brand: "takeoffgo", group: "tgo-group" },
+    });
+    expect(moved.status).toBe(200);
+    expect(moved.body).toMatchObject({ brand: "takeoffgo", group: "tgo-group" });
+    expect((await call("/probe", { scope: "tanzania" })).body.brand).toEqual({
+      id: "takeoffgo",
+      label: "Take Off Go",
+    });
+  });
+});
 
 /* ------------------------------------------------------------------ chain --- */
 
-describe('a chain never crosses a brand, and there is no shared (decision 5)', () => {
-  it('answers ~shared with 404 No site or group', async () => {
-    const res = await call('/probe', { scope: 'shared' })
-    expect(res.status).toBe(404)
-    expect(errorOf(res.body)?.message).toBe("No site or group 'shared'")
-  })
+describe("a chain never crosses a brand, and there is no shared (decision 5)", () => {
+  it("answers ~shared with 404 No site or group", async () => {
+    const res = await call("/probe", { scope: "shared" });
+    expect(res.status).toBe(404);
+    expect(errorOf(res.body)?.message).toBe("No site or group 'shared'");
+  });
 
-  it('still answers ~shared on a single-brand multi-site deployment', async () => {
+  it("still answers ~shared on a single-brand multi-site deployment", async () => {
     const single: FolioConfig<Cloudflare.Env> = {
       blocks: [aaaRoot, aaaProse, aaaHeader],
       types: aaaTypes,
       sites: { admin: ADMIN },
       bindings,
-      basePath: '/folio',
+      basePath: "/folio",
       auth: config.auth,
       route: config.route,
-    }
+    };
     const res = await mount(createRuntime(single), single).request(
       `${ADMIN}/folio/probe`,
-      { headers: { [SCOPE_HEADER]: 'shared' } },
+      { headers: { [SCOPE_HEADER]: "shared" } },
       env,
-    )
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ scope: 'shared', brand: null, has: true })
-  })
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ scope: "shared", brand: null, has: true });
+  });
 
-  it('stops a site’s chain at its group, and a group’s at itself', async () => {
-    const registry = await rt.sites!.registry(env)
-    expect(registry.shared).toBe(false)
-    expect(chain(registry, 'kenya')).toEqual(['kenya', 'east'])
-    expect(chain(registry, 'east')).toEqual(['east'])
-    expect(chain(registry, 'default')).toEqual(['default'])
-  })
+  it("stops a site’s chain at its group, and a group’s at itself", async () => {
+    const registry = await rt.sites!.registry(env);
+    expect(registry.shared).toBe(false);
+    expect(chain(registry, "kenya")).toEqual(["kenya", "east"]);
+    expect(chain(registry, "east")).toEqual(["east"]);
+    expect(chain(registry, "default")).toEqual(["default"]);
+  });
 
-  it('skips a group of another brand for a row SQL wrote', async () => {
+  it("skips a group of another brand for a row SQL wrote", async () => {
     await env.DB.prepare(
       `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at)
        values ('sneaky', 'site', 'Sneaky', 'east', 'live', null, 'takeoffgo', 0, 0)`,
-    ).run()
-    rt.sites!.drop()
-    const registry = await rt.sites!.registry(env)
-    expect(chain(registry, 'sneaky')).toEqual(['sneaky'])
-    await env.DB.prepare("delete from sites where id = 'sneaky'").run()
-    rt.sites!.drop()
-  })
+    ).run();
+    rt.sites!.drop();
+    const registry = await rt.sites!.registry(env);
+    expect(chain(registry, "sneaky")).toEqual(["sneaky"]);
+    await env.DB.prepare("delete from sites where id = 'sneaky'").run();
+    rt.sites!.drop();
+  });
 
-  it('seeds a global layer on a site with no group, and on a group, in full', async () => {
-    const registry = await rt.sites!.registry(env)
-    expect(layerSeed(registry, 'default')).toBe('full')
-    expect(layerSeed(registry, 'east')).toBe('full')
-    expect(layerSeed(registry, 'kenya')).toBe('bare')
+  it("seeds a global layer on a site with no group, and on a group, in full", async () => {
+    const registry = await rt.sites!.registry(env);
+    expect(layerSeed(registry, "default")).toBe("full");
+    expect(layerSeed(registry, "east")).toBe("full");
+    expect(layerSeed(registry, "kenya")).toBe("bare");
 
-    const aaa = rt.brands.get('allaboutafrica')!
-    const story = (scope: string) => ({ id: `sng_header:${scope}`, type: 'header', title: 'H' })
-    const rootData = (doc: Doc) => doc.bloks[doc.root]?.data
+    const aaa = rt.brands.get("allaboutafrica")!;
+    const story = (scope: string) => ({ id: `sng_header:${scope}`, type: "header", title: "H" });
+    const rootData = (doc: Doc) => doc.bloks[doc.root]?.data;
     // The default of the brand's declared field is what a bottom layer starts from.
-    expect(rootData(aaa.seedFor(story('default'), registry))).toEqual({ tagline: 'Karibu' })
-    expect(rootData(aaa.seedFor(story('east'), registry))).toEqual({ tagline: 'Karibu' })
-    expect(rootData(aaa.seedFor(story('kenya'), registry))).toEqual({})
+    expect(rootData(aaa.seedFor(story("default"), registry))).toEqual({ tagline: "Karibu" });
+    expect(rootData(aaa.seedFor(story("east"), registry))).toEqual({ tagline: "Karibu" });
+    expect(rootData(aaa.seedFor(story("kenya"), registry))).toEqual({});
     // Without the registry a layer's seed is not guessed.
-    expect(() => aaa.seedFor(story('kenya'))).toThrow(/seeds by its chain/)
+    expect(() => aaa.seedFor(story("kenya"))).toThrow(/seeds by its chain/);
     // Not a layer: the id alone answers.
-    expect(rootData(aaa.seedFor({ id: 'sty_x', type: 'page', title: 'X' }))).toMatchObject({
-      title: 'X',
-    })
-  })
-})
+    expect(rootData(aaa.seedFor({ id: "sty_x", type: "page", title: "X" }))).toMatchObject({
+      title: "X",
+    });
+  });
+});
 
 /* ------------------------------------------------------------------ fence --- */
 
-describe('the fence: a row of no configured brand serves nothing', () => {
-  it('leaves null-brand and unconfigured-brand rows out of the snapshot', async () => {
-    const registry = await rt.sites!.registry(env)
-    const ids = registry.sites.map((s) => s.id)
-    expect(ids).toContain('kenya')
-    expect(ids).toContain('takeoffgo')
-    expect(ids).not.toContain('orphan')
-    expect(ids).not.toContain('ghost')
-    expect(registry.sites.every((s) => s.brand !== null)).toBe(true)
-  })
+describe("the fence: a row of no configured brand serves nothing", () => {
+  it("leaves null-brand and unconfigured-brand rows out of the snapshot", async () => {
+    const registry = await rt.sites!.registry(env);
+    const ids = registry.sites.map((s) => s.id);
+    expect(ids).toContain("kenya");
+    expect(ids).toContain("takeoffgo");
+    expect(ids).not.toContain("orphan");
+    expect(ids).not.toContain("ghost");
+    expect(registry.sites.every((s) => s.brand !== null)).toBe(true);
+  });
 
-  it('answers ~<scope> of such a row with 404, as an unknown scope', async () => {
-    for (const scope of ['orphan', 'ghost', 'zulu']) {
-      const res = await call('/probe', { scope })
-      expect(res.status, scope).toBe(404)
-      expect(errorOf(res.body)?.message).toBe(`No site or group '${scope}'`)
+  it("answers ~<scope> of such a row with 404, as an unknown scope", async () => {
+    for (const scope of ["orphan", "ghost", "zulu"]) {
+      const res = await call("/probe", { scope });
+      expect(res.status, scope).toBe(404);
+      expect(errorOf(res.body)?.message).toBe(`No site or group '${scope}'`);
     }
-  })
+  });
 
-  it('sets c.var.brand from the scope, else the gated site, and never a default', async () => {
-    expect((await call('/probe', { scope: 'kenya' })).body).toEqual({
-      scope: 'kenya',
-      brand: { id: 'allaboutafrica', label: 'All About Africa' },
+  it("sets c.var.brand from the scope, else the gated site, and never a default", async () => {
+    expect((await call("/probe", { scope: "kenya" })).body).toEqual({
+      scope: "kenya",
+      brand: { id: "allaboutafrica", label: "All About Africa" },
       has: true,
-    })
-    expect((await call('/probe', { site: 'takeoffgo' })).body.brand).toEqual({
-      id: 'takeoffgo',
-      label: 'Take Off Go',
-    })
+    });
+    expect((await call("/probe", { site: "takeoffgo" })).body.brand).toEqual({
+      id: "takeoffgo",
+      label: "Take Off Go",
+    });
     // No scope and no site: no brand at all, not the first one.
-    expect((await call('/probe')).body).toEqual({ scope: null, brand: null, has: false })
+    expect((await call("/probe")).body).toEqual({ scope: null, brand: null, has: false });
     // A site header naming a row the snapshot left out is no brand either.
-    expect((await call('/probe', { site: 'orphan' })).body.has).toBe(false)
-  })
+    expect((await call("/probe", { site: "orphan" })).body.has).toBe(false);
+  });
 
-  it('refuses a brand’s render or query for another brand’s site, or for none', async () => {
-    const registry = await rt.sites!.registry(env)
-    const tango = registry.sites.find((s) => s.id === 'takeoffgo')!
-    const aaa = rt.brands.get('allaboutafrica')!
-    const b = { ...bindings(env), db: env.DB }
+  it("refuses a brand’s render or query for another brand’s site, or for none", async () => {
+    const registry = await rt.sites!.registry(env);
+    const tango = registry.sites.find((s) => s.id === "takeoffgo")!;
+    const aaa = rt.brands.get("allaboutafrica")!;
+    const b = { ...bindings(env), db: env.DB };
     await expect(
       aaa.resolve(b, undefined, {
-        site: { site: tango, surface: 'live', chain: chain(registry, 'takeoffgo') },
+        site: { site: tango, surface: "live", chain: chain(registry, "takeoffgo") },
       }),
-    ).rejects.toThrow(/brand 'allaboutafrica' cannot resolve site 'takeoffgo'/)
-    await expect(aaa.resolve(b)).rejects.toThrow(/cannot resolve with no site/)
-    await expect(aaa.query(b, { type: 'page' }, ['takeoffgo'], tango)).rejects.toThrow(
+    ).rejects.toThrow(/brand 'allaboutafrica' cannot resolve site 'takeoffgo'/);
+    await expect(aaa.resolve(b)).rejects.toThrow(/cannot resolve with no site/);
+    await expect(aaa.query(b, { type: "page" }, ["takeoffgo"], tango)).rejects.toThrow(
       /cannot query site 'takeoffgo'/,
-    )
-  })
-})
+    );
+  });
+});
 
 /* ----------------------------------------------------------- credentials --- */
 
-describe('a grant or a token binding names only a scope the snapshot serves', () => {
-  it('refuses to bind a token to shared, or to a row of no configured brand', async () => {
-    for (const site of ['shared', 'orphan', 'ghost']) {
-      const res = await call('/api/tokens', {
-        method: 'POST',
-        body: { name: `t-${site}`, scopes: ['content:read'], site },
-      })
-      expect(res.status, site).toBe(400)
-      expect(errorOf(res.body)?.message).toBe(`site names '${site}', which is not a site or group`)
+describe("a grant or a token binding names only a scope the snapshot serves", () => {
+  it("refuses to bind a token to shared, or to a row of no configured brand", async () => {
+    for (const site of ["shared", "orphan", "ghost"]) {
+      const res = await call("/api/tokens", {
+        method: "POST",
+        body: { name: `t-${site}`, scopes: ["content:read"], site },
+      });
+      expect(res.status, site).toBe(400);
+      expect(errorOf(res.body)?.message).toBe(`site names '${site}', which is not a site or group`);
     }
-    const ok = await call('/api/tokens', {
-      method: 'POST',
-      body: { name: 't-kenya', scopes: ['content:read'], site: 'kenya' },
-    })
-    expect(ok.status).toBe(201)
-  })
+    const ok = await call("/api/tokens", {
+      method: "POST",
+      body: { name: "t-kenya", scopes: ["content:read"], site: "kenya" },
+    });
+    expect(ok.status).toBe(201);
+  });
 
-  it('refuses a grant on shared, or on a row of no configured brand', async () => {
-    for (const scope of ['shared', 'orphan', 'ghost']) {
-      const res = await call('/api/users', {
-        method: 'POST',
-        body: { email: `${scope}@x.example`, grants: { [scope]: 'editor' } },
-      })
-      expect(res.status, scope).toBe(400)
+  it("refuses a grant on shared, or on a row of no configured brand", async () => {
+    for (const scope of ["shared", "orphan", "ghost"]) {
+      const res = await call("/api/users", {
+        method: "POST",
+        body: { email: `${scope}@x.example`, grants: { [scope]: "editor" } },
+      });
+      expect(res.status, scope).toBe(400);
       expect(errorOf(res.body)?.message).toBe(
         `grants names '${scope}', which is not a site or group`,
-      )
+      );
     }
-    const ok = await call('/api/users', {
-      method: 'POST',
-      body: { email: 'kenya@x.example', grants: { kenya: 'editor' } },
-    })
-    expect(ok.status).toBe(201)
-  })
-})
+    const ok = await call("/api/users", {
+      method: "POST",
+      body: { email: "kenya@x.example", grants: { kenya: "editor" } },
+    });
+    expect(ok.status).toBe(201);
+  });
+});
 
 /* ------------------------------------------------------------------ routes --- */
 
@@ -548,62 +548,62 @@ describe('a grant or a token binding names only a scope the snapshot serves', ()
  * scopes of my own so the sections above cannot have moved them. Each brand has a
  * type the other lacks, and the block names `pageRoot` and `prose` are shared.
  */
-describe('the routes read the scope’s brand (decision 6)', () => {
+describe("the routes read the scope’s brand (decision 6)", () => {
   const aaaMigration = defineMigration({
-    id: 'allaboutafrica/0001-noop',
-    description: 'stamps allaboutafrica documents',
+    id: "allaboutafrica/0001-noop",
+    description: "stamps allaboutafrica documents",
     up: () => [],
-  })
+  });
   const tgoMigration = defineMigration({
-    id: 'takeoffgo/0001-noop',
-    description: 'stamps takeoffgo documents',
+    id: "takeoffgo/0001-noop",
+    description: "stamps takeoffgo documents",
     up: () => [],
-  })
+  });
   const routeBrands: Record<string, FolioBrand<Cloudflare.Env>> = {
     allaboutafrica: {
       ...brands.allaboutafrica!,
-      types: [...aaaTypes, { name: 'article', label: 'Article', kind: 'page', root: 'pageRoot' }],
+      types: [...aaaTypes, { name: "article", label: "Article", kind: "page", root: "pageRoot" }],
       migrations: [aaaMigration],
     },
     takeoffgo: {
       ...brands.takeoffgo!,
-      types: [...tgoTypes, { name: 'landing', label: 'Landing', kind: 'page', root: 'pageRoot' }],
+      types: [...tgoTypes, { name: "landing", label: "Landing", kind: "page", root: "pageRoot" }],
       migrations: [tgoMigration],
     },
-  }
-  const routeConfig: FolioConfig<Cloudflare.Env> = { ...config, brands: routeBrands }
-  const routeRt = createRuntime(routeConfig)
-  const routeApp = createApp(routeConfig, routeRt)
+  };
+  const routeConfig: FolioConfig<Cloudflare.Env> = { ...config, brands: routeBrands };
+  const routeRt = createRuntime(routeConfig);
+  const routeApp = createApp(routeConfig, routeRt);
 
-  const AAA = 'r-aaa'
-  const TGO = 'r-tgo'
+  const AAA = "r-aaa";
+  const TGO = "r-tgo";
 
   async function api(
     path: string,
     init: {
-      method?: string
-      body?: unknown
-      scope?: string
-      headers?: Record<string, string>
+      method?: string;
+      body?: unknown;
+      scope?: string;
+      headers?: Record<string, string>;
     } = {},
   ) {
     const headers = new Headers({
-      'content-type': 'application/json',
+      "content-type": "application/json",
       ...(await auth()),
       ...(init.headers ?? {}),
-    })
-    if (init.scope) headers.set(SCOPE_HEADER, init.scope)
+    });
+    if (init.scope) headers.set(SCOPE_HEADER, init.scope);
     const res = await routeApp.request(
       `${ADMIN}/folio${path}`,
       {
-        method: init.method ?? 'GET',
+        method: init.method ?? "GET",
         headers,
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       },
       env,
       createExecutionContext(),
-    )
-    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+    );
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   }
 
   beforeAll(async () => {
@@ -618,189 +618,193 @@ describe('the routes read the scope’s brand (decision 6)', () => {
          values ('sty_r_aaa', 'page', null, 'home', 'home', 'a0', 'AAA home', 1, '${AAA}'),
                 ('sty_r_tgo', 'page', null, 'home', 'home', 'a0', 'TGO home', 1, '${TGO}')`,
       ),
-    ])
-    routeRt.sites?.drop()
-  })
+    ]);
+    routeRt.sites?.drop();
+  });
 
-  it('creates a document of the scope’s own types, and refuses the other brand’s', async () => {
-    const own = await api('/api/stories', {
-      method: 'POST',
+  it("creates a document of the scope’s own types, and refuses the other brand’s", async () => {
+    const own = await api("/api/stories", {
+      method: "POST",
       scope: AAA,
-      body: { type: 'article', title: 'A story' },
-    })
-    expect(own.status).toBe(200)
-    expect(own.body.type).toBe('article')
-    expect(own.body.site).toBe(AAA)
+      body: { type: "article", title: "A story" },
+    });
+    expect(own.status).toBe(200);
+    expect(own.body.type).toBe("article");
+    expect(own.body.site).toBe(AAA);
 
-    const wrong = await api('/api/stories', {
-      method: 'POST',
+    const wrong = await api("/api/stories", {
+      method: "POST",
       scope: TGO,
-      body: { type: 'article', title: 'Not here' },
-    })
-    expect(wrong.status).toBe(501)
-    expect(errorOf(wrong.body)?.message).toBe('Unknown document type: article')
+      body: { type: "article", title: "Not here" },
+    });
+    expect(wrong.status).toBe(501);
+    expect(errorOf(wrong.body)?.message).toBe("Unknown document type: article");
 
-    const tgo = await api('/api/stories', {
-      method: 'POST',
+    const tgo = await api("/api/stories", {
+      method: "POST",
       scope: TGO,
-      body: { type: 'landing', title: 'Landing' },
-    })
-    expect(tgo.status).toBe(200)
-    const back = await api('/api/stories', {
-      method: 'POST',
+      body: { type: "landing", title: "Landing" },
+    });
+    expect(tgo.status).toBe(200);
+    const back = await api("/api/stories", {
+      method: "POST",
       scope: AAA,
-      body: { type: 'landing', title: 'Not here either' },
-    })
-    expect(back.status).toBe(501)
-  })
+      body: { type: "landing", title: "Not here either" },
+    });
+    expect(back.status).toBe(501);
+  });
 
-  it('does the same through the versioned API', async () => {
-    const own = await api('/api/v1/documents', {
-      method: 'POST',
+  it("does the same through the versioned API", async () => {
+    const own = await api("/api/v1/documents", {
+      method: "POST",
       scope: TGO,
-      body: { type: 'landing', title: 'v1 landing' },
-    })
-    expect(own.status).toBe(201)
-    const wrong = await api('/api/v1/documents', {
-      method: 'POST',
+      body: { type: "landing", title: "v1 landing" },
+    });
+    expect(own.status).toBe(201);
+    const wrong = await api("/api/v1/documents", {
+      method: "POST",
       scope: TGO,
-      body: { type: 'article', title: 'v1 wrong' },
-    })
-    expect(wrong.status).toBe(501)
+      body: { type: "article", title: "v1 wrong" },
+    });
+    expect(wrong.status).toBe(501);
     // The draft is read against the brand's own schema: `heading` is takeoffgo's
     // `pageRoot` field, and `strap` is allaboutafrica's.
     const put = await api(`/api/v1/documents/${own.body.id}/content`, {
-      method: 'PUT',
+      method: "PUT",
       scope: TGO,
-      body: { content: { fields: { heading: 'Hello' } } },
-    })
-    expect(put.status).toBe(200)
+      body: { content: { fields: { heading: "Hello" } } },
+    });
+    expect(put.status).toBe(200);
     const refused = await api(`/api/v1/documents/${own.body.id}/content`, {
-      method: 'PUT',
+      method: "PUT",
       scope: TGO,
-      body: { content: { fields: { strap: 'Not a takeoffgo field' } } },
-    })
-    expect(refused.status).toBe(400)
-  })
+      body: { content: { fields: { strap: "Not a takeoffgo field" } } },
+    });
+    expect(refused.status).toBe(400);
+  });
 
-  it('answers each scope’s blocks and types only from the schema routes', async () => {
+  it("answers each scope’s blocks and types only from the schema routes", async () => {
     const names = (m: Record<string, unknown>) =>
-      (m.blocks as { name: string }[]).map((b) => b.name)
+      (m.blocks as { name: string }[]).map((b) => b.name);
     const typeNames = (m: Record<string, unknown>) =>
-      (m.types as { name: string }[]).map((t) => t.name)
-    const aaa = await api('/api/schema', { scope: AAA })
-    const tgo = await api('/api/schema', { scope: TGO })
-    expect(names(aaa.body).sort()).toEqual(['header', 'pageRoot', 'prose'])
-    expect(names(tgo.body).sort()).toEqual(['pageRoot', 'prose'])
-    expect(typeNames(aaa.body)).toContain('article')
-    expect(typeNames(aaa.body)).not.toContain('landing')
-    expect(typeNames(tgo.body)).toContain('landing')
-    expect(typeNames(tgo.body)).not.toContain('article')
+      (m.types as { name: string }[]).map((t) => t.name);
+    const aaa = await api("/api/schema", { scope: AAA });
+    const tgo = await api("/api/schema", { scope: TGO });
+    expect(names(aaa.body).sort()).toEqual(["header", "pageRoot", "prose"]);
+    expect(names(tgo.body).sort()).toEqual(["pageRoot", "prose"]);
+    expect(typeNames(aaa.body)).toContain("article");
+    expect(typeNames(aaa.body)).not.toContain("landing");
+    expect(typeNames(tgo.body)).toContain("landing");
+    expect(typeNames(tgo.body)).not.toContain("article");
     // A block name both brands declare answers each brand's own fields.
     const fieldsOf = (m: Record<string, unknown>) =>
       Object.keys(
-        (m.blocks as { name: string; fields: object }[]).find((b) => b.name === 'pageRoot')!.fields,
-      )
-    expect(fieldsOf(aaa.body).sort()).toEqual(['strap', 'title'])
-    expect(fieldsOf(tgo.body)).toEqual(['heading'])
+        (m.blocks as { name: string; fields: object }[]).find((b) => b.name === "pageRoot")!.fields,
+      );
+    expect(fieldsOf(aaa.body).sort()).toEqual(["strap", "title"]);
+    expect(fieldsOf(tgo.body)).toEqual(["heading"]);
 
-    const v1 = await api('/api/v1/schema', { scope: TGO })
-    expect(names(v1.body).sort()).toEqual(['pageRoot', 'prose'])
+    const v1 = await api("/api/v1/schema", { scope: TGO });
+    expect(names(v1.body).sort()).toEqual(["pageRoot", "prose"]);
     // Unscoped on a branded deployment there is no brand to answer for, and none is chosen.
-    const bare = await api('/api/v1/schema')
-    expect(bare.status).toBe(400)
-    expect(bare.body.blocks).toBeUndefined()
-  })
+    const bare = await api("/api/v1/schema");
+    expect(bare.status).toBe(400);
+    expect(bare.body.blocks).toBeUndefined();
+  });
 
-  it('describes the scope’s brand’s types and blocks in MCP, and no other’s', async () => {
+  it("describes the scope’s brand’s types and blocks in MCP, and no other’s", async () => {
     const list = async (scope: string | undefined) => {
-      const params = {}
+      const params = {};
       const headers: Record<string, string> = {
-        'content-type': 'application/json',
-        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-        'mcp-method': 'tools/list',
+        "content-type": "application/json",
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+        "mcp-method": "tools/list",
         ...(await auth()),
-      }
-      if (scope) headers[SCOPE_HEADER] = scope
+      };
+      if (scope) headers[SCOPE_HEADER] = scope;
       const res = await routeApp.request(
         `${ADMIN}/folio/mcp`,
         {
-          method: 'POST',
+          method: "POST",
           headers,
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params }),
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params }),
         },
         env,
         createExecutionContext(),
-      )
-      if (!scope) return { status: res.status, text: '' }
-      expect(res.status).toBe(200)
+      );
+      if (!scope) return { status: res.status, text: "" };
+      expect(res.status).toBe(200);
       const answer = (await res.json()) as {
-        result: { tools: { name: string; description: string }[] }
-      }
-      return { status: 200, text: answer.result.tools.map((t) => t.description).join('\n') }
-    }
-    const aaa = (await list(AAA)).text
-    const tgo = (await list(TGO)).text
-    expect(aaa).toContain('article')
-    expect(aaa).toContain('header')
-    expect(aaa).not.toContain('landing')
-    expect(tgo).toContain('landing')
-    expect(tgo).not.toContain('article')
-    expect(tgo).not.toContain('header')
+        result: { tools: { name: string; description: string }[] };
+      };
+      return { status: 200, text: answer.result.tools.map((t) => t.description).join("\n") };
+    };
+    const aaa = (await list(AAA)).text;
+    const tgo = (await list(TGO)).text;
+    expect(aaa).toContain("article");
+    expect(aaa).toContain("header");
+    expect(aaa).not.toContain("landing");
+    expect(tgo).toContain("landing");
+    expect(tgo).not.toContain("article");
+    expect(tgo).not.toContain("header");
     // MCP names the site first: no scope, no brand, and no list of anyone's types.
-    expect((await list(undefined)).status).toBe(400)
-  })
+    expect((await list(undefined)).status).toBe(400);
+  });
 
-  it('keeps a form of one brand out of the other’s scope', async () => {
-    const made = await api('/api/forms', { method: 'POST', scope: AAA, body: { label: 'Enquiry' } })
-    expect(made.status).toBe(201)
-    const id = ((made.body.form ?? made.body) as { id: string }).id
-    expect((await api(`/api/forms/${id}`, { scope: AAA })).status).toBe(200)
-    expect((await api(`/api/forms/${id}`, { scope: TGO })).status).toBe(404)
-    const listed = await api('/api/forms', { scope: TGO })
-    expect(JSON.stringify(listed.body)).not.toContain(id)
-  })
+  it("keeps a form of one brand out of the other’s scope", async () => {
+    const made = await api("/api/forms", {
+      method: "POST",
+      scope: AAA,
+      body: { label: "Enquiry" },
+    });
+    expect(made.status).toBe(201);
+    const id = ((made.body.form ?? made.body) as { id: string }).id;
+    expect((await api(`/api/forms/${id}`, { scope: AAA })).status).toBe(200);
+    expect((await api(`/api/forms/${id}`, { scope: TGO })).status).toBe(404);
+    const listed = await api("/api/forms", { scope: TGO });
+    expect(JSON.stringify(listed.body)).not.toContain(id);
+  });
 
-  it('runs a migration on one brand’s scopes and leaves the other’s documents alone', async () => {
-    const status = await api('/api/migrations', { scope: AAA })
-    expect(status.body.pending).toEqual(['allaboutafrica/0001-noop'])
+  it("runs a migration on one brand’s scopes and leaves the other’s documents alone", async () => {
+    const status = await api("/api/migrations", { scope: AAA });
+    expect(status.body.pending).toEqual(["allaboutafrica/0001-noop"]);
 
-    const run = await api('/api/migrate', { method: 'POST', scope: AAA, body: {} })
-    expect(run.status).toBe(200)
+    const run = await api("/api/migrate", { method: "POST", scope: AAA, body: {} });
+    expect(run.status).toBe(200);
     const stamp = async (id: string) =>
       (
-        await env.DB.prepare('select schema_id as s from stories where id = ?')
+        await env.DB.prepare("select schema_id as s from stories where id = ?")
           .bind(id)
           .first<{ s: string | null }>()
-      )?.s
-    expect(await stamp('sty_r_aaa')).toBe('allaboutafrica/0001-noop')
-    expect(await stamp('sty_r_tgo')).toBeNull()
-  })
-})
+      )?.s;
+    expect(await stamp("sty_r_aaa")).toBe("allaboutafrica/0001-noop");
+    expect(await stamp("sty_r_tgo")).toBeNull();
+  });
+});
 
 /* --------------------------------------- the admin and agent surfaces (phase 7) --- */
 
-describe('the admin and agent surfaces (decisions 12, 16, 19, 20)', () => {
-  const P_AAA = 'p7-aaa'
-  const P_TGO = 'p7-tgo'
+describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
+  const P_AAA = "p7-aaa";
+  const P_TGO = "p7-tgo";
 
   /** Every hook payload, by event, in the order fired. `await` so a route has fired them by its answer. */
-  const fired: { event: string; payload: Record<string, unknown> }[] = []
+  const fired: { event: string; payload: Record<string, unknown> }[] = [];
   const record =
     (event: string) =>
     (payload: unknown): void => {
-      fired.push({ event, payload: payload as Record<string, unknown> })
-    }
+      fired.push({ event, payload: payload as Record<string, unknown> });
+    };
 
   const p7Brands: Record<string, FolioBrand<Cloudflare.Env>> = {
     allaboutafrica: {
       ...brands.allaboutafrica!,
-      settings: 'header',
+      settings: "header",
       migrations: [
         defineMigration({
-          id: 'allaboutafrica/0002-p7-title',
-          description: 'title defaults',
-          up: (_doc, ctx) => ctx.each('pageRoot', (b) => field.default(b, 'title', 'Untitled')),
+          id: "allaboutafrica/0002-p7-title",
+          description: "title defaults",
+          up: (_doc, ctx) => ctx.each("pageRoot", (b) => field.default(b, "title", "Untitled")),
         }),
       ],
     },
@@ -808,47 +812,47 @@ describe('the admin and agent surfaces (decisions 12, 16, 19, 20)', () => {
       ...brands.takeoffgo!,
       migrations: [
         defineMigration({
-          id: 'takeoffgo/0002-p7-heading',
-          description: 'heading defaults',
-          up: (_doc, ctx) => ctx.each('pageRoot', (b) => field.default(b, 'heading', 'Untitled')),
+          id: "takeoffgo/0002-p7-heading",
+          description: "heading defaults",
+          up: (_doc, ctx) => ctx.each("pageRoot", (b) => field.default(b, "heading", "Untitled")),
         }),
       ],
     },
-  }
+  };
   const p7Config: FolioConfig<Cloudflare.Env> = {
     ...config,
     brands: p7Brands,
     // No `sites.settings`: with brands it belongs to a brand.
     hooks: {
-      await: ['created', 'migrated', 'reindexed', 'siteChanged'],
-      created: record('created'),
-      migrated: record('migrated'),
-      reindexed: record('reindexed'),
-      siteChanged: record('siteChanged'),
+      await: ["created", "migrated", "reindexed", "siteChanged"],
+      created: record("created"),
+      migrated: record("migrated"),
+      reindexed: record("reindexed"),
+      siteChanged: record("siteChanged"),
     },
-  }
-  const p7Rt = createRuntime(p7Config)
-  const p7App = createApp(p7Config, p7Rt)
-  const openConfig: FolioConfig<Cloudflare.Env> = { ...p7Config, auth: 'open', hooks: undefined }
-  const openApp = createApp(openConfig, createRuntime(openConfig))
+  };
+  const p7Rt = createRuntime(p7Config);
+  const p7App = createApp(p7Config, p7Rt);
+  const openConfig: FolioConfig<Cloudflare.Env> = { ...p7Config, auth: "open", hooks: undefined };
+  const openApp = createApp(openConfig, createRuntime(openConfig));
 
   async function api(
     path: string,
     init: { method?: string; body?: unknown; scope?: string; on?: typeof p7App } = {},
   ) {
-    const headers = new Headers({ 'content-type': 'application/json', ...(await auth()) })
-    if (init.scope) headers.set(SCOPE_HEADER, init.scope)
+    const headers = new Headers({ "content-type": "application/json", ...(await auth()) });
+    if (init.scope) headers.set(SCOPE_HEADER, init.scope);
     const res = await (init.on ?? p7App).request(
       `${ADMIN}/folio${path}`,
       {
-        method: init.method ?? 'GET',
+        method: init.method ?? "GET",
         headers,
         ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       },
       env,
       createExecutionContext(),
-    )
-    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+    );
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   }
 
   beforeAll(async () => {
@@ -867,293 +871,293 @@ describe('the admin and agent surfaces (decisions 12, 16, 19, 20)', () => {
                 ('sty_p7_tgo', 'page', null, 'home', 'home', 'a0', 'Home', 1, '${P_TGO}', ?, 2)`,
       ).bind(
         JSON.stringify({
-          root: 'r0',
+          root: "r0",
           bloks: {
-            r0: { uid: 'r0', type: 'pageRoot', parent: null, slot: null, order: 'a0', data: {} },
+            r0: { uid: "r0", type: "pageRoot", parent: null, slot: null, order: "a0", data: {} },
           },
         }),
         JSON.stringify({
-          root: 'r0',
+          root: "r0",
           bloks: {
-            r0: { uid: 'r0', type: 'pageRoot', parent: null, slot: null, order: 'a0', data: {} },
+            r0: { uid: "r0", type: "pageRoot", parent: null, slot: null, order: "a0", data: {} },
           },
         }),
       ),
-    ])
-    p7Rt.sites?.drop()
-  })
+    ]);
+    p7Rt.sites?.drop();
+  });
 
-  describe('the manifest (decision 12)', () => {
-    it('is the scope’s brand’s, with the brand and its settings type', async () => {
-      const aaa = await api('/api/schema', { scope: P_AAA })
-      const tgo = await api('/api/schema', { scope: P_TGO })
-      expect(aaa.body.brand).toEqual({ id: 'allaboutafrica', label: 'All About Africa' })
-      expect(aaa.body.settings).toBe('header')
-      expect(tgo.body.brand).toEqual({ id: 'takeoffgo', label: 'Take Off Go' })
+  describe("the manifest (decision 12)", () => {
+    it("is the scope’s brand’s, with the brand and its settings type", async () => {
+      const aaa = await api("/api/schema", { scope: P_AAA });
+      const tgo = await api("/api/schema", { scope: P_TGO });
+      expect(aaa.body.brand).toEqual({ id: "allaboutafrica", label: "All About Africa" });
+      expect(aaa.body.settings).toBe("header");
+      expect(tgo.body.brand).toEqual({ id: "takeoffgo", label: "Take Off Go" });
       // A brand that declares no settings type carries no key.
-      expect('settings' in tgo.body).toBe(false)
-    })
+      expect("settings" in tgo.body).toBe(false);
+    });
 
-    it('is neutral with no scope: no types, blocks or globals, and the deployment’s own hooks', async () => {
-      const bare = await api('/api/schema')
-      expect(bare.status).toBe(200)
-      expect(bare.body).toMatchObject({ types: [], blocks: [], globals: [] })
-      expect('brand' in bare.body).toBe(false)
-      expect('settings' in bare.body).toBe(false)
+    it("is neutral with no scope: no types, blocks or globals, and the deployment’s own hooks", async () => {
+      const bare = await api("/api/schema");
+      expect(bare.status).toBe(200);
+      expect(bare.body).toMatchObject({ types: [], blocks: [], globals: [] });
+      expect("brand" in bare.body).toBe(false);
+      expect("settings" in bare.body).toBe(false);
       // Same as every brand's: `hooks` is the deployment's, not a brand's.
-      const scoped = await api('/api/schema', { scope: P_TGO })
-      expect(bare.body.hooks).toEqual(scoped.body.hooks)
-      expect((bare.body.hooks as { declared: string[] }).declared).toContain('created')
-    })
+      const scoped = await api("/api/schema", { scope: P_TGO });
+      expect(bare.body.hooks).toEqual(scoped.body.hooks);
+      expect((bare.body.hooks as { declared: string[] }).declared).toContain("created");
+    });
 
-    it('carries no brand or settings on a deployment without brands', async () => {
+    it("carries no brand or settings on a deployment without brands", async () => {
       const single: FolioConfig<Cloudflare.Env> = {
         blocks: [aaaRoot, aaaProse, aaaHeader],
         types: aaaTypes,
-        sites: { admin: ADMIN, settings: 'header' },
+        sites: { admin: ADMIN, settings: "header" },
         bindings,
-        basePath: '/folio',
+        basePath: "/folio",
         auth: config.auth,
         route: config.route,
-      }
-      const on = createApp(single, createRuntime(single))
-      const res = await api('/api/schema', { on })
-      expect(res.status).toBe(200)
-      expect('brand' in res.body).toBe(false)
-      expect('settings' in res.body).toBe(false)
-      expect((res.body.types as unknown[]).length).toBeGreaterThan(0)
-    })
-  })
+      };
+      const on = createApp(single, createRuntime(single));
+      const res = await api("/api/schema", { on });
+      expect(res.status).toBe(200);
+      expect("brand" in res.body).toBe(false);
+      expect("settings" in res.body).toBe(false);
+      expect((res.body.types as unknown[]).length).toBeGreaterThan(0);
+    });
+  });
 
-  describe('the versioned schema (decisions 12 and 19)', () => {
-    it('adds the scope and its brand when scoped', async () => {
-      const res = await api('/api/v1/schema', { scope: P_TGO })
-      expect(res.status).toBe(200)
+  describe("the versioned schema (decisions 12 and 19)", () => {
+    it("adds the scope and its brand when scoped", async () => {
+      const res = await api("/api/v1/schema", { scope: P_TGO });
+      expect(res.status).toBe(200);
       expect(res.body.scope).toEqual({
         id: P_TGO,
-        name: 'P7 TGO',
-        kind: 'site',
-        brand: { id: 'takeoffgo', label: 'Take Off Go' },
-      })
-    })
+        name: "P7 TGO",
+        kind: "site",
+        brand: { id: "takeoffgo", label: "Take Off Go" },
+      });
+    });
 
-    it('is 400 site_required unscoped, and names no brand’s types or blocks', async () => {
-      const res = await api('/api/v1/schema')
-      expect(res.status).toBe(400)
-      expect(errorOf(res.body)?.code).toBe('site_required')
-      expect(res.body.types).toBeUndefined()
-      expect(res.body.blocks).toBeUndefined()
-    })
+    it("is 400 site_required unscoped, and names no brand’s types or blocks", async () => {
+      const res = await api("/api/v1/schema");
+      expect(res.status).toBe(400);
+      expect(errorOf(res.body)?.code).toBe("site_required");
+      expect(res.body.types).toBeUndefined();
+      expect(res.body.blocks).toBeUndefined();
+    });
 
-    it('is 400 site_required for the other unscoped routes that need a registry', async () => {
-      for (const path of ['/api/migrations', '/api/audit']) {
-        const res = await api(path)
-        expect(res.status, path).toBe(400)
-        expect(errorOf(res.body)?.code, path).toBe('site_required')
+    it("is 400 site_required for the other unscoped routes that need a registry", async () => {
+      for (const path of ["/api/migrations", "/api/audit"]) {
+        const res = await api(path);
+        expect(res.status, path).toBe(400);
+        expect(errorOf(res.body)?.code, path).toBe("site_required");
       }
-    })
+    });
 
-    it('adds a scope with brand null on a single-brand multi-site deployment', async () => {
+    it("adds a scope with brand null on a single-brand multi-site deployment", async () => {
       const single: FolioConfig<Cloudflare.Env> = {
         blocks: [aaaRoot, aaaProse, aaaHeader],
         types: aaaTypes,
         sites: { admin: ADMIN },
         bindings,
-        basePath: '/folio',
+        basePath: "/folio",
         auth: config.auth,
         route: config.route,
-      }
-      const on = createApp(single, createRuntime(single))
-      const res = await api('/api/v1/schema', { on, scope: 'shared' })
-      expect(res.status).toBe(200)
-      expect(res.body.scope).toEqual({ id: 'shared', name: 'Shared', kind: 'shared', brand: null })
-    })
-  })
+      };
+      const on = createApp(single, createRuntime(single));
+      const res = await api("/api/v1/schema", { on, scope: "shared" });
+      expect(res.status).toBe(200);
+      expect(res.body.scope).toEqual({ id: "shared", name: "Shared", kind: "shared", brand: null });
+    });
+  });
 
-  describe('an unscoped route that picks a brand needs the caller to reach the scope', () => {
+  describe("an unscoped route that picks a brand needs the caller to reach the scope", () => {
     const bearer = async (site: string | null) => ({
-      authorization: `Bearer ${(await createToken(env.DB, { name: `l1-${site}`, scopes: ['content:read'], site })).token}`,
-    })
+      authorization: `Bearer ${(await createToken(env.DB, { name: `l1-${site}`, scopes: ["content:read"], site })).token}`,
+    });
     const get = async (path: string, scope: string, headers: Record<string, string>) => {
       const res = await p7App.request(
         `${ADMIN}/folio${path}`,
         { headers: { ...headers, [SCOPE_HEADER]: scope } },
         env,
         createExecutionContext(),
-      )
-      return { status: res.status, body: (await res.json()) as Record<string, unknown> }
-    }
-    const PATHS = ['/api/v1/schema', '/api/migrations', '/api/assets/describe']
+      );
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
+    const PATHS = ["/api/v1/schema", "/api/migrations", "/api/assets/describe"];
 
-    it('refuses a token bound to one brand’s site on another brand’s scope', async () => {
-      const bound = await bearer(P_AAA)
+    it("refuses a token bound to one brand’s site on another brand’s scope", async () => {
+      const bound = await bearer(P_AAA);
       for (const path of PATHS) {
-        const res = await get(path, P_TGO, bound)
-        expect(res.status, path).toBe(403)
-        expect(res.body.types, path).toBeUndefined()
+        const res = await get(path, P_TGO, bound);
+        expect(res.status, path).toBe(403);
+        expect(res.body.types, path).toBeUndefined();
       }
-    })
+    });
 
-    it('still answers that token on its own scope, and an unbound one on either', async () => {
-      const bound = await bearer(P_AAA)
-      expect((await get('/api/v1/schema', P_AAA, bound)).status).toBe(200)
-      const unbound = await bearer(null)
-      expect((await get('/api/v1/schema', P_TGO, unbound)).status).toBe(200)
-      expect((await get('/api/v1/schema', P_AAA, unbound)).status).toBe(200)
-    })
-  })
+    it("still answers that token on its own scope, and an unbound one on either", async () => {
+      const bound = await bearer(P_AAA);
+      expect((await get("/api/v1/schema", P_AAA, bound)).status).toBe(200);
+      const unbound = await bearer(null);
+      expect((await get("/api/v1/schema", P_TGO, unbound)).status).toBe(200);
+      expect((await get("/api/v1/schema", P_AAA, unbound)).status).toBe(200);
+    });
+  });
 
-  describe('/me (decision 20)', () => {
-    it('carries each scope’s brand and the brand list, no shared, and no settings type', async () => {
-      const me = (await api('/api/me', { on: openApp, scope: P_TGO })).body as {
+  describe("/me (decision 20)", () => {
+    it("carries each scope’s brand and the brand list, no shared, and no settings type", async () => {
+      const me = (await api("/api/me", { on: openApp, scope: P_TGO })).body as {
         sites: {
-          settings: string | null
-          brands: { id: string; label: string }[]
-          scopes: { id: string; kind: string; brand: { id: string; label: string } | null }[]
-        }
-      }
-      expect(me.sites.settings).toBeNull()
+          settings: string | null;
+          brands: { id: string; label: string }[];
+          scopes: { id: string; kind: string; brand: { id: string; label: string } | null }[];
+        };
+      };
+      expect(me.sites.settings).toBeNull();
       expect(me.sites.brands).toEqual([
-        { id: 'allaboutafrica', label: 'All About Africa' },
-        { id: 'takeoffgo', label: 'Take Off Go' },
-      ])
-      expect(me.sites.scopes.some((s) => s.kind === 'shared')).toBe(false)
+        { id: "allaboutafrica", label: "All About Africa" },
+        { id: "takeoffgo", label: "Take Off Go" },
+      ]);
+      expect(me.sites.scopes.some((s) => s.kind === "shared")).toBe(false);
       expect(me.sites.scopes.find((s) => s.id === P_TGO)?.brand).toEqual({
-        id: 'takeoffgo',
-        label: 'Take Off Go',
-      })
-      expect(me.sites.scopes.find((s) => s.id === P_AAA)?.brand?.id).toBe('allaboutafrica')
-    })
+        id: "takeoffgo",
+        label: "Take Off Go",
+      });
+      expect(me.sites.scopes.find((s) => s.id === P_AAA)?.brand?.id).toBe("allaboutafrica");
+    });
 
-    it('answers with no scope too', async () => {
-      const res = await api('/api/me', { on: openApp })
-      expect(res.status).toBe(200)
-      expect((res.body.sites as { settings: string | null }).settings).toBeNull()
-    })
-  })
+    it("answers with no scope too", async () => {
+      const res = await api("/api/me", { on: openApp });
+      expect(res.status).toBe(200);
+      expect((res.body.sites as { settings: string | null }).settings).toBeNull();
+    });
+  });
 
-  describe('the MCP instructions (decision 19)', () => {
+  describe("the MCP instructions (decision 19)", () => {
     const discover = async (scope: string | undefined) => {
       const headers: Record<string, string> = {
-        'content-type': 'application/json',
-        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-        'mcp-method': 'server/discover',
+        "content-type": "application/json",
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+        "mcp-method": "server/discover",
         ...(await auth()),
-      }
-      if (scope) headers[SCOPE_HEADER] = scope
+      };
+      if (scope) headers[SCOPE_HEADER] = scope;
       const res = await p7App.request(
         `${ADMIN}/folio/mcp`,
         {
-          method: 'POST',
+          method: "POST",
           headers,
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} }),
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: {} }),
         },
         env,
         createExecutionContext(),
-      )
-      return { status: res.status, body: (await res.json()) as Record<string, unknown> }
-    }
+      );
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    };
     const instructions = async (scope: string) =>
-      ((await discover(scope)).body.result as { instructions: string }).instructions
+      ((await discover(scope)).body.result as { instructions: string }).instructions;
 
-    it('names the site and the brand, and says other brands are not visible', async () => {
-      const text = await instructions(P_TGO)
+    it("names the site and the brand, and says other brands are not visible", async () => {
+      const text = await instructions(P_TGO);
       expect(text).toContain(
         `This session is scoped to site 'P7 TGO' (\`${P_TGO}\`) of brand 'Take Off Go'`,
-      )
-      expect(text).toContain('documents, types and blocks of other brands are not visible')
-      expect(text).toContain('get_schema describes this brand only')
-      expect(await instructions(P_AAA)).toContain("of brand 'All About Africa'")
-    })
+      );
+      expect(text).toContain("documents, types and blocks of other brands are not visible");
+      expect(text).toContain("get_schema describes this brand only");
+      expect(await instructions(P_AAA)).toContain("of brand 'All About Africa'");
+    });
 
-    it('names the site alone on a multi-site deployment without brands', async () => {
+    it("names the site alone on a multi-site deployment without brands", async () => {
       const single: FolioConfig<Cloudflare.Env> = {
         blocks: [aaaRoot, aaaProse, aaaHeader],
         types: aaaTypes,
         sites: { admin: ADMIN },
         bindings,
-        basePath: '/folio',
+        basePath: "/folio",
         auth: config.auth,
         route: config.route,
-      }
-      const on = createApp(single, createRuntime(single))
+      };
+      const on = createApp(single, createRuntime(single));
       const res = await on.request(
         `${ADMIN}/folio/mcp`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'content-type': 'application/json',
-            'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-            'mcp-method': 'server/discover',
+            "content-type": "application/json",
+            "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+            "mcp-method": "server/discover",
             ...(await auth()),
             [SCOPE_HEADER]: P_TGO,
           },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} }),
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: {} }),
         },
         env,
         createExecutionContext(),
-      )
-      const text = ((await res.json()) as { result: { instructions: string } }).result.instructions
-      expect(text).toContain(`This session is scoped to site 'P7 TGO' (\`${P_TGO}\`).`)
-      expect(text).not.toContain('brand')
-    })
+      );
+      const text = ((await res.json()) as { result: { instructions: string } }).result.instructions;
+      expect(text).toContain(`This session is scoped to site 'P7 TGO' (\`${P_TGO}\`).`);
+      expect(text).not.toContain("brand");
+    });
 
-    it('keeps the three sentences every session gets', async () => {
-      const text = await instructions(P_TGO)
-      expect(text).toContain('call get_schema first')
-      expect(text).toContain('undoable')
-    })
-  })
+    it("keeps the three sentences every session gets", async () => {
+      const text = await instructions(P_TGO);
+      expect(text).toContain("call get_schema first");
+      expect(text).toContain("undoable");
+    });
+  });
 
-  describe('hooks are told the brand (decision 16)', () => {
-    it('created carries the brand of the scope it happened in', async () => {
-      fired.length = 0
+  describe("hooks are told the brand (decision 16)", () => {
+    it("created carries the brand of the scope it happened in", async () => {
+      fired.length = 0;
       expect(
-        (await api('/api/stories', { method: 'POST', scope: P_TGO, body: { title: 'Made' } }))
+        (await api("/api/stories", { method: "POST", scope: P_TGO, body: { title: "Made" } }))
           .status,
-      ).toBe(200)
+      ).toBe(200);
       expect(
-        (await api('/api/stories', { method: 'POST', scope: P_AAA, body: { title: 'Made' } }))
+        (await api("/api/stories", { method: "POST", scope: P_AAA, body: { title: "Made" } }))
           .status,
-      ).toBe(200)
-      const created = fired.filter((f) => f.event === 'created')
+      ).toBe(200);
+      const created = fired.filter((f) => f.event === "created");
       expect(created.map((f) => [f.payload.site, f.payload.brand])).toEqual([
-        [P_TGO, 'takeoffgo'],
-        [P_AAA, 'allaboutafrica'],
-      ])
-    })
+        [P_TGO, "takeoffgo"],
+        [P_AAA, "allaboutafrica"],
+      ]);
+    });
 
-    it('migrated and reindexed carry the brand they ran for', async () => {
-      fired.length = 0
-      expect((await api('/api/migrate', { method: 'POST', scope: P_TGO, body: {} })).status).toBe(
+    it("migrated and reindexed carry the brand they ran for", async () => {
+      fired.length = 0;
+      expect((await api("/api/migrate", { method: "POST", scope: P_TGO, body: {} })).status).toBe(
         200,
-      )
-      expect((await api('/api/reindex', { method: 'POST', scope: P_AAA, body: {} })).status).toBe(
+      );
+      expect((await api("/api/reindex", { method: "POST", scope: P_AAA, body: {} })).status).toBe(
         200,
-      )
+      );
       const brandsOf = (event: string) =>
-        fired.filter((f) => f.event === event).map((f) => f.payload.brand)
-      expect(brandsOf('migrated')).toEqual(['takeoffgo'])
-      expect(brandsOf('reindexed')).toEqual(['allaboutafrica'])
-    })
+        fired.filter((f) => f.event === event).map((f) => f.payload.brand);
+      expect(brandsOf("migrated")).toEqual(["takeoffgo"]);
+      expect(brandsOf("reindexed")).toEqual(["allaboutafrica"]);
+    });
 
-    it('siteChanged carries the row’s brand, including on a delete', async () => {
-      fired.length = 0
-      const made = await api('/api/sites', {
-        method: 'POST',
-        body: { id: 'p7-new', kind: 'site', name: 'New', brand: 'takeoffgo' },
-      })
-      expect(made.status).toBe(201)
-      expect(made.body.brand).toBe('takeoffgo')
-      expect((await api('/api/sites/p7-new', { method: 'DELETE' })).status).toBe(200)
+    it("siteChanged carries the row’s brand, including on a delete", async () => {
+      fired.length = 0;
+      const made = await api("/api/sites", {
+        method: "POST",
+        body: { id: "p7-new", kind: "site", name: "New", brand: "takeoffgo" },
+      });
+      expect(made.status).toBe(201);
+      expect(made.body.brand).toBe("takeoffgo");
+      expect((await api("/api/sites/p7-new", { method: "DELETE" })).status).toBe(200);
       expect(
         fired
-          .filter((f) => f.event === 'siteChanged')
+          .filter((f) => f.event === "siteChanged")
           .map((f) => [f.payload.change, f.payload.brand]),
       ).toEqual([
-        ['created', 'takeoffgo'],
-        ['deleted', 'takeoffgo'],
-      ])
-    })
-  })
-})
+        ["created", "takeoffgo"],
+        ["deleted", "takeoffgo"],
+      ]);
+    });
+  });
+});

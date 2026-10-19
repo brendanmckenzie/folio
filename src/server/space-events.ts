@@ -25,10 +25,10 @@
  * refetch is cheaper than a wrong tree, and the events are idempotent, so a
  * missed one is corrected by the next load anyway.
  */
-import type { SpaceEvent } from '../core/protocol'
-import { DEFAULT_SITE } from '../core/sites'
-import type { FolioHooks } from './hooks'
-import type { FolioConfig, FolioLogger, SpaceStub } from './types'
+import type { SpaceEvent } from "../core/protocol";
+import { DEFAULT_SITE } from "../core/sites";
+import type { FolioHooks } from "./hooks";
+import type { FolioConfig, FolioLogger, SpaceStub } from "./types";
 
 /**
  * The name of the space instance for `default`. One per **scope** since spec 23
@@ -36,7 +36,7 @@ import type { FolioConfig, FolioLogger, SpaceStub } from './types'
  * an editor on `alpha` has no business seeing who is working on `bravo`, whose
  * pages, titles and cursors would otherwise cross the fence in a presence frame.
  */
-export const SPACE_NAME = 'space'
+export const SPACE_NAME = "space";
 
 /**
  * The space instance a scope's editors share: `space` for `default` — so a
@@ -46,7 +46,7 @@ export const SPACE_NAME = 'space'
  * the people on `~shared` and not the sites that inherit it.
  */
 export function spaceNameFor(scope: string | null | undefined): string {
-  return !scope || scope === DEFAULT_SITE ? SPACE_NAME : `${SPACE_NAME}:${scope}`
+  return !scope || scope === DEFAULT_SITE ? SPACE_NAME : `${SPACE_NAME}:${scope}`;
 }
 
 /**
@@ -59,12 +59,12 @@ function emit(
   waitUntil: (p: Promise<unknown>) => void,
   logger: FolioLogger = console,
 ) {
-  if (!space) return // no binding: the whole channel is absent, by design
+  if (!space) return; // no binding: the whole channel is absent, by design
   waitUntil(
     space.broadcastEvent(event).catch((err: unknown) => {
-      logger.error(`folio: could not broadcast ${event.kind} to the space channel`, err)
+      logger.error(`folio: could not broadcast ${event.kind} to the space channel`, err);
     }),
-  )
+  );
 }
 
 /**
@@ -83,16 +83,16 @@ export function spaceBroadcastHooks<Env>(
   logger: FolioLogger = console,
 ): FolioHooks<Env> {
   const spaceFor = (env: Env, scope: string | null): SpaceStub | null => {
-    const ns = config.bindings(env).space
-    return ns ? (ns.get(ns.idFromName(spaceNameFor(scope))) as unknown as SpaceStub) : null
-  }
+    const ns = config.bindings(env).space;
+    return ns ? (ns.get(ns.idFromName(spaceNameFor(scope))) as unknown as SpaceStub) : null;
+  };
 
   return {
     created: ({ env, waitUntil, story, actor, site }) => {
       emit(
         spaceFor(env, site),
         {
-          kind: 'story.created',
+          kind: "story.created",
           id: story.id,
           parentId: story.parentId,
           title: story.title,
@@ -101,7 +101,7 @@ export function spaceBroadcastHooks<Env>(
         },
         waitUntil,
         logger,
-      )
+      );
     },
 
     /**
@@ -116,11 +116,11 @@ export function spaceBroadcastHooks<Env>(
      * after-commit path for the sake of a row moving up one place.
      */
     pathsChanged: ({ env, waitUntil, changes, actor, site }) => {
-      emit(spaceFor(env, site), { kind: 'story.updated', changes, actor }, waitUntil, logger)
+      emit(spaceFor(env, site), { kind: "story.updated", changes, actor }, waitUntil, logger);
     },
 
     deleted: ({ env, waitUntil, ids, actor, site }) => {
-      emit(spaceFor(env, site), { kind: 'story.deleted', ids, actor }, waitUntil, logger)
+      emit(spaceFor(env, site), { kind: "story.deleted", ids, actor }, waitUntil, logger);
     },
 
     /**
@@ -129,11 +129,11 @@ export function spaceBroadcastHooks<Env>(
      * the `global.changed` hint for anything rendering that global's content.
      */
     published: ({ env, waitUntil, story, version, publishedAt, actor, site }) => {
-      const space = spaceFor(env, site)
+      const space = spaceFor(env, site);
       emit(
         space,
         {
-          kind: 'story.published',
+          kind: "story.published",
           id: story.id,
           title: story.title,
           at: publishedAt,
@@ -142,15 +142,15 @@ export function spaceBroadcastHooks<Env>(
         },
         waitUntil,
         logger,
-      )
+      );
       if (globals.includes(story.type)) {
         emit(
           space,
-          { kind: 'global.changed', name: story.type, storyId: story.id, actor },
+          { kind: "global.changed", name: story.type, storyId: story.id, actor },
           waitUntil,
           logger,
-        )
+        );
       }
     },
-  }
+  };
 }

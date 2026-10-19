@@ -39,21 +39,21 @@
  * button calls, so it gets the retained version, the `content_index` write, the
  * `published` hook and Folio's own cache purge without restating any of them.
  */
-import { DEFAULT_SITE, type Registry } from '../core/sites'
-import type { Schedule, ScheduleAction, ScheduleStatus, StoryMeta } from '../core/story'
-import type { HookRunnerCtx } from './hooks'
-import type { FolioRuntime } from './runtime'
-import { FolioError } from './errors'
-import { publish, type PublishDeps, type StorySelector, unpublish } from './publish'
-import type { FolioDb } from './db'
+import { DEFAULT_SITE, type Registry } from "../core/sites";
+import type { Schedule, ScheduleAction, ScheduleStatus, StoryMeta } from "../core/story";
+import type { HookRunnerCtx } from "./hooks";
+import type { FolioRuntime } from "./runtime";
+import { FolioError } from "./errors";
+import { publish, type PublishDeps, type StorySelector, unpublish } from "./publish";
+import type { FolioDb } from "./db";
 import {
   completeScheduleStatement,
   countDue,
   dueSchedules,
   failScheduleStatement,
-} from './schedules'
-import { storyById } from './stories'
-import type { FolioLogger, ReadBindings } from './types'
+} from "./schedules";
+import { storyById } from "./stories";
+import type { FolioLogger, ReadBindings } from "./types";
 
 /**
  * The sweep on a deployment with `brands` (`multi-brand.md` decision 6): one
@@ -63,9 +63,9 @@ import type { FolioLogger, ReadBindings } from './types'
  * guess (a null brand serves nothing, decision 4).
  */
 export interface BrandedScheduleDeps {
-  db: FolioDb
-  logger?: FolioLogger
-  depsFor: (story: StoryMeta) => Promise<PublishDeps | null>
+  db: FolioDb;
+  logger?: FolioLogger;
+  depsFor: (story: StoryMeta) => Promise<PublishDeps | null>;
 }
 
 /**
@@ -80,33 +80,33 @@ export function scheduleDeps(
   bindings: ReadBindings,
   hookCtx: HookRunnerCtx,
 ): (PublishDeps & { logger?: FolioLogger }) | BrandedScheduleDeps {
-  const one = rt.brands.get(null)
-  if (one) return one.publishDeps(bindings, hookCtx)
-  const sites = rt.sites!
-  let registry: Promise<Registry> | null = null
-  const built = new Map<string, PublishDeps>()
+  const one = rt.brands.get(null);
+  if (one) return one.publishDeps(bindings, hookCtx);
+  const sites = rt.sites!;
+  let registry: Promise<Registry> | null = null;
+  const built = new Map<string, PublishDeps>();
   return {
     db: bindings.db,
     logger: rt.logger,
     depsFor: async (story) => {
-      registry ??= sites.registry(hookCtx.env)
-      const brand = rt.forScope(await registry, story.site ?? DEFAULT_SITE)
-      if (!brand?.brand) return null
-      let deps = built.get(brand.brand.id)
+      registry ??= sites.registry(hookCtx.env);
+      const brand = rt.forScope(await registry, story.site ?? DEFAULT_SITE);
+      if (!brand?.brand) return null;
+      let deps = built.get(brand.brand.id);
       if (!deps) {
-        deps = brand.publishDeps(bindings, hookCtx)
-        built.set(brand.brand.id, deps)
+        deps = brand.publishDeps(bindings, hookCtx);
+        built.set(brand.brand.id, deps);
       }
-      return deps
+      return deps;
     },
-  }
+  };
 }
 
 /** How many schedules one call fires before handing back a cursor. */
-export const DEFAULT_SCHEDULE_BATCH = 25
+export const DEFAULT_SCHEDULE_BATCH = 25;
 
 /** Ceiling on `batch`, so a caller cannot ask for a run that outlives the request. */
-export const MAX_SCHEDULE_BATCH = 200
+export const MAX_SCHEDULE_BATCH = 200;
 
 /**
  * How many times a schedule is retried before it is marked `failed` and left
@@ -121,39 +121,39 @@ export const MAX_SCHEDULE_BATCH = 200
  * once-a-minute cron, which is long enough to outlast a blip and short enough that
  * an editor watching for their page notices.
  */
-export const MAX_SCHEDULE_ATTEMPTS = 3
+export const MAX_SCHEDULE_ATTEMPTS = 3;
 
 export interface ScheduleFailure {
   /** The schedule row, so a caller can cancel or reschedule it. */
-  id: string
-  storyId: string
-  action: ScheduleAction
-  reason: string
-  attempts: number
+  id: string;
+  storyId: string;
+  action: ScheduleAction;
+  reason: string;
+  attempts: number;
   /** True once `attempts` reached `MAX_SCHEDULE_ATTEMPTS`: this will not be
    * retried, and an editor has to reschedule it. */
-  givenUp: boolean
+  givenUp: boolean;
 }
 
 export interface ScheduleRunReport {
   /** Schedules that were due and examined in this call. */
-  due: number
+  due: number;
   /** Story ids published by this call. */
-  published: string[]
+  published: string[];
   /** Story ids unpublished by this call. */
-  unpublished: string[]
+  unpublished: string[];
   /**
    * Schedules dropped because the document they name no longer exists — not a
    * failure. An instruction to publish something that has been deleted is not an
    * instruction, so the row goes rather than being retried three times and
    * retained as a broken schedule for a document nothing can show.
    */
-  dropped: string[]
-  failed: ScheduleFailure[]
-  dryRun: boolean
+  dropped: string[];
+  failed: ScheduleFailure[];
+  dryRun: boolean;
   /** Pass back as `continueFrom` to sweep the next batch. Null when this call
    * reached the end of what was due. */
-  continueFrom: string | null
+  continueFrom: string | null;
   /**
    * How many schedules are still pending and due, asked directly after the run.
    *
@@ -163,7 +163,7 @@ export interface ScheduleRunReport {
    * here, unlike `MigrateReport`. That flag would be an invitation to write
    * exactly that loop.
    */
-  remaining: number
+  remaining: number;
 }
 
 const EMPTY = (dryRun: boolean): ScheduleRunReport => ({
@@ -175,7 +175,7 @@ const EMPTY = (dryRun: boolean): ScheduleRunReport => ({
   dryRun,
   continueFrom: null,
   remaining: 0,
-})
+});
 
 export interface ScheduleRunOptions {
   /**
@@ -186,12 +186,12 @@ export interface ScheduleRunOptions {
    * production passes it, and it is deliberately not readable off the HTTP route:
    * see `routes/schedules.ts`.
    */
-  now?: number
-  batch?: number
+  now?: number;
+  batch?: number;
   /** The previous call's `continueFrom`. An opaque `(at, id)` cursor, not an id. */
-  continueFrom?: string | null
+  continueFrom?: string | null;
   /** Reports what would fire and writes nothing — no publish, no row cleared. */
-  dryRun?: boolean
+  dryRun?: boolean;
 }
 
 /**
@@ -218,26 +218,26 @@ export async function runSchedules(
      * its brand's (`multi-brand.md` decision 6). Absent is every schedule — the
      * cron's sweep, which covers every brand.
      */
-    scopes?: readonly string[]
+    scopes?: readonly string[];
   },
   opts: ScheduleRunOptions = {},
 ): Promise<ScheduleRunReport> {
-  const logger = deps.logger ?? console
-  const now = opts.now ?? Date.now()
-  const dryRun = opts.dryRun === true
+  const logger = deps.logger ?? console;
+  const now = opts.now ?? Date.now();
+  const dryRun = opts.dryRun === true;
   const batch = Math.min(
     Math.max(Math.trunc(opts.batch ?? DEFAULT_SCHEDULE_BATCH), 1),
     MAX_SCHEDULE_BATCH,
-  )
+  );
 
-  const resuming = (opts.continueFrom ?? null) !== null
+  const resuming = (opts.continueFrom ?? null) !== null;
   const { rows, next } = await dueSchedules(
     deps.db,
     now,
     opts.continueFrom ?? null,
     batch,
     deps.scopes,
-  )
+  );
   if (rows.length === 0) {
     // **One read, and this branch is where that claim is paid.** The ordinary cron
     // tick on a site with nothing scheduled lands here, and `remaining` is 0 by
@@ -251,57 +251,57 @@ export async function runSchedules(
     return {
       ...EMPTY(dryRun),
       remaining: resuming ? await countDue(deps.db, now, deps.scopes) : 0,
-    }
+    };
   }
 
-  const report: ScheduleRunReport = { ...EMPTY(dryRun), due: rows.length, continueFrom: next }
+  const report: ScheduleRunReport = { ...EMPTY(dryRun), due: rows.length, continueFrom: next };
 
   for (const row of rows) {
     if (dryRun) {
       // Tallied as if it had worked: a dry run reports the *intent*, and asking
       // whether each publish would have succeeded means performing it.
-      const bucket = row.action === 'publish' ? report.published : report.unpublished
-      bucket.push(row.storyId)
-      continue
+      const bucket = row.action === "publish" ? report.published : report.unpublished;
+      bucket.push(row.storyId);
+      continue;
     }
 
     try {
-      const [workflow, story] = await workflowFor(deps, row)
-      if (row.action === 'publish') {
-        await publish(workflow, story, row.actor)
-        report.published.push(row.storyId)
-      } else if (row.action === 'unpublish') {
-        await unpublish(workflow, story, row.actor)
-        report.unpublished.push(row.storyId)
+      const [workflow, story] = await workflowFor(deps, row);
+      if (row.action === "publish") {
+        await publish(workflow, story, row.actor);
+        report.published.push(row.storyId);
+      } else if (row.action === "unpublish") {
+        await unpublish(workflow, story, row.actor);
+        report.unpublished.push(row.storyId);
       } else {
         // An action nothing declares. Reachable only from a hand-written row or a
         // future value written by a newer deploy: `schedules.action` carries no
         // CHECK constraint on purpose (`0003_schedules.sql`), so the guard is
         // here. Failed rather than dropped — the row is somebody's instruction and
         // deleting one this code does not understand is not this code's call.
-        throw new FolioError('unsupported', `Unknown schedule action '${String(row.action)}'`)
+        throw new FolioError("unsupported", `Unknown schedule action '${String(row.action)}'`);
       }
     } catch (err) {
-      if (err instanceof FolioError && err.code === 'not_found') {
+      if (err instanceof FolioError && err.code === "not_found") {
         // The document has been deleted. `deleteStoryStatement` batches the
         // schedule cleanup so this is normally unreachable; it is still handled,
         // because a delete racing this sweep and a schedule written by a script for
         // an id that never existed both land here.
-        await clearRow(deps.db, row, logger)
-        report.dropped.push(row.id)
-        continue
+        await clearRow(deps.db, row, logger);
+        report.dropped.push(row.id);
+        continue;
       }
-      report.failed.push(await recordFailure(deps.db, row, reasonOf(err), logger))
-      continue
+      report.failed.push(await recordFailure(deps.db, row, reasonOf(err), logger));
+      continue;
     }
 
     // The publish has committed, so this row's work is done. See the at-least-once
     // note in this function's own doc comment for why the clear comes second.
-    await clearRow(deps.db, row, logger)
+    await clearRow(deps.db, row, logger);
   }
 
-  report.remaining = await countDue(deps.db, now, deps.scopes)
-  return report
+  report.remaining = await countDue(deps.db, now, deps.scopes);
+  return report;
 }
 
 /**
@@ -316,17 +316,17 @@ async function workflowFor(
   deps: (PublishDeps & { logger?: FolioLogger }) | BrandedScheduleDeps,
   row: Schedule,
 ): Promise<[PublishDeps, StorySelector]> {
-  if (!('depsFor' in deps)) return [deps, row.storyId]
-  const story = await storyById(deps.db, row.storyId)
-  if (!story) throw new FolioError('not_found', 'Unknown story')
-  const branded = await deps.depsFor(story)
+  if (!("depsFor" in deps)) return [deps, row.storyId];
+  const story = await storyById(deps.db, row.storyId);
+  if (!story) throw new FolioError("not_found", "Unknown story");
+  const branded = await deps.depsFor(story);
   if (!branded) {
     throw new FolioError(
-      'bad_request',
-      `No configured brand serves the scope '${story.site ?? 'default'}' this story belongs to`,
-    )
+      "bad_request",
+      `No configured brand serves the scope '${story.site ?? "default"}' this story belongs to`,
+    );
   }
-  return [branded, story]
+  return [branded, story];
 }
 
 /**
@@ -345,12 +345,12 @@ async function workflowFor(
  */
 async function clearRow(db: FolioDb, row: Schedule, logger: FolioLogger = console): Promise<void> {
   try {
-    await completeScheduleStatement(db, row.id).run()
+    await completeScheduleStatement(db, row.id).run();
   } catch (err) {
     logger.error(
       `folio: fired the schedule for ${row.storyId} but could not clear it; the next sweep will repeat it`,
       err,
-    )
+    );
   }
 }
 
@@ -361,21 +361,21 @@ async function recordFailure(
   reason: string,
   logger: FolioLogger = console,
 ): Promise<ScheduleFailure> {
-  const attempts = row.attempts + 1
-  const givenUp = attempts >= MAX_SCHEDULE_ATTEMPTS
-  const status: ScheduleStatus = givenUp ? 'failed' : 'pending'
+  const attempts = row.attempts + 1;
+  const givenUp = attempts >= MAX_SCHEDULE_ATTEMPTS;
+  const status: ScheduleStatus = givenUp ? "failed" : "pending";
   // Best-effort: a failure to record a failure must not abort the rest of the
   // sweep. The report still names it, and the row stays pending, so the next sweep
   // retries — with `attempts` unchanged, which is the safe direction to be wrong in
   // (a retry too many, never a schedule abandoned without a trace).
   try {
-    await failScheduleStatement(db, row.id, attempts, status, reason).run()
+    await failScheduleStatement(db, row.id, attempts, status, reason).run();
   } catch (err) {
-    logger.error(`folio: could not record a failed schedule for ${row.storyId}`, err)
+    logger.error(`folio: could not record a failed schedule for ${row.storyId}`, err);
   }
-  return { id: row.id, storyId: row.storyId, action: row.action, reason, attempts, givenUp }
+  return { id: row.id, storyId: row.storyId, action: row.action, reason, attempts, givenUp };
 }
 
 function reasonOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return err instanceof Error ? err.message : String(err);
 }

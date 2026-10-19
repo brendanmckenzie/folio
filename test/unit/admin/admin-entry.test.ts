@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 /**
  * The bundle entry's one contract: **`Admin` is imported statically.**
@@ -26,28 +26,28 @@ import { describe, expect, it } from 'vitest'
  * output that `pnpm test` does not otherwise have — to learn something the one
  * line of source already says.
  */
-const entry = readFileSync(new URL('../../../src/admin/main.tsx', import.meta.url), 'utf8')
+const entry = readFileSync(new URL("../../../src/admin/main.tsx", import.meta.url), "utf8");
 
-describe('the admin entry', () => {
-  it('imports the application statically, or the admin ships unstyled', () => {
-    expect(entry).toMatch(/^import \{ Admin, type AdminBoot \} from '\.\/ui\/Admin'$/m)
-  })
+describe("the admin entry", () => {
+  it("imports the application statically, or the admin ships unstyled", () => {
+    expect(entry).toMatch(/^import \{ Admin, type AdminBoot \} from "\.\/ui\/Admin";$/m);
+  });
 
-  it('reaches the application through no dynamic import at all', () => {
+  it("reaches the application through no dynamic import at all", () => {
     // The assertion above pins the line that is there; this pins the absence of the
     // one that must not be, because the two are not the same check. A `lazy(() =>
     // import('./ui/Admin'))` added *beside* a surviving static import — which is
     // exactly what a half-finished code-splitting change looks like — satisfies the
     // first and is still the bug, since Vite splits on the dynamic edge.
-    expect(entry).not.toMatch(/import\(/)
-    expect(entry).not.toMatch(/\blazy\(/)
-  })
+    expect(entry).not.toMatch(/import\(/);
+    expect(entry).not.toMatch(/\blazy\(/);
+  });
 
-  it('renders the component the shell bootstrap is typed against', () => {
+  it("renders the component the shell bootstrap is typed against", () => {
     // `__FOLIO_SHELL__` is written by `server/pages.tsx` as an untyped JSON blob, so
     // this declaration is the only thing tying the two ends together. The global's
     // name is the wire and does not follow a rename of the type.
-    expect(entry).toContain('__FOLIO_SHELL__?: AdminBoot')
-    expect(entry).toContain('<Admin boot={shell} />')
-  })
-})
+    expect(entry).toContain("__FOLIO_SHELL__?: AdminBoot");
+    expect(entry).toContain("<Admin boot={shell} />");
+  });
+});

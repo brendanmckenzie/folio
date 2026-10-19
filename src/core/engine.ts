@@ -15,7 +15,7 @@
 
 // Shared document shape, re-exported here (as well as from `folio/core`) so
 // engine consumers can type a `Doc` without a second import just for that.
-export type { Blok, Doc, Json } from './doc'
+export type { Blok, Doc, Json } from "./doc";
 
 export {
   ancestorsOf,
@@ -24,7 +24,7 @@ export {
   keyAtIndex,
   newUid,
   subtree,
-} from './doc'
+} from "./doc";
 
 /**
  * The nested document shape (`../../docs/specs/platform/content-api.md`) — the
@@ -33,7 +33,7 @@ export {
  * graph and allocating uids and fractional orders by hand. `folio/engine` is
  * exactly the entry point that doc comment above describes.
  */
-export { fieldShapeError, fromNested, NestedError, toNested } from './nested'
+export { fieldShapeError, fromNested, NestedError, toNested } from "./nested";
 export type {
   FromNestedOptions,
   NestedBlok,
@@ -41,12 +41,12 @@ export type {
   NestedInput,
   NestedValue,
   ToNestedOptions,
-} from './nested'
+} from "./nested";
 
-export { apply, applyAll, invert, invertAll, mutationError } from './mutations'
-export type { Mutation } from './mutations'
+export { apply, applyAll, invert, invertAll, mutationError } from "./mutations";
+export type { Mutation } from "./mutations";
 
-export { deepEqual, diff, summariseDiff } from './diff'
+export { deepEqual, diff, summariseDiff } from "./diff";
 
 /**
  * Content migrations (`../../docs/specs/foundation/schema-migrations.md`) —
@@ -63,22 +63,22 @@ export {
   migrationContext,
   pendingFor,
   validateMigrations,
-} from './migrate'
-export type { Migration, MigrationContext } from './migrate'
+} from "./migrate";
+export type { Migration, MigrationContext } from "./migrate";
 
 // `cloneSubtree`/`cloneDoc` (duplicate-and-paste.md) build on `allocateSubtree`
 // below: fresh uids and orders for an existing subtree, rather than a preset's
 // recipe. `parseClipboard` validates untrusted clipboard text the same way a
 // socket frame is validated — total over malformed input, refusing rather
 // than throwing.
-export { cloneDoc, cloneSubtree } from './clone'
-export { parseClipboard } from './clipboard'
-export type { ParsedClipboard } from './clipboard'
+export { cloneDoc, cloneSubtree } from "./clone";
+export { parseClipboard } from "./clipboard";
+export type { ParsedClipboard } from "./clipboard";
 
 // `blankBlok` needs `SchemaIndex` to look up a type's field defaults; re-exported
 // here for the same reason `Doc`/`Blok`/`Json` are.
-export type { SchemaIndex } from './schema'
-export { blankBlok } from './schema'
+export type { SchemaIndex } from "./schema";
+export { blankBlok } from "./schema";
 
 // `allocateSubtree` is the uid-and-fractional-order primitive shared by a
 // preset's recipe (`blankSubtree`, schema-aware) and `duplicate-and-paste.md`
@@ -90,14 +90,14 @@ export {
   validatePresets,
   validateGlobals,
   validateTypes,
-} from './schema'
-export type { SubtreeBlok } from './schema'
+} from "./schema";
+export type { SubtreeBlok } from "./schema";
 
 // `validateLocales` sits with the other construction-time validators; `fieldValue`
 // and `dataOf` are re-exported here as well as from `folio/core` because a
 // bulk-import or migration script writing `i18n` needs to read it back.
-export { dataOf, validateLocales, fieldValue } from './locales'
-export type { LocaleConfig, LocaleContext } from './locales'
+export { dataOf, validateLocales, fieldValue } from "./locales";
+export type { LocaleConfig, LocaleContext } from "./locales";
 
 export {
   PROTOCOL_VERSION,
@@ -111,5 +111,5 @@ export {
   MAX_FRAME_BYTES,
   MAX_SELECTION_LEN,
   MAX_TX_MUTATIONS,
-} from './protocol'
-export type { ClientFrame, ClientMsg, HelloIdentity, Presence } from './protocol'
+} from "./protocol";
+export type { ClientFrame, ClientMsg, HelloIdentity, Presence } from "./protocol";

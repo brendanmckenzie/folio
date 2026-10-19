@@ -14,14 +14,14 @@
  * — must not acquire a dependency on the database merely because a middleware
  * runs ahead of them.
  */
-import type { Registry } from '../../core/sites'
-import type { ResolvedAuth } from './config'
-import { readGrantCookie, readSessionCookie } from './cookie'
-import { readGrant } from './grants'
-import { type Actor, mayPreviewDrafts } from './roles'
-import { readSession } from './session'
-import { bearerToken, readToken } from './tokens'
-import type { FolioDb } from '../db'
+import type { Registry } from "../../core/sites";
+import type { ResolvedAuth } from "./config";
+import { readGrantCookie, readSessionCookie } from "./cookie";
+import { readGrant } from "./grants";
+import { type Actor, mayPreviewDrafts } from "./roles";
+import { readSession } from "./session";
+import { bearerToken, readToken } from "./tokens";
+import type { FolioDb } from "../db";
 
 /**
  * The presented credential, without resolving it. Useful on its own: the CSRF
@@ -30,24 +30,24 @@ import type { FolioDb } from '../db'
  * ambiently.
  */
 export interface Credential {
-  cookie: string | null
-  bearer: string | null
+  cookie: string | null;
+  bearer: string | null;
   /**
    * A preview grant cookie (`multi-site.md` decision 13), screened, or null. Carried
    * whatever the request, and **worth nothing unless `resolveActor` is told which
    * preview origin it arrived on**: a grant is one site's, and only a caller that
    * knows the gated site and surface can ask for it.
    */
-  grant: string | null
+  grant: string | null;
 }
 
 export function credentialOf(req: Request): Credential {
-  const cookie = req.headers.get('cookie')
+  const cookie = req.headers.get("cookie");
   return {
     cookie: readSessionCookie(cookie),
-    bearer: bearerToken(req.headers.get('authorization')),
+    bearer: bearerToken(req.headers.get("authorization")),
     grant: readGrantCookie(cookie),
-  }
+  };
 }
 
 /**
@@ -57,8 +57,8 @@ export function credentialOf(req: Request): Credential {
  * every admin route and every socket.
  */
 export interface PreviewSite {
-  id: string
-  registry: Registry
+  id: string;
+  registry: Registry;
   /**
    * The session the grant is read on: **`first-primary`**, unlike every other
    * credential read. A grant is redeemed on the primary one redirect before the
@@ -66,7 +66,7 @@ export interface PreviewSite {
    * pane's first render showing the published page as though it were the draft.
    * Only a request carrying a grant cookie on a preview origin pays for it.
    */
-  db: FolioDb
+  db: FolioDb;
 }
 
 /**
@@ -87,12 +87,12 @@ export async function resolveActor(
   credential: Credential,
   opts: { preview?: PreviewSite } = {},
 ): Promise<Actor | null> {
-  if (auth.mode !== 'session') return null
-  const preview = opts.preview
+  if (auth.mode !== "session") return null;
+  const preview = opts.preview;
   if (!preview) {
-    if (credential.cookie) return readSession(db(), credential.cookie, { days: auth.sessionDays })
-    if (credential.bearer) return readToken(db(), credential.bearer)
-    return null
+    if (credential.cookie) return readSession(db(), credential.cookie, { days: auth.sessionDays });
+    if (credential.bearer) return readToken(db(), credential.bearer);
+    return null;
   }
   // On a preview origin (decision 13) a session is kept only if it may preview
   // this site; one that may not — a cookie that leaked across ports in
@@ -100,19 +100,19 @@ export async function resolveActor(
   // grant rather than hiding it.
   const session = credential.cookie
     ? await readSession(db(), credential.cookie, { days: auth.sessionDays })
-    : null
-  if (session && mayPreviewDrafts(session, preview.registry, preview.id)) return session
+    : null;
+  if (session && mayPreviewDrafts(session, preview.registry, preview.id)) return session;
   // Ahead of the bearer header: a headless front end forwards the visitor's
   // `Cookie` on its own call (decision 13, "every surface"), and the grant in it is
   // the visitor's right to the draft, whatever the front end's own token holds.
   if (credential.grant) {
-    const grant = await readGrant(preview.db, credential.grant, preview)
-    if (grant) return grant
+    const grant = await readGrant(preview.db, credential.grant, preview);
+    if (grant) return grant;
   }
-  if (credential.bearer) return readToken(db(), credential.bearer)
+  if (credential.bearer) return readToken(db(), credential.bearer);
   // The ineligible session still identifies somebody: the caller decides what it
   // may do (`mayPreviewDrafts` on a render path, `scopedActor` on a v1 route).
-  return session
+  return session;
 }
 
 /**
@@ -135,14 +135,14 @@ export async function resolveActor(
  *     tricked into replaying someone's cookie.
  */
 export function originAllowed(req: Request, credential: Credential): boolean {
-  if (!credential.cookie && !credential.grant) return true
-  const method = req.method.toUpperCase()
-  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return true
-  const origin = req.headers.get('origin')
-  if (origin === null) return true
+  if (!credential.cookie && !credential.grant) return true;
+  const method = req.method.toUpperCase();
+  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return true;
+  const origin = req.headers.get("origin");
+  if (origin === null) return true;
   try {
-    return new URL(origin).origin === new URL(req.url).origin
+    return new URL(origin).origin === new URL(req.url).origin;
   } catch {
-    return false
+    return false;
   }
 }

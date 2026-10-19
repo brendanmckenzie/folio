@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
-import type { PresenceSelection, SpaceEvent, SpacePresence } from '../../core/protocol'
-import { type SpaceAvatar, avatarsOf, SpaceStore } from '../spaceStore'
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import type { PresenceSelection, SpaceEvent, SpacePresence } from "../../core/protocol";
+import { type SpaceAvatar, avatarsOf, SpaceStore } from "../spaceStore";
 
 /**
  * What one structural event means for this editor
@@ -21,22 +21,22 @@ import { type SpaceAvatar, avatarsOf, SpaceStore } from '../spaceStore'
  */
 export interface SpaceEffect {
   /** Reload the story tree and the document list. */
-  reload: boolean
+  reload: boolean;
   /** Re-fetch the configured globals' documents. */
-  globals: boolean
+  globals: boolean;
   /** Something to tell the person looking at the open story, or null. */
-  notice: string | null
+  notice: string | null;
 }
 
-const NOTHING: SpaceEffect = { reload: false, globals: false, notice: null }
+const NOTHING: SpaceEffect = { reload: false, globals: false, notice: null };
 
 export interface SpaceEffectContext {
   /** The story this editor has open. */
-  openStoryId: string
+  openStoryId: string;
   /** This client's own actor id, or null under `auth: 'open'`. */
-  myActor: string | null
+  myActor: string | null;
   /** A display name for an actor id, from the peer list this channel carries. */
-  nameOf: (actor: string | null) => string
+  nameOf: (actor: string | null) => string;
 }
 
 /**
@@ -49,54 +49,54 @@ export interface SpaceEffectContext {
  * one for the sake of a refetch.
  */
 export function spaceEventEffect(event: SpaceEvent, ctx: SpaceEffectContext): SpaceEffect {
-  if (event.actor !== null && event.actor === ctx.myActor) return NOTHING
-  const who = ctx.nameOf(event.actor)
+  if (event.actor !== null && event.actor === ctx.myActor) return NOTHING;
+  const who = ctx.nameOf(event.actor);
 
   switch (event.kind) {
-    case 'story.created':
+    case "story.created":
       // No notice: somebody else adding a page elsewhere in the tree is not an
       // interruption, it is just a row appearing.
-      return { reload: true, globals: false, notice: null }
+      return { reload: true, globals: false, notice: null };
 
-    case 'story.updated': {
-      const mine = event.changes.find((c) => c.id === ctx.openStoryId)
+    case "story.updated": {
+      const mine = event.changes.find((c) => c.id === ctx.openStoryId);
       return {
         reload: true,
         globals: false,
         notice: mine ? `${who} moved this page to /${mine.to}` : null,
-      }
+      };
     }
 
-    case 'story.deleted':
+    case "story.deleted":
       // Told, rather than discovered through a 4002 close with no explanation.
       return {
         reload: true,
         globals: false,
         notice: event.ids.includes(ctx.openStoryId) ? `${who} deleted this page` : null,
-      }
+      };
 
-    case 'story.published':
+    case "story.published":
       return {
         reload: true,
         globals: false,
         notice: event.id === ctx.openStoryId ? `${who} published this page` : null,
-      }
+      };
 
-    case 'global.changed':
+    case "global.changed":
       // Content, not structure: only the globals need refetching, and the tree
       // and the open document are untouched.
-      return { reload: false, globals: true, notice: null }
+      return { reload: false, globals: true, notice: null };
   }
 }
 
 export interface Space {
-  connected: boolean
+  connected: boolean;
   /** Everybody else in the site, one entry per socket. */
-  peers: SpacePresence[]
+  peers: SpacePresence[];
   /** The same list deduped by actor, for the avatar row. */
-  avatars: SpaceAvatar[]
+  avatars: SpaceAvatar[];
   /** Whether the channel exists at all on this deployment. */
-  enabled: boolean
+  enabled: boolean;
   /**
    * The channel's own last word about itself, or null: an unreadable frame, a
    * `PROTOCOL_VERSION` mismatch, an `error` frame, or one of the three terminal
@@ -113,21 +113,21 @@ export interface Space {
    * Distinct from `spaceEventEffect`'s `notice`, which is about somebody else's
    * write. This one is about the socket.
    */
-  notice: string | null
+  notice: string | null;
 }
 
 interface Options {
-  apiBase: string
+  apiBase: string;
   /** `FolioBindings.space` was declared. False and nothing is attempted. */
-  enabled: boolean
+  enabled: boolean;
   /** The advisory identity, used only under `auth: 'open'`. */
-  identity: { actor: string; name: string; colour: string }
+  identity: { actor: string; name: string; colour: string };
   /** Where this editor is. Null `storyId` is a list screen, which is a real place. */
-  storyId: string | null
-  storyTitle: string | null
-  locale: string | null
-  selection: PresenceSelection | null
-  onEvent: (event: SpaceEvent) => void
+  storyId: string | null;
+  storyTitle: string | null;
+  locale: string | null;
+  selection: PresenceSelection | null;
+  onEvent: (event: SpaceEvent) => void;
 }
 
 /**
@@ -138,16 +138,16 @@ interface Options {
  * backoff, not a console warning — nothing at all.
  */
 export function useSpace(opts: Options): Space {
-  const { apiBase, enabled, storyId, storyTitle, locale, selection, onEvent } = opts
+  const { apiBase, enabled, storyId, storyTitle, locale, selection, onEvent } = opts;
 
   // Held in a ref so a new callback identity on every render — which is what
   // `onEvent` is, since it closes over the tree — never rebuilds the socket.
-  const handler = useRef(onEvent)
-  handler.current = onEvent
+  const handler = useRef(onEvent);
+  handler.current = onEvent;
 
   // The advisory identity is generated once per store, so it must not be a
   // dependency: including it would rebuild the socket on every render.
-  const identity = useRef(opts.identity)
+  const identity = useRef(opts.identity);
 
   const store = useMemo(
     () =>
@@ -157,34 +157,34 @@ export function useSpace(opts: Options): Space {
           })
         : null,
     [apiBase, enabled],
-  )
+  );
 
   useEffect(() => {
-    if (!store) return
-    store.connect()
-    return () => store.disconnect()
-  }, [store])
+    if (!store) return;
+    store.connect();
+    return () => store.disconnect();
+  }, [store]);
 
   const state = useSyncExternalStore(
     store?.subscribe ?? noopSubscribe,
     store?.getSnapshot ?? emptySnapshot,
     store?.getSnapshot ?? emptySnapshot,
-  )
+  );
 
   useEffect(() => {
-    store?.setWhere(storyId, storyTitle, locale)
-  }, [store, storyId, storyTitle, locale])
+    store?.setWhere(storyId, storyTitle, locale);
+  }, [store, storyId, storyTitle, locale]);
 
   useEffect(() => {
-    store?.setSelection(selection)
-  }, [store, selection])
+    store?.setSelection(selection);
+  }, [store, selection]);
 
-  const avatars = useMemo(() => avatarsOf(state.peers), [state.peers])
+  const avatars = useMemo(() => avatarsOf(state.peers), [state.peers]);
 
-  return { connected: state.connected, peers: state.peers, avatars, enabled, notice: state.notice }
+  return { connected: state.connected, peers: state.peers, avatars, enabled, notice: state.notice };
 }
 
 /** The store-less case, as a stable pair `useSyncExternalStore` accepts. */
-const EMPTY = { connected: false, peers: [] as SpacePresence[], notice: null }
-const noopSubscribe = () => () => {}
-const emptySnapshot = () => EMPTY
+const EMPTY = { connected: false, peers: [] as SpacePresence[], notice: null };
+const noopSubscribe = () => () => {};
+const emptySnapshot = () => EMPTY;

@@ -10,14 +10,14 @@
  * `admin` role and live in `users.ts`, so that this file's "no credential
  * required" rule holds for the whole file rather than per handler.
  */
-import type { Context } from 'hono'
-import { Hono } from 'hono'
+import type { Context } from "hono";
+import { Hono } from "hono";
 import {
   CLOCK_LEEWAY_MS,
   consumeChallenge,
   createChallenge,
   recentChallengeCount,
-} from '../auth/challenges'
+} from "../auth/challenges";
 import {
   type AuthProvider,
   authPolicy,
@@ -26,7 +26,7 @@ import {
   type ResolvedAuth,
   type TrustedProvider,
   type VerifiedIdentity,
-} from '../auth/config'
+} from "../auth/config";
 import {
   challengeBytes,
   clearOidcCookies,
@@ -38,23 +38,23 @@ import {
   readOidcCookie,
   readWebauthnCookie,
   serialiseCookie,
-} from '../auth/cookie'
-import { listEvents, recordEventStatement } from '../auth/events'
-import { base64url } from '../auth/jwt'
-import { passkeyForAssertion, usePasskeyStatement } from '../auth/passkeys'
-import { meSites } from '../auth/me-sites'
-import { credentialOf, resolveActor } from '../auth/resolve'
-import { READ } from '../auth/roles'
-import { revokeSession, sessionProvider } from '../auth/session'
-import { completeSignIn, domainOf } from '../auth/sign-in'
-import type { NewSession } from '../auth/session'
-import { userByEmail, userById } from '../auth/users'
-import { requestOptions, verifyAssertion, WebAuthnError } from '../auth/webauthn'
-import { FolioError } from '../errors'
-import { requireAccess, requireAuthConfigured } from '../middleware'
-import { loginPage } from '../pages'
-import type { FolioRuntime } from '../runtime'
-import type { BrandRef, FolioEnv } from '../types'
+} from "../auth/cookie";
+import { listEvents, recordEventStatement } from "../auth/events";
+import { base64url } from "../auth/jwt";
+import { passkeyForAssertion, usePasskeyStatement } from "../auth/passkeys";
+import { meSites } from "../auth/me-sites";
+import { credentialOf, resolveActor } from "../auth/resolve";
+import { READ } from "../auth/roles";
+import { revokeSession, sessionProvider } from "../auth/session";
+import { completeSignIn, domainOf } from "../auth/sign-in";
+import type { NewSession } from "../auth/session";
+import { userByEmail, userById } from "../auth/users";
+import { requestOptions, verifyAssertion, WebAuthnError } from "../auth/webauthn";
+import { FolioError } from "../errors";
+import { requireAccess, requireAuthConfigured } from "../middleware";
+import { loginPage } from "../pages";
+import type { FolioRuntime } from "../runtime";
+import type { BrandRef, FolioEnv } from "../types";
 import {
   LoginEmailBody,
   PasskeyAssertionBody,
@@ -63,13 +63,13 @@ import {
   parseOrThrow,
   safeNext,
   wantsJson,
-} from '../validate'
-import { mintChallenge, passkeyEnrolmentRefusal, passkeyRefusalBody, rpIdOf } from './passkeys'
+} from "../validate";
+import { mintChallenge, passkeyEnrolmentRefusal, passkeyRefusalBody, rpIdOf } from "./passkeys";
 
 /** How long the OIDC state cookie lives: one round trip to an IdP, not a
  * session. Ten minutes is generous for a login form and short enough that a
  * stale tab fails closed. */
-const OIDC_STATE_TTL_S = 600
+const OIDC_STATE_TTL_S = 600;
 
 /**
  * The generic answer a sign-in request always gets, whether or not the address
@@ -81,7 +81,7 @@ const OIDC_STATE_TTL_S = 600
  * site's CMS", which is a useful thing for an attacker to learn and a useless
  * thing for a legitimate user to be told.
  */
-const SENT = 'If that address has access, a sign-in link is on its way. It expires in 15 minutes.'
+const SENT = "If that address has access, a sign-in link is on its way. It expires in 15 minutes.";
 
 /**
  * The fixed error vocabulary of the login page, as prose.
@@ -95,29 +95,29 @@ const SENT = 'If that address has access, a sign-in link is on its way. It expir
  */
 function loginNotice(code: string | null | undefined): string | null {
   switch (code) {
-    case 'link':
-      return 'That sign-in link has already been used or has expired. Ask for a new one.'
-    case 'refused':
-      return 'That account does not have access to this site.'
-    case 'provider':
-      return 'Signing in with that provider did not work. Try again.'
+    case "link":
+      return "That sign-in link has already been used or has expired. Ask for a new one.";
+    case "refused":
+      return "That account does not have access to this site.";
+    case "provider":
+      return "Signing in with that provider did not work. Try again.";
     default:
-      return null
+      return null;
   }
 }
 
 /** Reads either a JSON body or an HTML form post, since the login page ships no
  * JavaScript and therefore posts a form. */
 async function loginBody(req: Request): Promise<{ email: string; next?: string }> {
-  const type = req.headers.get('content-type') ?? ''
-  let raw: unknown
-  if (type.includes('application/json')) {
-    raw = await req.json().catch(() => ({}))
+  const type = req.headers.get("content-type") ?? "";
+  let raw: unknown;
+  if (type.includes("application/json")) {
+    raw = await req.json().catch(() => ({}));
   } else {
-    const form = await req.formData().catch(() => new FormData())
-    raw = Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)]))
+    const form = await req.formData().catch(() => new FormData());
+    raw = Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)]));
   }
-  return parseOrThrow(LoginEmailBody, raw, 'body')
+  return parseOrThrow(LoginEmailBody, raw, "body");
 }
 
 /**
@@ -132,44 +132,44 @@ async function scopeOfNext<Env>(
   env: Env,
   next: string,
 ): Promise<{ id: string; name: string; brand: BrandRef | null } | null> {
-  if (!rt.sites) return null
-  const path = new URL(next, 'http://folio.invalid').pathname
-  const prefix = `${rt.base}/~`
-  if (!path.startsWith(prefix)) return null
-  let id: string
+  if (!rt.sites) return null;
+  const path = new URL(next, "http://folio.invalid").pathname;
+  const prefix = `${rt.base}/~`;
+  if (!path.startsWith(prefix)) return null;
+  let id: string;
   try {
-    id = decodeURIComponent(path.slice(prefix.length).split('/')[0] ?? '')
+    id = decodeURIComponent(path.slice(prefix.length).split("/")[0] ?? "");
   } catch {
-    return null
+    return null;
   }
-  const registry = await rt.sites.registry(env)
-  const held = registry.sites.find((s) => s.id === id) ?? registry.groups.find((g) => g.id === id)
-  if (!held) return null
+  const registry = await rt.sites.registry(env);
+  const held = registry.sites.find((s) => s.id === id) ?? registry.groups.find((g) => g.id === id);
+  if (!held) return null;
   const brand =
     held.brand === null
       ? null
-      : ([...rt.brands.values()].find((b) => b.brand?.id === held.brand)?.brand ?? null)
-  return { id: held.id, name: held.name, brand }
+      : ([...rt.brands.values()].find((b) => b.brand?.id === held.brand)?.brand ?? null);
+  return { id: held.id, name: held.name, brand };
 }
 
 export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
   // A deployment with `sites` has no unscoped editor: the shell at `{base}/` sends the
   // caller to their first scope, so that is where a sign-in with no `next` lands.
-  const editorUrl = rt.sites ? `${rt.base}/` : `${rt.base}/edit`
+  const editorUrl = rt.sites ? `${rt.base}/` : `${rt.base}/edit`;
 
   /** The resolved auth, or a 404 for a deployment with `auth: 'open'`: there is
    * nothing to sign in to, so a login page would be a lie. */
-  const sessionAuth = (): Extract<ResolvedAuth<unknown>, { mode: 'session' }> => {
-    if (rt.auth.mode !== 'session') throw new FolioError('not_found', 'Auth is not configured')
-    return rt.auth
-  }
+  const sessionAuth = (): Extract<ResolvedAuth<unknown>, { mode: "session" }> => {
+    if (rt.auth.mode !== "session") throw new FolioError("not_found", "Auth is not configured");
+    return rt.auth;
+  };
 
   const providerById = (id: string): AuthProvider<unknown> => {
-    const found = sessionAuth().config.providers.find((p) => p.id === id)
-    if (!found) throw new FolioError('not_found', 'Unknown sign-in provider')
-    return found
-  }
+    const found = sessionAuth().config.providers.find((p) => p.id === id);
+    if (!found) throw new FolioError("not_found", "Unknown sign-in provider");
+    return found;
+  };
 
   /**
    * One place turns a minted session into a cookie, so the name rule and the
@@ -181,11 +181,11 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * twice-written block it replaced.
    */
   const signInCookie = (c: Context<FolioEnv<Env>>, minted: NewSession): string => {
-    const url = new URL(c.req.url)
+    const url = new URL(c.req.url);
     return serialiseCookie(url, cookieName(url), minted.token, {
       maxAge: Math.floor((minted.expiresAt - Date.now()) / 1000),
-    })
-  }
+    });
+  };
 
   /**
    * Signs a trusted identity in, on whichever route asked.
@@ -202,37 +202,37 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   const signInTrusted = async (
     c: Context<FolioEnv<Env>>,
-    auth: Extract<ResolvedAuth<unknown>, { mode: 'session' }>,
+    auth: Extract<ResolvedAuth<unknown>, { mode: "session" }>,
     providers: readonly TrustedProvider<unknown>[],
     next: string,
-  ): Promise<Response | 'refused' | 'provider' | null> => {
+  ): Promise<Response | "refused" | "provider" | null> => {
     for (const provider of providers) {
-      let identity: VerifiedIdentity | null
+      let identity: VerifiedIdentity | null;
       try {
-        identity = await provider.resolve(c.env, c.req.raw)
+        identity = await provider.resolve(c.env, c.req.raw);
       } catch (err) {
         // Logged and shown, never swallowed: a gate that has stopped verifying
         // looks exactly like a gate nobody is standing at.
-        rt.logger.error(`folio: ${provider.id} could not resolve an identity`, err)
-        return 'provider'
+        rt.logger.error(`folio: ${provider.id} could not resolve an identity`, err);
+        return "provider";
       }
-      if (!identity) continue
+      if (!identity) continue;
       const result = await completeSignIn(
         c.var.bindings().db,
         auth,
         provider,
         identity,
-        { userAgent: c.req.header('user-agent') ?? null },
+        { userAgent: c.req.header("user-agent") ?? null },
         rt.logger,
-      )
-      if (!result.ok) return result.reason
+      );
+      if (!result.ok) return result.reason;
       return new Response(null, {
         status: 302,
-        headers: { location: next, 'set-cookie': signInCookie(c, result.session) },
-      })
+        headers: { location: next, "set-cookie": signInCookie(c, result.session) },
+      });
     }
-    return null
-  }
+    return null;
+  };
 
   /**
    * The login page — and, for a deployment with a `trusted` provider, the whole
@@ -254,25 +254,25 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    *      renders **in place** and never redirects to `/login`, for the same
    *      loop reason.
    */
-  app.get('/login', async (c) => {
-    const auth = sessionAuth()
-    const next = safeNext(c.req.query('next'), editorUrl)
+  app.get("/login", async (c) => {
+    const auth = sessionAuth();
+    const next = safeNext(c.req.query("next"), editorUrl);
     // `?error=` is set by the redirects below rather than by anything a stranger
     // can craft into a message: the parameter selects one of a fixed set.
-    const error = c.req.query('error')
-    const sent = c.req.query('sent') !== undefined
-    const signedOut = c.req.query('signedout') !== undefined
+    const error = c.req.query("error");
+    const sent = c.req.query("sent") !== undefined;
+    const signedOut = c.req.query("signedout") !== undefined;
 
     // Costs nothing for an anonymous browser: `resolveActor` reads no D1 for a
     // request carrying neither cookie nor bearer.
-    const actor = await resolveActor(() => c.var.bindings().db, rt.auth, credentialOf(c.req.raw))
-    if (actor) return c.redirect(next)
+    const actor = await resolveActor(() => c.var.bindings().db, rt.auth, credentialOf(c.req.raw));
+    if (actor) return c.redirect(next);
 
-    let refused: 'refused' | 'provider' | null = null
+    let refused: "refused" | "provider" | null = null;
     if (error === undefined && !sent && !signedOut && auth.trusted.length > 0) {
-      const outcome = await signInTrusted(c, auth, auth.trusted, next)
-      if (outcome instanceof Response) return outcome
-      refused = outcome
+      const outcome = await signInTrusted(c, auth, auth.trusted, next);
+      if (outcome instanceof Response) return outcome;
+      refused = outcome;
     }
 
     return loginPage(rt, {
@@ -280,8 +280,8 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       sent: sent ? SENT : null,
       error: loginNotice(error ?? refused),
       signedOut,
-    })
-  })
+    });
+  });
 
   /**
    * Requests a sign-in link. **Always** answers the same thing.
@@ -298,62 +298,62 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * button on the same page already discloses that fact. What the alternative
    * bought was a legitimate user waiting for a mail nobody was going to send.
    */
-  app.post('/login/email', async (c) => {
-    const auth = sessionAuth()
+  app.post("/login/email", async (c) => {
+    const auth = sessionAuth();
     // The mail provider by *kind*, not by which functions the object happens to
     // carry, and there is at most one of them by construction.
-    const provider = auth.mail
+    const provider = auth.mail;
     if (!provider) {
-      throw new FolioError('unsupported', 'No email sign-in provider is configured')
+      throw new FolioError("unsupported", "No email sign-in provider is configured");
     }
-    const body = await loginBody(c.req.raw)
-    const next = safeNext(body.next, editorUrl)
+    const body = await loginBody(c.req.raw);
+    const next = safeNext(body.next, editorUrl);
 
     // **Before any D1 read**, so there is no timing difference and no challenge
     // row to be consumed later — `completeSignIn` would refuse the link anyway,
     // but a mail per refusal is a round trip to say what this form could say.
     // A `mail` provider cannot itself claim a domain (`resolveAuth` refuses it),
     // so the comparison is defensive rather than reachable.
-    const enforced = auth.domains.get(domainOf(body.email))
+    const enforced = auth.domains.get(domainOf(body.email));
     if (enforced !== undefined && enforced !== provider.id) {
       // The same answer for a JSON caller: a script follows redirects, and the
       // admin never posts to this route.
-      return c.redirect(`${rt.base}/login/${enforced}?next=${encodeURIComponent(next)}`)
+      return c.redirect(`${rt.base}/login/${enforced}?next=${encodeURIComponent(next)}`);
     }
 
-    const db = c.var.bindings().db
+    const db = c.var.bindings().db;
 
-    const user = await userByEmail(db, body.email)
+    const user = await userByEmail(db, body.email);
     if (user) {
-      const perHour = auth.linksPerHour
-      const recent = await recentChallengeCount(db, body.email)
+      const perHour = auth.linksPerHour;
+      const recent = await recentChallengeCount(db, body.email);
       if (recent < perHour) {
-        const challenge = await createChallenge(db, body.email)
-        const url = new URL(c.req.url)
-        url.pathname = `${rt.base}/login/verify`
-        url.search = ''
-        url.searchParams.set('t', challenge.token)
-        url.searchParams.set('next', next)
+        const challenge = await createChallenge(db, body.email);
+        const url = new URL(c.req.url);
+        url.pathname = `${rt.base}/login/verify`;
+        url.search = "";
+        url.searchParams.set("t", challenge.token);
+        url.searchParams.set("next", next);
         try {
-          const scope = await scopeOfNext(rt, c.env, next)
+          const scope = await scopeOfNext(rt, c.env, next);
           await provider.send(c.env, {
             email: body.email,
             url: url.toString(),
             expiresAt: challenge.expiresAt,
             ...(scope ? { scope } : {}),
-          })
+          });
         } catch (err) {
           // A failed send is the host's problem to see in its logs, never the
           // requester's to learn about: "we could not mail you" is a weaker
           // oracle than an outright "unknown address", but it is still one.
-          rt.logger.error('folio: a sign-in link failed to send', err)
+          rt.logger.error("folio: a sign-in link failed to send", err);
         }
       }
     }
 
-    if (wantsJson(c.req.raw)) return c.json({ ok: true, message: SENT })
-    return loginPage(rt, { next, sent: SENT })
-  })
+    if (wantsJson(c.req.raw)) return c.json({ ok: true, message: SENT });
+    return loginPage(rt, { next, sent: SENT });
+  });
 
   /**
    * Consumes a link and signs the browser in.
@@ -363,20 +363,20 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * reason rather than rendering an error in place, so the address in the bar
    * afterwards is a page that can be reloaded.
    */
-  app.get('/login/verify', async (c) => {
-    const auth = sessionAuth()
-    const next = safeNext(c.req.query('next'), editorUrl)
-    const token = c.req.query('t')
-    const db = c.var.bindings().db
+  app.get("/login/verify", async (c) => {
+    const auth = sessionAuth();
+    const next = safeNext(c.req.query("next"), editorUrl);
+    const token = c.req.query("t");
+    const db = c.var.bindings().db;
 
-    const email = token ? await consumeChallenge(db, token) : null
-    if (!email) return c.redirect(`${rt.base}/login?error=link&next=${encodeURIComponent(next)}`)
+    const email = token ? await consumeChallenge(db, token) : null;
+    if (!email) return c.redirect(`${rt.base}/login?error=link&next=${encodeURIComponent(next)}`);
 
     // Unreachable in practice — only `POST /login/email` mints a challenge and
     // it needs this provider — but a token cannot be trusted to imply a
     // configuration, so the branch is written rather than asserted.
     if (!auth.mail) {
-      return c.redirect(`${rt.base}/login?error=refused&next=${encodeURIComponent(next)}`)
+      return c.redirect(`${rt.base}/login?error=refused&next=${encodeURIComponent(next)}`);
     }
 
     // The challenge proves the address. Everything after it — the account must
@@ -387,18 +387,18 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       auth,
       auth.mail,
       { email },
-      { userAgent: c.req.header('user-agent') ?? null },
+      { userAgent: c.req.header("user-agent") ?? null },
       rt.logger,
-    )
+    );
     if (!result.ok) {
-      return c.redirect(`${rt.base}/login?error=${result.reason}&next=${encodeURIComponent(next)}`)
+      return c.redirect(`${rt.base}/login?error=${result.reason}&next=${encodeURIComponent(next)}`);
     }
 
     return new Response(null, {
       status: 302,
-      headers: { location: next, 'set-cookie': signInCookie(c, result.session) },
-    })
-  })
+      headers: { location: next, "set-cookie": signInCookie(c, result.session) },
+    });
+  });
 
   /**
    * The request options and a `k: 'get'` challenge cookie.
@@ -418,11 +418,11 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * GET, so nothing could swallow them today. The next person to add
    * `POST /login/:provider` would find out the hard way.
    */
-  app.post('/login/passkey/options', (c) => {
-    const auth = sessionAuth()
-    if (!auth.passkey) throw new FolioError('not_found', 'Passkeys are not configured')
-    const url = new URL(c.req.url)
-    const minted = mintChallenge(url, 'get')
+  app.post("/login/passkey/options", (c) => {
+    const auth = sessionAuth();
+    if (!auth.passkey) throw new FolioError("not_found", "Passkeys are not configured");
+    const url = new URL(c.req.url);
+    const minted = mintChallenge(url, "get");
     return new Response(
       JSON.stringify({
         publicKey: requestOptions({ rpId: rpIdOf(url), challenge: minted.challenge }),
@@ -430,12 +430,12 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       {
         status: 200,
         headers: [
-          ['content-type', 'application/json'],
-          ['set-cookie', minted.cookie],
+          ["content-type", "application/json"],
+          ["set-cookie", minted.cookie],
         ],
       },
-    )
-  })
+    );
+  });
 
   /**
    * Signs in with a passkey. **Every failure answers the byte-identical 401.**
@@ -455,11 +455,11 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * whatever happened, because a challenge is single-use whether or not it
    * verified.
    */
-  app.post('/login/passkey', async (c) => {
-    const auth = sessionAuth()
-    if (!auth.passkey) throw new FolioError('not_found', 'Passkeys are not configured')
-    const provider = auth.passkey
-    const url = new URL(c.req.url)
+  app.post("/login/passkey", async (c) => {
+    const auth = sessionAuth();
+    if (!auth.passkey) throw new FolioError("not_found", "Passkeys are not configured");
+    const provider = auth.passkey;
+    const url = new URL(c.req.url);
 
     /** The one answer every refusal gives. Built once per call rather than held
      * as a module constant so the cleared-cookie headers travel with it. */
@@ -467,31 +467,31 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       new Response(JSON.stringify(passkeyRefusalBody()), {
         status: 401,
         headers: [
-          ['content-type', 'application/json'],
-          ...clearWebauthnCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+          ["content-type", "application/json"],
+          ...clearWebauthnCookies(url).map((value) => ["set-cookie", value] as [string, string]),
         ],
-      })
+      });
 
-    const challenge = decodeChallenge(readWebauthnCookie(c.req.header('cookie')))
+    const challenge = decodeChallenge(readWebauthnCookie(c.req.header("cookie")));
     // A `create` cookie here is the enrolment ceremony's, and the two are
     // different gates: one proves a device to an account that is already
     // signed in, the other decides who is signing in.
-    if (challenge?.k !== 'get') return refuse()
+    if (challenge?.k !== "get") return refuse();
 
-    let body: PasskeyAssertionInput
+    let body: PasskeyAssertionInput;
     try {
-      body = await parseBody(c.req, PasskeyAssertionBody)
+      body = await parseBody(c.req, PasskeyAssertionBody);
     } catch {
       // A 400 naming the field that failed would be a difference an attacker
       // could measure. This is the one route where a malformed body is a 401.
-      return refuse()
+      return refuse();
     }
 
-    const db = c.var.bindings().db
-    const found = await passkeyForAssertion(db, body.credential.id)
-    if (!found) return refuse()
+    const db = c.var.bindings().db;
+    const found = await passkeyForAssertion(db, body.credential.id);
+    if (!found) return refuse();
 
-    let asserted: { counter: number; backedUp: boolean }
+    let asserted: { counter: number; backedUp: boolean };
     try {
       asserted = await verifyAssertion({
         credential: body.credential,
@@ -506,23 +506,23 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           origin: url.origin,
           rpId: rpIdOf(url),
         },
-      })
+      });
     } catch (err) {
-      if (err instanceof WebAuthnError && err.code === 'counter') {
+      if (err instanceof WebAuthnError && err.code === "counter") {
         // The only refusal anybody can ever see. A clone is the person's to
         // resolve by removing the credential, so this records and refuses
         // rather than deleting the row out from under them.
         await db.batch([
           recordEventStatement(db, {
-            kind: 'passkey_rejected',
+            kind: "passkey_rejected",
             userId: found.user.id,
             actor: found.user.id,
             provider: provider.id,
-            detail: { passkey: found.passkey.id, reason: 'counter' },
+            detail: { passkey: found.passkey.id, reason: "counter" },
           }),
-        ])
+        ]);
       }
-      return refuse()
+      return refuse();
     }
 
     // The assertion proves the credential; everything after it — the enforced
@@ -530,26 +530,26 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // the passkey's own stamp riding in the same batch rather than a second
     // round trip.
     // biome-ignore lint/correctness/useHookAtTopLevel: `usePasskeyStatement` is a D1 statement builder, not a React hook — `use` is the verb ("use this passkey"), and nothing in this file renders.
-    const stamp = usePasskeyStatement(db, found.passkey.id, asserted.counter, asserted.backedUp)
+    const stamp = usePasskeyStatement(db, found.passkey.id, asserted.counter, asserted.backedUp);
     const result = await completeSignIn(
       db,
       auth,
       provider,
       { email: found.user.email },
-      { userAgent: c.req.header('user-agent') ?? null, extra: [stamp] },
+      { userAgent: c.req.header("user-agent") ?? null, extra: [stamp] },
       rt.logger,
-    )
-    if (!result.ok) return refuse()
+    );
+    if (!result.ok) return refuse();
 
     return new Response(JSON.stringify({ ok: true, next: safeNext(body.next, editorUrl) }), {
       status: 200,
       headers: [
-        ['content-type', 'application/json'],
-        ['set-cookie', signInCookie(c, result.session)],
-        ...clearWebauthnCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+        ["content-type", "application/json"],
+        ["set-cookie", signInCookie(c, result.session)],
+        ...clearWebauthnCookies(url).map((value) => ["set-cookie", value] as [string, string]),
       ],
-    })
-  })
+    });
+  });
 
   /**
    * Starts a redirect flow.
@@ -559,11 +559,11 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * both must survive a trip to the IdP and be unreadable to anything else,
    * which is exactly a cookie's job.
    */
-  app.get('/login/:provider', async (c) => {
-    const auth = sessionAuth()
-    const provider = providerById(c.req.param('provider'))
-    const url = new URL(c.req.url)
-    const next = safeNext(c.req.query('next'), editorUrl)
+  app.get("/login/:provider", async (c) => {
+    const auth = sessionAuth();
+    const provider = providerById(c.req.param("provider"));
+    const url = new URL(c.req.url);
+    const next = safeNext(c.req.query("next"), editorUrl);
 
     /**
      * The explicit half of trusted identity, and the only other place it
@@ -576,67 +576,67 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * cannot start. `null` — no identity on this request — is `refused`,
      * because the person clicked a button that turned out to lead nowhere.
      */
-    if (provider.kind === 'trusted') {
-      const outcome = await signInTrusted(c, auth, [provider], next)
-      if (outcome instanceof Response) return outcome
-      const reason = outcome ?? 'refused'
-      return c.redirect(`${rt.base}/login?error=${reason}&next=${encodeURIComponent(next)}`)
+    if (provider.kind === "trusted") {
+      const outcome = await signInTrusted(c, auth, [provider], next);
+      if (outcome instanceof Response) return outcome;
+      const reason = outcome ?? "refused";
+      return c.redirect(`${rt.base}/login?error=${reason}&next=${encodeURIComponent(next)}`);
     }
 
-    if (provider.kind !== 'redirect') {
-      throw new FolioError('not_found', 'That provider is not a redirect flow')
+    if (provider.kind !== "redirect") {
+      throw new FolioError("not_found", "That provider is not a redirect flow");
     }
-    const redirectUri = `${url.origin}${rt.base}/login/${provider.id}/callback`
+    const redirectUri = `${url.origin}${rt.base}/login/${provider.id}/callback`;
 
-    let started: { url: string; state: RedirectState }
+    let started: { url: string; state: RedirectState };
     try {
       // `next` is not handed to the provider: it is Folio's, it has already been
       // screened same-origin, and a provider that never sees it cannot be talked
       // into putting it somewhere. The cookie envelope below carries it.
-      started = await provider.start(c.env, { redirectUri })
+      started = await provider.start(c.env, { redirectUri });
     } catch (err) {
-      rt.logger.error(`folio: ${provider.id} sign-in could not start`, err)
-      return c.redirect(`${rt.base}/login?error=provider&next=${encodeURIComponent(next)}`)
+      rt.logger.error(`folio: ${provider.id} sign-in could not start`, err);
+      return c.redirect(`${rt.base}/login?error=provider&next=${encodeURIComponent(next)}`);
     }
 
     return new Response(null, {
       status: 302,
       headers: {
         location: started.url,
-        'set-cookie': serialiseCookie(
+        "set-cookie": serialiseCookie(
           url,
           oidcCookieName(url),
           encodeState({ next, state: started.state }),
           { maxAge: OIDC_STATE_TTL_S },
         ),
       },
-    })
-  })
+    });
+  });
 
-  app.get('/login/:provider/callback', async (c) => {
-    const auth = sessionAuth()
-    const provider = providerById(c.req.param('provider'))
-    if (provider.kind !== 'redirect') {
-      throw new FolioError('not_found', 'That provider has no callback')
+  app.get("/login/:provider/callback", async (c) => {
+    const auth = sessionAuth();
+    const provider = providerById(c.req.param("provider"));
+    if (provider.kind !== "redirect") {
+      throw new FolioError("not_found", "That provider has no callback");
     }
-    const url = new URL(c.req.url)
-    const envelope = decodeState(readOidcCookie(c.req.header('cookie')))
-    const next = safeNext(envelope?.next, editorUrl)
-    const bail = (reason: 'provider' | 'refused') =>
+    const url = new URL(c.req.url);
+    const envelope = decodeState(readOidcCookie(c.req.header("cookie")));
+    const next = safeNext(envelope?.next, editorUrl);
+    const bail = (reason: "provider" | "refused") =>
       new Response(null, {
         status: 302,
         headers: [
-          ['location', `${rt.base}/login?error=${reason}&next=${encodeURIComponent(next)}`],
-          ...clearOidcCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+          ["location", `${rt.base}/login?error=${reason}&next=${encodeURIComponent(next)}`],
+          ...clearOidcCookies(url).map((value) => ["set-cookie", value] as [string, string]),
         ],
-      })
+      });
 
     // No state cookie at all: a bookmarked callback, a cookie-less browser, or a
     // cross-site attempt. There is nothing to verify the response against, so
     // there is nothing to exchange.
-    if (!envelope) return bail('provider')
+    if (!envelope) return bail("provider");
 
-    let identity: Awaited<ReturnType<RedirectProvider<unknown>['callback']>>
+    let identity: Awaited<ReturnType<RedirectProvider<unknown>["callback"]>>;
     try {
       identity = await provider.callback(c.env, {
         // The query only. A provider that cannot see the request's own URL
@@ -645,10 +645,10 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         params: url.searchParams,
         redirectUri: `${url.origin}${rt.base}/login/${provider.id}/callback`,
         state: envelope.state,
-      })
+      });
     } catch (err) {
-      rt.logger.error(`folio: ${provider.id} sign-in failed`, err)
-      return bail('provider')
+      rt.logger.error(`folio: ${provider.id} sign-in failed`, err);
+      return bail("provider");
     }
 
     const result = await completeSignIn(
@@ -656,22 +656,22 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       auth,
       provider,
       identity,
-      { userAgent: c.req.header('user-agent') ?? null },
+      { userAgent: c.req.header("user-agent") ?? null },
       rt.logger,
-    )
-    if (!result.ok) return bail(result.reason)
+    );
+    if (!result.ok) return bail(result.reason);
 
     return new Response(null, {
       status: 302,
       headers: [
-        ['location', next],
-        ['set-cookie', signInCookie(c, result.session)],
-        ...clearOidcCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+        ["location", next],
+        ["set-cookie", signInCookie(c, result.session)],
+        ...clearOidcCookies(url).map((value) => ["set-cookie", value] as [string, string]),
       ],
-    })
-  })
+    });
+  });
 
-  return app
+  return app;
 }
 
 /**
@@ -685,7 +685,7 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * server, so they move.
  */
 export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * Signs out. Reads the cookie itself rather than `c.var.actor`, so a browser
@@ -706,42 +706,42 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * The provider is read *before* the revocation, because after it there is no
    * row to read it from.
    */
-  app.post('/logout', async (c) => {
-    const url = new URL(c.req.url)
-    const token = credentialOf(c.req.raw).cookie
-    let next = `${rt.base}/login?signedout=1`
-    if (token && rt.auth.mode === 'session') {
-      const db = c.var.bindings().db
-      const minted = await sessionProvider(db, token)
-      await revokeSession(db, token)
-      const provider = minted ? rt.auth.config.providers.find((p) => p.id === minted) : undefined
-      if (provider && 'signOutUrl' in provider && provider.signOutUrl) {
-        next = provider.signOutUrl
+  app.post("/logout", async (c) => {
+    const url = new URL(c.req.url);
+    const token = credentialOf(c.req.raw).cookie;
+    let next = `${rt.base}/login?signedout=1`;
+    if (token && rt.auth.mode === "session") {
+      const db = c.var.bindings().db;
+      const minted = await sessionProvider(db, token);
+      await revokeSession(db, token);
+      const provider = minted ? rt.auth.config.providers.find((p) => p.id === minted) : undefined;
+      if (provider && "signOutUrl" in provider && provider.signOutUrl) {
+        next = provider.signOutUrl;
       }
       // After the revoke, not before: the row this describes has just stopped
       // existing. `c.var.actor` is who `withActor` resolved from this same
       // cookie at the top of the request, before the revoke — a token never
       // reaches this branch, since `credentialOf(...).cookie` is empty for one.
-      const actor = c.var.actor
-      if (actor?.kind === 'user') {
+      const actor = c.var.actor;
+      if (actor?.kind === "user") {
         await db.batch([
           recordEventStatement(db, {
-            kind: 'sign_out',
+            kind: "sign_out",
             userId: actor.id,
             actor: actor.id,
             provider: minted,
           }),
-        ])
+        ]);
       }
     }
     return new Response(JSON.stringify({ ok: true, next }), {
       status: 200,
       headers: [
-        ['content-type', 'application/json'],
-        ...clearSessionCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+        ["content-type", "application/json"],
+        ...clearSessionCookies(url).map((value) => ["set-cookie", value] as [string, string]),
       ],
-    })
-  })
+    });
+  });
 
   /**
    * The current actor, for the admin's user menu and its read-only mode.
@@ -760,11 +760,11 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * new gate to hold it: session mode already refuses a caller with no actor two
    * lines below, and `auth: 'open'` has no policy to describe.
    */
-  app.get('/me', async (c) => {
-    const credential = credentialOf(c.req.raw)
-    const actor = await resolveActor(() => c.var.bindings().db, rt.auth, credential)
-    if (rt.auth.mode === 'session' && !actor) {
-      throw new FolioError('unauthorized', 'Not signed in')
+  app.get("/me", async (c) => {
+    const credential = credentialOf(c.req.raw);
+    const actor = await resolveActor(() => c.var.bindings().db, rt.auth, credential);
+    if (rt.auth.mode === "session" && !actor) {
+      throw new FolioError("unauthorized", "Not signed in");
     }
     // Redacted, not the actor verbatim: `session` is the SHA-256 of the cookie's
     // token and `expiresAt` is bookkeeping, and neither is any use to the admin.
@@ -774,11 +774,11 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // A preview grant never reaches here — `resolveActor` answers one only when
     // asked for a preview origin, and this asks for none — so it is no one.
     const safe =
-      actor === null || actor.kind === 'grant'
+      actor === null || actor.kind === "grant"
         ? null
-        : actor.kind === 'user'
+        : actor.kind === "user"
           ? {
-              kind: 'user' as const,
+              kind: "user" as const,
               id: actor.id,
               name: actor.name,
               colour: actor.colour,
@@ -791,16 +791,16 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               email: actor.email,
               roleFrom: actor.roleFrom ?? null,
             }
-          : { kind: 'token' as const, id: actor.id, name: actor.name, scopes: actor.scopes }
+          : { kind: "token" as const, id: actor.id, name: actor.name, scopes: actor.scopes };
     // Omitted rather than null under `auth: 'open'`, where there are no providers,
     // no session length and no throttle: absence is the honest answer, and a block
     // of zeroes would be a policy the screen would then have to explain away.
-    const policy = authPolicy(rt.auth)
+    const policy = authPolicy(rt.auth);
     // Which provider minted *this* browser's session, from the join `readSession`
     // already runs. Present only when there is one to name, so the key's absence
     // means "not a session" rather than "a session by an unknown door".
     const session =
-      actor?.kind === 'user' && actor.provider ? { session: { provider: actor.provider } } : {}
+      actor?.kind === "user" && actor.provider ? { session: { provider: actor.provider } } : {};
     /**
      * The passkey block (`../../../docs/specs/foundation/passkeys.md`
      * decision 6). Present only when the deployment listed `passkeys()`, so its
@@ -814,14 +814,14 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * fact about the address; it is paid only by a deployment that asked for
      * passkeys, and `/me` is already reading D1 for the session.
      */
-    let passkeys: { passkeys?: { allowed: boolean; reason?: string } } = {}
-    if (rt.auth.mode === 'session' && rt.auth.passkey) {
-      let reason: string | null = null
-      if (actor?.kind === 'user') {
-        const row = await userById(c.var.bindings().db, actor.id)
-        reason = row ? passkeyEnrolmentRefusal(rt.auth, row.email) : null
+    let passkeys: { passkeys?: { allowed: boolean; reason?: string } } = {};
+    if (rt.auth.mode === "session" && rt.auth.passkey) {
+      let reason: string | null = null;
+      if (actor?.kind === "user") {
+        const row = await userById(c.var.bindings().db, actor.id);
+        reason = row ? passkeyEnrolmentRefusal(rt.auth, row.email) : null;
       }
-      passkeys = { passkeys: reason ? { allowed: false, reason } : { allowed: true } }
+      passkeys = { passkeys: reason ? { allowed: false, reason } : { allowed: true } };
     }
     /**
      * Whether the host declared the `SPACE` binding
@@ -844,7 +844,7 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * Any role, matching the socket's own gate: seeing who else is in the site is
      * not an editing capability, and a viewer already gets the story socket.
      */
-    const space = Boolean(rt.space(c.var.bindings()))
+    const space = Boolean(rt.space(c.var.bindings()));
     /**
      * **Many sites** (`multi-site.md`'s route table): the scopes this caller reaches
      * and their role on each, the sites they may preview, and whether they are the
@@ -854,22 +854,22 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * the admin, so it is given none; `auth: 'open'` is every role on every scope,
      * which is what the deployment does (`createFolio` warns).
      */
-    let multi: { sites?: ReturnType<typeof meSites> } = {}
-    if (rt.sites && (rt.auth.mode === 'open' || actor?.kind === 'user')) {
-      const registry = await rt.sites.registry(c.env)
+    let multi: { sites?: ReturnType<typeof meSites> } = {};
+    if (rt.sites && (rt.auth.mode === "open" || actor?.kind === "user")) {
+      const registry = await rt.sites.registry(c.env);
       const brandRefs = rt.sites.brands
         ? [...rt.brands.values()].flatMap((b) => (b.brand ? [b.brand] : []))
-        : undefined
+        : undefined;
       multi = {
         sites: meSites(
           registry,
-          actor?.kind === 'user' ? (actor.grants ?? { '*': actor.role }) : null,
+          actor?.kind === "user" ? (actor.grants ?? { "*": actor.role }) : null,
           // On a deployment with `brands` the settings type is the brand's and rides on
           // the scoped manifest, so `/me` names none (`multi-brand.md` decision 20).
           rt.sites.brands ? undefined : c.var.brand?.settings,
           brandRefs,
         ),
-      }
+      };
     }
     return c.json({
       mode: rt.auth.mode,
@@ -880,8 +880,8 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       ...session,
       ...passkeys,
       ...(policy ? { policy } : {}),
-    })
-  })
+    });
+  });
 
   /**
    * The caller's own last twenty rows of `../../../docs/specs/foundation/
@@ -893,16 +893,16 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `api_tokens.last_used_at`, not a person's sign-in history, and there is no
    * account for `?user=` to mean here in the first place.
    */
-  app.get('/me/events', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, READ), async (c) => {
-    const actor = c.var.actor
-    if (actor?.kind !== 'user') {
-      throw new FolioError('forbidden', 'A token has no sign-in history of its own.')
+  app.get("/me/events", requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, READ), async (c) => {
+    const actor = c.var.actor;
+    if (actor?.kind !== "user") {
+      throw new FolioError("forbidden", "A token has no sign-in history of its own.");
     }
-    const page = await listEvents(c.var.bindings().db, { user: actor.id, limit: 20 })
-    return c.json({ events: page.rows })
-  })
+    const page = await listEvents(c.var.bindings().db, { user: actor.id, limit: 20 });
+    return c.json({ events: page.rows });
+  });
 
-  return app
+  return app;
 }
 
 /* ------------------------------------------------------------------ state --- */
@@ -921,15 +921,15 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * others.
  */
 interface StateEnvelope {
-  next: string
-  state: RedirectState
+  next: string;
+  state: RedirectState;
 }
 
 function encodeState(envelope: StateEnvelope): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(envelope))
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const bytes = new TextEncoder().encode(JSON.stringify(envelope));
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /**
@@ -941,27 +941,27 @@ function encodeState(envelope: StateEnvelope): string {
  * or a number arriving where it wrote a string.
  */
 function decodeState(value: string | null): StateEnvelope | null {
-  if (!value) return null
+  if (!value) return null;
   try {
-    const padded = value.replace(/-/g, '+').replace(/_/g, '/')
-    const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<StateEnvelope>
-    if (typeof parsed.next !== 'string') return null
-    const state = parsed.state
-    if (typeof state !== 'object' || state === null || Array.isArray(state)) return null
-    const screened: Record<string, string> = {}
+    const padded = value.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<StateEnvelope>;
+    if (typeof parsed.next !== "string") return null;
+    const state = parsed.state;
+    if (typeof state !== "object" || state === null || Array.isArray(state)) return null;
+    const screened: Record<string, string> = {};
     for (const [key, entry] of Object.entries(state)) {
-      if (typeof entry !== 'string') return null
-      screened[key] = entry
+      if (typeof entry !== "string") return null;
+      screened[key] = entry;
     }
-    return { next: parsed.next, state: screened }
+    return { next: parsed.next, state: screened };
   } catch {
-    return null
+    return null;
   }
 }
 
 /** Re-exported so the login routes and the OIDC provider agree on the leeway
  * every expiry comparison in this feature uses. */
-export { CLOCK_LEEWAY_MS }
+export { CLOCK_LEEWAY_MS };

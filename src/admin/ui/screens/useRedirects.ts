@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import { type RedirectRow, type RedirectsUrl, redirectsParams } from './redirects-model'
-import { messageOf } from './useContent'
+import { useCallback, useEffect, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import { type RedirectRow, type RedirectsUrl, redirectsParams } from "./redirects-model";
+import { messageOf } from "./useContent";
 
 /**
  * The Redirects screen's data: one page of the redirect table.
@@ -23,7 +23,7 @@ import { messageOf } from './useContent'
 
 /** Rows per request. The route defaults to 50 and clamps at 200. Fifty is roughly
  * two screens, which makes paging the exception rather than the rhythm. */
-const PAGE = 50
+const PAGE = 50;
 
 /**
  * How long the search box waits before it is a request.
@@ -33,28 +33,28 @@ const PAGE = 50
  * `count(*)` over the table behind each one. 150ms, matching the palette's search
  * and the editor's debounced draft write.
  */
-const DEBOUNCE_MS = 150
+const DEBOUNCE_MS = 150;
 
 export interface RedirectsData {
-  page: Page<RedirectRow> & { loading: boolean; error?: string }
+  page: Page<RedirectRow> & { loading: boolean; error?: string };
   /** Cursors already visited, so *previous* is a pop rather than a reverse query.
    * Keyset paging only goes forwards; a client-side stack is what makes next /
    * previous work without the route learning a second direction. */
-  canGoBack: boolean
-  nextPage: () => void
-  prevPage: () => void
+  canGoBack: boolean;
+  nextPage: () => void;
+  prevPage: () => void;
   /** Re-read the current page, after a write. */
-  reload: () => void
+  reload: () => void;
 }
 
 export function useRedirects(apiBase: string, url: RedirectsUrl): RedirectsData {
-  const [page, setPage] = useState<RedirectsData['page']>({
+  const [page, setPage] = useState<RedirectsData["page"]>({
     rows: [],
     cursor: null,
     loading: true,
-  })
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [history, setHistory] = useState<readonly (string | null)[]>([])
+  });
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [history, setHistory] = useState<readonly (string | null)[]>([]);
 
   /**
    * The query the *request* uses, which trails what is in the box by `DEBOUNCE_MS`.
@@ -63,28 +63,28 @@ export function useRedirects(apiBase: string, url: RedirectsUrl): RedirectsData 
    * should answer immediately; a search term arrives one character at a time, and
    * its intermediate states are not states anybody asked to see.
    */
-  const q = useDebounced(url.q)
-  const settled = { ...url, q }
+  const q = useDebounced(url.q);
+  const settled = { ...url, q };
 
   // Serialised, because a fresh object every render would restart the effect below.
   // The string is also exactly what goes on the wire, so there is no second
   // representation to keep in step.
-  const params = redirectsParams(settled, { limit: PAGE, cursor, count: true }).toString()
+  const params = redirectsParams(settled, { limit: PAGE, cursor, count: true }).toString();
 
   const fetchPage = useCallback(async () => {
-    setPage((prev) => ({ ...prev, loading: true }))
+    setPage((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`${apiBase}/redirects?${params}`)
-      if (!res.ok) throw new Error(await messageOf(res))
-      setPage({ ...((await res.json()) as Page<RedirectRow>), loading: false })
+      const res = await fetch(`${apiBase}/redirects?${params}`);
+      if (!res.ok) throw new Error(await messageOf(res));
+      setPage({ ...((await res.json()) as Page<RedirectRow>), loading: false });
     } catch (e) {
-      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message })
+      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message });
     }
-  }, [apiBase, params])
+  }, [apiBase, params]);
 
   useEffect(() => {
-    void fetchPage()
-  }, [fetchPage])
+    void fetchPage();
+  }, [fetchPage]);
 
   /**
    * A filter change invalidates the cursor stack: it is a different set, so a
@@ -95,28 +95,28 @@ export function useRedirects(apiBase: string, url: RedirectsUrl): RedirectsData 
    * it rather than listing `source` and `q` separately is what keeps a third filter
    * from being added without a reset.
    */
-  const identity = redirectsParams(settled, { limit: PAGE, count: true }).toString()
+  const identity = redirectsParams(settled, { limit: PAGE, count: true }).toString();
   // biome-ignore lint/correctness/useExhaustiveDependencies: `identity` is the trigger, not a value the body reads — it only clears. Naming it is the point; reading it to satisfy the rule would misstate what this depends on
   useEffect(() => {
-    setCursor(null)
-    setHistory([])
-  }, [identity])
+    setCursor(null);
+    setHistory([]);
+  }, [identity]);
 
   const nextPage = useCallback(() => {
-    if (!page.cursor) return
-    setHistory((prev) => [...prev, cursor])
-    setCursor(page.cursor)
-  }, [page.cursor, cursor])
+    if (!page.cursor) return;
+    setHistory((prev) => [...prev, cursor]);
+    setCursor(page.cursor);
+  }, [page.cursor, cursor]);
 
   const prevPage = useCallback(() => {
     setHistory((prev) => {
-      if (prev.length === 0) return prev
-      setCursor(prev[prev.length - 1] ?? null)
-      return prev.slice(0, -1)
-    })
-  }, [])
+      if (prev.length === 0) return prev;
+      setCursor(prev[prev.length - 1] ?? null);
+      return prev.slice(0, -1);
+    });
+  }, []);
 
-  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage }
+  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage };
 }
 
 /**
@@ -129,10 +129,10 @@ export function useRedirects(apiBase: string, url: RedirectsUrl): RedirectsData 
  * file while three screens are being built in parallel.
  */
 function useDebounced(value: string): string {
-  const [settled, setSettled] = useState(value)
+  const [settled, setSettled] = useState(value);
   useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [value])
-  return settled
+    const timer = setTimeout(() => setSettled(value), DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [value]);
+  return settled;
 }

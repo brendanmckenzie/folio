@@ -1,16 +1,16 @@
-import type { CSSProperties, KeyboardEvent } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import type { StoryBulkAction, FlatSort } from '../../../core/story'
-import type { BulkRefusal } from '../../../core/bulk'
-import { canCreateContent, type Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
-import { List, ListHeader, Row } from '../List'
-import { Menu } from '../Menu'
-import { href, type Screen } from '../route'
-import { useRememberedSet } from '../remembered'
+import type { CSSProperties, KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { DocumentType, SchemaIndex } from "../../../core/schema";
+import type { StoryBulkAction, FlatSort } from "../../../core/story";
+import type { BulkRefusal } from "../../../core/bulk";
+import { canCreateContent, type Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
+import { List, ListHeader, Row } from "../List";
+import { Menu } from "../Menu";
+import { href, type Screen } from "../route";
+import { useRememberedSet } from "../remembered";
 import {
   actionsFor,
   allShownSelected,
@@ -53,21 +53,21 @@ import {
   visibleRows,
   withFilter,
   withView,
-} from './content-model'
-import { ConfirmBulkDialog } from './ConfirmBulkDialog'
-import { stateTone, when } from './content-rows'
-import css from './Content.module.css'
-import { CreateDialog } from './CreateDialog'
-import type { CreateBody } from './create-model'
-import { MoveDialog } from './MoveDialog'
-import { messageOf, useContent } from './useContent'
+} from "./content-model";
+import { ConfirmBulkDialog } from "./ConfirmBulkDialog";
+import { stateTone, when } from "./content-rows";
+import css from "./Content.module.css";
+import { CreateDialog } from "./CreateDialog";
+import type { CreateBody } from "./create-model";
+import { MoveDialog } from "./MoveDialog";
+import { messageOf, useContent } from "./useContent";
 
 interface Props {
   /** Where Folio is mounted, for the real `<a href>` inside each row. */
-  mount: string
+  mount: string;
   /** The admin's internal JSON base — the reads here and the writes the bulk
    * actions make. */
-  apiBase: string
+  apiBase: string;
   /**
    * Who is signed in, for the role gates below. Every control on this screen that
    * writes is absent for somebody whose role cannot take it — the bulk bar's five
@@ -75,17 +75,17 @@ interface Props {
    * `../../../../docs/ui-architecture.md`'s `## Cross-cutting` says an impossible
    * control is absent rather than refused after the click (issue #7).
    */
-  me: Me
-  query: Readonly<Record<string, string>>
+  me: Me;
+  query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
-  onQuery: (next: Record<string, string | undefined>) => void
-  onOpen: (screen: Screen) => void
-  onNotice: (message: string) => void
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onOpen: (screen: Screen) => void;
+  onNotice: (message: string) => void;
   /** The open document, if the editor was reached from here — so walking back to
    * the tree shows you where you were. */
-  selected?: string
+  selected?: string;
   /** Declared page types, for the type chips and the create menu. */
-  pageTypes: readonly DocumentType[]
+  pageTypes: readonly DocumentType[];
   /**
    * The block schema, indexed by name — for the create dialog, which labels its
    * one field with the type's title field's own label.
@@ -96,37 +96,37 @@ interface Props {
    * pass it yet and that file is not this screen's to edit; the fix there is one
    * line, `schema={a.schema}`, and `a.schema` is already in scope.
    */
-  schema?: SchemaIndex
+  schema?: SchemaIndex;
   /** The remembered view and sort, used when the URL names neither. */
-  remembered: { view: ViewMode; sort: FlatSort }
-  onRemember: (next: { view: ViewMode; sort: FlatSort }) => void
+  remembered: { view: ViewMode; sort: FlatSort };
+  onRemember: (next: { view: ViewMode; sort: FlatSort }) => void;
   /**
    * Hands this screen's `reload` to the shell, which calls it when the space
    * channel reports that somebody *else* moved, published or deleted a page
    * (`Admin.tsx`'s `listReload`). Registered in an effect and unregistered on
    * unmount, so the shell never holds a stale closure over a screen that is gone.
    */
-  registerReload: (reload: (() => void) | null) => void
+  registerReload: (reload: (() => void) | null) => void;
 }
 
 /** Eight placeholder rows, named rather than indexed — an index key on a list
  * that never reorders is harmless, but writing one teaches the wrong habit for the
  * lists here that do. */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8"];
 
 const STATES = [
-  { value: 'all', label: 'All' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'changed', label: 'Changed' },
-  { value: 'live', label: 'Live' },
-  { value: 'unpublished', label: 'Unpublished' },
-] as const
+  { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
+  { value: "changed", label: "Changed" },
+  { value: "live", label: "Live" },
+  { value: "unpublished", label: "Unpublished" },
+] as const;
 
 const SORTS: { value: FlatSort; label: string }[] = [
-  { value: 'edited', label: 'Last edited' },
-  { value: 'title', label: 'Title' },
-  { value: 'path', label: 'Path' },
-]
+  { value: "edited", label: "Last edited" },
+  { value: "title", label: "Title" },
+  { value: "path", label: "Path" },
+];
 
 /**
  * The page tree, given the whole screen instead of 280px — which is most of what
@@ -156,10 +156,10 @@ const SORTS: { value: FlatSort; label: string }[] = [
  *    arithmetic, and it is where the off-by-one on a downward move lives.
  */
 export function Content(props: Props) {
-  const { mount, apiBase, pageTypes, onNotice, onQuery, onRemember, onOpen } = props
-  const url = parseContentUrl(props.query, props.remembered)
-  const filter = filterOf(url)
-  const data = useContent(apiBase, url)
+  const { mount, apiBase, pageTypes, onNotice, onQuery, onRemember, onOpen } = props;
+  const url = parseContentUrl(props.query, props.remembered);
+  const filter = filterOf(url);
+  const data = useContent(apiBase, url);
 
   /**
    * The shell's handle on this screen's data.
@@ -177,11 +177,11 @@ export function Content(props: Props) {
    * `reload` changes it for the four local write paths that also call it, which
    * is beyond the issue that mounted this channel.
    */
-  const { registerReload } = props
+  const { registerReload } = props;
   useEffect(() => {
-    registerReload(data.reload)
-    return () => registerReload(null)
-  }, [registerReload, data.reload])
+    registerReload(data.reload);
+    return () => registerReload(null);
+  }, [registerReload, data.reload]);
 
   /**
    * Which nodes are open — **remembered, and deliberately not in the URL**.
@@ -194,47 +194,47 @@ export function Content(props: Props) {
    * get: linkable first, convenient second.
    */
   const { value: expanded, toggle: toggleExpanded } = useRememberedSet(
-    'folio.content.expanded',
+    "folio.content.expanded",
     isStoryId,
-  )
-  const [selection, setSelection] = useState<Selection>(NOTHING)
-  const [moving, setMoving] = useState(false)
-  const [busy, setBusy] = useState(false)
+  );
+  const [selection, setSelection] = useState<Selection>(NOTHING);
+  const [moving, setMoving] = useState(false);
+  const [busy, setBusy] = useState(false);
   /** The job's own `seen`/`total`, while a run takes more than one call. */
-  const [progress, setProgress] = useState<string | null>(null)
+  const [progress, setProgress] = useState<string | null>(null);
   /** A confirmation waiting on an answer. */
-  const [pending, setPending] = useState<Job | null>(null)
+  const [pending, setPending] = useState<Job | null>(null);
   /** The 409, with the job it refused — so one button can re-post with the count
    * the server just reported. */
-  const [refused, setRefused] = useState<{ job: Job; refusal: BulkRefusal } | null>(null)
+  const [refused, setRefused] = useState<{ job: Job; refusal: BulkRefusal } | null>(null);
 
-  const showType = pageTypes.length > 1
+  const showType = pageTypes.length > 1;
   /** Type name → label, so a captured `type` reads as the chip did rather than as
    * the wire value. */
   const labels = useMemo(
     () => Object.fromEntries(pageTypes.map((type) => [type.name, type.label])),
     [pageTypes],
-  )
+  );
 
   const go = useCallback(
     (next: ContentUrl) => {
       // Remembered *and* in the URL: linkable first, convenient second — the same
       // rule Assets' grid/table toggle gets. The URL is what a person sends a
       // colleague; the memory is what they get when they arrive without one.
-      onRemember({ view: next.view, sort: next.sort })
-      onQuery(contentQuery(next))
+      onRemember({ view: next.view, sort: next.sort });
+      onQuery(contentQuery(next));
     },
     [onQuery, onRemember],
-  )
+  );
 
   /* ------------------------------------------------------------------ rows --- */
 
   const rows: VisibleRow[] = useMemo(
     () =>
-      url.view === 'tree'
+      url.view === "tree"
         ? visibleRows(data.levels, expanded)
         : data.flat.rows.map((row, index) => ({
-            kind: 'story' as const,
+            kind: "story" as const,
             // Flat rows never disclose, so `childCount` is 0 by construction
             // rather than fetched: the column exists for the tree's twisty and
             // there is no twisty here.
@@ -247,30 +247,30 @@ export function Content(props: Props) {
             expanded: false,
           })),
     [url.view, data.levels, data.flat.rows, expanded],
-  )
-  const stories = useMemo(() => storyRowsOf(rows), [rows])
+  );
+  const stories = useMemo(() => storyRowsOf(rows), [rows]);
   /** The rows themselves rather than their ids: a select-all is a *filter*, so
    * deciding whether a row is in it means evaluating that filter against the row.
    * `content-model.ts`'s `isSelected` is where it happens. */
-  const visible = useMemo<Matchable[]>(() => stories.map((r) => r.row), [stories])
-  const bar = summarise(selection, visible, labels)
+  const visible = useMemo<Matchable[]>(() => stories.map((r) => r.row), [stories]);
+  const bar = summarise(selection, visible, labels);
 
-  const rootLevel = data.levels[ROOT]
-  const loading = url.view === 'tree' ? (rootLevel?.loading ?? true) : data.flat.loading
-  const firstLoad = loading && stories.length === 0
-  const error = url.view === 'tree' ? rootLevel?.error : data.flat.error
-  const total = url.view === 'tree' ? rootLevel?.total : data.flat.total
+  const rootLevel = data.levels[ROOT];
+  const loading = url.view === "tree" ? (rootLevel?.loading ?? true) : data.flat.loading;
+  const firstLoad = loading && stories.length === 0;
+  const error = url.view === "tree" ? rootLevel?.error : data.flat.error;
+  const total = url.view === "tree" ? rootLevel?.total : data.flat.total;
 
   const toggleOpen = (row: LevelRow) => {
-    const opening = !expanded.has(row.id)
-    toggleExpanded(row.id)
+    const opening = !expanded.has(row.id);
+    toggleExpanded(row.id);
     // Asked for on expand rather than up front, which is the whole point of
     // per-level loading. `openLevel` is idempotent, so re-opening a node already
     // fetched costs no request — and it *does* re-ask for a level that failed, which
     // is why the gesture keeps its own call rather than leaving everything to the
     // effect below: that one deliberately never retries.
-    if (opening) data.openLevel(row.id)
-  }
+    if (opening) data.openLevel(row.id);
+  };
 
   /**
    * The levels a remembered expansion needs, asked for as they become **visible**.
@@ -289,58 +289,58 @@ export function Content(props: Props) {
    * request in a loop. Retrying is the twisty's job, above.
    */
   useEffect(() => {
-    if (url.view !== 'tree') return
+    if (url.view !== "tree") return;
     for (const row of rows) {
-      if (row.kind !== 'story' || !row.expanded) continue
-      if (!data.levels[row.row.id]) data.openLevel(row.row.id)
+      if (row.kind !== "story" || !row.expanded) continue;
+      if (!data.levels[row.row.id]) data.openLevel(row.row.id);
     }
-  }, [url.view, rows, data.levels, data.openLevel])
+  }, [url.view, rows, data.levels, data.openLevel]);
 
   /* -------------------------------------------------------------- keyboard --- */
 
   const patchMove = useCallback(
     async (move: Move) => {
       const res = await fetch(`${apiBase}/stories/${encodeURIComponent(move.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ parentId: move.parentId, index: move.index }),
-      })
+      });
       if (!res.ok) {
         const { error: err } = (await res.json().catch(() => ({}))) as {
-          error?: { message?: string }
-        }
-        throw new Error(err?.message ?? `Move failed (${res.status})`)
+          error?: { message?: string };
+        };
+        throw new Error(err?.message ?? `Move failed (${res.status})`);
       }
     },
     [apiBase],
-  )
+  );
 
   const gesture = useCallback(
     async (which: Gesture, at: TreeRow) => {
-      if (url.view === 'flat') {
+      if (url.view === "flat") {
         // Order and structure are the same axis in a tree — `ord` *is* the sibling
         // order — so a reorder inside a list sorted by title or by edit time has
         // no meaning to express. Refused with the reason rather than silently
         // ignored, which is the rule the whole screen follows.
-        onNotice('Reordering is a tree operation — switch to Tree to move pages')
-        return
+        onNotice("Reordering is a tree operation — switch to Tree to move pages");
+        return;
       }
-      const outcome = gestureMove(which, at, rows, data.levels)
-      if ('refusal' in outcome) {
-        onNotice(outcome.refusal)
-        return
+      const outcome = gestureMove(which, at, rows, data.levels);
+      if ("refusal" in outcome) {
+        onNotice(outcome.refusal);
+        return;
       }
       // Focus survives the reload because rows are keyed by story id and the moved
       // row keeps its own id; the browser restores focus to the same element.
       try {
-        await patchMove(outcome.move)
-        data.reload()
+        await patchMove(outcome.move);
+        data.reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       }
     },
     [rows, data, url.view, onNotice, patchMove],
-  )
+  );
 
   /**
    * → ← and the four ⌥ gestures, for whichever row has focus.
@@ -355,31 +355,31 @@ export function Content(props: Props) {
     index: number,
     focus: (i: number) => void,
   ) => {
-    const at = stories[index]
-    if (!at) return
+    const at = stories[index];
+    if (!at) return;
 
     if (e.altKey) {
-      const which = GESTURES[e.key]
-      if (!which) return
-      e.preventDefault()
-      void gesture(which, at)
-      return
+      const which = GESTURES[e.key];
+      if (!which) return;
+      e.preventDefault();
+      void gesture(which, at);
+      return;
     }
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
-    e.preventDefault()
-    if (e.key === 'ArrowRight') {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    if (e.key === "ArrowRight") {
       // → on a closed parent opens it; on an open one it steps to the first child,
       // which is the row physically below. Leaving that to ↓ would mean → doing
       // nothing at all on an already-open node.
-      if (at.expandable && !at.expanded) toggleOpen(at.row)
-      else focus(index + 1)
-      return
+      if (at.expandable && !at.expanded) toggleOpen(at.row);
+      else focus(index + 1);
+      return;
     }
     // ← collapses an open node, and steps out to the parent otherwise. The same
     // asymmetry, the other way round.
-    if (at.expanded) toggleOpen(at.row)
-    else focus(stories.findIndex((r) => r.row.id === at.parent))
-  }
+    if (at.expanded) toggleOpen(at.row);
+    else focus(stories.findIndex((r) => r.row.id === at.parent));
+  };
 
   /* ------------------------------------------------------------------ bulk --- */
 
@@ -393,13 +393,13 @@ export function Content(props: Props) {
    * development to prove it.
    */
   const tick = (row: Matchable) => {
-    const outcome = toggleSelected(selection, row)
-    if ('refusal' in outcome) {
-      onNotice(outcome.refusal)
-      return
+    const outcome = toggleSelected(selection, row);
+    if ("refusal" in outcome) {
+      onNotice(outcome.refusal);
+      return;
     }
-    setSelection(outcome.selection)
-  }
+    setSelection(outcome.selection);
+  };
 
   /**
    * A whole bulk job: **one `POST {apiBase}/bulk/{action}` per batch**, looped on
@@ -419,52 +419,52 @@ export function Content(props: Props) {
    */
   const run = useCallback(
     async (job: Job, override?: Selection) => {
-      const target = override ?? selection
-      setBusy(true)
-      setProgress(null)
+      const target = override ?? selection;
+      setBusy(true);
+      setProgress(null);
       try {
         const result = await runBulkJob((body) => postBulk(apiBase, job.action, body), target, {
           ...(job.destination ? { destination: job.destination } : {}),
           onProgress: (seen, total) => setProgress(progressOf(seen, total)),
-        })
-        if ('refused' in result) {
-          setRefused({ job, refusal: result.refused })
-          return
+        });
+        if ("refused" in result) {
+          setRefused({ job, refusal: result.refused });
+          return;
         }
-        setSelection(NOTHING)
-        data.reload()
+        setSelection(NOTHING);
+        data.reload();
         // Once, at the end, over the summed `done` and the concatenated `failed`:
         // both are per call by design, because the server cannot know what an
         // earlier call did.
-        onNotice(reportOf(job.action, result.done, result.failed))
+        onNotice(reportOf(job.action, result.done, result.failed));
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
-        setProgress(null)
+        setBusy(false);
+        setProgress(null);
       }
     },
     [apiBase, data, onNotice, selection],
-  )
+  );
 
   /** What a confirmation would say, or null when the action can be taken as read.
    * The rule is `confirmOf`'s; the captured filter is only passed in select-all
    * mode, because that is the only mode with conditions to restate. */
   const confirmation = (action: StoryBulkAction) =>
-    confirmOf(action, bar, isAll(selection) ? selection.filter : undefined, labels)
+    confirmOf(action, bar, isAll(selection) ? selection.filter : undefined, labels);
 
   /** A bar button. Move opens its destination picker, which is its confirmation;
    * everything else asks first when there is something to say. */
   const start = (action: StoryBulkAction) => {
-    if (action === 'move') {
-      setMoving(true)
-      return
+    if (action === "move") {
+      setMoving(true);
+      return;
     }
-    if (confirmation(action)) setPending({ action })
-    else void run({ action })
-  }
+    if (confirmation(action)) setPending({ action });
+    else void run({ action });
+  };
 
-  const ask = pending ? confirmation(pending.action) : null
+  const ask = pending ? confirmation(pending.action) : null;
 
   /* ------------------------------------------------------------------ view --- */
 
@@ -481,7 +481,7 @@ export function Content(props: Props) {
           }
         />
       </div>
-    )
+    );
   }
 
   return (
@@ -507,8 +507,8 @@ export function Content(props: Props) {
                 schema={props.schema}
                 apiBase={apiBase}
                 onCreated={(id) => {
-                  data.reload()
-                  onOpen({ name: 'edit', id })
+                  data.reload();
+                  onOpen({ name: "edit", id });
                 }}
                 onNotice={onNotice}
               />
@@ -525,20 +525,20 @@ export function Content(props: Props) {
         */}
         <fieldset className={css.toggle}>
           <legend className={css.srOnly}>View</legend>
-          {(['tree', 'flat'] as const).map((mode) => (
+          {(["tree", "flat"] as const).map((mode) => (
             <button
               key={mode}
               type="button"
-              className={`${css.segment} ${url.view === mode ? css.segmentOn : ''}`}
+              className={`${css.segment} ${url.view === mode ? css.segmentOn : ""}`}
               aria-pressed={url.view === mode}
               title={
-                mode === 'tree' && isNarrowed(filter)
-                  ? 'Clears the filters: a tree loads one level at a time, so it cannot show a filtered result without hiding matches'
+                mode === "tree" && isNarrowed(filter)
+                  ? "Clears the filters: a tree loads one level at a time, so it cannot show a filtered result without hiding matches"
                   : undefined
               }
               onClick={() => go(withView(url, mode))}
             >
-              {mode === 'tree' ? 'Tree' : 'Flat'}
+              {mode === "tree" ? "Tree" : "Flat"}
             </button>
           ))}
         </fieldset>
@@ -549,7 +549,7 @@ export function Content(props: Props) {
             <button
               key={state.value}
               type="button"
-              className={`${css.chip} ${url.state === state.value ? css.chipOn : ''}`}
+              className={`${css.chip} ${url.state === state.value ? css.chipOn : ""}`}
               aria-pressed={url.state === state.value}
               onClick={() => go(withFilter(url, { state: state.value }))}
             >
@@ -565,7 +565,7 @@ export function Content(props: Props) {
             <legend className={css.srOnly}>Filter by type</legend>
             <button
               type="button"
-              className={`${css.chip} ${url.type === undefined ? css.chipOn : ''}`}
+              className={`${css.chip} ${url.type === undefined ? css.chipOn : ""}`}
               aria-pressed={url.type === undefined}
               onClick={() => go(withFilter(url, { type: undefined }))}
             >
@@ -575,7 +575,7 @@ export function Content(props: Props) {
               <button
                 key={type.name}
                 type="button"
-                className={`${css.chip} ${url.type === type.name ? css.chipOn : ''}`}
+                className={`${css.chip} ${url.type === type.name ? css.chipOn : ""}`}
                 aria-pressed={url.type === type.name}
                 onClick={() => go(withFilter(url, { type: type.name }))}
               >
@@ -585,7 +585,7 @@ export function Content(props: Props) {
           </fieldset>
         ) : null}
 
-        {url.view === 'flat' ? (
+        {url.view === "flat" ? (
           <label className={css.sort}>
             Sort
             <select
@@ -626,15 +626,15 @@ export function Content(props: Props) {
         </div>
       ) : stories.length === 0 ? (
         <EmptyState
-          title={isNarrowed(filter) ? 'Nothing matches' : 'No pages yet'}
+          title={isNarrowed(filter) ? "Nothing matches" : "No pages yet"}
           body={
             isNarrowed(filter)
-              ? 'Try a different state, or clear the search.'
-              : 'A page is a document in the tree. Every one of them has a URL.'
+              ? "Try a different state, or clear the search."
+              : "A page is a document in the tree. Every one of them has a URL."
           }
           action={
             isNarrowed(filter) ? (
-              <Button size="sm" onClick={() => go(withView(url, 'tree'))}>
+              <Button size="sm" onClick={() => go(withView(url, "tree"))}>
                 Clear filters
               </Button>
             ) : null
@@ -642,13 +642,13 @@ export function Content(props: Props) {
         />
       ) : (
         <List
-          label={url.view === 'tree' ? 'Page tree' : 'Pages'}
-          tree={url.view === 'tree'}
+          label={url.view === "tree" ? "Page tree" : "Pages"}
+          tree={url.view === "tree"}
           multiselect
           onUnhandledKey={onRowKey}
         >
           {rows.map((row) =>
-            row.kind === 'more' ? (
+            row.kind === "more" ? (
               <MoreRow
                 key={`more:${row.parent}`}
                 row={row}
@@ -658,7 +658,7 @@ export function Content(props: Props) {
               <PageRow
                 key={row.row.id}
                 at={row}
-                tree={url.view === 'tree'}
+                tree={url.view === "tree"}
                 mount={mount}
                 showType={showType}
                 typeLabel={pageTypes.find((t) => t.name === row.row.type)?.label}
@@ -666,7 +666,7 @@ export function Content(props: Props) {
                 current={row.row.id === props.selected}
                 onToggleOpen={() => toggleOpen(row.row)}
                 onToggleTick={() => tick(row.row)}
-                onOpen={() => onOpen({ name: 'edit', id: row.row.id })}
+                onOpen={() => onOpen({ name: "edit", id: row.row.id })}
               />
             ),
           )}
@@ -680,7 +680,7 @@ export function Content(props: Props) {
           onClick={() => setSelection((prev) => toggleAllShown(prev, visible))}
           disabled={visible.length === 0}
         >
-          {allShownSelected(selection, visible) ? 'Deselect all shown' : 'Select all shown'}
+          {allShownSelected(selection, visible) ? "Deselect all shown" : "Select all shown"}
         </button>
         {/*
           Select-all-matching, and **only in flat mode**. `expected` has to be the
@@ -690,7 +690,7 @@ export function Content(props: Props) {
           number would capture 12 and mean 51,420, so the control is absent there
           rather than disabled — there is no version of it a tree can honestly draw.
         */}
-        {url.view === 'flat' && total !== undefined && !isAll(selection) ? (
+        {url.view === "flat" && total !== undefined && !isAll(selection) ? (
           <button
             type="button"
             className={css.selectAll}
@@ -710,11 +710,11 @@ export function Content(props: Props) {
         <span className={css.count}>
           {total === undefined
             ? `${stories.length} shown`
-            : url.view === 'tree'
+            : url.view === "tree"
               ? `${rootLevel?.rows.length ?? 0} of ${total} top-level pages`
               : `${stories.length} of ${total} pages`}
         </span>
-        {url.view === 'flat' ? (
+        {url.view === "flat" ? (
           <span className={css.pager}>
             <Button
               size="sm"
@@ -742,11 +742,11 @@ export function Content(props: Props) {
           count={bar.count}
           // The picker is the move's confirmation, so it carries the sentence about
           // the invisible part rather than a second dialog appearing behind it.
-          note={confirmation('move')?.body}
+          note={confirmation("move")?.body}
           onClose={() => setMoving(false)}
           onConfirm={(parentId) => {
-            setMoving(false)
-            void run({ action: 'move', destination: { parentId } })
+            setMoving(false);
+            void run({ action: "move", destination: { parentId } });
           }}
         />
       ) : null}
@@ -757,9 +757,9 @@ export function Content(props: Props) {
           confirmLabel={verbOf(pending.action)}
           onClose={() => setPending(null)}
           onConfirm={() => {
-            const job = pending
-            setPending(null)
-            void run(job)
+            const job = pending;
+            setPending(null);
+            void run(job);
           }}
         />
       ) : null}
@@ -777,23 +777,23 @@ export function Content(props: Props) {
           confirmLabel={retryLabel(refused.job.action, refused.refusal)}
           onClose={() => setRefused(null)}
           onConfirm={() => {
-            const { job, refusal } = refused
-            const corrected: Selection = { ...selection, expected: refusal.actual }
-            setRefused(null)
-            setSelection(corrected)
-            void run(job, corrected)
+            const { job, refusal } = refused;
+            const corrected: Selection = { ...selection, expected: refusal.actual };
+            setRefused(null);
+            setSelection(corrected);
+            void run(job, corrected);
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /** One bulk job in flight or awaiting confirmation: what to do, and for a move,
  * where. */
 interface Job {
-  action: StoryBulkAction
-  destination?: Destination
+  action: StoryBulkAction;
+  destination?: Destination;
 }
 
 /* ------------------------------------------------------------------- a row --- */
@@ -810,18 +810,18 @@ function PageRow({
   onToggleTick,
   onOpen,
 }: {
-  at: { kind: 'story' } & TreeRow
-  tree: boolean
-  mount: string
-  showType: boolean
-  typeLabel: string | undefined
-  ticked: boolean
-  current: boolean
-  onToggleOpen: () => void
-  onToggleTick: () => void
-  onOpen: () => void
+  at: { kind: "story" } & TreeRow;
+  tree: boolean;
+  mount: string;
+  showType: boolean;
+  typeLabel: string | undefined;
+  ticked: boolean;
+  current: boolean;
+  onToggleOpen: () => void;
+  onToggleTick: () => void;
+  onOpen: () => void;
 }) {
-  const { row } = at
+  const { row } = at;
   return (
     <Row
       depth={at.depth}
@@ -841,7 +841,7 @@ function PageRow({
           // hundred stops. Space on the focused row is the keyboard route, which
           // is `Row`'s `onSelect`.
           tabIndex={-1}
-          aria-label={`Select ${row.title || 'Untitled'}`}
+          aria-label={`Select ${row.title || "Untitled"}`}
           onClick={(e) => e.stopPropagation()}
           onChange={onToggleTick}
         />
@@ -851,16 +851,16 @@ function PageRow({
           <button
             type="button"
             className={css.twisty}
-            data-open={at.expanded ? '' : undefined}
-            aria-label={`${at.expanded ? 'Collapse' : 'Expand'} ${row.title}`}
+            data-open={at.expanded ? "" : undefined}
+            aria-label={`${at.expanded ? "Collapse" : "Expand"} ${row.title}`}
             // No `aria-expanded` here: the treeitem around it already carries it,
             // and two elements announcing the same state is one of them lying as
             // soon as they disagree.
             onClick={(e) => {
               // The row's own click opens the document. A twisty inside it must
               // not do both.
-              e.stopPropagation()
-              onToggleOpen()
+              e.stopPropagation();
+              onToggleOpen();
             }}
           >
             ›
@@ -879,14 +879,14 @@ function PageRow({
        * would repeat what the shape already says; in a flat list there is no
        * indent, so the slug alone cannot tell `/about/team` from `/careers/team`.
        */
-      meta={tree ? (row.slug === '' ? '/' : row.slug) : row.path === '' ? '/' : `/${row.path}`}
+      meta={tree ? (row.slug === "" ? "/" : row.slug) : row.path === "" ? "/" : `/${row.path}`}
       trailing={
         // Fixed-width columns rather than a flex run of chips. Right-aligned
         // metadata is the correct pattern for a list row, but the first version
         // let each cell size to its content, so `live · 2m ago` and `draft · 22 Jan`
         // put their badges at different x positions on adjacent rows — which is
         // what makes a wide list read as scattered instead of tabular.
-        <span className={css.cols} data-typed={showType ? '' : undefined}>
+        <span className={css.cols} data-typed={showType ? "" : undefined}>
           {showType ? <Badge>{typeLabel ?? row.type}</Badge> : null}
           <Badge tone={stateTone(row.state)}>{row.state}</Badge>
           <span className={css.stamp}>{when(row)}</span>
@@ -897,7 +897,7 @@ function PageRow({
           even though the whole row is clickable too. */}
       <a
         className={css.title}
-        href={href({ name: 'edit', id: row.id }, mount)}
+        href={href({ name: "edit", id: row.id }, mount)}
         // The row is already handling the click and navigating; letting this
         // bubble would do it twice.
         onClick={(e) => e.stopPropagation()}
@@ -905,7 +905,7 @@ function PageRow({
         {row.title || <span className={css.untitled}>Untitled</span>}
       </a>
     </Row>
-  )
+  );
 }
 
 /** The rest of an incomplete level. See `Level` in `content-model.ts` for why a
@@ -914,22 +914,22 @@ function MoreRow({
   row,
   onMore,
 }: {
-  row: Extract<VisibleRow, { kind: 'more' }>
-  onMore: () => void
+  row: Extract<VisibleRow, { kind: "more" }>;
+  onMore: () => void;
 }) {
-  const remaining = row.total === undefined ? undefined : row.total - row.loaded
+  const remaining = row.total === undefined ? undefined : row.total - row.loaded;
   return (
-    <div className={css.moreRow} style={{ '--depth': row.depth } as CSSProperties}>
+    <div className={css.moreRow} style={{ "--depth": row.depth } as CSSProperties}>
       <span className={css.moreIndent} />
       <button type="button" className={css.more} disabled={row.loading} onClick={onMore}>
         {row.loading
-          ? 'Loading…'
+          ? "Loading…"
           : remaining === undefined
-            ? 'Show more'
+            ? "Show more"
             : `Show ${remaining} more`}
       </button>
     </div>
-  )
+  );
 }
 
 /* --------------------------------------------------------------- the bar --- */
@@ -943,21 +943,21 @@ function SelectionBar({
   onRun,
   onShowSelected,
 }: {
-  summary: ReturnType<typeof summarise>
-  busy: boolean
+  summary: ReturnType<typeof summarise>;
+  busy: boolean;
   /** The job's own progress, while a run takes more than one call. */
-  progress: string | null
+  progress: string | null;
   /** Which of the five this selection may be given. `duplicate` is absent for a
    * select-all because the server refuses it there, and any of the five is absent
    * for a role that may not take it — both because an impossible control is
    * absent rather than disabled. `actionsFor` holds the whole rule; a viewer's
    * bar therefore offers `Clear` and nothing else. */
-  actions: readonly StoryBulkAction[]
-  onClear: () => void
-  onRun: (action: StoryBulkAction) => void
+  actions: readonly StoryBulkAction[];
+  onClear: () => void;
+  onRun: (action: StoryBulkAction) => void;
   /** Absent for an explicit selection: twelve ids are not a filter, so there is no
    * URL that shows them. */
-  onShowSelected?: () => void
+  onShowSelected?: () => void;
 }) {
   return (
     // `role="status"`, so the count and the mode are announced when they change:
@@ -979,7 +979,7 @@ function SelectionBar({
           <Button
             key={action}
             size="sm"
-            {...(action === 'delete' ? { variant: 'danger' as const } : {})}
+            {...(action === "delete" ? { variant: "danger" as const } : {})}
             disabled={busy}
             onClick={() => onRun(action)}
           >
@@ -991,18 +991,18 @@ function SelectionBar({
         </Button>
       </span>
     </div>
-  )
+  );
 }
 
 /** The bar's buttons. `Move…` keeps its ellipsis because it opens a dialog rather
  * than acting, which is the same convention the palette follows. */
 const ACTION_LABELS: Record<StoryBulkAction, string> = {
-  publish: 'Publish',
-  unpublish: 'Unpublish',
-  duplicate: 'Duplicate',
-  move: 'Move…',
-  delete: 'Delete',
-}
+  publish: "Publish",
+  unpublish: "Unpublish",
+  duplicate: "Duplicate",
+  move: "Move…",
+  delete: "Delete",
+};
 
 /* ------------------------------------------------------------------ create --- */
 
@@ -1031,41 +1031,41 @@ function NewPageButton({
   onCreated,
   onNotice,
 }: {
-  types: readonly DocumentType[]
-  schema: SchemaIndex | undefined
-  apiBase: string
-  onCreated: (id: string) => void
-  onNotice: (message: string) => void
+  types: readonly DocumentType[];
+  schema: SchemaIndex | undefined;
+  apiBase: string;
+  onCreated: (id: string) => void;
+  onNotice: (message: string) => void;
 }) {
-  const [pending, setPending] = useState(false)
+  const [pending, setPending] = useState(false);
   /** The type being created, and the dialog's open state in one value: there is
    * no create without a type to create. */
-  const [creating, setCreating] = useState<DocumentType | null>(null)
-  const top = types.filter((t) => (t.under ?? []).length === 0)
+  const [creating, setCreating] = useState<DocumentType | null>(null);
+  const top = types.filter((t) => (t.under ?? []).length === 0);
 
   /** The one write, with the name the dialog collected. Closes on success only:
    * a failed POST leaves the dialog open with what was typed still in it, and the
    * message in the toast above it. */
   const create = async (body: CreateBody) => {
-    setPending(true)
+    setPending(true);
     try {
       const res = await fetch(`${apiBase}/stories`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: "POST",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      })
+      });
       if (!res.ok) {
-        const answer = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
-        throw new Error(answer.error?.message ?? `Could not create the page (${res.status})`)
+        const answer = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+        throw new Error(answer.error?.message ?? `Could not create the page (${res.status})`);
       }
-      setCreating(null)
-      onCreated(((await res.json()) as { id: string }).id)
+      setCreating(null);
+      onCreated(((await res.json()) as { id: string }).id);
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <>
@@ -1086,8 +1086,8 @@ function NewPageButton({
           disabled={top.length === 0}
           reason="No page type may be created at the top level"
           onClick={() => {
-            const only = top[0]
-            if (only) setCreating(only)
+            const only = top[0];
+            if (only) setCreating(only);
           }}
         >
           New page
@@ -1103,7 +1103,7 @@ function NewPageButton({
         />
       ) : null}
     </>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ writes --- */
@@ -1128,24 +1128,24 @@ async function postBulk(
   body: BulkRequest,
 ): Promise<BulkAnswer> {
   const res = await fetch(`${apiBase}/bulk/${action}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  })
+  });
   if (res.status === 409) {
     const body = (await res.json().catch(() => ({}))) as Partial<BulkRefusal> & {
-      error?: { message?: string }
-    }
+      error?: { message?: string };
+    };
     // Narrowed rather than trusted: `error` is where every client already looks, so
     // a 409 that is *not* the count guard — a conflict thrown by a hook, say — still
     // reads as a sentence rather than as a refusal with `undefined` in it.
-    if (body.refused === 'count' && typeof body.actual === 'number') {
-      return { refused: 'count', expected: body.expected ?? 0, actual: body.actual }
+    if (body.refused === "count" && typeof body.actual === "number") {
+      return { refused: "count", expected: body.expected ?? 0, actual: body.actual };
     }
-    throw new Error(body.error?.message ?? 'HTTP 409')
+    throw new Error(body.error?.message ?? "HTTP 409");
   }
-  if (!res.ok) throw new Error(await messageOf(res))
-  return (await res.json()) as BulkAnswer
+  if (!res.ok) throw new Error(await messageOf(res));
+  return (await res.json()) as BulkAnswer;
 }
 
 /**
@@ -1154,8 +1154,8 @@ async function postBulk(
  * expression nobody checks.
  */
 const GESTURES: Record<string, Gesture | undefined> = {
-  ArrowUp: 'up',
-  ArrowDown: 'down',
-  ArrowLeft: 'out',
-  ArrowRight: 'in',
-}
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "out",
+  ArrowRight: "in",
+};

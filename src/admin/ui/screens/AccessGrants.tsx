@@ -1,10 +1,10 @@
-import { useState } from 'react'
-import type { Grants, Role } from '../../../server/auth/roles'
-import type { Me } from '../../me'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { Select } from '../Field'
-import css from './Access.module.css'
+import { useState } from "react";
+import type { Grants, Role } from "../../../server/auth/roles";
+import type { Me } from "../../me";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { Select } from "../Field";
+import css from "./Access.module.css";
 import {
   type AccessUser,
   grantScopeLabel,
@@ -16,7 +16,7 @@ import {
   ROLE_OPTIONS,
   withGrant,
   withoutGrant,
-} from './access-model'
+} from "./access-model";
 
 /**
  * A person's grants, one role per scope (`multi-site.md` decision 10): `*` is the
@@ -34,17 +34,17 @@ export function GrantsEditor({
   value,
   onChange,
 }: {
-  me: Me
-  value: Grants
-  onChange: (next: Grants) => void
+  me: Me;
+  value: Grants;
+  onChange: (next: Grants) => void;
 }) {
-  const [scope, setScope] = useState<string>('')
-  const [role, setRole] = useState<Role>('editor')
-  const entries = Object.entries(value)
-  const options = grantScopeOptions(me).filter((option) => !(option.id in value))
+  const [scope, setScope] = useState<string>("");
+  const [role, setRole] = useState<Role>("editor");
+  const entries = Object.entries(value);
+  const options = grantScopeOptions(me).filter((option) => !(option.id in value));
   const chosen = options.some((option) => option.id === scope)
     ? scope
-    : (nextScope(me, value) ?? '')
+    : (nextScope(me, value) ?? "");
 
   return (
     <div className={css.grants}>
@@ -96,11 +96,11 @@ export function GrantsEditor({
           </Select>
           <Button
             size="sm"
-            disabled={chosen === ''}
+            disabled={chosen === ""}
             reason="Every scope is already granted"
             onClick={() => {
-              onChange(withGrant(value, chosen, role))
-              setScope('')
+              onChange(withGrant(value, chosen, role));
+              setScope("");
             }}
           >
             Add
@@ -109,7 +109,7 @@ export function GrantsEditor({
       ) : null}
       <p className={css.help}>{ROLE_MEANING[role]}</p>
     </div>
-  )
+  );
 }
 
 /**
@@ -123,24 +123,24 @@ export function AccessGrantsDialog({
   onClose,
   onSave,
 }: {
-  me: Me
-  user: AccessUser
-  onClose: () => void
-  onSave: (grants: Grants) => Promise<void>
+  me: Me;
+  user: AccessUser;
+  onClose: () => void;
+  onSave: (grants: Grants) => Promise<void>;
 }) {
-  const [grants, setGrants] = useState<Grants>(() => grantsOf(user))
-  const [pending, setPending] = useState(false)
-  const refusal = grantsRefusal(grants)
+  const [grants, setGrants] = useState<Grants>(() => grantsOf(user));
+  const [pending, setPending] = useState(false);
+  const refusal = grantsRefusal(grants);
 
   const save = async () => {
-    if (refusal) return
-    setPending(true)
+    if (refusal) return;
+    setPending(true);
     try {
-      await onSave(grants)
+      await onSave(grants);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Dialog
@@ -154,7 +154,7 @@ export function AccessGrantsDialog({
           <Button
             variant="primary"
             disabled={pending || refusal !== undefined}
-            reason={pending ? 'Saving…' : refusal}
+            reason={pending ? "Saving…" : refusal}
             onClick={() => void save()}
           >
             Save access
@@ -164,5 +164,5 @@ export function AccessGrantsDialog({
     >
       <GrantsEditor me={me} value={grants} onChange={setGrants} />
     </Dialog>
-  )
+  );
 }

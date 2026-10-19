@@ -21,31 +21,31 @@
  * widened eleventh — is a design conversation, not a screen's decision. Until then
  * this is `Dialog` plus `rank`, which is exactly what `MoveDialog` is.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { SchemaIndex } from '../../../core/schema'
-import { Badge } from '../Badge'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { highlight, nextIndex, rank } from '../rank'
-import css from './BlockPicker.module.css'
-import { groupRanked, type PickerEntry, slotOffer } from './block-picker-model'
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { SchemaIndex } from "../../../core/schema";
+import { Badge } from "../Badge";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { highlight, nextIndex, rank } from "../rank";
+import css from "./BlockPicker.module.css";
+import { groupRanked, type PickerEntry, slotOffer } from "./block-picker-model";
 
 export interface BlockPickerProps {
-  schema: SchemaIndex
+  schema: SchemaIndex;
   /** The block type owning the slot — `doc.bloks[parent].type`. */
-  parentType: string
+  parentType: string;
   /** The slot the block goes in. A `blocks`-kind field on `parentType`. */
-  slot: string
+  slot: string;
   /** How many blocks the slot already holds, so a full slot refuses rather than
    * offering a list every entry of which would be rejected. */
-  filled: number
-  onClose: () => void
+  filled: number;
+  onClose: () => void;
   /**
    * `useBlocks.add` with `(parent, slot, index)` already closed over by the caller
    * — the shape `BlockTree`'s `AddMenu` already uses, so the wiring is one arrow
    * function and this component never learns where in the slot the block lands.
    */
-  onPick: (type: string, preset?: string) => void
+  onPick: (type: string, preset?: string) => void;
 }
 
 /**
@@ -80,15 +80,15 @@ export function BlockPicker({
   const offer = useMemo(
     () => slotOffer(schema, parentType, slot, filled),
     [filled, parentType, schema, slot],
-  )
+  );
 
   return (
     <Dialog
       title={`Add to ${offer.slotLabel}`}
       description={
         offer.refusal === null
-          ? 'Only the block types this slot accepts are listed.'
-          : 'This slot has nothing to offer.'
+          ? "Only the block types this slot accepts are listed."
+          : "This slot has nothing to offer."
       }
       size="wide"
       onClose={onClose}
@@ -104,7 +104,7 @@ export function BlockPicker({
         <EmptyState title="Nothing can be added here" body={offer.refusal} />
       )}
     </Dialog>
-  )
+  );
 }
 
 function Picker({
@@ -112,37 +112,37 @@ function Picker({
   onClose,
   onPick,
 }: {
-  entries: readonly PickerEntry[]
-  onClose: () => void
-  onPick: (type: string, preset?: string) => void
+  entries: readonly PickerEntry[];
+  onClose: () => void;
+  onPick: (type: string, preset?: string) => void;
 }) {
-  const [query, setQuery] = useState('')
-  const [active, setActive] = useState(0)
-  const listRef = useRef<HTMLDivElement>(null)
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  const results = useMemo(() => rank(query, entries), [entries, query])
-  const groups = useMemo(() => groupRanked(results), [results])
+  const results = useMemo(() => rank(query, entries), [entries, query]);
+  const groups = useMemo(() => groupRanked(results), [results]);
 
   // Clamped rather than reset, the same rule `Palette` follows: typing a character
   // that shortens the list should leave the selection on something, and resetting
   // to 0 on every keystroke fights anyone arrowing down while still typing.
-  const index = Math.min(active, Math.max(results.length - 1, 0))
+  const index = Math.min(active, Math.max(results.length - 1, 0));
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: index is the trigger, not a value the body reads — the DOM is queried for whichever row now carries data-active
   useEffect(() => {
-    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
-  }, [index])
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [index]);
 
   const run = (at: number) => {
-    const hit = results[at]
-    if (!hit) return
+    const hit = results[at];
+    if (!hit) return;
     // Close first, then insert — `Palette.run`'s order. The insert moves the
     // selection and re-renders the tree and the inspector behind this dialog, and
     // doing that while the dialog is still mounted means the focus trap restores
     // focus to a control that has just been replaced.
-    onClose()
-    onPick(hit.item.type, hit.item.preset)
-  }
+    onClose();
+    onPick(hit.item.type, hit.item.preset);
+  };
 
   return (
     <>
@@ -156,21 +156,21 @@ function Picker({
         placeholder="Search blocks and presets"
         aria-label="Search blocks and presets"
         onChange={(e) => {
-          setQuery(e.target.value)
-          setActive(0)
+          setQuery(e.target.value);
+          setActive(0);
         }}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            run(index)
-            return
+          if (e.key === "Enter") {
+            e.preventDefault();
+            run(index);
+            return;
           }
           // Escape is deliberately not handled: `useFocusTrap` owns it on the
           // window, so the one key that closes an overlay closes every overlay.
-          const next = nextIndex(e.key, index, results.length)
+          const next = nextIndex(e.key, index, results.length);
           if (next !== null) {
-            e.preventDefault()
-            setActive(next)
+            e.preventDefault();
+            setActive(next);
           }
         }}
       />
@@ -187,7 +187,7 @@ function Picker({
                   key={entry.id}
                   type="button"
                   data-active={at === index}
-                  className={`${css.row} ${at === index ? css.rowActive : ''}`}
+                  className={`${css.row} ${at === index ? css.rowActive : ""}`}
                   onMouseMove={() => setActive(at)}
                   onClick={() => run(at)}
                 >
@@ -213,5 +213,5 @@ function Picker({
         )}
       </div>
     </>
-  )
+  );
 }

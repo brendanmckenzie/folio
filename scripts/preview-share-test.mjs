@@ -24,26 +24,26 @@
 //     is visible at every call site.
 //   - `anon()` asserts it is not carrying a session cookie on every call, so a future
 //     edit that leaks one fails loudly rather than passing for the wrong reason.
-import { signInGlobally } from './lib/auth.mjs'
+import { signInGlobally } from "./lib/auth.mjs";
 
-const HTTP = 'http://localhost:5199'
-const BASE = `${HTTP}/folio`
-const API = `${BASE}/api`
+const HTTP = "http://localhost:5199";
+const BASE = `${HTTP}/folio`;
+const API = `${BASE}/api`;
 
 /** The two seeded pages this script uses (examples/demo/seed.sql). */
-const ABOUT = 'sty_about'
-const TEAM = 'sty_team'
+const ABOUT = "sty_about";
+const TEAM = "sty_team";
 
-const results = []
-const check = (label, ok, detail = '') => {
-  results.push({ label, ok, detail })
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`)
-}
+const results = [];
+const check = (label, ok, detail = "") => {
+  results.push({ label, ok, detail });
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? `  (${detail})` : ""}`);
+};
 
-const { realFetch, RealWebSocket } = await signInGlobally()
+const { realFetch, RealWebSocket } = await signInGlobally();
 
 /** A request as the signed-in admin: the global, wrapped `fetch`. */
-const editor = (path, init) => fetch(`${HTTP}${path}`, init)
+const editor = (path, init) => fetch(`${HTTP}${path}`, init);
 
 /**
  * A browser with no account.
@@ -51,29 +51,29 @@ const editor = (path, init) => fetch(`${HTTP}${path}`, init)
  * One cookie jar, holding whatever the server set, and nothing else — no session
  * cookie ever enters it, which is asserted rather than assumed on every call.
  */
-let jar = null
+let jar = null;
 async function anon(path, init = {}) {
-  const headers = new Headers(init.headers)
-  if (jar) headers.set('cookie', jar)
-  if (/folio_session/.test(headers.get('cookie') ?? '')) {
-    throw new Error('the anonymous client picked up a session cookie — the test is void')
+  const headers = new Headers(init.headers);
+  if (jar) headers.set("cookie", jar);
+  if (/folio_session/.test(headers.get("cookie") ?? "")) {
+    throw new Error("the anonymous client picked up a session cookie — the test is void");
   }
-  const res = await realFetch(`${HTTP}${path}`, { ...init, headers, redirect: 'manual' })
-  const set = res.headers.getSetCookie?.() ?? []
+  const res = await realFetch(`${HTTP}${path}`, { ...init, headers, redirect: "manual" });
+  const set = res.headers.getSetCookie?.() ?? [];
   for (const value of set) {
-    const match = /(^|[;,]\s*)(__Host-folio_share|folio_share)=([^;]+)/.exec(value)
-    if (match) jar = `${match[2]}=${match[3]}`
+    const match = /(^|[;,]\s*)(__Host-folio_share|folio_share)=([^;]+)/.exec(value);
+    if (match) jar = `${match[2]}=${match[3]}`;
   }
-  return res
+  return res;
 }
 
 const json = async (res) => {
   try {
-    return await res.json()
+    return await res.json();
   } catch {
-    return null
+    return null;
   }
-}
+};
 
 /* --- the seeded link, which is what `wrangler dev` demonstrates ----------- */
 //
@@ -83,142 +83,142 @@ const json = async (res) => {
 // rather than in a workers test, because the thing being verified is that the
 // precomputed SHA-256 in that file matches the plaintext in its own comment.
 
-const SEEDED = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-const seededEntry = await anon(`/folio/share?t=${SEEDED}`)
+const SEEDED = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const seededEntry = await anon(`/folio/share?t=${SEEDED}`);
 check(
-  'the seeded demo link works straight out of seed.sql',
+  "the seeded demo link works straight out of seed.sql",
   // The page's **own** URL, not `?_folio=draft`. The demo declares `draftMode: true`
   // and calls `folio.draftAt` in its miss branch (spec 25, `218a7ca`), so a reviewer
   // is sent to the real page and gets the draft inside the host's own layout. Every
   // reviewer request below is therefore at a real URL: this script asserted the
   // pre-25 destination for a week after that landed, and could not say so because
   // `e2e.sh` discarded its exit code.
-  seededEntry.status === 302 && seededEntry.headers.get('location') === '/',
-  `status=${seededEntry.status} location=${seededEntry.headers.get('location')}`,
-)
-const seededPreview = await anon('/')
-const seededHtml = await seededPreview.text()
+  seededEntry.status === 302 && seededEntry.headers.get("location") === "/",
+  `status=${seededEntry.status} location=${seededEntry.headers.get("location")}`,
+);
+const seededPreview = await anon("/");
+const seededHtml = await seededPreview.text();
 check(
-  'and renders the home page’s draft to a browser with nothing else',
-  seededPreview.status === 200 && seededHtml.includes('Home'),
+  "and renders the home page’s draft to a browser with nothing else",
+  seededPreview.status === 200 && seededHtml.includes("Home"),
   `status=${seededPreview.status}`,
-)
+);
 // Fresh jar for the rest of the run, so nothing below can pass on the seed's grant.
-jar = null
+jar = null;
 
 /* --- set the scene: a published page whose draft has moved on -------------- */
 
-const published = await editor(`/folio/api/story/${ABOUT}/publish`, { method: 'POST' })
-check('the editor publishes /about', published.status === 200, `status=${published.status}`)
+const published = await editor(`/folio/api/story/${ABOUT}/publish`, { method: "POST" });
+check("the editor publishes /about", published.status === 200, `status=${published.status}`);
 
-const DRAFT_ONLY = 'Under review, not for the public'
+const DRAFT_ONLY = "Under review, not for the public";
 const patched = await editor(`/folio/api/v1/documents/${ABOUT}/fields`, {
-  method: 'PATCH',
-  headers: { 'content-type': 'application/json' },
+  method: "PATCH",
+  headers: { "content-type": "application/json" },
   body: JSON.stringify({ fields: { title: DRAFT_ONLY } }),
-})
+});
 check(
-  'and then edits the draft, so draft and published differ',
+  "and then edits the draft, so draft and published differ",
   patched.status === 200,
   `status=${patched.status}`,
-)
+);
 
-const live = await anon('/about')
-const liveHtml = await live.text()
-check('the public page serves', live.status === 200, `status=${live.status}`)
+const live = await anon("/about");
+const liveHtml = await live.text();
+check("the public page serves", live.status === 200, `status=${live.status}`);
 check(
-  'and shows the published title, not the draft',
+  "and shows the published title, not the draft",
   !liveHtml.includes(DRAFT_ONLY),
-  liveHtml.includes(DRAFT_ONLY) ? 'the draft leaked to the public page' : '',
-)
+  liveHtml.includes(DRAFT_ONLY) ? "the draft leaked to the public page" : "",
+);
 
 // The control that makes everything below mean something: the flag on its own is worth
 // nothing, in either mode. `handle()` hands the request back and the host serves its page.
-for (const mode of ['preview', 'draft']) {
-  const flagAlone = await anon(`/about?_folio=${mode}`)
-  const flagAloneHtml = await flagAlone.text()
+for (const mode of ["preview", "draft"]) {
+  const flagAlone = await anon(`/about?_folio=${mode}`);
+  const flagAloneHtml = await flagAlone.text();
   check(
     `the ${mode} flag alone shows a stranger the published page, never the draft`,
     flagAlone.status === 200 && !flagAloneHtml.includes(DRAFT_ONLY),
     `status=${flagAlone.status}`,
-  )
+  );
 }
 
 /* --- minting a link ------------------------------------------------------- */
 
 const minted = await editor(`/folio/api/story/${ABOUT}/share`, {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ note: 'e2e review', expiresInDays: 3 }),
-})
-const mintedBody = await json(minted)
-check('minting a link answers 201', minted.status === 201, `status=${minted.status}`)
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ note: "e2e review", expiresInDays: 3 }),
+});
+const mintedBody = await json(minted);
+check("minting a link answers 201", minted.status === 201, `status=${minted.status}`);
 check(
-  'with an absolute URL on this origin, carrying the token in the query',
-  typeof mintedBody?.url === 'string' && mintedBody.url.startsWith(`${BASE}/share?t=`),
+  "with an absolute URL on this origin, carrying the token in the query",
+  typeof mintedBody?.url === "string" && mintedBody.url.startsWith(`${BASE}/share?t=`),
   String(mintedBody?.url),
-)
-const token = mintedBody?.url ? new URL(mintedBody.url).searchParams.get('t') : null
-check('and the token is 32 bytes of hex', /^[0-9a-f]{64}$/.test(token ?? ''), String(token))
+);
+const token = mintedBody?.url ? new URL(mintedBody.url).searchParams.get("t") : null;
+check("and the token is 32 bytes of hex", /^[0-9a-f]{64}$/.test(token ?? ""), String(token));
 check(
-  'and the row it answers carries no token and no hash',
-  !JSON.stringify(mintedBody?.share ?? {}).includes(token ?? 'x'),
-)
+  "and the row it answers carries no token and no hash",
+  !JSON.stringify(mintedBody?.share ?? {}).includes(token ?? "x"),
+);
 check(
-  'and three days, because the editor asked for three',
+  "and three days, because the editor asked for three",
   Math.round((mintedBody.share.expiresAt - mintedBody.share.createdAt) / 86_400_000) === 3,
-)
+);
 
 /* --- the reviewer, who has no account ------------------------------------- */
 
-const entry = await anon(`/folio/share?t=${token}`)
-check('opening the link redirects', entry.status === 302, `status=${entry.status}`)
+const entry = await anon(`/folio/share?t=${token}`);
+check("opening the link redirects", entry.status === 302, `status=${entry.status}`);
 check(
-  'to the document’s own URL, built by the host’s route()',
+  "to the document’s own URL, built by the host’s route()",
   // The page's own URL under `draftMode: true`, and never `?_folio=preview`
   // (platform/mcp-server.md decision 5): the reviewer is reading the page, so they
   // get the page rather than the editor's view of it. Asserted as a consequence a
   // few lines below, not only as a URL.
-  entry.headers.get('location') === '/about',
-  entry.headers.get('location') ?? '',
-)
+  entry.headers.get("location") === "/about",
+  entry.headers.get("location") ?? "",
+);
 check(
-  'and never stores the response that carried the token',
-  (entry.headers.get('cache-control') ?? '').includes('no-store'),
-  entry.headers.get('cache-control') ?? '',
-)
-const entryCookie = (entry.headers.getSetCookie?.() ?? []).join(' | ')
-check('setting a share cookie', /folio_share=/.test(entryCookie), entryCookie)
-check('HttpOnly, so no script can read it', /HttpOnly/.test(entryCookie))
+  "and never stores the response that carried the token",
+  (entry.headers.get("cache-control") ?? "").includes("no-store"),
+  entry.headers.get("cache-control") ?? "",
+);
+const entryCookie = (entry.headers.getSetCookie?.() ?? []).join(" | ");
+check("setting a share cookie", /folio_share=/.test(entryCookie), entryCookie);
+check("HttpOnly, so no script can read it", /HttpOnly/.test(entryCookie));
 check(
-  'and not a session cookie: the token can satisfy no route gate',
+  "and not a session cookie: the token can satisfy no route gate",
   !/folio_session=/.test(entryCookie),
-)
+);
 
-const preview = await anon(entry.headers.get('location'))
-const previewHtml = await preview.text()
-check('following the redirect renders', preview.status === 200, `status=${preview.status}`)
+const preview = await anon(entry.headers.get("location"));
+const previewHtml = await preview.text();
+check("following the redirect renders", preview.status === 200, `status=${preview.status}`);
 check(
-  'the DRAFT, which the public page does not show',
+  "the DRAFT, which the public page does not show",
   previewHtml.includes(DRAFT_ONLY),
-  previewHtml.includes(DRAFT_ONLY) ? '' : 'the shared preview showed published content',
-)
+  previewHtml.includes(DRAFT_ONLY) ? "" : "the shared preview showed published content",
+);
 check(
-  'and says no-store, so an unpublished draft cannot be cached at a public URL',
-  (preview.headers.get('cache-control') ?? '').includes('no-store'),
-  preview.headers.get('cache-control') ?? '',
-)
+  "and says no-store, so an unpublished draft cannot be cached at a public URL",
+  (preview.headers.get("cache-control") ?? "").includes("no-store"),
+  preview.headers.get("cache-control") ?? "",
+);
 // The bug this mode fixed, end to end and against a real bundle: the reviewer used to
 // land on the editing render, where `attachBridge()` calls `preventDefault()` on every
 // click inside a marked block and draws a dashed outline under the cursor. No body
 // class and no preview entry means neither can happen — nothing here is hydrated.
 check(
-  'as a page rather than as an editing surface: no chrome, no bridge, live links',
-  !previewHtml.includes('folio-editing') &&
-    !previewHtml.includes('__FOLIO__') &&
-    !previewHtml.includes('folio-marker'),
-  previewHtml.includes('folio-editing') ? 'the editing body class survived' : '',
-)
+  "as a page rather than as an editing surface: no chrome, no bridge, live links",
+  !previewHtml.includes("folio-editing") &&
+    !previewHtml.includes("__FOLIO__") &&
+    !previewHtml.includes("folio-marker"),
+  previewHtml.includes("folio-editing") ? "the editing body class survived" : "",
+);
 
 /* --- and nothing else ----------------------------------------------------- */
 //
@@ -227,70 +227,70 @@ check(
 // is a row somebody has to deliberately not add.
 
 const closed = [
-  ['the admin shell', BASE, undefined, 302],
-  ['a deep link into the shell', `${BASE}/content`, undefined, 302],
-  ['the editor', `${BASE}/edit/${ABOUT}`, undefined, 302],
-  ['the story list', `${API}/stories`, undefined, 401],
-  ['this document’s draft as JSON', `${API}/story/${ABOUT}/document`, undefined, 401],
-  ['the document list', `${API}/documents`, undefined, 401],
-  ['the type counts', `${API}/counts`, undefined, 401],
-  ['site search', `${API}/search?q=about`, undefined, 401],
-  ['content_index over published content', `${API}/content?type=page`, undefined, 401],
-  ['the media library', `${API}/assets`, undefined, 401],
-  ['the version list', `${API}/story/${ABOUT}/versions`, undefined, 401],
-  ['the activity trail', `${API}/story/${ABOUT}/activity`, undefined, 401],
-  ['who am I', `${API}/me`, undefined, 401],
-  ['the editor list', `${API}/users`, undefined, 401],
-  ['the token list', `${API}/tokens`, undefined, 401],
-  ['the share list itself', `${API}/shares`, undefined, 401],
-  ['schedules', `${API}/schedules`, undefined, 401],
-  ['redirects', `${API}/redirects`, undefined, 401],
-  ['the v1 document read', `${API}/v1/documents/${ABOUT}`, undefined, 401],
-  ['the v1 draft read', `${API}/v1/documents/${ABOUT}?status=draft`, undefined, 401],
-  ['the v1 by-path read', `${API}/v1/documents/by-path/about`, undefined, 401],
-  ['publishing', `${API}/story/${ABOUT}/publish`, { method: 'POST' }, 401],
-  ['unpublishing', `${API}/story/${ABOUT}/unpublish`, { method: 'POST' }, 401],
-  ['deleting', `${API}/stories/${ABOUT}`, { method: 'DELETE' }, 401],
-  ['renaming or moving', `${API}/stories/${ABOUT}`, { method: 'PATCH' }, 401],
-  ['creating', `${API}/stories`, { method: 'POST' }, 401],
-  ['bulk publishing', `${API}/bulk/publish`, { method: 'POST' }, 401],
-  ['writing a field', `${API}/v1/documents/${ABOUT}/fields`, { method: 'PATCH' }, 401],
-  ['minting another link', `${API}/story/${TEAM}/share`, { method: 'POST' }, 401],
-  ['revoking a link', `${API}/shares/${mintedBody.share.id}`, { method: 'DELETE' }, 401],
-  ['migrating', `${API}/migrate`, { method: 'POST' }, 401],
-  ['reindexing', `${API}/reindex`, { method: 'POST' }, 401],
-  ['running schedules', `${API}/schedules/run`, { method: 'POST' }, 401],
-]
+  ["the admin shell", BASE, undefined, 302],
+  ["a deep link into the shell", `${BASE}/content`, undefined, 302],
+  ["the editor", `${BASE}/edit/${ABOUT}`, undefined, 302],
+  ["the story list", `${API}/stories`, undefined, 401],
+  ["this document’s draft as JSON", `${API}/story/${ABOUT}/document`, undefined, 401],
+  ["the document list", `${API}/documents`, undefined, 401],
+  ["the type counts", `${API}/counts`, undefined, 401],
+  ["site search", `${API}/search?q=about`, undefined, 401],
+  ["content_index over published content", `${API}/content?type=page`, undefined, 401],
+  ["the media library", `${API}/assets`, undefined, 401],
+  ["the version list", `${API}/story/${ABOUT}/versions`, undefined, 401],
+  ["the activity trail", `${API}/story/${ABOUT}/activity`, undefined, 401],
+  ["who am I", `${API}/me`, undefined, 401],
+  ["the editor list", `${API}/users`, undefined, 401],
+  ["the token list", `${API}/tokens`, undefined, 401],
+  ["the share list itself", `${API}/shares`, undefined, 401],
+  ["schedules", `${API}/schedules`, undefined, 401],
+  ["redirects", `${API}/redirects`, undefined, 401],
+  ["the v1 document read", `${API}/v1/documents/${ABOUT}`, undefined, 401],
+  ["the v1 draft read", `${API}/v1/documents/${ABOUT}?status=draft`, undefined, 401],
+  ["the v1 by-path read", `${API}/v1/documents/by-path/about`, undefined, 401],
+  ["publishing", `${API}/story/${ABOUT}/publish`, { method: "POST" }, 401],
+  ["unpublishing", `${API}/story/${ABOUT}/unpublish`, { method: "POST" }, 401],
+  ["deleting", `${API}/stories/${ABOUT}`, { method: "DELETE" }, 401],
+  ["renaming or moving", `${API}/stories/${ABOUT}`, { method: "PATCH" }, 401],
+  ["creating", `${API}/stories`, { method: "POST" }, 401],
+  ["bulk publishing", `${API}/bulk/publish`, { method: "POST" }, 401],
+  ["writing a field", `${API}/v1/documents/${ABOUT}/fields`, { method: "PATCH" }, 401],
+  ["minting another link", `${API}/story/${TEAM}/share`, { method: "POST" }, 401],
+  ["revoking a link", `${API}/shares/${mintedBody.share.id}`, { method: "DELETE" }, 401],
+  ["migrating", `${API}/migrate`, { method: "POST" }, 401],
+  ["reindexing", `${API}/reindex`, { method: "POST" }, 401],
+  ["running schedules", `${API}/schedules/run`, { method: "POST" }, 401],
+];
 
-const wrong = []
+const wrong = [];
 for (const [what, url, init, expected] of closed) {
-  const res = await anon(url.replace(HTTP, ''), init)
+  const res = await anon(url.replace(HTTP, ""), init);
   // Read and discard, so a body never sits unread on a keep-alive socket.
-  await res.arrayBuffer()
-  if (res.status !== expected) wrong.push(`${what}: ${res.status} not ${expected}`)
+  await res.arrayBuffer();
+  if (res.status !== expected) wrong.push(`${what}: ${res.status} not ${expected}`);
 }
 check(
   `a preview token reaches none of the other ${closed.length} route families`,
   wrong.length === 0,
-  wrong.join('; '),
-)
+  wrong.join("; "),
+);
 
 // Another document's preview, which is the refusal that matters most: a grant names one
 // story id, so a sibling page's URL is handed back to the host exactly as it would be
 // for a stranger.
-const sibling = await anon('/about/team')
-const siblingHtml = await sibling.text()
+const sibling = await anon("/about/team");
+const siblingHtml = await sibling.text();
 check(
-  'and cannot walk to another document’s draft',
+  "and cannot walk to another document’s draft",
   // /about/team is unpublished, so the host answers its own 404 rather than a preview.
   sibling.status === 404,
   `status=${sibling.status}`,
-)
+);
 check(
-  'with no draft content in the body',
-  !siblingHtml.includes('Our team'),
+  "with no draft content in the body",
+  !siblingHtml.includes("Our team"),
   siblingHtml.slice(0, 80),
-)
+);
 
 // `?as=` swaps the editable document for a *global's* draft — the site header, site
 // settings — which the grant does not cover.
@@ -298,10 +298,10 @@ check(
 // Deliberately asked in `preview` mode, which is the stronger question: `draft` refuses
 // `?as=` outright for everybody (mcp-server.md decision 5), so asking there would pass
 // without the share refusal existing at all.
-const asGlobal = await anon('/about?_folio=preview&as=header')
-const asGlobalHtml = await asGlobal.text()
+const asGlobal = await anon("/about?_folio=preview&as=header");
+const asGlobalHtml = await asGlobal.text();
 check(
-  'and cannot ask for a global in the page’s context with ?as=',
+  "and cannot ask for a global in the page’s context with ?as=",
   // The evidence is that **Folio answered nothing**: `handle()` hands the request
   // back and the host renders its own page, which is the draft this reviewer is
   // already entitled to at this URL. Folio's preview document is what an honoured
@@ -312,17 +312,17 @@ check(
   // the day a reviewer started getting the page's own draft at the page's own URL:
   // the page's draft text is now the *expected* content here, and the absence of a
   // global's draft is what is being asserted.
-  asGlobal.status === 200 && !asGlobalHtml.includes('modulepreload'),
-  `status=${asGlobal.status} folioAnswered=${asGlobalHtml.includes('modulepreload')}`,
-)
+  asGlobal.status === 200 && !asGlobalHtml.includes("modulepreload"),
+  `status=${asGlobal.status} folioAnswered=${asGlobalHtml.includes("modulepreload")}`,
+);
 
 // Folio's own bare preview for a singleton is an HTML route gated on READ_DRAFT.
-const globalPreview = await anon('/folio/preview/global/header')
+const globalPreview = await anon("/folio/preview/global/header");
 check(
-  'and cannot reach Folio’s own singleton preview',
+  "and cannot reach Folio’s own singleton preview",
   globalPreview.status === 302,
   `status=${globalPreview.status}`,
-)
+);
 
 // The socket, through a real WebSocket rather than `fetch` — undici refuses an
 // `Upgrade` header outright, and the refusal being tested is an *application close
@@ -331,159 +331,159 @@ check(
 const socketClose = await new Promise((resolve) => {
   const ws = new RealWebSocket(`ws://localhost:5199/folio/api/story/${ABOUT}/socket`, {
     headers: { cookie: jar },
-  })
-  const done = setTimeout(() => resolve('timed out'), 5000)
-  ws.addEventListener('close', (e) => {
-    clearTimeout(done)
-    resolve(e.code)
-  })
-  ws.addEventListener('error', () => {
-    clearTimeout(done)
-    resolve('refused')
-  })
-})
+  });
+  const done = setTimeout(() => resolve("timed out"), 5000);
+  ws.addEventListener("close", (e) => {
+    clearTimeout(done);
+    resolve(e.code);
+  });
+  ws.addEventListener("error", () => {
+    clearTimeout(done);
+    resolve("refused");
+  });
+});
 check(
-  'and cannot upgrade the sync socket to an editing session',
+  "and cannot upgrade the sync socket to an editing session",
   // 4003 is "not signed in", the terminal close an unauthenticated socket gets: a
   // share cookie is not a session, so there is no identity to hand the object.
   socketClose === 4003,
   `close=${socketClose}`,
-)
+);
 
 /* --- two links at once ---------------------------------------------------- */
 
-const second = await editor(`/folio/api/story/${TEAM}/share`, { method: 'POST' })
-const secondBody = await json(second)
-check('a second link for a second document', second.status === 201, `status=${second.status}`)
+const second = await editor(`/folio/api/story/${TEAM}/share`, { method: "POST" });
+const secondBody = await json(second);
+check("a second link for a second document", second.status === 201, `status=${second.status}`);
 
-const secondEntry = await anon(`/folio/share?t=${new URL(secondBody.url).searchParams.get('t')}`)
+const secondEntry = await anon(`/folio/share?t=${new URL(secondBody.url).searchParams.get("t")}`);
 check(
-  'lands on that document’s URL',
-  secondEntry.headers.get('location') === '/about/team',
-  secondEntry.headers.get('location') ?? '',
-)
+  "lands on that document’s URL",
+  secondEntry.headers.get("location") === "/about/team",
+  secondEntry.headers.get("location") ?? "",
+);
 
-const teamPreview = await anon('/about/team')
-check('and renders it', teamPreview.status === 200, `status=${teamPreview.status}`)
-await teamPreview.arrayBuffer()
+const teamPreview = await anon("/about/team");
+check("and renders it", teamPreview.status === 200, `status=${teamPreview.status}`);
+await teamPreview.arrayBuffer();
 
 // The reason the cookie holds a list: the second click must not unseat the first.
-const stillAbout = await anon('/about')
-const stillAboutHtml = await stillAbout.text()
+const stillAbout = await anon("/about");
+const stillAboutHtml = await stillAbout.text();
 check(
-  'while the first link still works from the same browser',
+  "while the first link still works from the same browser",
   stillAbout.status === 200 && stillAboutHtml.includes(DRAFT_ONLY),
   `status=${stillAbout.status}`,
-)
+);
 
 /* --- the receipt ---------------------------------------------------------- */
 
-const listed = await json(await editor('/folio/api/shares?count=1'))
+const listed = await json(await editor("/folio/api/shares?count=1"));
 check(
-  'the editor can list what is outstanding',
+  "the editor can list what is outstanding",
   Array.isArray(listed?.shares),
   JSON.stringify(listed).slice(0, 80),
-)
+);
 // Newest first, so the two this script made lead — the demo also seeds one for
 // sty_home (examples/demo/seed.sql), which is why this is a prefix rather than a
 // count: a test coupled to the seed's contents breaks every time the seed grows.
 check(
-  'newest first, both of this run’s links leading',
+  "newest first, both of this run’s links leading",
   listed?.shares?.[0]?.storyId === TEAM &&
     listed?.shares?.[1]?.storyId === ABOUT &&
     listed?.total === listed?.shares?.length,
   JSON.stringify(listed?.shares?.map((s) => s.storyId)),
-)
+);
 check(
-  'with the views the reviewer actually made',
+  "with the views the reviewer actually made",
   (listed?.shares?.find((s) => s.storyId === ABOUT)?.views ?? 0) >= 2,
   JSON.stringify(listed?.shares?.map((s) => [s.storyId, s.views])),
-)
-check('and never a token anywhere in the list', !JSON.stringify(listed).includes(token))
+);
+check("and never a token anywhere in the list", !JSON.stringify(listed).includes(token));
 check(
-  'attributed to the person who made it',
-  listed?.shares?.every((s) => typeof s.createdBy === 'string' && s.createdBy.startsWith('usr_')),
-)
+  "attributed to the person who made it",
+  listed?.shares?.every((s) => typeof s.createdBy === "string" && s.createdBy.startsWith("usr_")),
+);
 
-const oneDocument = await json(await editor(`/folio/api/shares?story=${TEAM}`))
+const oneDocument = await json(await editor(`/folio/api/shares?story=${TEAM}`));
 check(
-  'filterable by document',
+  "filterable by document",
   oneDocument?.shares?.length === 1,
   JSON.stringify(oneDocument?.shares?.length),
-)
-const liveOnly = await json(await editor('/folio/api/shares?state=live'))
+);
+const liveOnly = await json(await editor("/folio/api/shares?state=live"));
 check(
-  'and by whether they still work: nothing has lapsed yet',
+  "and by whether they still work: nothing has lapsed yet",
   liveOnly?.shares?.length === listed?.shares?.length &&
-    (await json(await editor('/folio/api/shares?state=lapsed')))?.shares?.length === 0,
+    (await json(await editor("/folio/api/shares?state=lapsed")))?.shares?.length === 0,
   JSON.stringify(liveOnly?.shares?.length),
-)
+);
 
 /* --- revoking ------------------------------------------------------------- */
 
-const revoked = await editor(`/folio/api/shares/${mintedBody.share.id}`, { method: 'DELETE' })
-check('revoking answers 200', revoked.status === 200, `status=${revoked.status}`)
-check('and says so', (await json(revoked))?.revoked === true)
+const revoked = await editor(`/folio/api/shares/${mintedBody.share.id}`, { method: "DELETE" });
+check("revoking answers 200", revoked.status === 200, `status=${revoked.status}`);
+check("and says so", (await json(revoked))?.revoked === true);
 
 // The page's own URL, which is where the grant is spent: at `?_folio=draft` this
 // assertion would hold whether or not the revocation worked, because a share cookie
 // does not unlock Folio's own draft render on a `draftMode` host. A refusal check
 // that cannot fail is worse than no check, and this one passed as one for a week.
-const afterRevoke = await anon('/about')
-const afterRevokeHtml = await afterRevoke.text()
+const afterRevoke = await anon("/about");
+const afterRevokeHtml = await afterRevoke.text();
 check(
-  'the shared preview stops showing the draft immediately',
+  "the shared preview stops showing the draft immediately",
   !afterRevokeHtml.includes(DRAFT_ONLY),
   afterRevoke.status === 200
-    ? 'served the published page, which is the refusal'
+    ? "served the published page, which is the refusal"
     : `status=${afterRevoke.status}`,
-)
+);
 
-const reopened = await anon(`/folio/share?t=${token}`)
-const reopenedHtml = await reopened.text()
+const reopened = await anon(`/folio/share?t=${token}`);
+const reopenedHtml = await reopened.text();
 check(
-  'and reopening the original link explains itself rather than 404ing blankly',
-  reopened.status === 404 && reopenedHtml.includes('no longer works'),
+  "and reopening the original link explains itself rather than 404ing blankly",
+  reopened.status === 404 && reopenedHtml.includes("no longer works"),
   `status=${reopened.status}`,
-)
-check('with no JavaScript on that page', !reopenedHtml.includes('<script'))
+);
+check("with no JavaScript on that page", !reopenedHtml.includes("<script"));
 check(
-  'and without naming the document it was for',
-  !reopenedHtml.includes('About') && !reopenedHtml.includes(DRAFT_ONLY),
-)
+  "and without naming the document it was for",
+  !reopenedHtml.includes("About") && !reopenedHtml.includes(DRAFT_ONLY),
+);
 
 // An unknown token is byte-identical to a revoked one: telling them apart would make
 // this route an oracle for "was this string ever one of our tokens", and the reader's
 // next action is the same either way.
-const unknown = await anon(`/folio/share?t=${'f'.repeat(64)}`)
-const unknownHtml = await unknown.text()
+const unknown = await anon(`/folio/share?t=${"f".repeat(64)}`);
+const unknownHtml = await unknown.text();
 check(
-  'an unknown token answers the identical page',
+  "an unknown token answers the identical page",
   unknown.status === 404 && unknownHtml === reopenedHtml,
-)
+);
 
 // The other link is untouched: revocation is per link, which is the whole reason a
 // grant covers one document rather than a subtree.
-const teamStillWorks = await anon('/about/team')
+const teamStillWorks = await anon("/about/team");
 check(
-  'the other link is untouched',
+  "the other link is untouched",
   teamStillWorks.status === 200,
   `status=${teamStillWorks.status}`,
-)
-await teamStillWorks.arrayBuffer()
+);
+await teamStillWorks.arrayBuffer();
 
-const lapsedList = await json(await editor('/folio/api/shares?state=lapsed'))
+const lapsedList = await json(await editor("/folio/api/shares?state=lapsed"));
 check(
-  'and the revoked one is still in the list, as the receipt it is',
+  "and the revoked one is still in the list, as the receipt it is",
   lapsedList?.shares?.length === 1 && lapsedList.shares[0].revokedAt > 0,
   JSON.stringify(lapsedList?.shares?.map((s) => [s.id, s.revokedAt])),
-)
+);
 
 /* --- report --------------------------------------------------------------- */
 
-const failed = results.filter((r) => !r.ok)
-console.log(`\n${results.length - failed.length}/${results.length} passed`)
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${results.length - failed.length}/${results.length} passed`);
 if (failed.length) {
-  for (const f of failed) console.log(`  FAILED: ${f.label} ${f.detail}`)
-  process.exitCode = 1
+  for (const f of failed) console.log(`  FAILED: ${f.label} ${f.detail}`);
+  process.exitCode = 1;
 }

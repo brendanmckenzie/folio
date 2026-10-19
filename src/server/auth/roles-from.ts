@@ -22,14 +22,14 @@
  * making someone alpha's publisher says nothing about the bravo editor their other
  * group makes them.
  */
-import { type Role, isRole, ROLES } from './roles'
-import type { RoleGrants, RoleMapper, VerifiedIdentity } from './config'
+import { type Role, isRole, ROLES } from "./roles";
+import type { RoleGrants, RoleMapper, VerifiedIdentity } from "./config";
 
 /**
  * What one claim value places: a bare role, which is a role on `*` (every scope —
  * all a deployment with no `sites` has), or a role on one scope.
  */
-export type RoleTarget = Role | { scope: string; role: Role }
+export type RoleTarget = Role | { scope: string; role: Role };
 
 export interface RoleFromClaimOptions {
   /**
@@ -37,14 +37,14 @@ export interface RoleFromClaimOptions {
    * nested object such as `'custom.groups'`. A path segment that is not a plain
    * object stops the walk and answers "no claim", which is the same as absent.
    */
-  claim: string
+  claim: string;
   /**
    * Claim value → what it places: a role, a `{ scope, role }`, or a list of either.
    * Every role must be one this build declares. A map that names no scope anywhere
    * makes a mapper answering a bare `Role`, exactly as before scopes existed; one
    * that names any answers `RoleGrants`, a bare role reading as `*`.
    */
-  map: Record<string, RoleTarget | readonly RoleTarget[]>
+  map: Record<string, RoleTarget | readonly RoleTarget[]>;
   /**
    * The role for an identity none of `map`'s keys matched. Omitted means `null`,
    * and `null` is not "no opinion": the interaction table in decision 5 treats it
@@ -52,14 +52,14 @@ export interface RoleFromClaimOptions {
    * provider previously placed. That is checkpoint 3 — their group was removed,
    * and keeping the stored role would be stale privilege.
    */
-  default?: Role
+  default?: Role;
 }
 
 /** Weakest to strongest, from `ROLES`' own declaration order. */
 const RANK: Record<Role, number> = Object.fromEntries(ROLES.map((r, i) => [r, i])) as Record<
   Role,
   number
->
+>;
 
 /**
  * A mapper that reads one claim and looks its values up in a table.
@@ -71,75 +71,75 @@ const RANK: Record<Role, number> = Object.fromEntries(ROLES.map((r, i) => [r, i]
  * to whichever person happened to be in that group first.
  */
 export function roleFromClaim(opts: RoleFromClaimOptions): RoleMapper {
-  const path = String(opts.claim ?? '')
-    .split('.')
-    .filter((segment) => segment !== '')
+  const path = String(opts.claim ?? "")
+    .split(".")
+    .filter((segment) => segment !== "");
   if (path.length === 0) {
-    throw new Error('folio: roleFromClaim({ claim }) must name a claim')
+    throw new Error("folio: roleFromClaim({ claim }) must name a claim");
   }
-  const table = new Map<string, readonly { scope: string; role: Role }[]>()
-  let scoped = false
+  const table = new Map<string, readonly { scope: string; role: Role }[]>();
+  let scoped = false;
   for (const [value, target] of Object.entries(opts.map ?? {})) {
-    const targets = (Array.isArray(target) ? target : [target]) as readonly unknown[]
+    const targets = (Array.isArray(target) ? target : [target]) as readonly unknown[];
     table.set(
       value,
       targets.map((one) => {
         const t =
-          typeof one === 'object' && one !== null
+          typeof one === "object" && one !== null
             ? (one as { scope?: unknown; role?: unknown })
-            : null
-        const role = t ? t.role : one
+            : null;
+        const role = t ? t.role : one;
         if (!isRole(role)) {
           throw new Error(
             `folio: roleFromClaim maps '${value}' to '${String(role)}', which is not a role`,
-          )
+          );
         }
-        if (!t) return { scope: '*', role }
-        if (typeof t.scope !== 'string' || t.scope === '') {
-          throw new Error(`folio: roleFromClaim maps '${value}' to a target with no scope`)
+        if (!t) return { scope: "*", role };
+        if (typeof t.scope !== "string" || t.scope === "") {
+          throw new Error(`folio: roleFromClaim maps '${value}' to a target with no scope`);
         }
-        scoped = true
-        return { scope: t.scope, role }
+        scoped = true;
+        return { scope: t.scope, role };
       }),
-    )
+    );
   }
   if (opts.default !== undefined && !isRole(opts.default)) {
-    throw new Error(`folio: roleFromClaim's default '${String(opts.default)}' is not a role`)
+    throw new Error(`folio: roleFromClaim's default '${String(opts.default)}' is not a role`);
   }
-  const fallback = opts.default ?? null
+  const fallback = opts.default ?? null;
 
   const mapper: RoleMapper = (identity: VerifiedIdentity): Role | RoleGrants | null => {
-    const raw = readPath(identity.claims, path)
+    const raw = readPath(identity.claims, path);
     // One value or many: a `groups` claim is an array and a `role` claim is
     // usually a string, and a mapper that only understood one of those would
     // silently ignore half the identity providers there are.
-    const values = Array.isArray(raw) ? raw : [raw]
-    const best: Record<string, Role> = {}
+    const values = Array.isArray(raw) ? raw : [raw];
+    const best: Record<string, Role> = {};
     for (const value of values) {
       // A number, a nested object, a null inside the array: not a group name,
       // and not an error either — a directory is allowed to put things in a
       // claim that this mapping has no opinion about.
-      if (typeof value !== 'string') continue
+      if (typeof value !== "string") continue;
       for (const { scope, role } of table.get(value) ?? []) {
-        const held = best[scope]
-        if (held === undefined || RANK[role] > RANK[held]) best[scope] = role
+        const held = best[scope];
+        if (held === undefined || RANK[role] > RANK[held]) best[scope] = role;
       }
     }
     if (Object.keys(best).length === 0) {
-      if (fallback === null) return null
-      return scoped ? { '*': fallback } : fallback
+      if (fallback === null) return null;
+      return scoped ? { "*": fallback } : fallback;
     }
-    return scoped ? best : (best['*'] ?? null)
-  }
+    return scoped ? best : (best["*"] ?? null);
+  };
   // Recorded on the function itself so `validateSitesAuth` can see it: a mapper is
   // otherwise opaque, and `default` is the one option that turns "nobody the map does
   // not name" into a role on `*` (`defaultRoleOf`).
-  if (opts.default !== undefined) DEFAULTS.set(mapper, opts.default)
-  return mapper
+  if (opts.default !== undefined) DEFAULTS.set(mapper, opts.default);
+  return mapper;
 }
 
 /** The bare `default` each `roleFromClaim` mapper was built with, if any. */
-const DEFAULTS = new WeakMap<RoleMapper, Role>()
+const DEFAULTS = new WeakMap<RoleMapper, Role>();
 
 /**
  * The bare role a mapper built by `roleFromClaim` gives an identity **none of its map
@@ -152,18 +152,18 @@ const DEFAULTS = new WeakMap<RoleMapper, Role>()
  * a directory handing out by omission). It reads this to refuse it at construction.
  */
 export function defaultRoleOf(mapper: unknown): Role | undefined {
-  return typeof mapper === 'function' ? DEFAULTS.get(mapper as RoleMapper) : undefined
+  return typeof mapper === "function" ? DEFAULTS.get(mapper as RoleMapper) : undefined;
 }
 
 /** Walks a dotted path through plain objects. Anything else — an array, a
  * string, a null — stops the walk, because there is nothing further to read. */
 function readPath(claims: Readonly<Record<string, unknown>> | undefined, path: string[]): unknown {
-  let cursor: unknown = claims
+  let cursor: unknown = claims;
   for (const segment of path) {
-    if (typeof cursor !== 'object' || cursor === null || Array.isArray(cursor)) return undefined
-    cursor = (cursor as Record<string, unknown>)[segment]
+    if (typeof cursor !== "object" || cursor === null || Array.isArray(cursor)) return undefined;
+    cursor = (cursor as Record<string, unknown>)[segment];
   }
-  return cursor
+  return cursor;
 }
 
 /**
@@ -177,5 +177,5 @@ function readPath(claims: Readonly<Record<string, unknown>> | undefined, path: s
  * where the role actually comes from.
  */
 export function roleSetByReason(provider: string): string {
-  return `Their role is set by ${provider}. Change it there.`
+  return `Their role is set by ${provider}. Change it there.`;
 }

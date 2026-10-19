@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import type { MigrationStatus } from '../../../server/migrate'
-import type { StoryMeta } from '../../../core/story'
-import type { RecentPublish } from '../../../server/versions'
-import { canManageAccess, type Me } from '../../me'
-import type { AccessUser } from './access-model'
-import type { AssetRow } from './assets-model'
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import type { MigrationStatus } from "../../../server/migrate";
+import type { StoryMeta } from "../../../core/story";
+import type { RecentPublish } from "../../../server/versions";
+import { canManageAccess, type Me } from "../../me";
+import type { AccessUser } from "./access-model";
+import type { AssetRow } from "./assets-model";
 import {
   type ActorDirectory,
   actorDirectory,
@@ -13,10 +13,10 @@ import {
   attention,
   homeRequests,
   type SiteCounts,
-} from './home-model'
-import { type AuditBatch, auditScope, canReadAudit } from './model-model'
-import { messageOf } from './useContent'
-import { type Uploads, useUploads } from './useAssets'
+} from "./home-model";
+import { type AuditBatch, auditScope, canReadAudit } from "./model-model";
+import { messageOf } from "./useContent";
+import { type Uploads, useUploads } from "./useAssets";
 
 /**
  * The Home screen's data: five blocks' worth, from seven requests.
@@ -44,10 +44,10 @@ import { type Uploads, useUploads } from './useAssets'
 
 /** One recency block, as the screen holds it. */
 export interface Block<T> {
-  rows: readonly T[]
-  loading: boolean
+  rows: readonly T[];
+  loading: boolean;
   /** The screen renders nothing at all for a failed block. */
-  failed: boolean
+  failed: boolean;
 }
 
 export interface HomeData {
@@ -57,27 +57,27 @@ export interface HomeData {
    * numbers rather than not at all, since the card set comes from the manifest and
    * the number is the only part a request owns.
    */
-  counts: SiteCounts | null
+  counts: SiteCounts | null;
   /** The library's total, from the same request that fills `media`. */
-  assetCount: number | undefined
-  changes: Block<StoryMeta>
-  published: Block<RecentPublish>
-  media: Block<AssetRow>
+  assetCount: number | undefined;
+  changes: Block<StoryMeta>;
+  published: Block<RecentPublish>;
+  media: Block<AssetRow>;
   /** Editor names for the publish rows. Empty for anybody who cannot read
    * `/users`, which `publishActor` degrades for. */
-  directory: ActorDirectory
-  attention: Attention
+  directory: ActorDirectory;
+  attention: Attention;
   /** What the audit report actually covered, or `''` — the sentence that keeps a
    * single batch from reading as the whole site. */
-  auditScope: string
+  auditScope: string;
   /** Re-read every block. */
-  reload: () => void
+  reload: () => void;
   /** The Assets card's create action, and the empty *Latest media* block's. */
-  uploads: Uploads
+  uploads: Uploads;
 }
 
 export function useHome(apiBase: string, me: Me, onNotice: (message: string) => void): HomeData {
-  const requests = useMemo(() => homeRequests(apiBase), [apiBase])
+  const requests = useMemo(() => homeRequests(apiBase), [apiBase]);
 
   /**
    * Bumped by `reload`, and every block's effect depends on it.
@@ -87,22 +87,22 @@ export function useHome(apiBase: string, me: Me, onNotice: (message: string) => 
    * functions would be seven things for the screen to wire up and one for the
    * upload callback to forget.
    */
-  const [nonce, setNonce] = useState(0)
-  const reload = useCallback(() => setNonce((n) => n + 1), [])
+  const [nonce, setNonce] = useState(0);
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
 
   /** Read once as booleans so the effects key on the answer rather than on the
    * identity of the `Me` object it came from — a caller that rebuilt `me` per render
    * would otherwise re-fetch on every one. */
-  const mayAudit = canReadAudit(me)
-  const mayResolveNames = canManageAccess(me)
+  const mayAudit = canReadAudit(me);
+  const mayResolveNames = canManageAccess(me);
 
-  const counts = useFetched<SiteCounts>(requests.counts, nonce)
-  const changes = useFetched<Page<StoryMeta>>(requests.changes, nonce)
-  const published = useFetched<Page<RecentPublish>>(requests.published, nonce)
-  const media = useFetched<Page<AssetRow>>(requests.media, nonce)
-  const migrations = useFetched<MigrationStatus>(requests.migrations, nonce)
-  const audit = useFetched<AuditBatch>(mayAudit ? requests.audit : null, nonce)
-  const users = useFetched<{ users: AccessUser[] }>(mayResolveNames ? requests.users : null, nonce)
+  const counts = useFetched<SiteCounts>(requests.counts, nonce);
+  const changes = useFetched<Page<StoryMeta>>(requests.changes, nonce);
+  const published = useFetched<Page<RecentPublish>>(requests.published, nonce);
+  const media = useFetched<Page<AssetRow>>(requests.media, nonce);
+  const migrations = useFetched<MigrationStatus>(requests.migrations, nonce);
+  const audit = useFetched<AuditBatch>(mayAudit ? requests.audit : null, nonce);
+  const users = useFetched<{ users: AccessUser[] }>(mayResolveNames ? requests.users : null, nonce);
 
   /**
    * The first failure, announced once.
@@ -122,22 +122,22 @@ export function useHome(apiBase: string, me: Me, onNotice: (message: string) => 
     published.failed ??
     media.failed ??
     migrations.failed ??
-    audit.failed
+    audit.failed;
   useEffect(() => {
-    if (failure) onNotice(`Some of this screen could not be loaded: ${failure}`)
-  }, [failure, onNotice])
+    if (failure) onNotice(`Some of this screen could not be loaded: ${failure}`);
+  }, [failure, onNotice]);
 
-  const directory = useMemo(() => actorDirectory(users.value?.users ?? []), [users.value])
+  const directory = useMemo(() => actorDirectory(users.value?.users ?? []), [users.value]);
   const needs = useMemo(
     () => attention({ status: migrations.value ?? null, audit: audit.value ?? null }),
     [migrations.value, audit.value],
-  )
+  );
 
   const uploads = useUploads(apiBase, (done, failed) => {
     if (failed === 0) {
       onNotice(
         done.length === 1 ? `Uploaded ${done[0]?.filename}` : `Uploaded ${done.length} files`,
-      )
+      );
     } else {
       // The per-file reason lives in `Uploads.entries`, which the Assets screen
       // renders as a list and this one does not: a queue report is a media-library
@@ -145,13 +145,13 @@ export function useHome(apiBase: string, me: Me, onNotice: (message: string) => 
       // So the toast says how many and where the detail is.
       onNotice(
         done.length === 0
-          ? 'Upload failed. Open Assets to see why.'
+          ? "Upload failed. Open Assets to see why."
           : `Uploaded ${done.length} of ${done.length + failed}. Open Assets to see which failed.`,
-      )
+      );
     }
     // Both the tiles and the Assets card's count are now wrong.
-    reload()
-  })
+    reload();
+  });
 
   return {
     counts: counts.value ?? null,
@@ -167,18 +167,18 @@ export function useHome(apiBase: string, me: Me, onNotice: (message: string) => 
     auditScope: auditScope({ data: audit.value ?? null, loading: audit.loading, batches: 1 }),
     reload,
     uploads,
-  }
+  };
 }
 
 /* ------------------------------------------------------------------ one GET --- */
 
 interface Fetched<T> {
   /** Undefined until it answers, and forever if it failed. */
-  value: T | undefined
-  loading: boolean
+  value: T | undefined;
+  loading: boolean;
   /** The failure message, or undefined. Nothing on screen renders it — a failed
    * block is absent — but `useHome` announces the first one. */
-  failed: string | undefined
+  failed: string | undefined;
 }
 
 /**
@@ -201,36 +201,36 @@ function useFetched<T>(url: string | null, nonce: number): Fetched<T> {
     value: undefined,
     loading: url !== null,
     failed: undefined,
-  })
+  });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `nonce` is the trigger, not a value the body reads — bumping it is the whole of what `reload` does. Naming it is the point; the alternative, reading it inside to satisfy the rule, would misstate what this depends on. Same shape as `useDocuments.ts`'s `identity` effect
   useEffect(() => {
     if (url === null) {
-      setState({ value: undefined, loading: false, failed: undefined })
-      return
+      setState({ value: undefined, loading: false, failed: undefined });
+      return;
     }
-    let live = true
-    setState((prev) => ({ ...prev, loading: true, failed: undefined }))
+    let live = true;
+    setState((prev) => ({ ...prev, loading: true, failed: undefined }));
     fetch(url)
       .then(async (res) => {
-        if (!res.ok) throw new Error(await messageOf(res))
-        return (await res.json()) as T
+        if (!res.ok) throw new Error(await messageOf(res));
+        return (await res.json()) as T;
       })
       .then((value) => {
-        if (live) setState({ value, loading: false, failed: undefined })
+        if (live) setState({ value, loading: false, failed: undefined });
       })
       .catch((e: Error) => {
         // The previous value is dropped rather than kept: a block showing stale rows
         // under a heading whose refresh just failed is the one outcome that is worse
         // than the gap, because nothing on screen would say the rows are old.
-        if (live) setState({ value: undefined, loading: false, failed: e.message })
-      })
+        if (live) setState({ value: undefined, loading: false, failed: e.message });
+      });
     return () => {
-      live = false
-    }
-  }, [url, nonce])
+      live = false;
+    };
+  }, [url, nonce]);
 
-  return state
+  return state;
 }
 
 function blockOf<T>(fetched: Fetched<Page<T>>): Block<T> {
@@ -238,5 +238,5 @@ function blockOf<T>(fetched: Fetched<Page<T>>): Block<T> {
     rows: fetched.value?.rows ?? [],
     loading: fetched.loading,
     failed: fetched.failed !== undefined,
-  }
+  };
 }

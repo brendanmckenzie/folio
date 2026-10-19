@@ -1,27 +1,27 @@
-import { defineBlock, richtext, select, text } from 'folio/core'
+import { defineBlock, richtext, select, text } from "folio/core";
 
 export const prose = defineBlock({
-  name: 'prose',
-  label: 'Prose',
-  summary: 'heading',
+  name: "prose",
+  label: "Prose",
+  summary: "heading",
   fields: {
-    heading: text({ label: 'Heading', translatable: true }),
+    heading: text({ label: "Heading", translatable: true }),
     // Arrives already rendered, so there is no way to reach the page without
     // going through sanitising and link resolution.
     // Translatable, so two whole ProseMirror trees can live in one blok — one per
     // locale (`content-model/localisation.md`). Last-write-wins per locale, as it
     // already is per field.
     body: richtext({
-      label: 'Body',
+      label: "Body",
       headingLevels: [2, 3],
-      help: 'Links to other pages follow them when those pages are renamed.',
+      help: "Links to other pages follow them when those pages are renamed.",
       translatable: true,
     }),
     width: select({
-      label: 'Measure',
+      label: "Measure",
       options: [
-        { label: 'Narrow', value: 'narrow' },
-        { label: 'Wide', value: 'wide' },
+        { label: "Narrow", value: "narrow" },
+        { label: "Wide", value: "wide" },
       ],
     }),
   },
@@ -31,7 +31,7 @@ export const prose = defineBlock({
       <div className="prose__body">{body}</div>
     </section>
   ),
-})
+});
 
 /**
  * A deliberately constrained field: bold, italic and links only, with no block
@@ -39,14 +39,14 @@ export const prose = defineBlock({
  * stripped down on the way in because the editor's schema has nowhere to put it.
  */
 export const pullquote = defineBlock({
-  name: 'pullquote',
-  label: 'Pull quote',
-  summary: 'credit',
+  name: "pullquote",
+  label: "Pull quote",
+  summary: "credit",
   fields: {
     quote: richtext({
-      label: 'Quote',
-      marks: ['bold', 'italic', 'link'],
-      nodes: ['paragraph'],
+      label: "Quote",
+      marks: ["bold", "italic", "link"],
+      nodes: ["paragraph"],
       translatable: true,
     }),
     /**
@@ -56,25 +56,25 @@ export const pullquote = defineBlock({
      * to solve: nothing reads it, nothing renders it, and the field the admin
      * now draws is empty.
      */
-    credit: text({ label: 'Credit', translatable: true }),
+    credit: text({ label: "Credit", translatable: true }),
     /**
      * Added after the block already existed, so documents written before it
      * have no `tone` key at all — `Field.default` is read at *creation* only.
      * `0002` fills the gap retroactively with `field.default`.
      */
     tone: select({
-      label: 'Tone',
+      label: "Tone",
       options: [
-        { label: 'Quiet', value: 'quiet' },
-        { label: 'Loud', value: 'loud' },
+        { label: "Quiet", value: "quiet" },
+        { label: "Loud", value: "loud" },
       ],
-      default: 'quiet',
+      default: "quiet",
     }),
   },
   render: ({ quote, credit, tone }) => (
-    <figure className="pullquote" data-tone={tone || 'quiet'}>
+    <figure className="pullquote" data-tone={tone || "quiet"}>
       <blockquote className="pullquote__body">{quote}</blockquote>
       {credit ? <figcaption className="pullquote__by">{credit}</figcaption> : null}
     </figure>
   ),
-})
+});

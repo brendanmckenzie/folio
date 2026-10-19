@@ -19,18 +19,18 @@
  *     `fieldValue`, the same call `RenderBlok` makes — so filtering a French
  *     index page matches what a French visitor actually reads.
  */
-import type { Blok, Doc, Json } from './doc'
-import type { Field } from './fields'
-import { fieldValue, type LocaleConfig, localeChain } from './locales'
-import type { DocumentType, SchemaIndex } from './schema'
+import type { Blok, Doc, Json } from "./doc";
+import type { Field } from "./fields";
+import { fieldValue, type LocaleConfig, localeChain } from "./locales";
+import type { DocumentType, SchemaIndex } from "./schema";
 
 /** One `content_index` row, minus the story id the caller already has. */
 export interface IndexRow {
   /** `''` for the source locale. */
-  locale: string
-  field: string
-  text: string | null
-  num: number | null
+  locale: string;
+  field: string;
+  text: string | null;
+  num: number | null;
 }
 
 /**
@@ -41,35 +41,35 @@ export interface IndexRow {
  */
 export function isIndexableKind(field: Field): field is IndexableField {
   switch (field.kind) {
-    case 'text':
-    case 'textarea':
-    case 'number':
-    case 'boolean':
-    case 'select':
-      return true
+    case "text":
+    case "textarea":
+    case "number":
+    case "boolean":
+    case "select":
+      return true;
     default:
-      return false
+      return false;
   }
 }
 
 /** The five kinds that can carry `indexed`, narrowed off `Field`. */
 export type IndexableField = Extract<
   Field,
-  { kind: 'text' | 'textarea' | 'number' | 'boolean' | 'select' }
->
+  { kind: "text" | "textarea" | "number" | "boolean" | "select" }
+>;
 
 /** True when this field is declared queryable. Total over every field kind, so a
  * hand-written schema marking a richtext field `indexed` reads as "not indexed"
  * rather than as a type error at a call site — the audit is what reports it. */
 export function isIndexed(field: Field): boolean {
-  return isIndexableKind(field) && field.indexed === true
+  return isIndexableKind(field) && field.indexed === true;
 }
 
 /** A block's `indexed` fields, in declaration order. */
 export function indexedFields(schema: SchemaIndex, blockType: string): [string, Field][] {
-  const def = schema[blockType]
-  if (!def) return []
-  return Object.entries(def.fields).filter(([, field]) => isIndexed(field))
+  const def = schema[blockType];
+  if (!def) return [];
+  return Object.entries(def.fields).filter(([, field]) => isIndexed(field));
 }
 
 /**
@@ -88,11 +88,11 @@ export function indexedFieldNames(
   schema: SchemaIndex,
   types: readonly DocumentType[],
 ): ReadonlySet<string> {
-  const out = new Set<string>()
+  const out = new Set<string>();
   for (const type of types) {
-    for (const [name] of indexedFields(schema, type.root)) out.add(name)
+    for (const [name] of indexedFields(schema, type.root)) out.add(name);
   }
-  return out
+  return out;
 }
 
 /**
@@ -105,7 +105,7 @@ export function indexedFieldNames(
  * which sorts a handful of rows ahead of every other row in the collection for
  * no reason anybody could find.
  */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
 
 /**
  * One stored value as the two index columns, or null when there is nothing to
@@ -122,20 +122,20 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2
  * `order` sorts it last.
  */
 export function projectValue(value: Json | undefined): { text: string; num: number | null } | null {
-  if (value === undefined || value === null) return null
-  if (typeof value === 'boolean') return { text: value ? 'true' : 'false', num: value ? 1 : 0 }
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? { text: String(value), num: value } : null
+  if (value === undefined || value === null) return null;
+  if (typeof value === "boolean") return { text: value ? "true" : "false", num: value ? 1 : 0 };
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? { text: String(value), num: value } : null;
   }
-  if (typeof value === 'string') {
-    if (value === '') return null
-    if (!ISO_DATE.test(value)) return { text: value, num: null }
-    const parsed = Date.parse(value)
-    return { text: value, num: Number.isNaN(parsed) ? null : parsed }
+  if (typeof value === "string") {
+    if (value === "") return null;
+    if (!ISO_DATE.test(value)) return { text: value, num: null };
+    const parsed = Date.parse(value);
+    return { text: value, num: Number.isNaN(parsed) ? null : parsed };
   }
   // An object or an array. Unrepresentable as a scalar, so no row — and the
   // audit reports the declaration that made it reachable.
-  return null
+  return null;
 }
 
 /**
@@ -155,29 +155,29 @@ export function indexRowsFor(
   schema: SchemaIndex,
   locales?: LocaleConfig,
 ): IndexRow[] {
-  const root: Blok | undefined = doc.bloks[doc.root]
-  if (!root) return []
+  const root: Blok | undefined = doc.bloks[doc.root];
+  if (!root) return [];
   // The document's **own** root block type in preference to the type's declared
   // `root`: a document written before the config was changed still indexes what
   // it actually holds rather than what the config now wishes it held. They agree
   // for every document Folio itself created; `type.root` is the fallback for a
   // malformed root blok carrying no type at all.
-  const fields = indexedFields(schema, root.type || (type?.root ?? ''))
-  if (fields.length === 0) return []
+  const fields = indexedFields(schema, root.type || (type?.root ?? ""));
+  if (fields.length === 0) return [];
 
-  const out: IndexRow[] = []
+  const out: IndexRow[] = [];
   const push = (locale: string, field: string, value: Json | undefined) => {
-    const projected = projectValue(value)
-    if (projected) out.push({ locale, field, text: projected.text, num: projected.num })
-  }
+    const projected = projectValue(value);
+    if (projected) out.push({ locale, field, text: projected.text, num: projected.num });
+  };
 
-  for (const [name] of fields) push('', name, root.data[name])
+  for (const [name] of fields) push("", name, root.data[name]);
 
   for (const locale of locales?.available ?? []) {
-    if (locale.code === locales?.default) continue
-    const ctx = { code: locale.code, fallbacks: localeChain(locales, locale.code) }
-    for (const [name] of fields) push(locale.code, name, fieldValue(root, name, ctx))
+    if (locale.code === locales?.default) continue;
+    const ctx = { code: locale.code, fallbacks: localeChain(locales, locale.code) };
+    for (const [name] of fields) push(locale.code, name, fieldValue(root, name, ctx));
   }
 
-  return out
+  return out;
 }

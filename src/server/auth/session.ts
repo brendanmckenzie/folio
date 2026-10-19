@@ -10,17 +10,17 @@ import {
   otherGrantsDelete,
   sessionGrantsDelete,
   userGrantsDelete,
-} from './grants'
-import type { Actor, Role } from './roles'
-import { isRole } from './roles'
-import { hashToken, mintSecret } from './secrets'
-import { parseGrantMap, type UserRow, touchUserStatement, userColour } from './users'
-import type { FolioDb } from '../db'
+} from "./grants";
+import type { Actor, Role } from "./roles";
+import { isRole } from "./roles";
+import { hashToken, mintSecret } from "./secrets";
+import { parseGrantMap, type UserRow, touchUserStatement, userColour } from "./users";
+import type { FolioDb } from "../db";
 
 /** Default session length. Overridable with `AuthConfig.sessionDays`. */
-export const DEFAULT_SESSION_DAYS = 30
+export const DEFAULT_SESSION_DAYS = 30;
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * How much of a session's life must elapse before a read renews it. Half:
@@ -28,14 +28,14 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * near the end means a browser that is used daily still gets logged out on the
  * one day it is not.
  */
-const RENEW_AFTER = 0.5
+const RENEW_AFTER = 0.5;
 
 export interface NewSession {
   /** The raw token. Goes in the cookie and nowhere else — it is not stored. */
-  token: string
+  token: string;
   /** `sessions.id`: the SHA-256 of `token`. */
-  id: string
-  expiresAt: number
+  id: string;
+  expiresAt: number;
 }
 
 /**
@@ -48,9 +48,9 @@ export async function createSession(
   userId: string,
   opts: { days?: number; userAgent?: string | null; provider?: string | null } = {},
 ): Promise<NewSession> {
-  const session = await newSession(opts)
-  await db.batch(sessionStatements(db, userId, session, opts))
-  return session
+  const session = await newSession(opts);
+  await db.batch(sessionStatements(db, userId, session, opts));
+  return session;
 }
 
 /**
@@ -62,10 +62,10 @@ export async function createSession(
  * cannot use a function that runs its own.
  */
 export async function newSession(opts: { days?: number; now?: number } = {}): Promise<NewSession> {
-  const token = mintSecret()
-  const id = await hashToken(token)
-  const now = opts.now ?? Date.now()
-  return { token, id, expiresAt: now + (opts.days ?? DEFAULT_SESSION_DAYS) * DAY_MS }
+  const token = mintSecret();
+  const id = await hashToken(token);
+  const now = opts.now ?? Date.now();
+  return { token, id, expiresAt: now + (opts.days ?? DEFAULT_SESSION_DAYS) * DAY_MS };
 }
 
 /**
@@ -82,7 +82,7 @@ export function sessionStatements(
   session: NewSession,
   opts: { userAgent?: string | null; provider?: string | null; now?: number } = {},
 ): D1PreparedStatement[] {
-  const now = opts.now ?? Date.now()
+  const now = opts.now ?? Date.now();
   return [
     db
       .prepare(
@@ -98,28 +98,28 @@ export function sessionStatements(
         opts.provider ?? null,
       ),
     touchUserStatement(db, userId, now, opts.provider ?? undefined),
-  ]
+  ];
 }
 
 interface SessionJoin {
-  session_id: string
-  expires_at: number
-  created_at: number
-  user_id: string
-  email: string
-  name: string
-  colour: string | null
+  session_id: string;
+  expires_at: number;
+  created_at: number;
+  user_id: string;
+  email: string;
+  name: string;
+  colour: string | null;
   /** From the `*` grant; null when the user holds none. */
-  role: string | null
-  provider: string | null
+  role: string | null;
+  provider: string | null;
   /** `sessions.provider`, which is not `users.provider`: the first is which
    * provider minted *this* browser's session, the second is the one that signed
    * this person in most recently anywhere. They differ the moment somebody signs
    * in on a second machine by another door. */
-  session_provider: string | null
-  role_from: string | null
+  session_provider: string | null;
+  role_from: string | null;
   /** Every grant, as `json_group_object(scope_id, role)`; `'{}'` for none. */
-  grants: string | null
+  grants: string | null;
 }
 
 /**
@@ -150,7 +150,7 @@ export async function readSession(
   token: string,
   opts: { days?: number; now?: number } = {},
 ): Promise<Actor | null> {
-  const id = await hashToken(token)
+  const id = await hashToken(token);
   const row = await db
     .prepare(
       `select s.id as session_id, s.expires_at, s.created_at, s.provider as session_provider,
@@ -162,28 +162,28 @@ export async function readSession(
         where s.id = ?`,
     )
     .bind(id)
-    .first<SessionJoin>()
-  if (!row) return null
+    .first<SessionJoin>();
+  if (!row) return null;
 
-  const now = opts.now ?? Date.now()
+  const now = opts.now ?? Date.now();
   if (row.expires_at <= now) {
     await db.batch([
       sessionGrantsDelete(db, id),
-      db.prepare('delete from sessions where id = ?').bind(id),
-    ])
-    return null
+      db.prepare("delete from sessions where id = ?").bind(id),
+    ]);
+    return null;
   }
 
   // Sliding renewal, past the halfway mark only: see RENEW_AFTER.
-  const days = opts.days ?? DEFAULT_SESSION_DAYS
-  const life = days * DAY_MS
-  let expiresAt = row.expires_at
+  const days = opts.days ?? DEFAULT_SESSION_DAYS;
+  const life = days * DAY_MS;
+  let expiresAt = row.expires_at;
   if (now - row.created_at > life * RENEW_AFTER) {
-    expiresAt = now + life
+    expiresAt = now + life;
     await db
-      .prepare('update sessions set created_at = ?, expires_at = ? where id = ?')
+      .prepare("update sessions set created_at = ?, expires_at = ? where id = ?")
       .bind(now, expiresAt, id)
-      .run()
+      .run();
   }
 
   const user: UserRow = {
@@ -191,7 +191,7 @@ export async function readSession(
     email: row.email,
     name: row.name,
     colour: row.colour,
-    role: isRole(row.role) ? row.role : 'viewer',
+    role: isRole(row.role) ? row.role : "viewer",
     // From the join, not a hard-coded null. It read `null` here for as long as
     // the column existed, which cost nothing until `completeSignIn` made the
     // column true and `/me` had a reader for it.
@@ -201,9 +201,9 @@ export async function readSession(
     grants: [],
     createdAt: row.created_at,
     lastSeenAt: null,
-  }
+  };
   return {
-    kind: 'user',
+    kind: "user",
     id: user.id,
     name: user.name,
     colour: userColour(user),
@@ -214,17 +214,17 @@ export async function readSession(
     email: user.email,
     roleFrom: row.role_from,
     grants: parseGrantMap(row.grants),
-  }
+  };
 }
 
 /** Whether a session id is still live, without loading the user. What the
  * Durable Object's periodic re-check asks (checkpoint 5). */
 export async function sessionExpiry(db: FolioDb, sessionId: string): Promise<number | null> {
   const row = await db
-    .prepare('select expires_at from sessions where id = ?')
+    .prepare("select expires_at from sessions where id = ?")
     .bind(sessionId)
-    .first<{ expires_at: number }>()
-  return row?.expires_at ?? null
+    .first<{ expires_at: number }>();
+  return row?.expires_at ?? null;
 }
 
 /**
@@ -240,22 +240,22 @@ export async function sessionExpiry(db: FolioDb, sessionId: string): Promise<num
  */
 export async function sessionProvider(db: FolioDb, token: string): Promise<string | null> {
   const row = await db
-    .prepare('select provider from sessions where id = ?')
+    .prepare("select provider from sessions where id = ?")
     .bind(await hashToken(token))
-    .first<{ provider: string | null }>()
-  return row?.provider ?? null
+    .first<{ provider: string | null }>();
+  return row?.provider ?? null;
 }
 
 /** Signs out one browser. Takes the raw cookie token, since that is what the
  * logout route has. */
 export async function revokeSession(db: FolioDb, token: string): Promise<void> {
-  const id = await hashToken(token)
+  const id = await hashToken(token);
   // Its preview grants in the same batch (`grants.ts`): `readGrant` would refuse
   // them anyway, and this is what keeps the table from growing.
   await db.batch([
     sessionGrantsDelete(db, id),
-    db.prepare('delete from sessions where id = ?').bind(id),
-  ])
+    db.prepare("delete from sessions where id = ?").bind(id),
+  ]);
 }
 
 /**
@@ -283,28 +283,28 @@ export async function listUserSessions(
     )
     .bind(userId, now)
     .all<{
-      id: string
-      created_at: number
-      expires_at: number
-      user_agent: string | null
-      provider: string | null
-    }>()
+      id: string;
+      created_at: number;
+      expires_at: number;
+      user_agent: string | null;
+      provider: string | null;
+    }>();
   return results.map((row) => ({
     id: row.id,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     userAgent: row.user_agent,
     provider: row.provider,
-  }))
+  }));
 }
 
 export interface SessionRow {
   /** `sessions.id`: the SHA-256 of the cookie token. Truncated before it ships. */
-  id: string
-  createdAt: number
-  expiresAt: number
-  userAgent: string | null
-  provider: string | null
+  id: string;
+  createdAt: number;
+  expiresAt: number;
+  userAgent: string | null;
+  provider: string | null;
 }
 
 /**
@@ -323,9 +323,9 @@ export async function revokeOtherSessions(
 ): Promise<number> {
   const [, result] = await db.batch([
     otherGrantsDelete(db, userId, keepId),
-    db.prepare('delete from sessions where user_id = ? and id != ?').bind(userId, keepId),
-  ])
-  return result?.meta.changes ?? 0
+    db.prepare("delete from sessions where user_id = ? and id != ?").bind(userId, keepId),
+  ]);
+  return result?.meta.changes ?? 0;
 }
 
 /**
@@ -338,21 +338,21 @@ export async function revokeOtherSessions(
 export function userSessionsDelete(db: FolioDb, userId: string): D1PreparedStatement[] {
   return [
     userGrantsDelete(db, userId),
-    db.prepare('delete from sessions where user_id = ?').bind(userId),
-  ]
+    db.prepare("delete from sessions where user_id = ?").bind(userId),
+  ];
 }
 
 /** Signs out every browser a user holds — what a role downgrade or a "sign out
  * everywhere" acts on. */
 export async function revokeUserSessions(db: FolioDb, userId: string): Promise<void> {
-  await db.batch(userSessionsDelete(db, userId))
+  await db.batch(userSessionsDelete(db, userId));
 }
 
 /** Housekeeping for sessions nobody returns to. Not on any request path. */
 export async function deleteExpiredSessions(db: FolioDb, now = Date.now()): Promise<number> {
   const [, result] = await db.batch([
     expiredSessionGrantsDelete(db, now),
-    db.prepare('delete from sessions where expires_at <= ?').bind(now),
-  ])
-  return result?.meta.changes ?? 0
+    db.prepare("delete from sessions where expires_at <= ?").bind(now),
+  ]);
+  return result?.meta.changes ?? 0;
 }

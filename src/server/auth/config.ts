@@ -14,20 +14,20 @@
  * carry — and a provider with `start` and no `callback` passed construction and
  * failed at the callback. A discriminant makes the shape checkable once, here.
  */
-import type { Role, Scope } from './roles'
-import { isRole, isScope } from './roles'
-import { defaultRoleOf } from './roles-from'
+import type { Role, Scope } from "./roles";
+import { isRole, isScope } from "./roles";
+import { defaultRoleOf } from "./roles-from";
 
 /** Deliberately open: anyone who reaches the editor may edit. Written out in
  * full, never a default. */
-export type OpenAuth = 'open'
+export type OpenAuth = "open";
 
 export interface MagicLinkMail {
-  email: string
+  email: string;
   /** The link to put in the mail. Absolute, on the request's own origin. */
-  url: string
+  url: string;
   /** When the link stops working, epoch ms. */
-  expiresAt: number
+  expiresAt: number;
   /**
    * The scope the sign-in was for, parsed from `next` when it names a `~<scope>` the
    * sites registry holds, so the mail can say "Sign in to Take Off Go" while being
@@ -35,17 +35,17 @@ export interface MagicLinkMail {
    * absent on a deployment with no `sites`. `brand` is null until a deployment can
    * configure brands (`../../../docs/specs/foundation/multi-brand.md` decision 16).
    */
-  scope?: { id: string; name: string; brand: { id: string; label: string } | null }
+  scope?: { id: string; name: string; brand: { id: string; label: string } | null };
 }
 
 export interface VerifiedIdentity {
-  email: string
-  name?: string
+  email: string;
+  name?: string;
   /**
    * Whatever else the provider verified — id-token claims, an Access JWT
    * payload — for `roleFrom`. Never stored and never projected to a client.
    */
-  claims?: Readonly<Record<string, unknown>>
+  claims?: Readonly<Record<string, unknown>>;
 }
 
 /**
@@ -53,7 +53,7 @@ export interface VerifiedIdentity {
  * (`../../../docs/specs/foundation/multi-site.md` decision 17). A bare `Role` is
  * `{ '*': role }`, which is everything a deployment with no `sites` means by one.
  */
-export type RoleGrants = Readonly<Record<string, Role>>
+export type RoleGrants = Readonly<Record<string, Role>>;
 
 /**
  * Maps a verified identity to a role — or, on a deployment with `sites`, to a set
@@ -65,19 +65,19 @@ export type RoleGrants = Readonly<Record<string, Role>>
  * covers what a DSL cannot — an app-roles claim versus a groups claim, a group
  * overage that points at a directory API, a role derived from the domain.
  */
-export type RoleMapper = (identity: VerifiedIdentity) => Role | RoleGrants | null
+export type RoleMapper = (identity: VerifiedIdentity) => Role | RoleGrants | null;
 
 /** Every kind carries these three. */
 interface ProviderBase {
-  id: string
+  id: string;
   /** Button label on the login page. */
-  label: string
+  label: string;
   /**
    * Email domains this provider is the only door for. Lowercase, no `@`, exact
    * match — `resolveAuth` compiles every provider's list into one map and throws
    * when two providers claim the same domain.
    */
-  domains?: readonly string[]
+  domains?: readonly string[];
 }
 
 /**
@@ -87,15 +87,15 @@ interface ProviderBase {
  * place a role.
  */
 interface Provisions {
-  provision?: Provisioning
-  roleFrom?: RoleMapper
+  provision?: Provisioning;
+  roleFrom?: RoleMapper;
 }
 
 export interface MailProvider<Env = unknown> extends ProviderBase {
-  kind: 'mail'
+  kind: "mail";
   /** Sends a sign-in link. Fire-and-forget: the route awaits it and answers the
    * same thing either way. */
-  send: (env: Env, mail: MagicLinkMail) => unknown
+  send: (env: Env, mail: MagicLinkMail) => unknown;
 }
 
 /**
@@ -103,42 +103,42 @@ export interface MailProvider<Env = unknown> extends ProviderBase {
  * carry between `start` and `callback`. Folio adds `next` in the cookie envelope
  * around it and the provider never sees it.
  */
-export type RedirectState = Readonly<Record<string, string>>
+export type RedirectState = Readonly<Record<string, string>>;
 
 export interface RedirectProvider<Env = unknown> extends ProviderBase, Provisions {
-  kind: 'redirect'
-  start: (env: Env, ctx: { redirectUri: string }) => Promise<{ url: string; state: RedirectState }>
+  kind: "redirect";
+  start: (env: Env, ctx: { redirectUri: string }) => Promise<{ url: string; state: RedirectState }>;
   callback: (
     env: Env,
     ctx: { params: URLSearchParams; redirectUri: string; state: RedirectState },
-  ) => Promise<VerifiedIdentity>
+  ) => Promise<VerifiedIdentity>;
   /** Where "sign out" sends the browser after Folio's own session is revoked. */
-  signOutUrl?: string
+  signOutUrl?: string;
 }
 
 export interface TrustedProvider<Env = unknown> extends ProviderBase, Provisions {
-  kind: 'trusted'
+  kind: "trusted";
   /**
    * Null when this request carries no identity from the host. **Throws** when it
    * carries one that does not verify — that is a provider error, not "nobody".
    */
-  resolve: (env: Env, req: Request) => Promise<VerifiedIdentity | null>
-  signOutUrl?: string
+  resolve: (env: Env, req: Request) => Promise<VerifiedIdentity | null>;
+  signOutUrl?: string;
 }
 
 /** `foundation/passkeys.md`. Constructed only by `passkeys()`; its routes are
  * Folio's own, which is why it carries no functions of its own. */
 export interface PasskeyProvider extends ProviderBase {
-  kind: 'passkey'
-  id: 'passkey'
-  rpName?: string
+  kind: "passkey";
+  id: "passkey";
+  rpName?: string;
 }
 
 export type AuthProvider<Env = unknown> =
   | MailProvider<Env>
   | RedirectProvider<Env>
   | TrustedProvider<Env>
-  | PasskeyProvider
+  | PasskeyProvider;
 
 /**
  * `'refuse'` (the default) means an email the IdP verified but Folio has never
@@ -146,19 +146,19 @@ export type AuthProvider<Env = unknown> =
  * consequence of holding an account at the provider. `'auto'` creates the user
  * on first sign-in with `role`, for a tenant where employment *is* the list.
  */
-export type Provisioning = 'refuse' | { create: true; role?: Role }
+export type Provisioning = "refuse" | { create: true; role?: Role };
 
 export interface AuthConfig<Env = unknown> {
-  providers: readonly AuthProvider<Env>[]
+  providers: readonly AuthProvider<Env>[];
   /** Session length. Default 30 (`DEFAULT_SESSION_DAYS`). */
-  sessionDays?: number
+  sessionDays?: number;
   /**
    * Sign-in links requested per address per hour before further requests are
    * quietly dropped. Default 5. A partial answer by design: the IP dimension
    * needs a zone rate-limiting rule, which is not Folio's to configure (see the
    * spec's edge cases).
    */
-  linksPerHour?: number
+  linksPerHour?: number;
 }
 
 /**
@@ -172,32 +172,32 @@ export interface AuthConfig<Env = unknown> {
  * is what the kinds replaced.
  */
 export type ResolvedAuth<Env = unknown> =
-  | { mode: 'open' }
+  | { mode: "open" }
   | {
-      mode: 'session'
-      config: AuthConfig<Env>
-      sessionDays: number
-      linksPerHour: number
+      mode: "session";
+      config: AuthConfig<Env>;
+      sessionDays: number;
+      linksPerHour: number;
       /** At most one: the no-JavaScript login page has one address field. */
-      mail: MailProvider<Env> | null
-      passkey: PasskeyProvider | null
-      redirects: readonly RedirectProvider<Env>[]
-      trusted: readonly TrustedProvider<Env>[]
+      mail: MailProvider<Env> | null;
+      passkey: PasskeyProvider | null;
+      redirects: readonly RedirectProvider<Env>[];
+      trusted: readonly TrustedProvider<Env>[];
       /** domain → provider id, compiled from every provider's `domains`. */
-      domains: ReadonlyMap<string, string>
-    }
+      domains: ReadonlyMap<string, string>;
+    };
 
 const OPEN_HINT =
   "folio: `auth` must be configured — pass `auth: { providers: [...] }`, or `auth: 'open'` " +
-  'deliberately to leave the editor open to anyone who reaches it'
+  "deliberately to leave the editor open to anyone who reaches it";
 
 /** The four kinds, as a runtime set — `kind` arrives from a host's object
  * literal and is not trustworthy until it has been checked against this. */
-const KINDS = ['mail', 'redirect', 'trusted', 'passkey'] as const
+const KINDS = ["mail", "redirect", "trusted", "passkey"] as const;
 
 /** A domain as `domains` may spell it: labels, a dot, and a TLD of letters. No
  * `@`, no wildcard (out of scope), no trailing dot. */
-const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/
+const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/;
 
 /**
  * Turns the config key into the shape the runtime uses, throwing at
@@ -210,109 +210,111 @@ const DOMAIN_RE = /^[a-z0-9.-]+\.[a-z]{2,}$/
  * construction throw needs is which of their four entries is wrong.
  */
 export function resolveAuth<Env>(auth: AuthConfig<Env> | OpenAuth | undefined): ResolvedAuth<Env> {
-  if (auth === undefined) throw new Error(OPEN_HINT)
-  if (auth === 'open') return { mode: 'open' }
-  if (typeof auth !== 'object' || auth === null) throw new Error(OPEN_HINT)
+  if (auth === undefined) throw new Error(OPEN_HINT);
+  if (auth === "open") return { mode: "open" };
+  if (typeof auth !== "object" || auth === null) throw new Error(OPEN_HINT);
 
   if (!Array.isArray(auth.providers) || auth.providers.length === 0) {
-    throw new Error("folio: `auth.providers` must list at least one provider (or set auth: 'open')")
+    throw new Error(
+      "folio: `auth.providers` must list at least one provider (or set auth: 'open')",
+    );
   }
 
-  const seen = new Set<string>()
-  let mail: MailProvider<Env> | null = null
-  let passkey: PasskeyProvider | null = null
-  const redirects: RedirectProvider<Env>[] = []
-  const trusted: TrustedProvider<Env>[] = []
-  const domains = new Map<string, string>()
+  const seen = new Set<string>();
+  let mail: MailProvider<Env> | null = null;
+  let passkey: PasskeyProvider | null = null;
+  const redirects: RedirectProvider<Env>[] = [];
+  const trusted: TrustedProvider<Env>[] = [];
+  const domains = new Map<string, string>();
 
   for (const provider of auth.providers) {
-    if (!provider || typeof provider.id !== 'string' || provider.id === '') {
-      throw new Error('folio: every auth provider needs an `id`')
+    if (!provider || typeof provider.id !== "string" || provider.id === "") {
+      throw new Error("folio: every auth provider needs an `id`");
     }
     if (seen.has(provider.id)) {
-      throw new Error(`folio: two auth providers share the id '${provider.id}'`)
+      throw new Error(`folio: two auth providers share the id '${provider.id}'`);
     }
-    seen.add(provider.id)
-    if (typeof provider.label !== 'string' || provider.label === '') {
-      throw new Error(`folio: auth provider '${provider.id}' needs a \`label\``)
+    seen.add(provider.id);
+    if (typeof provider.label !== "string" || provider.label === "") {
+      throw new Error(`folio: auth provider '${provider.id}' needs a \`label\``);
     }
     if (!KINDS.includes(provider.kind)) {
       throw new Error(
         `folio: auth provider '${provider.id}' has an unknown \`kind\` '${String(provider.kind)}' —` +
-          ` one of ${KINDS.join(', ')}`,
-      )
+          ` one of ${KINDS.join(", ")}`,
+      );
     }
 
     switch (provider.kind) {
-      case 'mail': {
-        if (typeof provider.send !== 'function') {
+      case "mail": {
+        if (typeof provider.send !== "function") {
           throw new Error(
             `folio: auth provider '${provider.id}' is a mail flow but has no \`send\``,
-          )
+          );
         }
-        refuseIdentityKeys(provider)
-        refuseDomains(provider, 'a domain enforced to the mail provider is the default')
+        refuseIdentityKeys(provider);
+        refuseDomains(provider, "a domain enforced to the mail provider is the default");
         if (mail) {
           throw new Error(
             `folio: auth providers '${mail.id}' and '${provider.id}' are both mail flows —` +
-              ' the login page has one address field, so only one can be reached',
-          )
+              " the login page has one address field, so only one can be reached",
+          );
         }
-        mail = provider
-        break
+        mail = provider;
+        break;
       }
-      case 'redirect': {
-        if (typeof provider.start !== 'function') {
+      case "redirect": {
+        if (typeof provider.start !== "function") {
           throw new Error(
             `folio: auth provider '${provider.id}' is a redirect flow but has no \`start\``,
-          )
+          );
         }
         // Nothing checked this before the kinds, which is how a half-built
         // provider passed construction and failed at the callback instead.
-        if (typeof provider.callback !== 'function') {
+        if (typeof provider.callback !== "function") {
           throw new Error(
             `folio: auth provider '${provider.id}' is a redirect flow but has no \`callback\``,
-          )
+          );
         }
-        checkIdentityKeys(provider)
-        redirects.push(provider)
-        break
+        checkIdentityKeys(provider);
+        redirects.push(provider);
+        break;
       }
-      case 'trusted': {
-        if (typeof provider.resolve !== 'function') {
+      case "trusted": {
+        if (typeof provider.resolve !== "function") {
           throw new Error(
             `folio: auth provider '${provider.id}' is a trusted flow but has no \`resolve\``,
-          )
+          );
         }
-        checkIdentityKeys(provider)
-        trusted.push(provider)
-        break
+        checkIdentityKeys(provider);
+        trusted.push(provider);
+        break;
       }
-      case 'passkey': {
-        if (provider.id !== 'passkey') {
+      case "passkey": {
+        if (provider.id !== "passkey") {
           throw new Error(
             `folio: auth provider '${provider.id}' is a passkey flow, whose id must be 'passkey'`,
-          )
+          );
         }
-        refuseIdentityKeys(provider)
-        refuseDomains(provider, 'a passkey proves a device, not a domain')
+        refuseIdentityKeys(provider);
+        refuseDomains(provider, "a passkey proves a device, not a domain");
         if (passkey) {
-          throw new Error(`folio: two passkey auth providers are configured ('${provider.id}')`)
+          throw new Error(`folio: two passkey auth providers are configured ('${provider.id}')`);
         }
-        passkey = provider
-        break
+        passkey = provider;
+        break;
       }
     }
 
     for (const domain of domainsOf(provider)) {
-      const claimed = domains.get(domain)
+      const claimed = domains.get(domain);
       if (claimed) {
         throw new Error(
           `folio: auth providers '${claimed}' and '${provider.id}' both claim the domain` +
             ` '${domain}' — an enforced domain is exactly one door`,
-        )
+        );
       }
-      domains.set(domain, provider.id)
+      domains.set(domain, provider.id);
     }
   }
 
@@ -320,20 +322,20 @@ export function resolveAuth<Env>(auth: AuthConfig<Env> | OpenAuth | undefined): 
   // mint the first one (`foundation/passkeys.md`).
   if (passkey && auth.providers.length === 1) {
     throw new Error(
-      'folio: the passkey provider cannot be the only one — nobody could enrol a first passkey',
-    )
+      "folio: the passkey provider cannot be the only one — nobody could enrol a first passkey",
+    );
   }
 
-  const sessionDays = auth.sessionDays ?? 30
+  const sessionDays = auth.sessionDays ?? 30;
   if (!Number.isFinite(sessionDays) || sessionDays <= 0) {
-    throw new Error('folio: `auth.sessionDays` must be a positive number of days')
+    throw new Error("folio: `auth.sessionDays` must be a positive number of days");
   }
-  const linksPerHour = auth.linksPerHour ?? 5
+  const linksPerHour = auth.linksPerHour ?? 5;
   if (!Number.isFinite(linksPerHour) || linksPerHour <= 0) {
-    throw new Error('folio: `auth.linksPerHour` must be a positive number')
+    throw new Error("folio: `auth.linksPerHour` must be a positive number");
   }
   return {
-    mode: 'session',
+    mode: "session",
     config: auth,
     sessionDays,
     linksPerHour,
@@ -342,25 +344,25 @@ export function resolveAuth<Env>(auth: AuthConfig<Env> | OpenAuth | undefined): 
     redirects,
     trusted,
     domains,
-  }
+  };
 }
 
 /** `provision` and `roleFrom`, on a kind that is allowed them. */
 function checkIdentityKeys(provider: {
-  id: string
-  provision?: Provisioning
-  roleFrom?: RoleMapper
+  id: string;
+  provision?: Provisioning;
+  roleFrom?: RoleMapper;
 }): void {
-  if (provider.provision !== undefined && provider.provision !== 'refuse') {
-    const role = provider.provision.role
+  if (provider.provision !== undefined && provider.provision !== "refuse") {
+    const role = provider.provision.role;
     if (role !== undefined && !isRole(role)) {
       throw new Error(
         `folio: auth provider '${provider.id}' provisions with an unknown role '${String(role)}'`,
-      )
+      );
     }
   }
-  if (provider.roleFrom !== undefined && typeof provider.roleFrom !== 'function') {
-    throw new Error(`folio: auth provider '${provider.id}'s \`roleFrom\` must be a function`)
+  if (provider.roleFrom !== undefined && typeof provider.roleFrom !== "function") {
+    throw new Error(`folio: auth provider '${provider.id}'s \`roleFrom\` must be a function`);
   }
 }
 
@@ -372,13 +374,13 @@ function checkIdentityKeys(provider: {
  * providers this is called with.
  */
 function refuseIdentityKeys(provider: { id: string; kind: string }): void {
-  const bag = provider as { provision?: unknown; roleFrom?: unknown }
-  for (const key of ['provision', 'roleFrom'] as const) {
+  const bag = provider as { provision?: unknown; roleFrom?: unknown };
+  for (const key of ["provision", "roleFrom"] as const) {
     if (bag[key] !== undefined) {
       throw new Error(
         `folio: auth provider '${provider.id}' is a ${provider.kind} flow and cannot carry` +
           ` \`${key}\` — only a provider that verifies an identity may place a role`,
-      )
+      );
     }
   }
 }
@@ -388,33 +390,33 @@ function refuseDomains(provider: { id: string; kind: string }, why: string): voi
     throw new Error(
       `folio: auth provider '${provider.id}' is a ${provider.kind} flow and cannot carry` +
         ` \`domains\` — ${why}`,
-    )
+    );
   }
 }
 
 /** A provider's `domains`, lowercased and screened. Throws naming the provider
  * and the entry, because a typo here silently enforces nothing. */
 function domainsOf(provider: { id: string; domains?: readonly string[] }): string[] {
-  const declared = provider.domains
-  if (declared === undefined) return []
+  const declared = provider.domains;
+  if (declared === undefined) return [];
   if (!Array.isArray(declared)) {
-    throw new Error(`folio: auth provider '${provider.id}'s \`domains\` must be an array`)
+    throw new Error(`folio: auth provider '${provider.id}'s \`domains\` must be an array`);
   }
   return declared.map((raw) => {
-    const domain = typeof raw === 'string' ? raw.trim().toLowerCase().replace(/\.$/, '') : ''
+    const domain = typeof raw === "string" ? raw.trim().toLowerCase().replace(/\.$/, "") : "";
     if (!DOMAIN_RE.test(domain)) {
       throw new Error(
         `folio: auth provider '${provider.id}' claims '${String(raw)}', which is not a domain` +
-          ' — lowercase, no `@`, no wildcard',
-      )
+          " — lowercase, no `@`, no wildcard",
+      );
     }
-    return domain
-  })
+    return domain;
+  });
 }
 
 /** Screens a scope list arriving from a request body. */
 export function screenScopes(value: unknown): Scope[] {
-  return Array.isArray(value) ? value.filter(isScope) : []
+  return Array.isArray(value) ? value.filter(isScope) : [];
 }
 
 /* -------------------------------------------------- describing it to a client --- */
@@ -434,24 +436,24 @@ export function screenScopes(value: unknown): Scope[] {
  * for a socket attachment.
  */
 export interface AuthPolicyProvider {
-  id: string
-  label: string
+  id: string;
+  label: string;
   /** Which of the four kinds it is, which is how a screen knows what it does. */
-  kind: AuthProvider['kind']
+  kind: AuthProvider["kind"];
   /** What happens to an identity the provider verified that matches no user row. */
-  provision: 'refuse' | 'create'
+  provision: "refuse" | "create";
   /** Role a provisioned user is created with, when `provision` is `'create'`. */
-  provisionRole?: Role
+  provisionRole?: Role;
   /**
    * Whether this provider's claims place a role. A boolean and not the mapping:
    * a `RoleMapper` is a function, and showing one needs a DSL the spec rejected
    * (decision 5). "Roles: from Okta" is the fact an editor needs.
    */
-  rolesFromProvider: boolean
+  rolesFromProvider: boolean;
   /** Email domains enforced to this provider, lowercased. Empty for most. */
-  domains: string[]
+  domains: string[];
   /** Whether signing out sends the browser on to the provider's own logout. */
-  signOut: boolean
+  signOut: boolean;
 }
 
 /**
@@ -475,11 +477,11 @@ export interface AuthPolicyProvider {
  * session mode. The auth **mode** is on the same response for the same reason.
  */
 export interface AuthPolicy {
-  providers: AuthPolicyProvider[]
+  providers: AuthPolicyProvider[];
   /** `AuthConfig.sessionDays`, resolved — the default is 30, never absent here. */
-  sessionDays: number
+  sessionDays: number;
   /** `AuthConfig.linksPerHour`, resolved. Default 5. */
-  linksPerHour: number
+  linksPerHour: number;
 }
 
 /**
@@ -493,37 +495,37 @@ export interface AuthPolicy {
  * to hand it out.
  */
 export function authPolicy(auth: ResolvedAuth<unknown>): AuthPolicy | undefined {
-  if (auth.mode === 'open') return undefined
+  if (auth.mode === "open") return undefined;
   return {
     providers: auth.config.providers.map((p) => ({
       id: p.id,
       label: p.label,
       kind: p.kind,
-      provision: provisionOf(p) === 'refuse' ? ('refuse' as const) : ('create' as const),
+      provision: provisionOf(p) === "refuse" ? ("refuse" as const) : ("create" as const),
       // Only when it would mean something. `provision: 'refuse'` with a role
       // beside it is a contradiction to read past, not a fact.
       ...roleClause(p),
-      rolesFromProvider: 'roleFrom' in p && typeof p.roleFrom === 'function',
+      rolesFromProvider: "roleFrom" in p && typeof p.roleFrom === "function",
       domains: [...(p.domains ?? [])].map((d) => d.toLowerCase()),
-      signOut: 'signOutUrl' in p && typeof p.signOutUrl === 'string' && p.signOutUrl !== '',
+      signOut: "signOutUrl" in p && typeof p.signOutUrl === "string" && p.signOutUrl !== "",
     })),
     // The *resolved* numbers, not `config.sessionDays` — a screen saying "not set"
     // where the answer is "30 days" has answered nothing.
     sessionDays: auth.sessionDays,
     linksPerHour: auth.linksPerHour,
-  }
+  };
 }
 
 /** `Provisioning` for any kind: the two that cannot provision read as
  * `'refuse'`, which is what they do. */
 function provisionOf(provider: AuthProvider<unknown>): Provisioning {
-  return 'provision' in provider ? (provider.provision ?? 'refuse') : 'refuse'
+  return "provision" in provider ? (provider.provision ?? "refuse") : "refuse";
 }
 
 function roleClause(provider: AuthProvider<unknown>): { provisionRole?: Role } {
-  const provision = provisionOf(provider)
-  if (provision === 'refuse' || !provision.role) return {}
-  return { provisionRole: provision.role }
+  const provision = provisionOf(provider);
+  if (provision === "refuse" || !provision.role) return {};
+  return { provisionRole: provision.role };
 }
 
 /**
@@ -539,36 +541,36 @@ function roleClause(provider: AuthProvider<unknown>): { provisionRole?: Role } {
  * With no `sites` neither applies, and nothing calls this.
  */
 export function validateSitesAuth(auth: ResolvedAuth<unknown>): void {
-  if (auth.mode !== 'session') return
+  if (auth.mode !== "session") return;
   for (const provider of auth.config.providers) {
-    if (!('provision' in provider)) continue
-    const provision = provider.provision
-    if (provision === undefined || provision === 'refuse') continue
+    if (!("provision" in provider)) continue;
+    const provision = provider.provision;
+    if (provision === undefined || provision === "refuse") continue;
     if (provision.role !== undefined) {
       throw new Error(
         `folio: auth provider '${provider.id}' provisions with a role, which on a deployment` +
-          ' with `sites` would be a role on every site; map roles with `roleFrom` instead',
-      )
+          " with `sites` would be a role on every site; map roles with `roleFrom` instead",
+      );
     }
-    if (typeof provider.roleFrom !== 'function') {
+    if (typeof provider.roleFrom !== "function") {
       throw new Error(
         `folio: auth provider '${provider.id}' creates users, and on a deployment with` +
-          ' `sites` a created user needs `roleFrom` to say where they may work',
-      )
+          " `sites` a created user needs `roleFrom` to say where they may work",
+      );
     }
   }
   // `roleFromClaim({ default })`, on any provider that places roles: the role for an
   // identity none of the map matched is a grant on `*`, which on a deployment with
   // `sites` is a role on every site for anybody the directory admits.
   for (const provider of auth.config.providers) {
-    if (!('roleFrom' in provider)) continue
-    const fallback = defaultRoleOf(provider.roleFrom)
+    if (!("roleFrom" in provider)) continue;
+    const fallback = defaultRoleOf(provider.roleFrom);
     if (fallback !== undefined) {
       throw new Error(
         `folio: auth provider '${provider.id}' maps a default role ('${fallback}') with` +
           " roleFromClaim's `default`, which on a deployment with `sites` would be a role on" +
-          ' every site for anybody the directory admits; drop it, and name each scope in `map`',
-      )
+          " every site for anybody the directory admits; drop it, and name each scope in `map`",
+      );
     }
   }
 }

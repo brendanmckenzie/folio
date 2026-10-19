@@ -1,13 +1,13 @@
-import { useCallback, useState } from 'react'
-import { type Me, brandsOf } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { ListHeader } from '../List'
-import { type Column, Table } from '../Table'
-import { SiteDialog } from './SiteDialog'
-import css from './Sites.module.css'
+import { useCallback, useState } from "react";
+import { type Me, brandsOf } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { ListHeader } from "../List";
+import { type Column, Table } from "../Table";
+import { SiteDialog } from "./SiteDialog";
+import css from "./Sites.module.css";
 import {
   brandLabel,
   createBody,
@@ -26,36 +26,36 @@ import {
   siteRows,
   sitesGate,
   statusTone,
-} from './sites-model'
-import { messageOf } from './useContent'
-import { useSites } from './useSites'
+} from "./sites-model";
+import { messageOf } from "./useContent";
+import { useSites } from "./useSites";
 
 interface Props {
   /** The admin's JSON base. `/sites` is unscoped, so any scope's answers alike. */
-  apiBase: string
+  apiBase: string;
   /** The mount with no scope, for the links into a scope's settings. */
-  base: string
-  me: Me
+  base: string;
+  me: Me;
   /** The shell's boot is in flight, so `me` is a guess. See `Access`. */
-  loading?: boolean
+  loading?: boolean;
   /** The singleton type that holds site-level fields, or null when the host declared
    * none — and then the Settings tab does not exist. */
-  settings: string | null
+  settings: string | null;
   /** The brand whose settings type `settings` is, from a scoped manifest on a
    * deployment with `brands`; null otherwise. It narrows the Settings tab to that
    * brand's scopes. */
-  settingsBrand?: string | null
-  query: Readonly<Record<string, string>>
-  onQuery: (next: Record<string, string | undefined>) => void
-  onNotice: (message: string) => void
+  settingsBrand?: string | null;
+  query: Readonly<Record<string, string>>;
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onNotice: (message: string) => void;
 }
 
 type Dialogue =
-  | { kind: 'create'; form: SiteForm }
-  | { kind: 'edit'; row: SiteRow }
-  | { kind: 'delete'; row: SiteRow }
+  | { kind: "create"; form: SiteForm }
+  | { kind: "edit"; row: SiteRow }
+  | { kind: "delete"; row: SiteRow };
 
-const SKELETON = ['s1', 's2', 's3', 's4']
+const SKELETON = ["s1", "s2", "s3", "s4"];
 
 /**
  * The registry: sites, groups, hostnames, preview origin and status
@@ -83,99 +83,99 @@ export function Sites({
   onQuery,
   onNotice,
 }: Props) {
-  const gate = sitesGate(me, loading)
-  const data = useSites(apiBase, gate.kind === 'ok')
-  const [dialogue, setDialogue] = useState<Dialogue | null>(null)
-  const [busy, setBusy] = useState(false)
+  const gate = sitesGate(me, loading);
+  const data = useSites(apiBase, gate.kind === "ok");
+  const [dialogue, setDialogue] = useState<Dialogue | null>(null);
+  const [busy, setBusy] = useState(false);
   // Empty on a deployment with no `brands`, and everything brand-shaped below keys off
   // that: no column, no field, no brand in a request.
-  const brands = brandsOf(me)
+  const brands = brandsOf(me);
 
-  const tab = settings !== null && query.tab === 'settings' ? 'settings' : 'registry'
+  const tab = settings !== null && query.tab === "settings" ? "settings" : "registry";
 
   const write = useCallback(
     async (work: () => Promise<string>) => {
-      setBusy(true)
+      setBusy(true);
       try {
-        onNotice(await work())
-        data.reload()
-        return true
+        onNotice(await work());
+        data.reload();
+        return true;
       } catch (e) {
-        onNotice((e as Error).message)
-        return false
+        onNotice((e as Error).message);
+        return false;
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [onNotice, data.reload],
-  )
+  );
 
   const call = useCallback(
-    async (path: string, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', body?: unknown) => {
+    async (path: string, method: "POST" | "PATCH" | "PUT" | "DELETE", body?: unknown) => {
       const res = await fetch(`${apiBase}${path}`, {
         method,
         ...(body === undefined
           ? {}
-          : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      return res
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      return res;
     },
     [apiBase],
-  )
+  );
 
-  if (gate.kind === 'booting') return <Booting />
-  if (gate.kind !== 'ok') return <Unavailable gate={gate} />
+  if (gate.kind === "booting") return <Booting />;
+  if (gate.kind !== "ok") return <Unavailable gate={gate} />;
 
-  const rows = siteRows(data.registry)
+  const rows = siteRows(data.registry);
 
   const save = async (form: SiteForm) => {
     const ok = await write(async () => {
-      if (dialogue?.kind === 'edit') {
-        const before = dialogue.row
-        const patch = patchBody(form, before)
+      if (dialogue?.kind === "edit") {
+        const before = dialogue.row;
+        const patch = patchBody(form, before);
         if (Object.keys(patch).length > 0) {
-          await call(`/sites/${encodeURIComponent(before.id)}`, 'PATCH', patch)
+          await call(`/sites/${encodeURIComponent(before.id)}`, "PATCH", patch);
         }
-        if (before.kind === 'site' && hostsChanged(form, before)) {
-          await call(`/sites/${encodeURIComponent(before.id)}/hosts`, 'PUT', {
+        if (before.kind === "site" && hostsChanged(form, before)) {
+          await call(`/sites/${encodeURIComponent(before.id)}/hosts`, "PUT", {
             hosts: form.hosts
               .split(/[\s,]+/)
               .map((host) => host.trim())
               .filter(Boolean),
-          })
+          });
         }
-        return `Saved ${form.name.trim()}.`
+        return `Saved ${form.name.trim()}.`;
       }
-      await call('/sites', 'POST', createBody(form))
-      return `Created ${form.name.trim()}.`
-    })
-    if (ok) setDialogue(null)
-  }
+      await call("/sites", "POST", createBody(form));
+      return `Created ${form.name.trim()}.`;
+    });
+    if (ok) setDialogue(null);
+  };
 
   const remove = (row: SiteRow) =>
     void write(async () => {
-      await call(`/sites/${encodeURIComponent(row.id)}`, 'DELETE')
-      return `${row.name} is deleted.`
-    })
+      await call(`/sites/${encodeURIComponent(row.id)}`, "DELETE");
+      return `${row.name} is deleted.`;
+    });
 
   const columns: Column<SiteRow>[] = [
     {
-      key: 'name',
-      label: 'Name',
+      key: "name",
+      label: "Name",
       cell: (row) => (
         <span className={css.ids}>
           <span className={css.name}>{row.name}</span>
           <Badge mono>{row.id}</Badge>
-          {row.kind === 'group' ? <Badge>group</Badge> : null}
+          {row.kind === "group" ? <Badge>group</Badge> : null}
         </span>
       ),
     },
     ...(brands.length > 0
       ? [
           {
-            key: 'brand',
-            label: 'Brand',
+            key: "brand",
+            label: "Brand",
             cell: (row: SiteRow) =>
               row.brand === null ? (
                 <span className={css.blank} title="No brand: this row serves nothing">
@@ -188,8 +188,8 @@ export function Sites({
         ]
       : []),
     {
-      key: 'status',
-      label: 'Status',
+      key: "status",
+      label: "Status",
       cell: (row) =>
         row.status === null ? (
           <span className={css.blank}>—</span>
@@ -198,16 +198,16 @@ export function Sites({
         ),
     },
     {
-      key: 'group',
-      label: 'Group',
+      key: "group",
+      label: "Group",
       cell: (row) =>
         row.group === null ? <span className={css.blank}>—</span> : <Badge mono>{row.group}</Badge>,
     },
     {
-      key: 'hosts',
-      label: 'Hostnames',
+      key: "hosts",
+      label: "Hostnames",
       cell: (row) =>
-        row.kind === 'group' ? (
+        row.kind === "group" ? (
           <span className={css.blank}>—</span>
         ) : row.hosts.length === 0 ? (
           <span className={css.blank}>none</span>
@@ -222,30 +222,30 @@ export function Sites({
         ),
     },
     {
-      key: 'preview',
-      label: 'Preview origin',
+      key: "preview",
+      label: "Preview origin",
       cell: (row) => {
-        if (row.kind === 'group') return <span className={css.blank}>—</span>
-        const note = previewNote(row)
+        if (row.kind === "group") return <span className={css.blank}>—</span>;
+        const note = previewNote(row);
         return note ? (
           <span className={css.blank} title={note}>
             none
           </span>
         ) : (
           <Badge mono>{row.preview}</Badge>
-        )
+        );
       },
     },
     {
-      key: 'act',
-      label: 'Actions',
+      key: "act",
+      label: "Actions",
       cell: (row) => (
         <span className={css.rowActions}>
           <Button
             size="sm"
             disabled={busy}
             reason="A write is in flight"
-            onClick={() => setDialogue({ kind: 'edit', row })}
+            onClick={() => setDialogue({ kind: "edit", row })}
           >
             Edit
           </Button>
@@ -254,35 +254,35 @@ export function Sites({
             variant="danger"
             disabled={busy}
             reason="A write is in flight"
-            onClick={() => setDialogue({ kind: 'delete', row })}
+            onClick={() => setDialogue({ kind: "delete", row })}
           >
             Delete
           </Button>
         </span>
       ),
     },
-  ]
+  ];
 
   return (
     <div className={css.screen}>
       {settings !== null ? (
         <div className={css.tabs} role="tablist" aria-label="Sites">
-          {(['registry', 'settings'] as const).map((id) => (
+          {(["registry", "settings"] as const).map((id) => (
             <button
               key={id}
               type="button"
               role="tab"
               aria-selected={tab === id}
-              className={`${css.tab} ${tab === id ? css.tabOn : ''}`}
-              onClick={() => onQuery({ tab: id === 'registry' ? undefined : id })}
+              className={`${css.tab} ${tab === id ? css.tabOn : ""}`}
+              onClick={() => onQuery({ tab: id === "registry" ? undefined : id })}
             >
-              {id === 'registry' ? 'Registry' : 'Settings'}
+              {id === "registry" ? "Registry" : "Settings"}
             </button>
           ))}
         </div>
       ) : null}
 
-      {tab === 'registry' ? (
+      {tab === "registry" ? (
         <section className={css.section} aria-label="Sites and groups">
           <ListHeader
             actions={
@@ -291,7 +291,7 @@ export function Sites({
                   size="sm"
                   disabled={busy}
                   reason="A write is in flight"
-                  onClick={() => setDialogue({ kind: 'create', form: emptyForm('group', brands) })}
+                  onClick={() => setDialogue({ kind: "create", form: emptyForm("group", brands) })}
                 >
                   New group
                 </Button>
@@ -300,7 +300,7 @@ export function Sites({
                   variant="primary"
                   disabled={busy}
                   reason="A write is in flight"
-                  onClick={() => setDialogue({ kind: 'create', form: emptyForm('site', brands) })}
+                  onClick={() => setDialogue({ kind: "create", form: emptyForm("site", brands) })}
                 >
                   New site
                 </Button>
@@ -340,13 +340,13 @@ export function Sites({
       ) : (
         <SettingsTab
           base={base}
-          type={settings ?? ''}
+          type={settings ?? ""}
           registry={data.registry}
           brand={settingsBrand}
         />
       )}
 
-      {dialogue?.kind === 'create' ? (
+      {dialogue?.kind === "create" ? (
         <SiteDialog
           mode="create"
           initial={dialogue.form}
@@ -356,18 +356,18 @@ export function Sites({
           onSave={save}
         />
       ) : null}
-      {dialogue?.kind === 'edit' ? (
+      {dialogue?.kind === "edit" ? (
         <SiteDialog
           mode="edit"
           initial={formOf(dialogue.row)}
           groups={data.registry.groups}
-          hasSites={dialogue.row.kind === 'group' && groupHasSites(data.registry, dialogue.row.id)}
+          hasSites={dialogue.row.kind === "group" && groupHasSites(data.registry, dialogue.row.id)}
           brands={brands}
           onClose={() => setDialogue(null)}
           onSave={save}
         />
       ) : null}
-      {dialogue?.kind === 'delete' ? (
+      {dialogue?.kind === "delete" ? (
         <Dialog
           title={`Delete ${dialogue.row.name}?`}
           description="Refused while it still owns any content."
@@ -379,9 +379,9 @@ export function Sites({
               <Button
                 variant="danger"
                 onClick={() => {
-                  const row = dialogue.row
-                  setDialogue(null)
-                  remove(row)
+                  const row = dialogue.row;
+                  setDialogue(null);
+                  remove(row);
                 }}
               >
                 Delete
@@ -396,7 +396,7 @@ export function Sites({
         </Dialog>
       ) : null}
     </div>
-  )
+  );
 }
 
 /**
@@ -413,12 +413,12 @@ function SettingsTab({
   registry,
   brand,
 }: {
-  base: string
-  type: string
-  registry: ReturnType<typeof useSites>['registry']
-  brand: string | null
+  base: string;
+  type: string;
+  registry: ReturnType<typeof useSites>["registry"];
+  brand: string | null;
 }) {
-  const scopes = settingsScopes(registry, brand)
+  const scopes = settingsScopes(registry, brand);
   return (
     <section className={css.section} aria-label="Settings by scope">
       <ListHeader>Settings</ListHeader>
@@ -433,7 +433,7 @@ function SettingsTab({
         ))}
       </ul>
     </section>
-  )
+  );
 }
 
 /* -------------------------------------------------------------- the gate --- */
@@ -448,7 +448,7 @@ function Booting() {
         ))}
       </div>
     </div>
-  )
+  );
 }
 
 /**
@@ -459,17 +459,17 @@ function Booting() {
 function Unavailable({
   gate,
 }: {
-  gate: Exclude<ReturnType<typeof sitesGate>, { kind: 'ok' | 'booting' }>
+  gate: Exclude<ReturnType<typeof sitesGate>, { kind: "ok" | "booting" }>;
 }) {
-  if (gate.kind === 'absent') {
+  if (gate.kind === "absent") {
     return (
       <EmptyState
         title="This deployment has one site"
         body="Sites are switched on by configuring `sites` in createFolio. Until then there is nothing to register."
       />
-    )
+    );
   }
-  if (gate.kind === 'anonymous') {
+  if (gate.kind === "anonymous") {
     return (
       <EmptyState
         title="Sign in to manage sites"
@@ -482,7 +482,7 @@ function Unavailable({
           </a>
         }
       />
-    )
+    );
   }
-  return <EmptyState title="Sites are managed by the platform" body={gate.reason} />
+  return <EmptyState title="Sites are managed by the platform" body={gate.reason} />;
 }

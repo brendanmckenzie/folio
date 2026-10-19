@@ -1,37 +1,43 @@
-import { useState } from 'react'
-import type { Json } from '../../../../core/doc'
-import type { StoryRef } from '../../../../core/resolve'
-import { asAsset, asLink, LINK_KINDS, type LinkKind, type LinkValue } from '../../../../core/values'
-import { Button } from '../../Button'
-import { Field, Input } from '../../Field'
-import { AssetField } from './AssetField'
-import { candidateHint } from './candidates'
-import { candidateOf, DocumentPicker } from './DocumentPicker'
-import css from './fields.module.css'
+import { useState } from "react";
+import type { Json } from "../../../../core/doc";
+import type { StoryRef } from "../../../../core/resolve";
+import {
+  asAsset,
+  asLink,
+  LINK_KINDS,
+  type LinkKind,
+  type LinkValue,
+} from "../../../../core/values";
+import { Button } from "../../Button";
+import { Field, Input } from "../../Field";
+import { AssetField } from "./AssetField";
+import { candidateHint } from "./candidates";
+import { candidateOf, DocumentPicker } from "./DocumentPicker";
+import css from "./fields.module.css";
 
 const LABELS: Record<LinkKind, string> = {
-  story: 'Page',
-  url: 'URL',
-  email: 'Email',
-  anchor: 'Anchor',
-  asset: 'File',
-}
+  story: "Page",
+  url: "URL",
+  email: "Email",
+  anchor: "Anchor",
+  asset: "File",
+};
 
 interface Props {
-  id: string
+  id: string;
   /** The field's label, for the document picker's own title. */
-  label: string
-  value: Json
-  allow?: readonly LinkKind[]
+  label: string;
+  value: Json;
+  allow?: readonly LinkKind[];
   /** `multilink({ types })`: which document types a story link may point at.
    * Absent offers every *routed* type — an unrouted document has no URL, so it is
    * never offered whatever this says (`document-types.md`). */
-  types?: readonly string[]
-  stories: Readonly<Record<string, StoryRef>>
-  apiBase: string
-  mount: string
-  editable: boolean
-  onChange: (value: Json) => void
+  types?: readonly string[];
+  stories: Readonly<Record<string, StoryRef>>;
+  apiBase: string;
+  mount: string;
+  editable: boolean;
+  onChange: (value: Json) => void;
 }
 
 /**
@@ -67,27 +73,27 @@ export function LinkField({
   editable,
   onChange,
 }: Props) {
-  const [chosen, setChosen] = useState<LinkKind | null>(null)
-  const [picking, setPicking] = useState(false)
+  const [chosen, setChosen] = useState<LinkKind | null>(null);
+  const [picking, setPicking] = useState(false);
 
-  const kinds = allow?.length ? LINK_KINDS.filter((k) => allow.includes(k)) : LINK_KINDS
-  const link = asLink(value)
+  const kinds = allow?.length ? LINK_KINDS.filter((k) => allow.includes(k)) : LINK_KINDS;
+  const link = asLink(value);
   const kind: LinkKind =
     link && kinds.includes(link.kind)
       ? link.kind
       : chosen && kinds.includes(chosen)
         ? chosen
-        : kinds[0]!
+        : kinds[0]!;
 
-  const patch = (next: LinkValue | null) => onChange(next as unknown as Json)
+  const patch = (next: LinkValue | null) => onChange(next as unknown as Json);
 
   const switchKind = (to: LinkKind) => {
-    setChosen(to)
-    patch(null)
-  }
+    setChosen(to);
+    patch(null);
+  };
 
-  const target = link && 'target' in link ? link.target : undefined
-  const targetable = kind === 'story' || kind === 'url' || kind === 'asset'
+  const target = link && "target" in link ? link.target : undefined;
+  const targetable = kind === "story" || kind === "url" || kind === "asset";
 
   return (
     <div className={css.stack}>
@@ -98,7 +104,7 @@ export function LinkField({
             <button
               key={k}
               type="button"
-              className={`${css.segment} ${css.segmentWide} ${k === kind ? css.segmentOn : ''}`}
+              className={`${css.segment} ${css.segmentWide} ${k === kind ? css.segmentOn : ""}`}
               aria-pressed={k === kind}
               onClick={() => switchKind(k)}
             >
@@ -108,7 +114,7 @@ export function LinkField({
         </fieldset>
       ) : null}
 
-      {kind === 'story' ? (
+      {kind === "story" ? (
         <StoryTarget
           id={id}
           label={label}
@@ -121,7 +127,7 @@ export function LinkField({
           onPicking={setPicking}
           onPatch={patch}
         />
-      ) : kind === 'url' ? (
+      ) : kind === "url" ? (
         /*
          * The row's own `id`, bound straight to the input, and no nested `Field`.
          * The row's label already names this control — a `multilink` called "Read
@@ -134,56 +140,56 @@ export function LinkField({
         <Input
           id={id}
           type="url"
-          value={link?.kind === 'url' ? link.url : ''}
+          value={link?.kind === "url" ? link.url : ""}
           placeholder="https://example.com"
           disabled={!editable}
           onChange={(e) =>
             patch(
               e.target.value
                 ? {
-                    kind: 'url',
+                    kind: "url",
                     url: e.target.value,
-                    ...(link?.kind === 'url' && link.target ? { target: link.target } : {}),
+                    ...(link?.kind === "url" && link.target ? { target: link.target } : {}),
                   }
                 : null,
             )
           }
         />
-      ) : kind === 'asset' ? (
+      ) : kind === "asset" ? (
         <AssetField
           id={id}
-          value={(link?.kind === 'asset' ? link.asset : null) as unknown as Json}
+          value={(link?.kind === "asset" ? link.asset : null) as unknown as Json}
           apiBase={apiBase}
           mount={mount}
           editable={editable}
           onChange={(next) => {
-            const asset = asAsset(next)
+            const asset = asAsset(next);
             patch(
               asset
                 ? {
-                    kind: 'asset',
+                    kind: "asset",
                     asset,
-                    ...(link?.kind === 'asset' && link.target ? { target: link.target } : {}),
+                    ...(link?.kind === "asset" && link.target ? { target: link.target } : {}),
                   }
                 : null,
-            )
+            );
           }}
         />
-      ) : kind === 'email' ? (
+      ) : kind === "email" ? (
         <>
           <Input
             id={id}
             type="email"
-            value={link?.kind === 'email' ? link.email : ''}
+            value={link?.kind === "email" ? link.email : ""}
             placeholder="someone@example.com"
             disabled={!editable}
             onChange={(e) =>
               patch(
                 e.target.value
                   ? {
-                      kind: 'email',
+                      kind: "email",
                       email: e.target.value,
-                      ...(link?.kind === 'email' && link.subject ? { subject: link.subject } : {}),
+                      ...(link?.kind === "email" && link.subject ? { subject: link.subject } : {}),
                     }
                   : null,
               )
@@ -194,13 +200,13 @@ export function LinkField({
               <Input
                 id={inner}
                 type="text"
-                value={link?.kind === 'email' ? (link.subject ?? '') : ''}
+                value={link?.kind === "email" ? (link.subject ?? "") : ""}
                 // There is nothing to put a subject on until there is an address, and
                 // a control that would silently discard what you typed is worse than
                 // one that says it is not ready.
-                disabled={!editable || link?.kind !== 'email'}
+                disabled={!editable || link?.kind !== "email"}
                 onChange={(e) =>
-                  link?.kind === 'email'
+                  link?.kind === "email"
                     ? patch({ ...link, subject: e.target.value || undefined })
                     : undefined
                 }
@@ -212,11 +218,11 @@ export function LinkField({
         <Input
           id={id}
           type="text"
-          value={link?.kind === 'anchor' ? link.anchor : ''}
+          value={link?.kind === "anchor" ? link.anchor : ""}
           placeholder="section-id"
           disabled={!editable}
           onChange={(e) =>
-            patch(e.target.value ? { kind: 'anchor', anchor: e.target.value } : null)
+            patch(e.target.value ? { kind: "anchor", anchor: e.target.value } : null)
           }
         />
       )}
@@ -227,11 +233,11 @@ export function LinkField({
             <input
               type="checkbox"
               className={css.checkbox}
-              checked={target === '_blank'}
+              checked={target === "_blank"}
               disabled={!editable || !link}
               onChange={(e) => {
-                if (!link || link.kind === 'email' || link.kind === 'anchor') return
-                patch({ ...link, target: e.target.checked ? '_blank' : undefined })
+                if (!link || link.kind === "email" || link.kind === "anchor") return;
+                patch({ ...link, target: e.target.checked ? "_blank" : undefined });
               }}
             />
             Open in a new tab
@@ -244,7 +250,7 @@ export function LinkField({
         ) : null}
       </div>
     </div>
-  )
+  );
 }
 
 /**
@@ -267,26 +273,26 @@ function StoryTarget({
   onPicking,
   onPatch,
 }: {
-  id: string
-  label: string
-  link: LinkValue | null
-  types?: readonly string[]
-  stories: Readonly<Record<string, StoryRef>>
-  apiBase: string
-  editable: boolean
-  picking: boolean
-  onPicking: (open: boolean) => void
-  onPatch: (next: LinkValue | null) => void
+  id: string;
+  label: string;
+  link: LinkValue | null;
+  types?: readonly string[];
+  stories: Readonly<Record<string, StoryRef>>;
+  apiBase: string;
+  editable: boolean;
+  picking: boolean;
+  onPicking: (open: boolean) => void;
+  onPatch: (next: LinkValue | null) => void;
 }) {
-  const target = link?.kind === 'story' ? link : null
-  const resolved = target ? candidateOf(stories, target.id) : undefined
+  const target = link?.kind === "story" ? link : null;
+  const resolved = target ? candidateOf(stories, target.id) : undefined;
 
   return (
     <div className={css.stack}>
       {target ? (
-        <div className={`${css.picked} ${resolved ? '' : css.missing}`}>
+        <div className={`${css.picked} ${resolved ? "" : css.missing}`}>
           <span className={css.pickedTitle}>
-            {resolved ? resolved.title || 'Untitled' : 'not found'}
+            {resolved ? resolved.title || "Untitled" : "not found"}
           </span>
           <span className={css.pickedWhere}>{resolved ? candidateHint(resolved) : target.id}</span>
         </div>
@@ -294,7 +300,7 @@ function StoryTarget({
 
       <div className={css.row}>
         <Button id={id} size="sm" disabled={!editable} onClick={() => onPicking(true)}>
-          {target ? 'Change page…' : 'Choose a page…'}
+          {target ? "Change page…" : "Choose a page…"}
         </Button>
       </div>
 
@@ -309,7 +315,7 @@ function StoryTarget({
           <Input
             id={inner}
             type="text"
-            value={target?.anchor ?? ''}
+            value={target?.anchor ?? ""}
             placeholder="section-id"
             disabled={!editable || !target}
             onChange={(e) =>
@@ -327,16 +333,16 @@ function StoryTarget({
           {...(types ? { types } : {})}
           onPick={(picked) => {
             onPatch({
-              kind: 'story',
+              kind: "story",
               id: picked,
               ...(target?.anchor ? { anchor: target.anchor } : {}),
               ...(target?.target ? { target: target.target } : {}),
-            })
-            onPicking(false)
+            });
+            onPicking(false);
           }}
           onClose={() => onPicking(false)}
         />
       ) : null}
     </div>
-  )
+  );
 }

@@ -10,8 +10,8 @@
  * (`vitest.config.ts` runs the unit project under `environment: 'node'`), so a
  * screen's decisions have to live somewhere a Node test can reach them.
  */
-import type { Me, MeUser } from '../../me'
-import { when } from './content-rows'
+import type { Me, MeUser } from "../../me";
+import { when } from "./content-rows";
 
 /* ------------------------------------------------------------------ gate --- */
 
@@ -28,16 +28,16 @@ import { when } from './content-rows'
  * every role.
  */
 export type AccountGate =
-  | { kind: 'ok'; self: MeUser }
-  | { kind: 'open' }
-  | { kind: 'anonymous'; loginUrl: string }
-  | { kind: 'token' }
+  | { kind: "ok"; self: MeUser }
+  | { kind: "open" }
+  | { kind: "anonymous"; loginUrl: string }
+  | { kind: "token" };
 
 export function accountGate(me: Me): AccountGate {
-  if (me.mode === 'open') return { kind: 'open' }
-  if (me.actor === null) return { kind: 'anonymous', loginUrl: me.loginUrl }
-  if (me.actor.kind === 'token') return { kind: 'token' }
-  return { kind: 'ok', self: me.actor }
+  if (me.mode === "open") return { kind: "open" };
+  if (me.actor === null) return { kind: "anonymous", loginUrl: me.loginUrl };
+  if (me.actor.kind === "token") return { kind: "token" };
+  return { kind: "ok", self: me.actor };
 }
 
 /* -------------------------------------------------------------- passkeys --- */
@@ -45,14 +45,14 @@ export function accountGate(me: Me): AccountGate {
 /** A passkey as `GET {base}/api/me/passkeys` answers one — `routes/passkeys.ts`'s
  * own `toJson`, which never carries `publicKey` or the raw `counter`. */
 export interface PasskeyRow {
-  id: string
-  name: string
-  alg: number
-  transports: string[] | null
-  aaguid: string | null
-  backedUp: boolean
-  createdAt: number
-  lastUsedAt: number | null
+  id: string;
+  name: string;
+  alg: number;
+  transports: string[] | null;
+  aaguid: string | null;
+  backedUp: boolean;
+  createdAt: number;
+  lastUsedAt: number | null;
 }
 
 /**
@@ -66,16 +66,16 @@ export interface PasskeyRow {
  * being optional rather than a bare boolean.
  */
 export type PasskeyAvailability =
-  | { kind: 'unavailable' }
-  | { kind: 'forbidden'; reason: string }
-  | { kind: 'available' }
+  | { kind: "unavailable" }
+  | { kind: "forbidden"; reason: string }
+  | { kind: "available" };
 
 export function passkeyAvailability(me: Me): PasskeyAvailability {
-  if (!me.passkeys) return { kind: 'unavailable' }
+  if (!me.passkeys) return { kind: "unavailable" };
   if (!me.passkeys.allowed) {
-    return { kind: 'forbidden', reason: me.passkeys.reason ?? 'You may not add a passkey.' }
+    return { kind: "forbidden", reason: me.passkeys.reason ?? "You may not add a passkey." };
   }
-  return { kind: 'available' }
+  return { kind: "available" };
 }
 
 /**
@@ -88,7 +88,7 @@ export function passkeyAvailability(me: Me): PasskeyAvailability {
  * renders this check, and the reason from `passkeyAvailability` in its place.
  */
 export function canEnrol(me: Me): boolean {
-  return passkeyAvailability(me).kind === 'available'
+  return passkeyAvailability(me).kind === "available";
 }
 
 /**
@@ -100,13 +100,13 @@ export function canEnrol(me: Me): boolean {
  * with.
  */
 const AAGUID_VENDORS: Readonly<Record<string, string>> = {
-  'ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4': 'Google Password Manager',
-  'dd4ec289-e01d-41c9-bb89-70fa845d4bf2': 'iCloud Keychain',
-  'fbfc3007-154e-4ecc-8c0b-6e020557d7bd': 'iCloud Keychain (managed Apple ID)',
-  '08987058-cadc-4b81-b6e1-30de50dcbe96': 'Windows Hello',
-  'bada5566-a7aa-401f-bd96-45619a55120d': '1Password',
-  '531126d6-e717-415c-9320-3d9aa6981239': 'Dashlane',
-}
+  "ea9b8d66-4d01-1d21-3ce4-b6b48cb575d4": "Google Password Manager",
+  "dd4ec289-e01d-41c9-bb89-70fa845d4bf2": "iCloud Keychain",
+  "fbfc3007-154e-4ecc-8c0b-6e020557d7bd": "iCloud Keychain (managed Apple ID)",
+  "08987058-cadc-4b81-b6e1-30de50dcbe96": "Windows Hello",
+  "bada5566-a7aa-401f-bd96-45619a55120d": "1Password",
+  "531126d6-e717-415c-9320-3d9aa6981239": "Dashlane",
+};
 
 /**
  * The vendor name a `passkeys.aaguid` implies, or null.
@@ -118,8 +118,8 @@ const AAGUID_VENDORS: Readonly<Record<string, string>> = {
  * person actually typed.
  */
 export function aaguidVendor(aaguid: string | null): string | null {
-  if (!aaguid) return null
-  return AAGUID_VENDORS[aaguid.toLowerCase()] ?? null
+  if (!aaguid) return null;
+  return AAGUID_VENDORS[aaguid.toLowerCase()] ?? null;
 }
 
 /** "ES256" / "RS256" from the COSE `alg` every passkey stores — the only two
@@ -129,11 +129,11 @@ export function aaguidVendor(aaguid: string | null): string | null {
 export function algLabel(alg: number): string {
   switch (alg) {
     case -7:
-      return 'ES256'
+      return "ES256";
     case -257:
-      return 'RS256'
+      return "RS256";
     default:
-      return `alg ${alg}`
+      return `alg ${alg}`;
   }
 }
 
@@ -142,7 +142,7 @@ export function algLabel(alg: number): string {
  * route answers `409` for the same reason, and this is what lets the screen say
  * so before the click rather than after. */
 export function passkeyCapReason(count: number, max: number): string | undefined {
-  return count >= max ? `That is the limit (${max}). Remove one before adding another.` : undefined
+  return count >= max ? `That is the limit (${max}). Remove one before adding another.` : undefined;
 }
 
 /* -------------------------------------------------------------- sessions --- */
@@ -151,12 +151,12 @@ export function passkeyCapReason(count: number, max: number): string | undefined
  * `users.last_seen_at` is per person, not per session, so there is no honest
  * per-browser answer to it (`routes/passkeys.ts`'s own comment). */
 export interface SessionRow {
-  id: string
-  current: boolean
-  provider: string | null
-  createdAt: number
-  expiresAt: number
-  userAgent: string | null
+  id: string;
+  current: boolean;
+  provider: string | null;
+  createdAt: number;
+  expiresAt: number;
+  userAgent: string | null;
 }
 
 /**
@@ -170,18 +170,18 @@ export interface SessionRow {
  * has no entry for `null`, which every session minted before spec 28 answers.
  */
 export function providerLabel(provider: string | null): string {
-  if (provider === null) return 'Unknown'
-  if (provider === 'passkey') return 'Passkey'
-  if (provider === 'mail') return 'Emailed link'
+  if (provider === null) return "Unknown";
+  if (provider === "passkey") return "Passkey";
+  if (provider === "mail") return "Emailed link";
   // Redirect and trusted providers are named by the id the host chose
   // (`passkeys()`'s own `id: 'passkey'` is the pattern), so the identifier
   // itself is the closest thing to a label this file can give without
   // depending on `AuthPolicy`, which a session row does not carry.
-  return provider
+  return provider;
 }
 
 export function userAgentLabel(userAgent: string | null): string {
-  return userAgent ?? 'Unknown browser'
+  return userAgent ?? "Unknown browser";
 }
 
 /* --------------------------------------------------------- recent sign-ins --- */
@@ -191,11 +191,11 @@ export function userAgentLabel(userAgent: string | null): string {
  * with no `CHECK` in the schema, so a kind this build has not been taught yet
  * must still read as data. */
 export interface EventRow {
-  id: string
-  at: number
-  kind: string
-  provider: string | null
-  detail: Record<string, unknown> | null
+  id: string;
+  at: number;
+  kind: string;
+  provider: string | null;
+  detail: Record<string, unknown> | null;
 }
 
 /**
@@ -206,30 +206,30 @@ export interface EventRow {
  * screening `AuthEventRow`'s own comment argues for: a kind a later migration
  * adds must read as *something*, not vanish or throw.
  */
-export function eventLabel(row: Pick<EventRow, 'kind' | 'provider'>): string {
+export function eventLabel(row: Pick<EventRow, "kind" | "provider">): string {
   switch (row.kind) {
-    case 'sign_in':
-      return row.provider ? `Signed in with ${providerLabel(row.provider)}` : 'Signed in'
-    case 'sign_in_refused':
-      return 'A sign-in attempt was refused'
-    case 'sign_out':
-      return 'Signed out'
-    case 'role_changed':
-      return 'Role changed'
-    case 'passkey_removed':
-      return 'Removed a passkey'
-    case 'passkeys_removed':
-      return 'An admin removed every passkey on this account'
-    case 'sessions_revoked':
-      return 'Signed out other browsers'
-    case 'passkey_rejected':
-      return 'A passkey sign-in was refused'
-    case 'user_invited':
-      return 'Invited'
-    case 'user_removed':
-      return 'Access removed'
+    case "sign_in":
+      return row.provider ? `Signed in with ${providerLabel(row.provider)}` : "Signed in";
+    case "sign_in_refused":
+      return "A sign-in attempt was refused";
+    case "sign_out":
+      return "Signed out";
+    case "role_changed":
+      return "Role changed";
+    case "passkey_removed":
+      return "Removed a passkey";
+    case "passkeys_removed":
+      return "An admin removed every passkey on this account";
+    case "sessions_revoked":
+      return "Signed out other browsers";
+    case "passkey_rejected":
+      return "A passkey sign-in was refused";
+    case "user_invited":
+      return "Invited";
+    case "user_removed":
+      return "Access removed";
     default:
-      return row.kind
+      return row.kind;
   }
 }
 
@@ -242,5 +242,5 @@ export function eventLabel(row: Pick<EventRow, 'kind' | 'provider'>): string {
  * used to sign in.
  */
 export function since(at: number | null, now?: number): string {
-  return at === null ? 'never' : when({ updatedAt: at, draftUpdatedAt: null }, now)
+  return at === null ? "never" : when({ updatedAt: at, draftUpdatedAt: null }, now);
 }

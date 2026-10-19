@@ -14,13 +14,13 @@
  * gives this list exactly the keyset plus two opt-in aggregates — so a search
  * box here would be a control with nothing to send it to.
  */
-import type { FormSummary } from '../../../server/forms'
-import { when } from './content-rows'
+import type { FormSummary } from "../../../server/forms";
+import { when } from "./content-rows";
 
 /** The row `GET {base}/api/forms?counts=1` answers with, unchanged — a count
  *  rather than the field array (`FormSummary`'s own header), which is why the
  *  builder reads a different shape entirely (`form-model.ts`'s `FormDetail`). */
-export type FormRow = FormSummary
+export type FormRow = FormSummary;
 
 /**
  * Open, closed by the editor's switch, or closed by the clock having passed
@@ -30,28 +30,28 @@ export type FormRow = FormSummary
  * cannot share one function without widening `isOpen`'s parameter to something
  * that no longer names what it needs).
  */
-export type FormStatus = 'open' | 'closed'
+export type FormStatus = "open" | "closed";
 
 export function formStatus(
-  row: Pick<FormRow, 'open' | 'closesAt'>,
+  row: Pick<FormRow, "open" | "closesAt">,
   now: number = Date.now(),
 ): FormStatus {
-  if (!row.open) return 'closed'
-  if (row.closesAt !== null && row.closesAt <= now) return 'closed'
-  return 'open'
+  if (!row.open) return "closed";
+  if (row.closesAt !== null && row.closesAt <= now) return "closed";
+  return "open";
 }
 
 /** The status badge's `title` — the same three states, in a sentence a person
  *  did not have to infer from a colour. */
 export function statusHint(
-  row: Pick<FormRow, 'open' | 'closesAt'>,
+  row: Pick<FormRow, "open" | "closesAt">,
   now: number = Date.now(),
 ): string {
-  if (!row.open) return 'Switched off in the builder.'
-  const date = row.closesAt === null ? null : new Date(row.closesAt).toLocaleDateString()
-  if (row.closesAt !== null && row.closesAt <= now) return `Closed automatically on ${date}.`
-  if (date) return `Accepting submissions until it closes automatically on ${date}.`
-  return 'Accepting submissions.'
+  if (!row.open) return "Switched off in the builder.";
+  const date = row.closesAt === null ? null : new Date(row.closesAt).toLocaleDateString();
+  if (row.closesAt !== null && row.closesAt <= now) return `Closed automatically on ${date}.`;
+  if (date) return `Accepting submissions until it closes automatically on ${date}.`;
+  return "Accepting submissions.";
 }
 
 /**
@@ -68,14 +68,14 @@ export function statusHint(
  * Case-insensitive and a plain substring — a form list is tens of rows, not a
  * corpus, so ranking it would be inventing precision nobody asked for.
  */
-export function matchesForm(row: Pick<FormRow, 'label' | 'name'>, q: string): boolean {
-  const needle = q.trim().toLowerCase()
-  if (needle === '') return true
-  return row.label.toLowerCase().includes(needle) || row.name.toLowerCase().includes(needle)
+export function matchesForm(row: Pick<FormRow, "label" | "name">, q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (needle === "") return true;
+  return row.label.toLowerCase().includes(needle) || row.name.toLowerCase().includes(needle);
 }
 
-export function questionsLabel(row: Pick<FormRow, 'questions'>): string {
-  return `${row.questions} ${row.questions === 1 ? 'question' : 'questions'}`
+export function questionsLabel(row: Pick<FormRow, "questions">): string {
+  return `${row.questions} ${row.questions === 1 ? "question" : "questions"}`;
 }
 
 /**
@@ -84,9 +84,9 @@ export function questionsLabel(row: Pick<FormRow, 'questions'>): string {
  * the answer was zero" are different facts, and the list always asks, so this
  * is really only reached while the first page is still loading.
  */
-export function responsesLabel(row: Pick<FormRow, 'responses'>): string {
-  if (row.responses === undefined) return '—'
-  return `${row.responses} ${row.responses === 1 ? 'response' : 'responses'}`
+export function responsesLabel(row: Pick<FormRow, "responses">): string {
+  if (row.responses === undefined) return "—";
+  return `${row.responses} ${row.responses === 1 ? "response" : "responses"}`;
 }
 
 /**
@@ -95,20 +95,20 @@ export function responsesLabel(row: Pick<FormRow, 'responses'>): string {
  * (decision 7), so `updatedAt` is simply the honest answer, the same posture
  * `redirects-model.ts`'s `createdLabel` takes for a table with one timestamp.
  */
-export function updatedLabel(row: Pick<FormRow, 'updatedAt'>, now?: number): string {
-  return when({ updatedAt: row.updatedAt, draftUpdatedAt: null }, now)
+export function updatedLabel(row: Pick<FormRow, "updatedAt">, now?: number): string {
+  return when({ updatedAt: row.updatedAt, draftUpdatedAt: null }, now);
 }
 
 /* -------------------------------------------------------------- creating --- */
 
 export interface FormDraft {
-  label: string
+  label: string;
   /** The editor's own override. Blank lets the server derive one from `label`
    *  (`formSlug`) — see `createFormBody`. */
-  name: string
+  name: string;
 }
 
-export const BLANK_FORM_DRAFT: FormDraft = { label: '', name: '' }
+export const BLANK_FORM_DRAFT: FormDraft = { label: "", name: "" };
 
 /**
  * The client-side refusal, and it goes exactly as far as being useful — the
@@ -118,8 +118,8 @@ export const BLANK_FORM_DRAFT: FormDraft = { label: '', name: '' }
  * because answering it here would mean holding a copy of every form's name.
  */
 export function formDraftRefusal(draft: FormDraft): string | null {
-  if (draft.label.trim() === '') return 'Type a label for this form.'
-  return null
+  if (draft.label.trim() === "") return "Type a label for this form.";
+  return null;
 }
 
 /**
@@ -128,7 +128,7 @@ export function formDraftRefusal(draft: FormDraft): string | null {
  * label-derived slug `createForm` would otherwise mint.
  */
 export function createFormBody(draft: FormDraft): { label: string; name?: string } {
-  const label = draft.label.trim()
-  const name = draft.name.trim()
-  return name ? { label, name } : { label }
+  const label = draft.label.trim();
+  const name = draft.name.trim();
+  return name ? { label, name } : { label };
 }

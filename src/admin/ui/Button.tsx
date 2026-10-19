@@ -1,21 +1,21 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
-import css from './Button.module.css'
+import type { ButtonHTMLAttributes, ReactNode } from "react";
+import css from "./Button.module.css";
 
-export type ButtonVariant = 'primary' | 'default' | 'subtle' | 'danger'
+export type ButtonVariant = "primary" | "default" | "subtle" | "danger";
 
-interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> {
-  variant?: ButtonVariant
-  size?: 'sm' | 'md'
+interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "className"> {
+  variant?: ButtonVariant;
+  size?: "sm" | "md";
   /** Fills the width of its container. For a dialog footer, never. */
-  block?: boolean
+  block?: boolean;
   /**
    * Why this is disabled. Rendered as the title, because the system's rule is
    * that a refusal explains itself — a greyed control with no explanation is the
    * thing `TopBar.tsx` already goes out of its way to avoid. Ignored unless
    * `disabled`, so passing both is safe.
    */
-  reason?: string
-  children?: ReactNode
+  reason?: string;
+  children?: ReactNode;
 }
 
 /**
@@ -29,13 +29,13 @@ interface Props extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className
  * and every one of them hand-rolled it.
  */
 export function Button({
-  variant = 'default',
-  size = 'md',
+  variant = "default",
+  size = "md",
   block,
   reason,
   disabled,
   title,
-  type = 'button',
+  type = "button",
   children,
   ...rest
 }: Props) {
@@ -53,9 +53,9 @@ export function Button({
        * made sense inside one component. See `Dialog`'s `danger` prop.
        */
       data-variant={variant}
-      className={[css.btn, css[variant], css[size], block ? css.block : ''].join(' ')}
+      className={[css.btn, css[variant], css[size], block ? css.block : ""].join(" ")}
     >
       {children}
     </button>
-  )
+  );
 }

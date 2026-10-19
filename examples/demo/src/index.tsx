@@ -1,29 +1,29 @@
-import { createFolio, type FolioGate, magicLink, passkeys, Shell, trusted } from 'folio/server'
-import { dataOf, resolveAsset, toSchemaIndex, type Doc, type Resolution } from 'folio/core'
+import { createFolio, type FolioGate, magicLink, passkeys, Shell, trusted } from "folio/server";
+import { dataOf, resolveAsset, toSchemaIndex, type Doc, type Resolution } from "folio/core";
 // `folio/engine` is the entry point for host-side tooling that manipulates
 // documents — a sync job is exactly the case its doc comment names. Ordinary
 // block and page code never needs it.
-import { diff, fromNested } from 'folio/engine'
-import type { ReactElement } from 'react'
-import { renderToReadableStream } from 'react-dom/server.edge'
-import { blocks } from './blocks'
-import { SubmissionStatus, type SubmissionState } from './blocks/contact'
-import { migrations } from './migrations'
+import { diff, fromNested } from "folio/engine";
+import type { ReactElement } from "react";
+import { renderToReadableStream } from "react-dom/server.edge";
+import { blocks } from "./blocks";
+import { SubmissionStatus, type SubmissionState } from "./blocks/contact";
+import { migrations } from "./migrations";
 
 // Two Durable Object classes now. SpaceDO is the space channel
 // (editing/live-collaboration.md): one instance for the whole site, no storage at
 // all, carrying who is where and broadcasting structural events. It is declared
 // with `new_classes` rather than `new_sqlite_classes` in wrangler.jsonc for
 // exactly that reason.
-export { SpaceDO, StoryDO } from 'folio/server'
+export { SpaceDO, StoryDO } from "folio/server";
 
 declare const __FOLIO_ASSETS__: {
-  admin: string
-  preview: string
-  devClient?: string
-  adminCss?: string[]
-  previewCss?: string[]
-}
+  admin: string;
+  preview: string;
+  devClient?: string;
+  adminCss?: string[];
+  previewCss?: string[];
+};
 
 /**
  * `platform/visitor-access.md`: `gate` names a root-block field — `access`,
@@ -44,14 +44,14 @@ declare const __FOLIO_ASSETS__: {
  * real membership gate is a paywall with no lock on it.
  */
 const gate: FolioGate<Env> = {
-  field: 'access',
-  public: 'public',
+  field: "access",
+  public: "public",
   visitor: (req) => {
-    const cookie = req.headers.get('cookie') ?? ''
-    return /(?:^|;\s*)demo_member=1(?:;|$)/.test(cookie) ? { id: 'demo-member' } : null
+    const cookie = req.headers.get("cookie") ?? "";
+    return /(?:^|;\s*)demo_member=1(?:;|$)/.test(cookie) ? { id: "demo-member" } : null;
   },
   allows: (visitor) => visitor !== null,
-}
+};
 
 /**
  * A trusted-identity provider that believes a request header.
@@ -78,22 +78,22 @@ const gate: FolioGate<Env> = {
  * security rather than a formality.
  */
 const devIdentity = trusted<Env>({
-  id: 'dev-header',
-  label: 'Continue as the dev identity',
+  id: "dev-header",
+  label: "Continue as the dev identity",
   // No provisioning: the address still has to be one of the seeded accounts, so
   // the header cannot conjure a user row either.
-  provision: 'refuse',
+  provision: "refuse",
   // No `signOutUrl`, deliberately — Folio cannot un-set a request header, so
   // this is exactly the deployment whose sign-out lands on
   // `/folio/login?signedout=1` rather than looping straight back in. That page
   // is what `scripts/auth-test.mjs` asserts.
   resolve: (_env, req) => {
-    const url = new URL(req.url)
-    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return null
-    const email = req.headers.get('x-folio-dev-identity')
-    return email ? { email } : null
+    const url = new URL(req.url);
+    if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return null;
+    const email = req.headers.get("x-folio-dev-identity");
+    return email ? { email } : null;
   },
-})
+});
 
 const folio = createFolio<Env>({
   blocks,
@@ -106,12 +106,12 @@ const folio = createFolio<Env>({
   // path both null), so naming a person "Contact" cannot take /contact away
   // from the page that needs it.
   types: [
-    { name: 'page', label: 'Page', kind: 'page', root: 'page' },
+    { name: "page", label: "Page", kind: "page", root: "page" },
     // A second *routable* type. No routing rule to configure: an insight
     // created under the "Insights" page already serves at /insights/whatever,
     // because Folio derives a path from the tree (checkpoint 3). `under`
     // constrains where one may be created *and* dragged, with a refusal notice.
-    { name: 'insight', label: 'Insight', kind: 'page', root: 'insightPage', under: ['page'] },
+    { name: "insight", label: "Insight", kind: "page", root: "insightPage", under: ["page"] },
     // Unrouted, and many of them. `titleField` is needed because personRecord
     // has no `title` field for the tree cache to have guessed at.
     //
@@ -120,31 +120,31 @@ const folio = createFolio<Env>({
     // are personRecord's `indexed` fields, and opening one is a full-width form
     // with no preview — there is nothing to preview.
     {
-      name: 'person',
-      label: 'Person',
-      kind: 'record',
-      root: 'personRecord',
-      titleField: 'fullName',
+      name: "person",
+      label: "Person",
+      kind: "record",
+      root: "personRecord",
+      titleField: "fullName",
     },
     // A second record type, and the one that shows checkpoint 1: `officeRecord`
     // declares no `render` at all. An office is an address and a phone number,
     // with no layout of its own, so `officeCard` reads `office.data` and
     // `office.content` is genuinely null.
     {
-      name: 'office',
-      label: 'Office',
-      kind: 'record',
-      root: 'officeRecord',
-      titleField: 'city',
+      name: "office",
+      label: "Office",
+      kind: "record",
+      root: "officeRecord",
+      titleField: "city",
     },
     // Unrouted, and exactly one — enforced by the derived id `sng_settings`
     // rather than by a constraint. Created on first access, never by an editor.
-    { name: 'settings', label: 'Site settings', kind: 'singleton', root: 'settingsRoot' },
+    { name: "settings", label: "Site settings", kind: "singleton", root: "settingsRoot" },
     // A second singleton, also a global (below): the site header. `previewPath:
     // ''` is what lets the admin preview it sitting on the homepage instead of
     // a blank background (`content-model/globals.md` decision 4) — opening it
     // points the iframe at `/?_folio=preview&as=header`.
-    { name: 'header', label: 'Header', kind: 'singleton', root: 'headerRoot', previewPath: '' },
+    { name: "header", label: "Header", kind: "singleton", root: "headerRoot", previewPath: "" },
   ],
   bindings: (env) => ({
     db: env.DB,
@@ -176,8 +176,8 @@ const folio = createFolio<Env>({
     providers: [
       magicLink({
         send: (_env, { email, url }) => {
-          console.log(`\nfolio: sign-in link for ${email}\n  ${url}\n`)
-          lastSignInUrl = url
+          console.log(`\nfolio: sign-in link for ${email}\n  ${url}\n`);
+          lastSignInUrl = url;
         },
       }),
       devIdentity,
@@ -213,17 +213,17 @@ const folio = createFolio<Env>({
     // computable from an address once that hour passes (decision 10).
     ratePerHour: 20,
   },
-  basePath: '/folio',
+  basePath: "/folio",
   // content-model/localisation.md: two languages, one document per story.
   // `default` is the *source* locale — the one `Blok.data` holds — and everything
   // else is a per-field override in `Blok.i18n`. Marking a field
   // `translatable: true` is what puts it in front of a translator; see
   // src/blocks/*.tsx, and `GET /folio/api/audit` for the ones nobody marked.
   locales: {
-    default: 'en',
+    default: "en",
     available: [
-      { code: 'en', label: 'English' },
-      { code: 'fr', label: 'Français' },
+      { code: "en", label: "English" },
+      { code: "fr", label: "Français" },
     ],
   },
   // '' is the root story, which serves '/'.
@@ -234,15 +234,15 @@ const folio = createFolio<Env>({
   // `/about` and `/fr/about` are the same story — so the prefix is all there is
   // to it, and `parseLocale` below is the one-line inverse.
   route: (path, locale) => {
-    const prefix = locale && locale !== 'en' ? `/${locale}` : ''
-    return path ? `${prefix}/${path}` : prefix || '/'
+    const prefix = locale && locale !== "en" ? `/${locale}` : "";
+    return path ? `${prefix}/${path}` : prefix || "/";
   },
-  previewCss: ['/site.css'],
+  previewCss: ["/site.css"],
   assets: __FOLIO_ASSETS__,
   // Loaded into every page's Resolution, so any render can place them
   // (`content-model/globals.md`). `settings` doubles as the footer here —
   // its root block already renders a `<footer>`.
-  globals: ['header', 'settings'],
+  globals: ["header", "settings"],
   /**
    * **A promise that `fetch` above calls `folio.draftAt`, and it does**
    * (`platform/draft-mode.md` decision 4). With this key a share link redirects a
@@ -278,10 +278,10 @@ const folio = createFolio<Env>({
   // Invalidation in appearance only.
   hooks: {
     published: ({ story }) => {
-      console.log(`folio: published ${story.path || '/'}`)
+      console.log(`folio: published ${story.path || "/"}`);
     },
     unpublished: ({ story }) => {
-      console.log(`folio: unpublished ${story.path || '/'}`)
+      console.log(`folio: unpublished ${story.path || "/"}`);
     },
     /**
      * Somebody filled in a form (`content-model/forms.md` checkpoint 4).
@@ -302,12 +302,12 @@ const folio = createFolio<Env>({
     submitted: ({ form, response, files }) => {
       console.log(
         `folio: ${form.name} answered (${response.id}, v${response.version}${
-          files.length ? `, ${files.length} file(s)` : ''
-        }) from ${response.page || 'an unknown page'}`,
-      )
+          files.length ? `, ${files.length} file(s)` : ""
+        }) from ${response.page || "an unknown page"}`,
+      );
     },
   },
-})
+});
 
 /**
  * The last sign-in link this worker "sent", for `/dev/last-signin` below.
@@ -317,40 +317,40 @@ const folio = createFolio<Env>({
  * `scripts/auth-test.mjs` can finish a flow that would otherwise need a mailbox,
  * and the route that reads it refuses anything but localhost.
  */
-let lastSignInUrl: string | null = null
+let lastSignInUrl: string | null = null;
 
 export default {
   async fetch(req, env, ctx) {
-    const url = new URL(req.url)
+    const url = new URL(req.url);
 
     // --- this project's own non-CMS routes, which always win -------------
-    if (url.pathname === '/health') {
-      return Response.json({ ok: true, service: 'demo' })
+    if (url.pathname === "/health") {
+      return Response.json({ ok: true, service: "demo" });
     }
     // Local development only: the link `send` above logged, so a script can do
     // what a person would do with their inbox. Not a Folio route and not a
     // pattern to copy into a real host — it is a stand-in for a mailbox.
-    if (url.pathname === '/dev/last-signin') {
-      if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-        return new Response('Not found', { status: 404 })
+    if (url.pathname === "/dev/last-signin") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
       }
-      return Response.json({ url: lastSignInUrl })
+      return Response.json({ url: lastSignInUrl });
     }
-    if (url.pathname === '/sitemap.xml') {
-      return sitemap(await folio.stories(env), url.origin)
+    if (url.pathname === "/sitemap.xml") {
+      return sitemap(await folio.stories(env), url.origin);
     }
     // A filtered archive as ordinary application code, which is the fourth user
     // story in `content-model/collections.md`: no Folio route is involved, just
     // `folio.query` over published content. `/archive?topic=policy&page=2`.
-    if (url.pathname === '/archive') {
-      return archive(env, url)
+    if (url.pathname === "/archive") {
+      return archive(env, url);
     }
     // A search results page (`content-model/full-text-search.md` decision 10):
     // "a search page is a page holding a collection block", so `/search?q=`
     // is `folio.resolve`, not `folio.query` — the block declares `searchable`
     // and reads its own `list.items`, exactly like `insightList` already does.
-    if (url.pathname === '/search') {
-      return searchPage(env, url)
+    if (url.pathname === "/search") {
+      return searchPage(env, url);
     }
     // The in-process write (`platform/content-api.md` decision 6): a host's own
     // Worker already holds the bindings, so a nightly ERP sync should not have to
@@ -358,11 +358,11 @@ export default {
     // because a route that writes content with no credential is not a pattern to
     // copy — a real one would be a `scheduled()` handler or sit behind the host's
     // own auth. The *code* is what a real one looks like.
-    if (url.pathname === '/dev/sync' && req.method === 'POST') {
-      if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-        return new Response('Not found', { status: 404 })
+    if (url.pathname === "/dev/sync" && req.method === "POST") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
       }
-      return sync(env, req)
+      return sync(env, req);
     }
 
     // --- Folio: editor, its API, and preview renders ---------------------
@@ -379,8 +379,8 @@ export default {
     // and the same URL with no cookie falls straight through to that published page,
     // which is the refusal rather than an error. There is no binding to add, no route
     // to write, and no branch here to keep in step. Seeded link: see seed.sql.
-    const handled = await folio.handle(req, env, ctx)
-    if (handled) return handled
+    const handled = await folio.handle(req, env, ctx);
+    if (handled) return handled;
 
     // --- published pages -------------------------------------------------
     // One reader for the whole render, so every read below runs on a single D1
@@ -389,11 +389,11 @@ export default {
     // `folio.published(env, …)` and friends still exist and each open their own
     // session — right for a cron, wrong for a page (`README.md`, "Reads and
     // replicas"). The `req` is what makes `draftAt` possible at all.
-    const reader = folio.reader(env, req)
+    const reader = folio.reader(env, req);
     // The inverse of `route` above, and this project's job rather than Folio's:
     // only the host knows how it encoded the locale (`localisation.md` decision
     // 5). One line, as the spec promised.
-    const { locale, path } = parseLocale(url.pathname)
+    const { locale, path } = parseLocale(url.pathname);
     // `locale` does not choose a document — there is one per story, holding every
     // language — but it *is* checked: `/xx/about` answers null here and falls
     // through to the 404 below rather than serving English under a URL that means
@@ -417,7 +417,7 @@ export default {
     // decision 5): the host reads it and passes it in, and it offsets every
     // `collection` field in the document. One number for the page, deliberately
     // — per-field pagination keyed by uid is out of scope until something needs it.
-    const asked = Number(url.searchParams.get('page') ?? '1')
+    const asked = Number(url.searchParams.get("page") ?? "1");
     /**
      * One call for the whole page: the draft-or-published document, the story
      * row behind it, the resolution, and the cache headers this response must
@@ -433,7 +433,7 @@ export default {
     const page = await reader.page(path, {
       locale,
       page: Number.isFinite(asked) && asked >= 1 ? Math.trunc(asked) : 1,
-    })
+    });
     if (!page) {
       // A live story always wins: `published` is checked first, and creating a
       // story at a redirected path deletes the row anyway, so the redirect can
@@ -442,13 +442,13 @@ export default {
       // One call, one round trip: `miss` batches the redirect lookup and the
       // published state, and tells apart a page taken down on purpose (410)
       // from one that never existed (404) instead of guessing.
-      const miss = await reader.miss(path)
-      if (miss.kind === 'redirect') {
-        const location = new URL(miss.to, url.origin)
-        location.search = url.search
-        return Response.redirect(location.toString(), miss.status)
+      const miss = await reader.miss(path);
+      if (miss.kind === "redirect") {
+        const location = new URL(miss.to, url.origin);
+        location.search = url.search;
+        return Response.redirect(location.toString(), miss.status);
       }
-      return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
+      return new Response("Not found", { status: miss.kind === "gone" ? 410 : 404 });
     }
 
     // Story links store an id, so hrefs are resolved per render rather than
@@ -466,7 +466,7 @@ export default {
     // a status, the form's slug and the names of the fields it refused — which
     // is exactly what keeps `?folio_status=ok` an ordinary cacheable page rather
     // than one nobody may store.
-    const submitted = submission(url)
+    const submitted = submission(url);
 
     return html(
       <Page
@@ -478,11 +478,11 @@ export default {
         // (`visitor-access.md` decision 4) — root kept, body nulled — so this
         // render is otherwise unchanged. `paywall` is the one thing the host
         // adds: somewhere to put a way to join, in the body's place.
-        paywall={page.access === 'denied'}
+        paywall={page.access === "denied"}
         {...(page.draft ? { draft: true } : {})}
       />,
       page.headers,
-    )
+    );
   },
 
   /**
@@ -508,25 +508,25 @@ export default {
    * work, so there is no response whose latency is being protected.
    */
   async scheduled(_controller, env, _ctx) {
-    let cursor: string | null = null
-    let batches = 0
+    let cursor: string | null = null;
+    let batches = 0;
     do {
-      const report = await folio.runSchedules(env, { continueFrom: cursor })
-      cursor = report.continueFrom
+      const report = await folio.runSchedules(env, { continueFrom: cursor });
+      cursor = report.continueFrom;
       // Worth a line in the log: a scheduled publish happens with nobody watching,
       // so the run that fired nothing and the run that could not are the two things
       // an operator needs to be able to tell apart after the fact.
       if (report.published.length || report.unpublished.length || report.failed.length) {
         console.log(
           `folio: fired ${report.published.length} publish, ${report.unpublished.length} unpublish, ${report.failed.length} failed`,
-        )
+        );
         for (const failure of report.failed) {
           console.error(
-            `folio: schedule ${failure.id} (${failure.action} ${failure.storyId}) failed on attempt ${failure.attempts}${failure.givenUp ? ', giving up' : ''}: ${failure.reason}`,
-          )
+            `folio: schedule ${failure.id} (${failure.action} ${failure.storyId}) failed on attempt ${failure.attempts}${failure.givenUp ? ", giving up" : ""}: ${failure.reason}`,
+          );
         }
       }
-    } while (cursor !== null && ++batches < 20)
+    } while (cursor !== null && ++batches < 20);
 
     /**
      * Auth housekeeping (`docs/specs/foundation/auth-providers.md` decision 8):
@@ -538,17 +538,17 @@ export default {
      * calls `folio.sweepAuth` for a host that forgets to, which is why it says
      * so, and `GET {base}/api/auth-events`'s `oldestAt` is where that would show.
      */
-    const swept = await folio.sweepAuth(env)
+    const swept = await folio.sweepAuth(env);
     if (swept.sessions || swept.challenges || swept.events) {
       console.log(
         `folio: swept ${swept.sessions} session(s), ${swept.challenges} challenge(s), ${swept.events} event(s)`,
-      )
+      );
     }
   },
-} satisfies ExportedHandler<Env>
+} satisfies ExportedHandler<Env>;
 
 /** The locales this site serves, mirroring `locales.available` above. */
-const LOCALES = ['en', 'fr'] as const
+const LOCALES = ["en", "fr"] as const;
 
 /**
  * The locale a URL names, and the story path underneath it — the inverse of the
@@ -563,12 +563,12 @@ const LOCALES = ['en', 'fr'] as const
  * page rather than a language nobody declared.
  */
 function parseLocale(pathname: string): { locale: string; path: string } {
-  const clean = pathname.replace(/^\/+|\/+$/g, '')
-  const [first, ...rest] = clean.split('/')
-  if (first && first !== 'en' && (LOCALES as readonly string[]).includes(first)) {
-    return { locale: first, path: rest.join('/') }
+  const clean = pathname.replace(/^\/+|\/+$/g, "");
+  const [first, ...rest] = clean.split("/");
+  if (first && first !== "en" && (LOCALES as readonly string[]).includes(first)) {
+    return { locale: first, path: rest.join("/") };
   }
-  return { locale: 'en', path: clean }
+  return { locale: "en", path: clean };
 }
 
 /** Page metadata comes off the document's root block. */
@@ -582,13 +582,13 @@ function parseLocale(pathname: string): { locale: string; path: string } {
  * three names anybody, the resulting URL is still an ordinary cacheable page.
  */
 function submission(url: URL): SubmissionState | null {
-  const status = url.searchParams.get('folio_status')
-  if (!status) return null
+  const status = url.searchParams.get("folio_status");
+  if (!status) return null;
   return {
     status,
-    form: url.searchParams.get('folio_form') ?? '',
-    invalid: (url.searchParams.get('folio_invalid') ?? '').split(',').filter(Boolean),
-  }
+    form: url.searchParams.get("folio_form") ?? "",
+    invalid: (url.searchParams.get("folio_invalid") ?? "").split(",").filter(Boolean),
+  };
 }
 
 function Page({
@@ -599,13 +599,13 @@ function Page({
   paywall = false,
   submitted = null,
 }: {
-  doc: Doc
-  resolution: Resolution
-  locale: string
-  draft?: boolean
+  doc: Doc;
+  resolution: Resolution;
+  locale: string;
+  draft?: boolean;
   /** What `submission()` read off the URL, for the form block to render the
    *  descriptor's own `successMessage` against. */
-  submitted?: SubmissionState | null
+  submitted?: SubmissionState | null;
   /**
    * `page.access === 'denied'` (`platform/visitor-access.md` decision 3). The
    * `doc` this render was handed is already redacted — every child dropped,
@@ -613,18 +613,18 @@ function Page({
    * construction; this is only the flag that says a paywall belongs where
    * that body was.
    */
-  paywall?: boolean
+  paywall?: boolean;
 }) {
-  const root = doc.bloks[doc.root]
+  const root = doc.bloks[doc.root];
   // `dataOf` rather than `.data`: metadata is read straight off the root block
   // rather than through `render`, so reading it in the active locale is this
   // page's job (`content-model/localisation.md`). A `title` translated into
   // French belongs in `<title>` and in `og:title`, not only in the body.
-  const meta = root ? dataOf(root, resolution.locale) : {}
-  const title = String(meta.title ?? 'Untitled')
+  const meta = root ? dataOf(root, resolution.locale) : {};
+  const title = String(meta.title ?? "Untitled");
   // Metadata is read straight off the root block rather than through `render`,
   // so resolving the asset is this page's job.
-  const social = resolveAsset(meta.socialImage, resolution)
+  const social = resolveAsset(meta.socialImage, resolution);
 
   return (
     <Shell
@@ -632,7 +632,7 @@ function Page({
       // The one bit of chrome only the host can set, and the reason switching
       // locale in the editor reloads the preview rather than pushing a frame.
       lang={locale}
-      stylesheets={['/site.css']}
+      stylesheets={["/site.css"]}
       head={
         <>
           {meta.description ? <meta name="description" content={String(meta.description)} /> : null}
@@ -641,7 +641,7 @@ function Page({
           {social ? (
             <meta
               property="og:image"
-              content={social.srcFor({ width: 1200, height: 630, fit: 'cover' })}
+              content={social.srcFor({ width: 1200, height: 630, fit: "cover" })}
             />
           ) : null}
         </>
@@ -665,19 +665,19 @@ function Page({
       {draft ? (
         <div
           style={{
-            background: '#8a5a00',
-            color: '#fff',
-            padding: '.5rem 1rem',
-            font: '500 14px system-ui, sans-serif',
+            background: "#8a5a00",
+            color: "#fff",
+            padding: ".5rem 1rem",
+            font: "500 14px system-ui, sans-serif",
           }}
         >
-          Draft — not published.{' '}
-          <a style={{ color: '#fff' }} href="/folio/draft/exit?next=/">
+          Draft — not published.{" "}
+          <a style={{ color: "#fff" }} href="/folio/draft/exit?next=/">
             Exit draft mode
           </a>
         </div>
       ) : null}
-      {folio.renderGlobal(resolution, 'header')}
+      {folio.renderGlobal(resolution, "header")}
       {/* `mark` in draft so a block is addressable for a screenshot; `off` — the
           default — on a published page, which ships zero JavaScript. */}
       <div id="folio-root">
@@ -690,7 +690,7 @@ function Page({
           render signature.
         */}
         <SubmissionStatus value={submitted}>
-          {folio.render(doc, { resolution, ...(draft ? { mode: 'mark' as const } : {}) })}
+          {folio.render(doc, { resolution, ...(draft ? { mode: "mark" as const } : {}) })}
         </SubmissionStatus>
         {/*
           The paywall, where the body was (`visitor-access.md` decision 4). `doc`'s
@@ -704,27 +704,27 @@ function Page({
           <div
             data-testid="paywall"
             style={{
-              background: '#f4ede2',
-              border: '1px solid #d8c9ae',
-              borderRadius: '.5rem',
-              padding: '1.5rem',
-              margin: '1.5rem 0',
-              font: '400 16px/1.5 system-ui, sans-serif',
+              background: "#f4ede2",
+              border: "1px solid #d8c9ae",
+              borderRadius: ".5rem",
+              padding: "1.5rem",
+              margin: "1.5rem 0",
+              font: "400 16px/1.5 system-ui, sans-serif",
             }}
           >
-            <h2 style={{ margin: '0 0 .5rem', font: '600 20px system-ui, sans-serif' }}>
+            <h2 style={{ margin: "0 0 .5rem", font: "600 20px system-ui, sans-serif" }}>
               Members only
             </h2>
             <p style={{ margin: 0 }}>
-              This page is for members. (Demo: this site's real login is a cookie — set{' '}
+              This page is for members. (Demo: this site's real login is a cookie — set{" "}
               <code>demo_member=1</code> to see the rest.)
             </p>
           </div>
         ) : null}
       </div>
-      {folio.renderGlobal(resolution, 'settings')}
+      {folio.renderGlobal(resolution, "settings")}
     </Shell>
-  )
+  );
 }
 
 /**
@@ -738,10 +738,10 @@ function Page({
  * set before it reaches SQL.
  */
 async function archive(env: Env, url: URL) {
-  const topic = url.searchParams.get('topic')
-  const page = Number(url.searchParams.get('page') ?? '1')
+  const topic = url.searchParams.get("topic");
+  const page = Number(url.searchParams.get("page") ?? "1");
   const result = await folio.query(env, {
-    type: 'insight',
+    type: "insight",
     // `folio.query` never gates (`platform/visitor-access.md` checkpoint 6):
     // an item here is the whole published document, so a members-only insight
     // would otherwise hand its full title and standfirst to every stranger
@@ -749,13 +749,13 @@ async function archive(env: Env, url: URL) {
     // — the same `access` field the gate itself reads — not something Folio
     // applies for it.
     where: [
-      { field: 'access', op: 'eq' as const, value: 'public' },
-      ...(topic ? [{ field: 'topic', op: 'eq' as const, value: topic }] : []),
+      { field: "access", op: "eq" as const, value: "public" },
+      ...(topic ? [{ field: "topic", op: "eq" as const, value: topic }] : []),
     ],
-    order: { field: 'published', dir: 'desc' },
+    order: { field: "published", dir: "desc" },
     perPage: 5,
     page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,
-  })
+  });
 
   return Response.json({
     total: result.total,
@@ -770,7 +770,7 @@ async function archive(env: Env, url: URL) {
       topic: i.data.topic ?? null,
       published: i.data.published ?? null,
     })),
-  })
+  });
 }
 
 /**
@@ -792,32 +792,32 @@ async function archive(env: Env, url: URL) {
  * user stories are answered differently on purpose.
  */
 async function searchPage(env: Env, url: URL) {
-  const q = url.searchParams.get('q') ?? ''
+  const q = url.searchParams.get("q") ?? "";
   const doc: Doc = {
-    root: 'r0',
+    root: "r0",
     bloks: {
       r0: {
-        uid: 'r0',
-        type: 'searchResults',
+        uid: "r0",
+        type: "searchResults",
         parent: null,
         slot: null,
-        order: 'a0',
-        data: { heading: q ? `Results for “${q}”` : 'Search', list: {} },
+        order: "a0",
+        data: { heading: q ? `Results for “${q}”` : "Search", list: {} },
       },
     },
-  }
-  const resolution = await folio.resolve(env, doc, { search: q })
+  };
+  const resolution = await folio.resolve(env, doc, { search: q });
 
   return html(
-    <Shell title="Search" stylesheets={['/site.css']}>
+    <Shell title="Search" stylesheets={["/site.css"]}>
       <form method="get" action="/search">
-        <label htmlFor="q">Search</label>{' '}
-        <input id="q" type="search" name="q" defaultValue={q} placeholder="Search the site…" />{' '}
+        <label htmlFor="q">Search</label>{" "}
+        <input id="q" type="search" name="q" defaultValue={q} placeholder="Search the site…" />{" "}
         <button type="submit">Search</button>
       </form>
       <div id="folio-root">{folio.render(doc, { resolution })}</div>
     </Shell>,
-  )
+  );
 }
 
 /**
@@ -838,25 +838,25 @@ async function searchPage(env: Env, url: URL) {
  */
 async function sync(env: Env, req: Request) {
   const body = (await req.json().catch(() => ({}))) as {
-    id?: string
-    fields?: Record<string, unknown>
-    txId?: string
-  }
-  if (!body.id) return Response.json({ error: 'id is required' }, { status: 400 })
+    id?: string;
+    fields?: Record<string, unknown>;
+    txId?: string;
+  };
+  if (!body.id) return Response.json({ error: "id is required" }, { status: 400 });
 
-  const doc = await folio.draft(env, body.id)
+  const doc = await folio.draft(env, body.id);
   const target = fromNested(
     { uid: doc.root, fields: body.fields ?? {} },
     toSchemaIndex(folio.registry),
     doc,
-    { mode: 'merge' },
-  )
+    { mode: "merge" },
+  );
   const result = await folio.write(env, body.id, diff(doc, target), {
-    actor: 'sync-job',
-    name: 'Nightly sync',
+    actor: "sync-job",
+    name: "Nightly sync",
     ...(body.txId ? { txId: body.txId } : {}),
-  })
-  return Response.json(result)
+  });
+  return Response.json(result);
 }
 
 function sitemap(stories: Awaited<ReturnType<typeof folio.stories>>, origin: string) {
@@ -874,16 +874,16 @@ function sitemap(stories: Awaited<ReturnType<typeof folio.stories>>, origin: str
     // and is absent entirely on a site with no locales, hence the fallback.
     .flatMap((s) => Object.values(s.urls ?? { en: s.url ?? `/${s.path}` }))
     .map((url) => `  <url><loc>${origin}${url}</loc></url>`)
-    .join('\n')
+    .join("\n");
 
   return new Response(
     `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`,
-    { headers: { 'content-type': 'application/xml' } },
-  )
+    { headers: { "content-type": "application/xml" } },
+  );
 }
 
 async function html(node: ReactElement, headers: Record<string, string> = {}) {
   return new Response(await renderToReadableStream(node), {
-    headers: { 'content-type': 'text/html; charset=utf-8', ...headers },
-  })
+    headers: { "content-type": "text/html; charset=utf-8", ...headers },
+  });
 }

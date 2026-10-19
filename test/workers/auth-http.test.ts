@@ -1,19 +1,19 @@
-import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { blocks, defineBlock, text } from '../../src/core'
-import type { ClientMsg, ServerFrame, ServerMsg } from '../../src/core/protocol'
-import { PROTOCOL_VERSION } from '../../src/core/protocol'
-import type { AuthConfig, MagicLinkMail, Role } from '../../src/server'
-import { createFolio, magicLink } from '../../src/server'
-import { SECURE_COOKIE } from '../../src/server/auth/cookie'
-import { createChallenge } from '../../src/server/auth/challenges'
-import { recordEventStatement } from '../../src/server/auth/events'
-import { createSession } from '../../src/server/auth/session'
-import { createToken } from '../../src/server/auth/tokens'
-import { createUser } from '../../src/server/auth/users'
-import type { StoryDO } from '../../src/server'
-import type { VersionMeta } from '../../src/server/versions'
-import type { Page } from '../../src/core/pagination'
+import { createExecutionContext, env, runInDurableObject } from "cloudflare:test";
+import { beforeEach, describe, expect, it } from "vitest";
+import { blocks, defineBlock, text } from "../../src/core";
+import type { ClientMsg, ServerFrame, ServerMsg } from "../../src/core/protocol";
+import { PROTOCOL_VERSION } from "../../src/core/protocol";
+import type { AuthConfig, MagicLinkMail, Role } from "../../src/server";
+import { createFolio, magicLink } from "../../src/server";
+import { SECURE_COOKIE } from "../../src/server/auth/cookie";
+import { createChallenge } from "../../src/server/auth/challenges";
+import { recordEventStatement } from "../../src/server/auth/events";
+import { createSession } from "../../src/server/auth/session";
+import { createToken } from "../../src/server/auth/tokens";
+import { createUser } from "../../src/server/auth/users";
+import type { StoryDO } from "../../src/server";
+import type { VersionMeta } from "../../src/server/versions";
+import type { Page } from "../../src/core/pagination";
 
 /**
  * Enforcement: every route's gate, the socket's terminal refusals, and the two
@@ -25,299 +25,305 @@ import type { Page } from '../../src/core/pagination'
  * header comment gives.
  */
 
-const ORIGIN = 'https://folio.test'
-const BASE = `${ORIGIN}/folio`
-const API = `${BASE}/api`
+const ORIGIN = "https://folio.test";
+const BASE = `${ORIGIN}/folio`;
+const API = `${BASE}/api`;
 
 const page = defineBlock({
-  name: 'page',
-  label: 'Page',
-  summary: 'title',
+  name: "page",
+  label: "Page",
+  summary: "title",
   fields: {
-    title: text({ label: 'Title', required: true }),
-    body: blocks({ label: 'Body', allow: [] }),
+    title: text({ label: "Title", required: true }),
+    body: blocks({ label: "Body", allow: [] }),
   },
   render: () => null,
-})
+});
 
-let outbox: MagicLinkMail[] = []
+let outbox: MagicLinkMail[] = [];
 
 const auth: AuthConfig<Cloudflare.Env> = {
   providers: [
     magicLink<Cloudflare.Env>({
       send: (_env, mail) => {
-        outbox.push(mail)
+        outbox.push(mail);
       },
     }),
   ],
-}
+};
 
-function build(mode: AuthConfig<Cloudflare.Env> | 'open' = auth) {
+function build(mode: AuthConfig<Cloudflare.Env> | "open" = auth) {
   return createFolio<Cloudflare.Env>({
     blocks: [page],
-    root: 'page',
+    root: "page",
     bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
-    basePath: '/folio',
-    assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
+    basePath: "/folio",
+    assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
     auth: mode,
-    route: (p) => (p ? `/${p}` : '/'),
-  })
+    route: (p) => (p ? `/${p}` : "/"),
+  });
 }
 
-const folio = build()
+const folio = build();
 
 function call(path: string, init?: RequestInit): Promise<Response> {
   return folio.handle(
     new Request(`${ORIGIN}${path}`, init),
     env,
     createExecutionContext(),
-  ) as Promise<Response>
+  ) as Promise<Response>;
 }
 
 /** `handle()` may legitimately answer null (the host's routes win), so the
  * preview tests need the raw answer rather than a coerced Response. */
 function raw(path: string, init?: RequestInit): Promise<Response | null> {
-  return build().handle(new Request(`${ORIGIN}${path}`, init), env, createExecutionContext())
+  return build().handle(new Request(`${ORIGIN}${path}`, init), env, createExecutionContext());
 }
 
 interface ErrorEnvelope {
-  error: { code: string; message: string }
+  error: { code: string; message: string };
 }
 
-let storyCounter = 0
+let storyCounter = 0;
 
-async function seedStory(title = 'Home'): Promise<string> {
-  const id = `sty_auth${(storyCounter++).toString().padStart(4, '0')}`
+async function seedStory(title = "Home"): Promise<string> {
+  const id = `sty_auth${(storyCounter++).toString().padStart(4, "0")}`;
   await env.DB.prepare(
     `insert into stories (id, type, parent_id, slug, path, ord, title, created_at, updated_at)
      values (?, 'page', null, ?, ?, 'a0', ?, ?, ?)`,
   )
     .bind(id, id, id, title, Date.now(), Date.now())
-    .run()
-  return id
+    .run();
+  return id;
 }
 
 /** A signed-in browser: the user row, and the cookie header to send. */
 async function signIn(role: Role, email = `${role}@example.com`) {
   // Name derived from the address, so a test that cares about the display name
   // (`ann@example.com` → "Ann") reads without a fourth argument everywhere else.
-  const local = email.split('@')[0] ?? role
+  const local = email.split("@")[0] ?? role;
   const user = await createUser(env.DB, {
     email,
     name: `${local[0]!.toUpperCase()}${local.slice(1)}`,
     role,
-  })
-  const session = await createSession(env.DB, user.id)
-  return { user, session, cookie: `${SECURE_COOKIE}=${session.token}` }
+  });
+  const session = await createSession(env.DB, user.id);
+  return { user, session, cookie: `${SECURE_COOKIE}=${session.token}` };
 }
 
 beforeEach(async () => {
-  outbox = []
+  outbox = [];
   await env.DB.batch([
-    env.DB.prepare('delete from sessions'),
-    env.DB.prepare('delete from api_tokens'),
-    env.DB.prepare('delete from login_challenges'),
-    env.DB.prepare('delete from auth_events'),
-    env.DB.prepare('delete from users'),
-    env.DB.prepare('delete from versions'),
-    env.DB.prepare('delete from stories'),
-  ])
-})
+    env.DB.prepare("delete from sessions"),
+    env.DB.prepare("delete from api_tokens"),
+    env.DB.prepare("delete from login_challenges"),
+    env.DB.prepare("delete from auth_events"),
+    env.DB.prepare("delete from users"),
+    env.DB.prepare("delete from versions"),
+    env.DB.prepare("delete from stories"),
+  ]);
+});
 
 /* --------------------------------------------------------- the closed door --- */
 
-describe('the editor is closed', () => {
-  it('redirects the admin HTML route to the login page, serving no bundle', async () => {
-    const id = await seedStory()
-    const res = await call(`/folio/edit/${id}`)
+describe("the editor is closed", () => {
+  it("redirects the admin HTML route to the login page, serving no bundle", async () => {
+    const id = await seedStory();
+    const res = await call(`/folio/edit/${id}`);
 
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe(
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(
       `/folio/login?next=${encodeURIComponent(`/folio/edit/${id}`)}`,
-    )
+    );
     // Nothing was rendered, so nothing about the site leaked either.
-    expect(await res.text()).toBe('')
-  })
+    expect(await res.text()).toBe("");
+  });
 
-  it('401s the JSON API with the one error envelope', async () => {
-    const res = await call('/folio/api/stories')
-    expect(res.status).toBe(401)
+  it("401s the JSON API with the one error envelope", async () => {
+    const res = await call("/folio/api/stories");
+    expect(res.status).toBe(401);
     expect(await res.json<ErrorEnvelope>()).toEqual({
-      error: { code: 'unauthorized', message: 'Sign in to continue.' },
-    })
-  })
+      error: { code: "unauthorized", message: "Sign in to continue." },
+    });
+  });
 
-  it('leaves /schema and the public asset route open', async () => {
+  it("leaves /schema and the public asset route open", async () => {
     // The manifest describes the code, not the content, and the admin bundle
     // needs it before it can render a sign-in prompt of its own.
-    expect((await call('/folio/api/schema')).status).toBe(200)
+    expect((await call("/folio/api/schema")).status).toBe(200);
     // A published page's <img> points here: exactly as public as the page.
-    const asset = await call('/folio/asset/ast_000000000000-none.png')
-    expect(asset.status).not.toBe(401)
-    expect(asset.status).not.toBe(403)
-  })
+    const asset = await call("/folio/asset/ast_000000000000-none.png");
+    expect(asset.status).not.toBe(401);
+    expect(asset.status).not.toBe(403);
+  });
 
-  it('hands a preview request back to the host instead of serving a draft', async () => {
-    await seedStory()
-    await env.DB.prepare("update stories set path = '', slug = ''").run()
+  it("hands a preview request back to the host instead of serving a draft", async () => {
+    await seedStory();
+    await env.DB.prepare("update stories set path = '', slug = ''").run();
     // Returning null rather than 401: to a visitor the flag then means nothing,
     // and the host serves its ordinary published page. This surface lives outside
     // basePath, so the app's own middleware never sees it.
-    expect(await raw('/?_folio=preview')).toBeNull()
+    expect(await raw("/?_folio=preview")).toBeNull();
 
-    const { cookie } = await signIn('viewer')
-    const allowed = await raw('/?_folio=preview', { headers: { cookie } })
-    expect(allowed?.status).toBe(200)
-  })
+    const { cookie } = await signIn("viewer");
+    const allowed = await raw("/?_folio=preview", { headers: { cookie } });
+    expect(allowed?.status).toBe(200);
+  });
 
-  it('is entirely open under auth: open, exactly as before this spec', async () => {
-    const id = await seedStory()
-    const open = build('open')
-    const ctx = createExecutionContext()
-    const res = await open.handle(new Request(`${API}/stories`), env, ctx)
-    expect(res?.status).toBe(200)
-    const edit = await open.handle(new Request(`${BASE}/edit/${id}`), env, createExecutionContext())
-    expect(edit?.status).toBe(200)
-  })
-})
+  it("is entirely open under auth: open, exactly as before this spec", async () => {
+    const id = await seedStory();
+    const open = build("open");
+    const ctx = createExecutionContext();
+    const res = await open.handle(new Request(`${API}/stories`), env, ctx);
+    expect(res?.status).toBe(200);
+    const edit = await open.handle(
+      new Request(`${BASE}/edit/${id}`),
+      env,
+      createExecutionContext(),
+    );
+    expect(edit?.status).toBe(200);
+  });
+});
 
 /* -------------------------------------------------------------- role gates --- */
 
-describe('role gates', () => {
-  it('lets a viewer read and refuses every write', async () => {
-    const id = await seedStory()
-    const { cookie } = await signIn('viewer')
+describe("role gates", () => {
+  it("lets a viewer read and refuses every write", async () => {
+    const id = await seedStory();
+    const { cookie } = await signIn("viewer");
 
-    expect((await call('/folio/api/stories', { headers: { cookie } })).status).toBe(200)
+    expect((await call("/folio/api/stories", { headers: { cookie } })).status).toBe(200);
     expect((await call(`/folio/api/story/${id}/document`, { headers: { cookie } })).status).toBe(
       200,
-    )
+    );
     expect((await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })).status).toBe(
       200,
-    )
+    );
 
     const publish = await call(`/folio/api/story/${id}/publish`, {
-      method: 'POST',
+      method: "POST",
       headers: { cookie },
-    })
-    expect(publish.status).toBe(403)
-    const body = await publish.json<ErrorEnvelope>()
-    expect(body.error.code).toBe('forbidden')
+    });
+    expect(publish.status).toBe(403);
+    const body = await publish.json<ErrorEnvelope>();
+    expect(body.error.code).toBe("forbidden");
     // Names the role that would have worked: not guessable from the other end.
-    expect(body.error.message).toContain('publisher')
-  })
+    expect(body.error.message).toContain("publisher");
+  });
 
-  it('lets an editor edit but not publish, and writes nothing when it refuses', async () => {
-    const id = await seedStory()
-    const { cookie } = await signIn('editor')
+  it("lets an editor edit but not publish, and writes nothing when it refuses", async () => {
+    const id = await seedStory();
+    const { cookie } = await signIn("editor");
 
     const res = await call(`/folio/api/story/${id}/publish`, {
-      method: 'POST',
+      method: "POST",
       headers: { cookie },
-    })
-    expect(res.status).toBe(403)
+    });
+    expect(res.status).toBe(403);
 
     // No version row and no published snapshot: the refusal is at the door.
-    const versions = await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })
-    expect((await versions.json<Page<VersionMeta>>()).rows).toEqual([])
-    const row = await env.DB.prepare('select published_doc, published_at from stories where id = ?')
+    const versions = await call(`/folio/api/story/${id}/versions`, { headers: { cookie } });
+    expect((await versions.json<Page<VersionMeta>>()).rows).toEqual([]);
+    const row = await env.DB.prepare("select published_doc, published_at from stories where id = ?")
       .bind(id)
-      .first<{ published_doc: string | null; published_at: number | null }>()
-    expect(row?.published_doc).toBeNull()
-    expect(row?.published_at).toBeNull()
-  })
+      .first<{ published_doc: string | null; published_at: number | null }>();
+    expect(row?.published_doc).toBeNull();
+    expect(row?.published_at).toBeNull();
+  });
 
   // Create split away from the rest at the owner's direction: a new document is
   // an unpublished draft at a path nothing links to yet, so starting one
   // withdraws nothing. Renaming, moving and deleting act on a URL that may
   // already be live, so those stay with the publisher.
-  it('lets an editor create a document, since a new draft serves nothing yet', async () => {
-    const editor = await signIn('editor')
-    const viewer = await signIn('viewer')
+  it("lets an editor create a document, since a new draft serves nothing yet", async () => {
+    const editor = await signIn("editor");
+    const viewer = await signIn("viewer");
 
     const post = (cookie: string, title: string) =>
-      call('/folio/api/stories', {
-        method: 'POST',
-        headers: { cookie, 'content-type': 'application/json' },
+      call("/folio/api/stories", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
         body: JSON.stringify({ title }),
-      })
-    expect((await post(editor.cookie, 'Editor made this')).status).toBe(200)
+      });
+    expect((await post(editor.cookie, "Editor made this")).status).toBe(200);
     // Still closed to a viewer: `CREATE` is `editor`, not `viewer`.
-    expect((await post(viewer.cookie, 'Viewer made this')).status).toBe(403)
-  })
+    expect((await post(viewer.cookie, "Viewer made this")).status).toBe(403);
+  });
 
-  it('reserves delete, move and manual redirects for a publisher', async () => {
-    const id = await seedStory()
-    const editor = await signIn('editor')
-    const publisher = await signIn('publisher')
+  it("reserves delete, move and manual redirects for a publisher", async () => {
+    const id = await seedStory();
+    const editor = await signIn("editor");
+    const publisher = await signIn("publisher");
 
     const patch = (cookie: string) =>
       call(`/folio/api/stories/${id}`, {
-        method: 'PATCH',
-        headers: { cookie, 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 'Renamed' }),
-      })
-    expect((await patch(editor.cookie)).status).toBe(403)
-    expect((await patch(publisher.cookie)).status).toBe(200)
+        method: "PATCH",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({ title: "Renamed" }),
+      });
+    expect((await patch(editor.cookie)).status).toBe(403);
+    expect((await patch(publisher.cookie)).status).toBe(200);
 
     expect(
       (
         await call(`/folio/api/stories/${id}`, {
-          method: 'DELETE',
+          method: "DELETE",
           headers: { cookie: editor.cookie },
         })
       ).status,
-    ).toBe(403)
-  })
+    ).toBe(403);
+  });
 
-  it('publishes as a publisher and records their own user id, not a header', async () => {
-    const id = await seedStory()
-    const { user, cookie } = await signIn('publisher')
+  it("publishes as a publisher and records their own user id, not a header", async () => {
+    const id = await seedStory();
+    const { user, cookie } = await signIn("publisher");
 
     const res = await call(`/folio/api/story/${id}/publish`, {
-      method: 'POST',
+      method: "POST",
       // Ignored: the header is gone, and this is what "cannot be spoofed" means.
-      headers: { cookie, 'x-folio-actor': 'somebody-else' },
-    })
-    expect(res.status).toBe(200)
+      headers: { cookie, "x-folio-actor": "somebody-else" },
+    });
+    expect(res.status).toBe(200);
 
     const versions = await (
       await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })
-    ).json<Page<VersionMeta>>()
-    expect(versions.rows[0]?.actor).toBe(user.id)
-  })
+    ).json<Page<VersionMeta>>();
+    expect(versions.rows[0]?.actor).toBe(user.id);
+  });
 
-  it('reserves the access surface for an admin, and 404s it when auth is open', async () => {
-    const publisher = await signIn('publisher')
-    const admin = await signIn('admin')
+  it("reserves the access surface for an admin, and 404s it when auth is open", async () => {
+    const publisher = await signIn("publisher");
+    const admin = await signIn("admin");
 
-    expect((await call('/folio/api/users', { headers: { cookie: publisher.cookie } })).status).toBe(
+    expect((await call("/folio/api/users", { headers: { cookie: publisher.cookie } })).status).toBe(
       403,
-    )
-    expect((await call('/folio/api/users', { headers: { cookie: admin.cookie } })).status).toBe(200)
-    expect((await call('/folio/api/tokens', { headers: { cookie: admin.cookie } })).status).toBe(
+    );
+    expect((await call("/folio/api/users", { headers: { cookie: admin.cookie } })).status).toBe(
       200,
-    )
+    );
+    expect((await call("/folio/api/tokens", { headers: { cookie: admin.cookie } })).status).toBe(
+      200,
+    );
 
     // Under `auth: 'open'` there is no admin and no way to become one, so the
     // surface does not exist rather than standing wide open.
-    const open = await build('open').handle(
+    const open = await build("open").handle(
       new Request(`${API}/users`),
       env,
       createExecutionContext(),
-    )
-    expect(open?.status).toBe(404)
-  })
+    );
+    expect(open?.status).toBe(404);
+  });
 
-  it('refuses an admin removing their own account', async () => {
-    const admin = await signIn('admin')
+  it("refuses an admin removing their own account", async () => {
+    const admin = await signIn("admin");
     const res = await call(`/folio/api/users/${admin.user.id}`, {
-      method: 'DELETE',
+      method: "DELETE",
       headers: { cookie: admin.cookie },
-    })
+    });
     // The one delete that can leave a site with no way to manage access at all.
-    expect(res.status).toBe(409)
-  })
+    expect(res.status).toBe(409);
+  });
 
   /**
    * Found while building the Access screen. The delete above has guarded self-removal
@@ -326,34 +332,34 @@ describe('role gates', () => {
    * the session revoke below made it instant. The recovery is a `wrangler d1 execute`
    * against production.
    */
-  it('refuses an admin changing their own role, which is the same lockout', async () => {
-    const admin = await signIn('admin')
+  it("refuses an admin changing their own role, which is the same lockout", async () => {
+    const admin = await signIn("admin");
     const res = await call(`/folio/api/users/${admin.user.id}`, {
-      method: 'PATCH',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ role: 'viewer' }),
-    })
-    expect(res.status).toBe(409)
+      method: "PATCH",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    expect(res.status).toBe(409);
 
     // And the role really did not change — a refusal that had already written the row
     // would be the worst of both.
-    const me = (await (await call('/folio/api/me', {
+    const me = (await (await call("/folio/api/me", {
       headers: { cookie: admin.cookie },
-    }))!.json()) as { actor: { role: string } | null }
-    expect(me.actor?.role).toBe('admin')
-  })
+    }))!.json()) as { actor: { role: string } | null };
+    expect(me.actor?.role).toBe("admin");
+  });
 
   /** The guard is on the *role*, not on the row: an admin renaming themselves is
    * ordinary, and refusing it would be paternalism rather than a lockout guard. */
-  it('lets an admin patch their own name', async () => {
-    const admin = await signIn('admin')
+  it("lets an admin patch their own name", async () => {
+    const admin = await signIn("admin");
     const res = await call(`/folio/api/users/${admin.user.id}`, {
-      method: 'PATCH',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Renamed Themselves' }),
-    })
-    expect(res.status).toBe(200)
-  })
+      method: "PATCH",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Renamed Themselves" }),
+    });
+    expect(res.status).toBe(200);
+  });
 
   /**
    * A role an identity provider's claims placed is not Folio's to edit
@@ -364,25 +370,25 @@ describe('role gates', () => {
    * refuses everywhere else: the row would read `viewer` until the person next
    * signed in, and then read `admin` again with nobody watching.
    */
-  it('refuses a role an identity provider placed, naming the provider', async () => {
-    const admin = await signIn('admin')
+  it("refuses a role an identity provider placed, naming the provider", async () => {
+    const admin = await signIn("admin");
     const target = await createUser(env.DB, {
-      email: 'bob@example.com',
-      role: 'editor',
-      provider: 'okta',
-      roleFrom: 'okta',
-    })
+      email: "bob@example.com",
+      role: "editor",
+      provider: "okta",
+      roleFrom: "okta",
+    });
 
     const res = await call(`/folio/api/users/${target.id}`, {
-      method: 'PATCH',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ role: 'viewer' }),
-    })
-    expect(res.status).toBe(409)
-    const body = (await res.json()) as ErrorEnvelope
+      method: "PATCH",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as ErrorEnvelope;
     // Naming it is the whole message: the remedy is in the directory, and a
     // refusal that did not say which one would send an admin looking.
-    expect(body.error.message).toBe('Their role is set by okta. Change it there.')
+    expect(body.error.message).toBe("Their role is set by okta. Change it there.");
 
     // And the row really did not change — a refusal that had already written it
     // would be the worst of both.
@@ -392,165 +398,165 @@ describe('role gates', () => {
       "select role from site_roles where user_id = ? and scope_id = '*'",
     )
       .bind(target.id)
-      .first<{ role: string }>()
-    expect(row?.role).toBe('editor')
-  })
+      .first<{ role: string }>();
+    expect(row?.role).toBe("editor");
+  });
 
-  it('still lets an admin rename somebody whose role a provider placed', async () => {
+  it("still lets an admin rename somebody whose role a provider placed", async () => {
     // The guard is on the *role*, not on the row. A name is Folio's whoever set
     // the role, and `roleFrom` travels back out so the screen can say why the
     // one control it does disable is disabled.
-    const admin = await signIn('admin')
+    const admin = await signIn("admin");
     const target = await createUser(env.DB, {
-      email: 'bob@example.com',
-      role: 'editor',
-      roleFrom: 'okta',
-    })
+      email: "bob@example.com",
+      role: "editor",
+      roleFrom: "okta",
+    });
     const res = await call(`/folio/api/users/${target.id}`, {
-      method: 'PATCH',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'Robert' }),
-    })
-    expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ user: { name: 'Robert', roleFrom: 'okta' } })
-  })
+      method: "PATCH",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "Robert" }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ user: { name: "Robert", roleFrom: "okta" } });
+  });
 
-  it('removes them anyway: removing somebody is not a role', async () => {
+  it("removes them anyway: removing somebody is not a role", async () => {
     // `DELETE` is always Folio's. A provider that decides what somebody may do
     // has no opinion on whether they have access at all — and an admin locked
     // out of revoking access because the directory owns the role would be a
     // worse failure than the one the 409 above prevents.
-    const admin = await signIn('admin')
+    const admin = await signIn("admin");
     const target = await createUser(env.DB, {
-      email: 'bob@example.com',
-      role: 'admin',
-      roleFrom: 'okta',
-    })
+      email: "bob@example.com",
+      role: "admin",
+      roleFrom: "okta",
+    });
     const res = await call(`/folio/api/users/${target.id}`, {
-      method: 'DELETE',
+      method: "DELETE",
       headers: { cookie: admin.cookie },
-    })
-    expect(res.status).toBe(200)
-    expect(await env.DB.prepare('select id from users where id = ?').bind(target.id).first()).toBe(
+    });
+    expect(res.status).toBe(200);
+    expect(await env.DB.prepare("select id from users where id = ?").bind(target.id).first()).toBe(
       null,
-    )
-  })
+    );
+  });
 
-  it('signs a user out of every browser when their role changes', async () => {
-    const admin = await signIn('admin')
-    const target = await signIn('editor')
+  it("signs a user out of every browser when their role changes", async () => {
+    const admin = await signIn("admin");
+    const target = await signIn("editor");
 
     const res = await call(`/folio/api/users/${target.user.id}`, {
-      method: 'PATCH',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ role: 'viewer' }),
-    })
-    expect(res.status).toBe(200)
+      method: "PATCH",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ role: "viewer" }),
+    });
+    expect(res.status).toBe(200);
     // A downgrade an admin just made deliberately must not sit in an open
     // socket's attachment for the bounded window a revocation may.
-    expect((await call('/folio/api/stories', { headers: { cookie: target.cookie } })).status).toBe(
+    expect((await call("/folio/api/stories", { headers: { cookie: target.cookie } })).status).toBe(
       401,
-    )
-  })
-})
+    );
+  });
+});
 
 /* ------------------------------------------------------------------ events --- */
 
-describe('auth_events', () => {
-  it('records who invited, re-roled and removed someone, and writes no event for a no-op role', async () => {
-    const admin = await signIn('admin')
+describe("auth_events", () => {
+  it("records who invited, re-roled and removed someone, and writes no event for a no-op role", async () => {
+    const admin = await signIn("admin");
 
-    const invited = await call('/folio/api/users', {
-      method: 'POST',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'invitee@example.com' }),
-    })
-    expect(invited.status).toBe(201)
-    const { user: created } = (await invited.json()) as { user: { id: string } }
+    const invited = await call("/folio/api/users", {
+      method: "POST",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ email: "invitee@example.com" }),
+    });
+    expect(invited.status).toBe(201);
+    const { user: created } = (await invited.json()) as { user: { id: string } };
 
     const patch = (role: string) =>
       call(`/folio/api/users/${created.id}`, {
-        method: 'PATCH',
-        headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { cookie: admin.cookie, "content-type": "application/json" },
         body: JSON.stringify({ role }),
-      })
-    expect((await patch('publisher')).status).toBe(200)
+      });
+    expect((await patch("publisher")).status).toBe(200);
     // Re-selecting the role already stored: no-op, so no second `role_changed`.
-    expect((await patch('publisher')).status).toBe(200)
+    expect((await patch("publisher")).status).toBe(200);
 
     expect(
       (
         await call(`/folio/api/users/${created.id}`, {
-          method: 'DELETE',
+          method: "DELETE",
           headers: { cookie: admin.cookie },
         })
       ).status,
-    ).toBe(200)
+    ).toBe(200);
 
     const invitedEvt = await env.DB.prepare(
       "select user_id, actor from auth_events where kind = 'user_invited'",
-    ).first<{ user_id: string; actor: string }>()
-    expect(invitedEvt).toEqual({ user_id: created.id, actor: admin.user.id })
+    ).first<{ user_id: string; actor: string }>();
+    expect(invitedEvt).toEqual({ user_id: created.id, actor: admin.user.id });
 
     const roleEvts = await env.DB.prepare(
       "select user_id, actor, detail from auth_events where kind = 'role_changed'",
-    ).all<{ user_id: string; actor: string; detail: string }>()
-    expect(roleEvts.results).toHaveLength(1)
-    expect(roleEvts.results[0]).toMatchObject({ user_id: created.id, actor: admin.user.id })
-    expect(JSON.parse(roleEvts.results[0]!.detail)).toEqual({ from: 'editor', to: 'publisher' })
+    ).all<{ user_id: string; actor: string; detail: string }>();
+    expect(roleEvts.results).toHaveLength(1);
+    expect(roleEvts.results[0]).toMatchObject({ user_id: created.id, actor: admin.user.id });
+    expect(JSON.parse(roleEvts.results[0]!.detail)).toEqual({ from: "editor", to: "publisher" });
 
     const removedEvt = await env.DB.prepare(
       "select user_id, actor from auth_events where kind = 'user_removed'",
-    ).first<{ user_id: string; actor: string }>()
-    expect(removedEvt).toEqual({ user_id: created.id, actor: admin.user.id })
-  })
+    ).first<{ user_id: string; actor: string }>();
+    expect(removedEvt).toEqual({ user_id: created.id, actor: admin.user.id });
+  });
 
-  it('records a sign-out naming the browser that signed out', async () => {
-    const admin = await signIn('admin')
-    const res = await call('/folio/api/logout', {
-      method: 'POST',
+  it("records a sign-out naming the browser that signed out", async () => {
+    const admin = await signIn("admin");
+    const res = await call("/folio/api/logout", {
+      method: "POST",
       headers: { cookie: admin.cookie },
-    })
-    expect(res.status).toBe(200)
+    });
+    expect(res.status).toBe(200);
 
     const row = await env.DB.prepare(
       "select user_id, actor from auth_events where kind = 'sign_out'",
-    ).first<{ user_id: string; actor: string }>()
-    expect(row).toEqual({ user_id: admin.user.id, actor: admin.user.id })
-  })
+    ).first<{ user_id: string; actor: string }>();
+    expect(row).toEqual({ user_id: admin.user.id, actor: admin.user.id });
+  });
 
-  it('never writes an event for a logout with no session to revoke', async () => {
-    expect((await call('/folio/api/logout', { method: 'POST' })).status).toBe(200)
-    const count = await env.DB.prepare('select count(*) as n from auth_events').first<{
-      n: number
-    }>()
-    expect(count?.n).toBe(0)
-  })
+  it("never writes an event for a logout with no session to revoke", async () => {
+    expect((await call("/folio/api/logout", { method: "POST" })).status).toBe(200);
+    const count = await env.DB.prepare("select count(*) as n from auth_events").first<{
+      n: number;
+    }>();
+    expect(count?.n).toBe(0);
+  });
 
-  it('reserves GET /auth-events for an admin, 404s under open, and reports oldestAt unaffected by ?user=', async () => {
-    const admin = await signIn('admin')
-    const editor = await signIn('editor')
+  it("reserves GET /auth-events for an admin, 404s under open, and reports oldestAt unaffected by ?user=", async () => {
+    const admin = await signIn("admin");
+    const editor = await signIn("editor");
 
     expect(
-      (await call('/folio/api/auth-events', { headers: { cookie: editor.cookie } })).status,
-    ).toBe(403)
+      (await call("/folio/api/auth-events", { headers: { cookie: editor.cookie } })).status,
+    ).toBe(403);
 
     const empty = (await (
-      await call('/folio/api/auth-events', { headers: { cookie: admin.cookie } })
-    ).json()) as { events: unknown[]; cursor: string | null; oldestAt: number | null }
-    expect(empty).toEqual({ events: [], cursor: null, oldestAt: null })
+      await call("/folio/api/auth-events", { headers: { cookie: admin.cookie } })
+    ).json()) as { events: unknown[]; cursor: string | null; oldestAt: number | null };
+    expect(empty).toEqual({ events: [], cursor: null, oldestAt: null });
 
-    await call('/folio/api/users', {
-      method: 'POST',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ email: 'invitee@example.com' }),
-    })
+    await call("/folio/api/users", {
+      method: "POST",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ email: "invitee@example.com" }),
+    });
 
     const page = (await (
-      await call('/folio/api/auth-events', { headers: { cookie: admin.cookie } })
-    ).json()) as { events: { kind: string }[]; oldestAt: number | null }
-    expect(page.events.some((e) => e.kind === 'user_invited')).toBe(true)
-    expect(page.oldestAt).toBeTypeOf('number')
+      await call("/folio/api/auth-events", { headers: { cookie: admin.cookie } })
+    ).json()) as { events: { kind: string }[]; oldestAt: number | null };
+    expect(page.events.some((e) => e.kind === "user_invited")).toBe(true);
+    expect(page.oldestAt).toBeTypeOf("number");
 
     // `?user=` narrows `events` but must not change the table-wide `oldestAt`:
     // it is a fact about the table, not the page (decision 8).
@@ -558,556 +564,559 @@ describe('auth_events', () => {
       await call(`/folio/api/auth-events?user=${editor.user.id}`, {
         headers: { cookie: admin.cookie },
       })
-    ).json()) as { events: unknown[]; oldestAt: number | null }
-    expect(filtered.events).toEqual([])
-    expect(filtered.oldestAt).toBe(page.oldestAt)
+    ).json()) as { events: unknown[]; oldestAt: number | null };
+    expect(filtered.events).toEqual([]);
+    expect(filtered.oldestAt).toBe(page.oldestAt);
 
-    const open = await build('open').handle(
+    const open = await build("open").handle(
       new Request(`${API}/auth-events`),
       env,
       createExecutionContext(),
-    )
-    expect(open?.status).toBe(404)
-  })
+    );
+    expect(open?.status).toBe(404);
+  });
 
   it("lists the caller's own last events over a real sign-in, and 403s a token", async () => {
-    const email = 'ann@example.com'
-    await createUser(env.DB, { email, name: 'Ann', role: 'editor' })
+    const email = "ann@example.com";
+    await createUser(env.DB, { email, name: "Ann", role: "editor" });
 
-    await call('/folio/login/email', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+    await call("/folio/login/email", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ email }),
-    })
-    const mail = outbox.at(-1)
-    expect(mail).toBeDefined()
-    const link = new URL(mail!.url)
-    const verify = await call(`${link.pathname}${link.search}`)
-    expect(verify.status).toBe(302)
-    const cookie = verify.headers.get('set-cookie')?.split(';')[0]
-    expect(cookie).toBeTruthy()
+    });
+    const mail = outbox.at(-1);
+    expect(mail).toBeDefined();
+    const link = new URL(mail!.url);
+    const verify = await call(`${link.pathname}${link.search}`);
+    expect(verify.status).toBe(302);
+    const cookie = verify.headers.get("set-cookie")?.split(";")[0];
+    expect(cookie).toBeTruthy();
 
-    const mine = await call('/folio/api/me/events', { headers: { cookie: cookie! } })
-    expect(mine.status).toBe(200)
-    const body = (await mine.json()) as { events: { kind: string }[] }
-    expect(body.events.map((e) => e.kind)).toEqual(['sign_in'])
+    const mine = await call("/folio/api/me/events", { headers: { cookie: cookie! } });
+    expect(mine.status).toBe(200);
+    const body = (await mine.json()) as { events: { kind: string }[] };
+    expect(body.events.map((e) => e.kind)).toEqual(["sign_in"]);
 
-    const { token } = await createToken(env.DB, { name: 'script', scopes: ['content:read'] })
+    const { token } = await createToken(env.DB, { name: "script", scopes: ["content:read"] });
     expect(
-      (await call('/folio/api/me/events', { headers: { authorization: `Bearer ${token}` } }))
+      (await call("/folio/api/me/events", { headers: { authorization: `Bearer ${token}` } }))
         .status,
-    ).toBe(403)
-  })
+    ).toBe(403);
+  });
 
-  it('folio.sweepAuth deletes expired sessions, stale challenges and retired events, and reports each count', async () => {
-    const viewer = await signIn('viewer')
-    await createSession(env.DB, viewer.user.id, { days: -1 })
-    await createChallenge(env.DB, 'ghost@example.com', Date.now() - 20 * 60 * 1000)
+  it("folio.sweepAuth deletes expired sessions, stale challenges and retired events, and reports each count", async () => {
+    const viewer = await signIn("viewer");
+    await createSession(env.DB, viewer.user.id, { days: -1 });
+    await createChallenge(env.DB, "ghost@example.com", Date.now() - 20 * 60 * 1000);
     await recordEventStatement(env.DB, {
-      kind: 'sign_in',
+      kind: "sign_in",
       at: Date.now() - 91 * 24 * 60 * 60 * 1000,
       userId: null,
-    }).run()
+    }).run();
 
-    const report = await folio.sweepAuth(env)
-    expect(report.sessions).toBe(1)
-    expect(report.challenges).toBe(1)
-    expect(report.events).toBe(1)
+    const report = await folio.sweepAuth(env);
+    expect(report.sessions).toBe(1);
+    expect(report.challenges).toBe(1);
+    expect(report.events).toBe(1);
 
     // The still-live session survives the sweep.
-    expect((await call('/folio/api/stories', { headers: { cookie: viewer.cookie } })).status).toBe(
+    expect((await call("/folio/api/stories", { headers: { cookie: viewer.cookie } })).status).toBe(
       200,
-    )
-  })
-})
+    );
+  });
+});
 
 /* ------------------------------------------------------------------ tokens --- */
 
-describe('api tokens', () => {
-  it('reads with a read scope and is refused a write, by name', async () => {
-    await seedStory()
-    const { token } = await createToken(env.DB, { name: 'importer', scopes: ['content:read'] })
-    const headers = { authorization: `Bearer ${token}` }
+describe("api tokens", () => {
+  it("reads with a read scope and is refused a write, by name", async () => {
+    await seedStory();
+    const { token } = await createToken(env.DB, { name: "importer", scopes: ["content:read"] });
+    const headers = { authorization: `Bearer ${token}` };
 
-    expect((await call('/folio/api/stories', { headers })).status).toBe(200)
+    expect((await call("/folio/api/stories", { headers })).status).toBe(200);
 
-    const res = await call('/folio/api/stories', {
-      method: 'POST',
-      headers: { ...headers, 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 'From a script' }),
-    })
-    expect(res.status).toBe(403)
-    expect((await res.json<ErrorEnvelope>()).error.message).toContain("'content:write'")
-  })
+    const res = await call("/folio/api/stories", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ title: "From a script" }),
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json<ErrorEnvelope>()).error.message).toContain("'content:write'");
+  });
 
-  it('stamps last_used_at even on the request it refuses', async () => {
-    const { row, token } = await createToken(env.DB, { name: 'importer', scopes: ['content:read'] })
-    await call('/folio/api/stories', {
-      method: 'DELETE',
+  it("stamps last_used_at even on the request it refuses", async () => {
+    const { row, token } = await createToken(env.DB, {
+      name: "importer",
+      scopes: ["content:read"],
+    });
+    await call("/folio/api/stories", {
+      method: "DELETE",
       headers: { authorization: `Bearer ${token}` },
-    })
-    const after = await env.DB.prepare('select last_used_at from api_tokens where id = ?')
+    });
+    const after = await env.DB.prepare("select last_used_at from api_tokens where id = ?")
       .bind(row.id)
-      .first<{ last_used_at: number | null }>()
+      .first<{ last_used_at: number | null }>();
     // The column answers "is this credential in use", not "did it succeed".
-    expect(after?.last_used_at).toBeTypeOf('number')
-  })
+    expect(after?.last_used_at).toBeTypeOf("number");
+  });
 
-  it('401s a revoked token: a credential that no longer exists, not a missing scope', async () => {
-    const { row, token } = await createToken(env.DB, { name: 'importer', scopes: ['admin'] })
-    await env.DB.prepare('update api_tokens set revoked_at = ? where id = ?')
+  it("401s a revoked token: a credential that no longer exists, not a missing scope", async () => {
+    const { row, token } = await createToken(env.DB, { name: "importer", scopes: ["admin"] });
+    await env.DB.prepare("update api_tokens set revoked_at = ? where id = ?")
       .bind(Date.now(), row.id)
-      .run()
+      .run();
 
-    const res = await call('/folio/api/stories', { headers: { authorization: `Bearer ${token}` } })
-    expect(res.status).toBe(401)
-  })
+    const res = await call("/folio/api/stories", { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(401);
+  });
 
-  it('mints a token exactly once, and never hands the value back afterwards', async () => {
-    const admin = await signIn('admin')
-    const created = await call('/folio/api/tokens', {
-      method: 'POST',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'import-script', scopes: ['content:read', 'content:write'] }),
-    })
-    expect(created.status).toBe(201)
-    const body = await created.json<{ token: string; row: { id: string; scopes: string[] } }>()
-    expect(body.token).toMatch(/^folio_[0-9a-f]{64}$/)
-    expect(body.row.scopes).toEqual(['content:read', 'content:write'])
+  it("mints a token exactly once, and never hands the value back afterwards", async () => {
+    const admin = await signIn("admin");
+    const created = await call("/folio/api/tokens", {
+      method: "POST",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "import-script", scopes: ["content:read", "content:write"] }),
+    });
+    expect(created.status).toBe(201);
+    const body = await created.json<{ token: string; row: { id: string; scopes: string[] } }>();
+    expect(body.token).toMatch(/^folio_[0-9a-f]{64}$/);
+    expect(body.row.scopes).toEqual(["content:read", "content:write"]);
 
     const listed = await (
-      await call('/folio/api/tokens', { headers: { cookie: admin.cookie } })
-    ).text()
+      await call("/folio/api/tokens", { headers: { cookie: admin.cookie } })
+    ).text();
     // Only the hash exists after this point; there is nothing to leak.
-    expect(listed).not.toContain(body.token)
-  })
+    expect(listed).not.toContain(body.token);
+  });
 
-  it('refuses a scope that does not exist rather than quietly dropping it', async () => {
-    const admin = await signIn('admin')
-    const res = await call('/folio/api/tokens', {
-      method: 'POST',
-      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'bad', scopes: ['content:destroy'] }),
-    })
-    expect(res.status).toBe(400)
-  })
-})
+  it("refuses a scope that does not exist rather than quietly dropping it", async () => {
+    const admin = await signIn("admin");
+    const res = await call("/folio/api/tokens", {
+      method: "POST",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "bad", scopes: ["content:destroy"] }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
 
 /* ------------------------------------------------------------------ origin --- */
 
-describe('the origin check', () => {
-  it('refuses a cookie-authenticated mutation from another origin', async () => {
-    const id = await seedStory()
-    const { cookie } = await signIn('publisher')
+describe("the origin check", () => {
+  it("refuses a cookie-authenticated mutation from another origin", async () => {
+    const id = await seedStory();
+    const { cookie } = await signIn("publisher");
 
     const res = await call(`/folio/api/story/${id}/publish`, {
-      method: 'POST',
-      headers: { cookie, origin: 'https://evil.example' },
-    })
-    expect(res.status).toBe(403)
-    expect((await res.json<ErrorEnvelope>()).error.message).toContain('another site')
-  })
+      method: "POST",
+      headers: { cookie, origin: "https://evil.example" },
+    });
+    expect(res.status).toBe(403);
+    expect((await res.json<ErrorEnvelope>()).error.message).toContain("another site");
+  });
 
-  it('allows the worker’s own origin, and any request with no Origin at all', async () => {
-    const id = await seedStory()
-    const { cookie } = await signIn('publisher')
+  it("allows the worker’s own origin, and any request with no Origin at all", async () => {
+    const id = await seedStory();
+    const { cookie } = await signIn("publisher");
 
     expect(
       (
         await call(`/folio/api/story/${id}/publish`, {
-          method: 'POST',
+          method: "POST",
           headers: { cookie, origin: ORIGIN },
         })
       ).status,
-    ).toBe(200)
+    ).toBe(200);
     // No Origin means curl, a script or a server: none of which can be tricked
     // into replaying somebody's cookie.
     expect(
-      (await call(`/folio/api/story/${id}/publish`, { method: 'POST', headers: { cookie } }))
+      (await call(`/folio/api/story/${id}/publish`, { method: "POST", headers: { cookie } }))
         .status,
-    ).toBe(200)
-  })
+    ).toBe(200);
+  });
 
-  it('leaves a bearer-token mutation alone: a token is not an ambient credential', async () => {
-    const { token } = await createToken(env.DB, { name: 'importer', scopes: ['content:write'] })
-    const res = await call('/folio/api/stories', {
-      method: 'POST',
+  it("leaves a bearer-token mutation alone: a token is not an ambient credential", async () => {
+    const { token } = await createToken(env.DB, { name: "importer", scopes: ["content:write"] });
+    const res = await call("/folio/api/stories", {
+      method: "POST",
       headers: {
         authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-        origin: 'https://someone-elses-tool.example',
+        "content-type": "application/json",
+        origin: "https://someone-elses-tool.example",
       },
-      body: JSON.stringify({ title: 'From a browser tool' }),
-    })
-    expect(res.status).toBe(200)
-  })
-})
+      body: JSON.stringify({ title: "From a browser tool" }),
+    });
+    expect(res.status).toBe(200);
+  });
+});
 
 /* ------------------------------------------------------------- the sockets --- */
 
 interface Peer {
-  ws: WebSocket
-  inbox: ServerMsg[]
-  closes: { code: number; reason: string }[]
-  send(msg: ClientMsg): void
+  ws: WebSocket;
+  inbox: ServerMsg[];
+  closes: { code: number; reason: string }[];
+  send(msg: ClientMsg): void;
 }
 
 async function openSocket(id: string, headers: Record<string, string> = {}) {
   const res = await call(`/folio/api/story/${id}/socket`, {
-    headers: { Upgrade: 'websocket', ...headers },
-  })
-  expect(res.status).toBe(101)
-  const ws = res.webSocket
-  if (!ws) throw new Error('the upgrade returned no socket')
-  ws.accept()
+    headers: { Upgrade: "websocket", ...headers },
+  });
+  expect(res.status).toBe(101);
+  const ws = res.webSocket;
+  if (!ws) throw new Error("the upgrade returned no socket");
+  ws.accept();
   const peer: Peer = {
     ws,
     inbox: [],
     closes: [],
     send: (msg) => ws.send(JSON.stringify({ ...msg, v: PROTOCOL_VERSION })),
-  }
-  ws.addEventListener('message', (event) => {
-    const { v: _v, ...msg } = JSON.parse(event.data as string) as ServerFrame
-    peer.inbox.push(msg as ServerMsg)
-  })
-  ws.addEventListener('close', (event) => {
-    peer.closes.push({ code: event.code, reason: event.reason })
-  })
-  return peer
+  };
+  ws.addEventListener("message", (event) => {
+    const { v: _v, ...msg } = JSON.parse(event.data as string) as ServerFrame;
+    peer.inbox.push(msg as ServerMsg);
+  });
+  ws.addEventListener("close", (event) => {
+    peer.closes.push({ code: event.code, reason: event.reason });
+  });
+  return peer;
 }
 
-const tick = () => new Promise((resolve) => setTimeout(resolve, 1))
+const tick = () => new Promise((resolve) => setTimeout(resolve, 1));
 
 async function settle() {
-  for (let i = 0; i < 30; i++) await tick()
+  for (let i = 0; i < 30; i++) await tick();
 }
 
-async function frame<T extends ServerMsg['type']>(
+async function frame<T extends ServerMsg["type"]>(
   peer: Peer,
   type: T,
   nth = 1,
 ): Promise<Extract<ServerMsg, { type: T }>> {
   for (let i = 0; i < 300; i++) {
-    const hits = peer.inbox.filter((f) => f.type === type)
-    if (hits.length >= nth) return hits[nth - 1] as Extract<ServerMsg, { type: T }>
-    await tick()
+    const hits = peer.inbox.filter((f) => f.type === type);
+    if (hits.length >= nth) return hits[nth - 1] as Extract<ServerMsg, { type: T }>;
+    await tick();
   }
-  throw new Error(`no '${type}' frame arrived; saw: ${peer.inbox.map((f) => f.type).join(', ')}`)
+  throw new Error(`no '${type}' frame arrived; saw: ${peer.inbox.map((f) => f.type).join(", ")}`);
 }
 
 async function closeCode(peer: Peer): Promise<number> {
   for (let i = 0; i < 300; i++) {
-    if (peer.closes.length > 0) return peer.closes[0]!.code
-    await tick()
+    if (peer.closes.length > 0) return peer.closes[0]!.code;
+    await tick();
   }
-  throw new Error('the socket never closed')
+  throw new Error("the socket never closed");
 }
 
-const setTitle = (uid: string, value: string): Extract<ClientMsg, { type: 'tx' }>['mutations'] => [
-  { t: 'set', uid, field: 'title', value },
-]
+const setTitle = (uid: string, value: string): Extract<ClientMsg, { type: "tx" }>["mutations"] => [
+  { t: "set", uid, field: "title", value },
+];
 
 const stubFor = (id: string) =>
-  env.STORY.get(env.STORY.idFromName(id)) as DurableObjectStub<StoryDO>
+  env.STORY.get(env.STORY.idFromName(id)) as DurableObjectStub<StoryDO>;
 
 /** Reaches into one socket's attachment. The only way to exercise the bounded
  * re-check without a test that waits a minute. */
 async function editAttachment(id: string, patch: Record<string, unknown>) {
   await runInDurableObject(stubFor(id), (_instance, state) => {
     for (const socket of state.getWebSockets()) {
-      const current = socket.deserializeAttachment() as Record<string, unknown> | null
-      if (current) socket.serializeAttachment({ ...current, ...patch })
+      const current = socket.deserializeAttachment() as Record<string, unknown> | null;
+      if (current) socket.serializeAttachment({ ...current, ...patch });
     }
-  })
+  });
 }
 
-describe('the sync socket', () => {
-  it('upgrades and closes 4003 with no session, rather than failing the handshake', async () => {
-    const id = await seedStory()
-    const peer = await openSocket(id)
+describe("the sync socket", () => {
+  it("upgrades and closes 4003 with no session, rather than failing the handshake", async () => {
+    const id = await seedStory();
+    const peer = await openSocket(id);
     // A failed upgrade is indistinguishable on the wire from a dropped
     // connection, so the client would reconnect on a backoff forever.
-    expect(await closeCode(peer)).toBe(4003)
-  })
+    expect(await closeCode(peer)).toBe(4003);
+  });
 
-  it('closes 4004 for an API token: a script is not an editing session', async () => {
-    const id = await seedStory()
-    const { token } = await createToken(env.DB, { name: 'importer', scopes: ['admin'] })
-    const peer = await openSocket(id, { authorization: `Bearer ${token}` })
-    expect(await closeCode(peer)).toBe(4004)
-  })
+  it("closes 4004 for an API token: a script is not an editing session", async () => {
+    const id = await seedStory();
+    const { token } = await createToken(env.DB, { name: "importer", scopes: ["admin"] });
+    const peer = await openSocket(id, { authorization: `Bearer ${token}` });
+    expect(await closeCode(peer)).toBe(4004);
+  });
 
-  it('gives a viewer a socket, read-only', async () => {
-    const id = await seedStory()
-    const { cookie } = await signIn('viewer')
-    const peer = await openSocket(id, { cookie })
+  it("gives a viewer a socket, read-only", async () => {
+    const id = await seedStory();
+    const { cookie } = await signIn("viewer");
+    const peer = await openSocket(id, { cookie });
 
     peer.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'x', name: 'x', colour: '#000000' },
-    })
-    const boot = await frame(peer, 'bootstrap')
+      identity: { actor: "x", name: "x", colour: "#000000" },
+    });
+    const boot = await frame(peer, "bootstrap");
 
-    peer.send({ type: 'tx', txId: 'v1', mutations: setTitle(boot.doc.root, 'Nope') })
-    const reject = await frame(peer, 'reject')
+    peer.send({ type: "tx", txId: "v1", mutations: setTitle(boot.doc.root, "Nope") });
+    const reject = await frame(peer, "reject");
     expect(reject).toEqual({
-      type: 'reject',
-      txId: 'v1',
-      reason: 'read-only: your role may not edit',
-    })
+      type: "reject",
+      txId: "v1",
+      reason: "read-only: your role may not edit",
+    });
     // Nothing logged: the refusal is at the door, exactly like an invalid
     // mutation, and the client's own `reject` handling drops the tx.
-    expect((await runInDurableObject(stubFor(id), (o) => o.recent())).rows).toEqual([])
-    peer.ws.close()
-  })
+    expect((await runInDurableObject(stubFor(id), (o) => o.recent())).rows).toEqual([]);
+    peer.ws.close();
+  });
 
-  it('cannot have its identity asserted by the client', async () => {
-    const id = await seedStory()
-    const ann = await signIn('editor', 'ann@example.com')
-    const bo = await signIn('publisher', 'bo@example.com')
+  it("cannot have its identity asserted by the client", async () => {
+    const id = await seedStory();
+    const ann = await signIn("editor", "ann@example.com");
+    const bo = await signIn("publisher", "bo@example.com");
 
-    const annSocket = await openSocket(id, { cookie: ann.cookie })
+    const annSocket = await openSocket(id, { cookie: ann.cookie });
     annSocket.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
       // A lie, in every field the frame still offers. At v3 that is one optional
       // nested object, and a vouched-for socket never reads it.
-      identity: { actor: 'usr_bo_pretending', name: 'Bo', colour: '#000000' },
-    })
-    const boot = await frame(annSocket, 'bootstrap')
+      identity: { actor: "usr_bo_pretending", name: "Bo", colour: "#000000" },
+    });
+    const boot = await frame(annSocket, "bootstrap");
 
-    const watcher = await openSocket(id, { cookie: bo.cookie })
+    const watcher = await openSocket(id, { cookie: bo.cookie });
     watcher.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'w', name: 'w', colour: '#ffffff' },
-    })
-    const watching = await frame(watcher, 'bootstrap')
+      identity: { actor: "w", name: "w", colour: "#ffffff" },
+    });
+    const watching = await frame(watcher, "bootstrap");
 
     // Presence carries Ann's own row, not what her client claimed.
     expect(watching.peers).toEqual([
       {
         actor: ann.user.id,
-        name: 'Ann',
+        name: "Ann",
         colour: expect.any(String),
         selection: null,
         locale: null,
       },
-    ])
+    ]);
 
-    annSocket.send({ type: 'tx', txId: 'a1', mutations: setTitle(boot.doc.root, 'Ann was here') })
-    await frame(annSocket, 'delta')
+    annSocket.send({ type: "tx", txId: "a1", mutations: setTitle(boot.doc.root, "Ann was here") });
+    await frame(annSocket, "delta");
 
-    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows
-    expect(trail[0]).toMatchObject({ actor: ann.user.id, actorName: 'Ann' })
-    annSocket.ws.close()
-    watcher.ws.close()
-  })
+    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows;
+    expect(trail[0]).toMatchObject({ actor: ann.user.id, actorName: "Ann" });
+    annSocket.ws.close();
+    watcher.ws.close();
+  });
 
-  it('keeps the pre-hello quarantine even though every socket now has an attachment', async () => {
+  it("keeps the pre-hello quarantine even though every socket now has an attachment", async () => {
     // The trap this spec calls out. `broadcast` used "has an attachment" as its
     // membership test; attaching a verified identity at upgrade time makes that
     // test true for every socket, so a `joined` flag is what still withholds a
     // delta from a socket with no watermark to place it against.
-    const id = await seedStory()
-    const ann = await signIn('editor', 'ann@example.com')
-    const lurkerAuth = await signIn('editor', 'lurk@example.com')
+    const id = await seedStory();
+    const ann = await signIn("editor", "ann@example.com");
+    const lurkerAuth = await signIn("editor", "lurk@example.com");
 
-    const writer = await openSocket(id, { cookie: ann.cookie })
+    const writer = await openSocket(id, { cookie: ann.cookie });
     writer.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
-    })
-    const boot = await frame(writer, 'bootstrap')
+      identity: { actor: "a", name: "a", colour: "#ff00ff" },
+    });
+    const boot = await frame(writer, "bootstrap");
 
     // Upgraded with a perfectly good session — so it *has* an attachment — and
     // has deliberately not said hello.
-    const lurker = await openSocket(id, { cookie: lurkerAuth.cookie })
+    const lurker = await openSocket(id, { cookie: lurkerAuth.cookie });
 
-    writer.send({ type: 'tx', txId: 'q1', mutations: setTitle(boot.doc.root, 'Quarantined') })
-    await frame(writer, 'delta')
-    await settle()
+    writer.send({ type: "tx", txId: "q1", mutations: setTitle(boot.doc.root, "Quarantined") });
+    await frame(writer, "delta");
+    await settle();
 
-    expect(lurker.inbox).toEqual([])
+    expect(lurker.inbox).toEqual([]);
     // And it is not in anybody's peer list either, for the same reason.
-    const third = await openSocket(id, { cookie: ann.cookie })
+    const third = await openSocket(id, { cookie: ann.cookie });
     third.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'c', name: 'c', colour: '#00ffff' },
-    })
-    expect((await frame(third, 'bootstrap')).peers).toHaveLength(1)
+      identity: { actor: "c", name: "c", colour: "#00ffff" },
+    });
+    expect((await frame(third, "bootstrap")).peers).toHaveLength(1);
 
     // Once it joins, it gets a bootstrap and every delta from then on.
     lurker.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'l', name: 'l', colour: '#00ff00' },
-    })
-    expect((await frame(lurker, 'bootstrap')).syncId).toBe(1)
-    writer.send({ type: 'tx', txId: 'q2', mutations: setTitle(boot.doc.root, 'Now visible') })
-    expect((await frame(lurker, 'delta')).txId).toBe('q2')
+      identity: { actor: "l", name: "l", colour: "#00ff00" },
+    });
+    expect((await frame(lurker, "bootstrap")).syncId).toBe(1);
+    writer.send({ type: "tx", txId: "q2", mutations: setTitle(boot.doc.root, "Now visible") });
+    expect((await frame(lurker, "delta")).txId).toBe("q2");
 
-    writer.ws.close()
-    lurker.ws.close()
-    third.ws.close()
-  })
+    writer.ws.close();
+    lurker.ws.close();
+    third.ws.close();
+  });
 
-  it('never leaks the role or the session onto a presence frame', async () => {
-    const id = await seedStory()
-    const ann = await signIn('admin', 'ann@example.com')
-    const bo = await signIn('editor', 'bo@example.com')
+  it("never leaks the role or the session onto a presence frame", async () => {
+    const id = await seedStory();
+    const ann = await signIn("admin", "ann@example.com");
+    const bo = await signIn("editor", "bo@example.com");
 
-    const first = await openSocket(id, { cookie: ann.cookie })
+    const first = await openSocket(id, { cookie: ann.cookie });
     first.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
-    })
-    await frame(first, 'bootstrap')
-    const second = await openSocket(id, { cookie: bo.cookie })
+      identity: { actor: "a", name: "a", colour: "#ff00ff" },
+    });
+    await frame(first, "bootstrap");
+    const second = await openSocket(id, { cookie: bo.cookie });
     second.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'b', name: 'b', colour: '#00ffff' },
-    })
-    await frame(second, 'bootstrap')
+      identity: { actor: "b", name: "b", colour: "#00ffff" },
+    });
+    await frame(second, "bootstrap");
 
-    const presence = await frame(first, 'presence')
+    const presence = await frame(first, "presence");
     // The attachment now holds role, session id and expiry; presence used to be a
     // spread of it.
     expect(Object.keys(presence.peer).sort()).toEqual([
-      'actor',
-      'colour',
-      'locale',
-      'name',
-      'selection',
-    ])
-    first.ws.close()
-    second.ws.close()
-  })
+      "actor",
+      "colour",
+      "locale",
+      "name",
+      "selection",
+    ]);
+    first.ws.close();
+    second.ws.close();
+  });
 
-  it('closes 4003 when the session expiry in the attachment has passed', async () => {
-    const id = await seedStory()
-    const { cookie } = await signIn('editor')
-    const peer = await openSocket(id, { cookie })
+  it("closes 4003 when the session expiry in the attachment has passed", async () => {
+    const id = await seedStory();
+    const { cookie } = await signIn("editor");
+    const peer = await openSocket(id, { cookie });
     peer.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
-    })
-    const boot = await frame(peer, 'bootstrap')
+      identity: { actor: "a", name: "a", colour: "#ff00ff" },
+    });
+    const boot = await frame(peer, "bootstrap");
 
     // The expiry rides in the attachment and is checked on every frame, which
     // costs nothing (checkpoint 5).
-    await editAttachment(id, { expiresAt: Date.now() - 1000 })
-    peer.send({ type: 'tx', txId: 'x1', mutations: setTitle(boot.doc.root, 'Too late') })
+    await editAttachment(id, { expiresAt: Date.now() - 1000 });
+    peer.send({ type: "tx", txId: "x1", mutations: setTitle(boot.doc.root, "Too late") });
 
-    expect(await closeCode(peer)).toBe(4003)
-    expect((await runInDurableObject(stubFor(id), (o) => o.recent())).rows).toEqual([])
-  })
+    expect(await closeCode(peer)).toBe(4003);
+    expect((await runInDurableObject(stubFor(id), (o) => o.recent())).rows).toEqual([]);
+  });
 
-  it('picks up an explicit revocation at the next re-check, and not before', async () => {
-    const id = await seedStory()
-    const { session, cookie } = await signIn('editor')
-    const peer = await openSocket(id, { cookie })
+  it("picks up an explicit revocation at the next re-check, and not before", async () => {
+    const id = await seedStory();
+    const { session, cookie } = await signIn("editor");
+    const peer = await openSocket(id, { cookie });
     peer.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
-    })
-    const boot = await frame(peer, 'bootstrap')
+      identity: { actor: "a", name: "a", colour: "#ff00ff" },
+    });
+    const boot = await frame(peer, "bootstrap");
 
-    await env.DB.prepare('delete from sessions where id = ?').bind(session.id).run()
+    await env.DB.prepare("delete from sessions where id = ?").bind(session.id).run();
 
     // Inside the window: the socket keeps working, because there is deliberately
     // no D1 read in the keystroke path. This is the cost checkpoint 5 accepts,
     // and asserting it is what stops the recheck from silently becoming
     // per-frame.
-    peer.send({ type: 'tx', txId: 'r1', mutations: setTitle(boot.doc.root, 'Still typing') })
-    expect((await frame(peer, 'delta')).txId).toBe('r1')
+    peer.send({ type: "tx", txId: "r1", mutations: setTitle(boot.doc.root, "Still typing") });
+    expect((await frame(peer, "delta")).txId).toBe("r1");
 
     // Past the window, simulated by ageing the attachment's own last-checked
     // stamp rather than by a test that waits a minute.
-    await editAttachment(id, { checkedAt: 0 })
-    peer.send({ type: 'tx', txId: 'r2', mutations: setTitle(boot.doc.root, 'And now not') })
-    expect(await closeCode(peer)).toBe(4003)
+    await editAttachment(id, { checkedAt: 0 });
+    peer.send({ type: "tx", txId: "r2", mutations: setTitle(boot.doc.root, "And now not") });
+    expect(await closeCode(peer)).toBe(4003);
 
     // What they had already logged stays, attributed to them.
-    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows
-    expect(trail.map((e) => e.syncId)).toEqual([1])
-  })
+    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows;
+    expect(trail.map((e) => e.syncId)).toEqual([1]);
+  });
 
-  it('re-checks a session that is still live and carries on, refreshing the stamp', async () => {
+  it("re-checks a session that is still live and carries on, refreshing the stamp", async () => {
     // The other half of the test above: a due re-check that finds the session
     // healthy must be invisible. Getting this wrong the other way — closing on a
     // successful check — would log everyone out once a minute.
-    const id = await seedStory()
-    const { cookie } = await signIn('editor')
-    const peer = await openSocket(id, { cookie })
+    const id = await seedStory();
+    const { cookie } = await signIn("editor");
+    const peer = await openSocket(id, { cookie });
     peer.send({
-      type: 'hello',
+      type: "hello",
       lastSyncId: 0,
-      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
-    })
-    const boot = await frame(peer, 'bootstrap')
+      identity: { actor: "a", name: "a", colour: "#ff00ff" },
+    });
+    const boot = await frame(peer, "bootstrap");
 
-    await editAttachment(id, { checkedAt: 0 })
-    peer.send({ type: 'tx', txId: 'k1', mutations: setTitle(boot.doc.root, 'Fine') })
-    expect((await frame(peer, 'delta')).txId).toBe('k1')
+    await editAttachment(id, { checkedAt: 0 });
+    peer.send({ type: "tx", txId: "k1", mutations: setTitle(boot.doc.root, "Fine") });
+    expect((await frame(peer, "delta")).txId).toBe("k1");
 
     // Stamped forward, so the next keystroke does not read D1 again.
     const checked = await runInDurableObject(stubFor(id), (_o, state) => {
-      const socket = state.getWebSockets()[0]!
-      return (socket.deserializeAttachment() as { checkedAt: number }).checkedAt
-    })
-    expect(checked).toBeGreaterThan(0)
-    peer.ws.close()
-  })
+      const socket = state.getWebSockets()[0]!;
+      return (socket.deserializeAttachment() as { checkedAt: number }).checkedAt;
+    });
+    expect(checked).toBeGreaterThan(0);
+    peer.ws.close();
+  });
 
-  it('is wide open under auth: open, with hello still supplying the identity', async () => {
-    const id = await seedStory()
-    const open = build('open')
+  it("is wide open under auth: open, with hello still supplying the identity", async () => {
+    const id = await seedStory();
+    const open = build("open");
     const res = (await open.handle(
-      new Request(`${API}/story/${id}/socket`, { headers: { Upgrade: 'websocket' } }),
+      new Request(`${API}/story/${id}/socket`, { headers: { Upgrade: "websocket" } }),
       env,
       createExecutionContext(),
-    )) as Response
-    const ws = res.webSocket!
-    ws.accept()
-    const inbox: ServerMsg[] = []
-    ws.addEventListener('message', (e) => {
-      const { v: _v, ...msg } = JSON.parse(e.data as string) as ServerFrame
-      inbox.push(msg as ServerMsg)
-    })
+    )) as Response;
+    const ws = res.webSocket!;
+    ws.accept();
+    const inbox: ServerMsg[] = [];
+    ws.addEventListener("message", (e) => {
+      const { v: _v, ...msg } = JSON.parse(e.data as string) as ServerFrame;
+      inbox.push(msg as ServerMsg);
+    });
     ws.send(
       JSON.stringify({
-        type: 'hello',
+        type: "hello",
         lastSyncId: 0,
-        identity: { actor: 'self-reported', name: 'Anon', colour: '#123456' },
+        identity: { actor: "self-reported", name: "Anon", colour: "#123456" },
         v: PROTOCOL_VERSION,
       }),
-    )
-    for (let i = 0; i < 300 && inbox.length === 0; i++) await tick()
-    expect(inbox[0]?.type).toBe('bootstrap')
+    );
+    for (let i = 0; i < 300 && inbox.length === 0; i++) await tick();
+    expect(inbox[0]?.type).toBe("bootstrap");
 
     ws.send(
       JSON.stringify({
-        type: 'tx',
-        txId: 'o1',
+        type: "tx",
+        txId: "o1",
         mutations: setTitle(
-          (inbox[0] as Extract<ServerMsg, { type: 'bootstrap' }>).doc.root,
-          'Open',
+          (inbox[0] as Extract<ServerMsg, { type: "bootstrap" }>).doc.root,
+          "Open",
         ),
         v: PROTOCOL_VERSION,
       }),
-    )
-    for (let i = 0; i < 300 && !inbox.some((f) => f.type === 'delta'); i++) await tick()
-    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows
+    );
+    for (let i = 0; i < 300 && !inbox.some((f) => f.type === "delta"); i++) await tick();
+    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows;
     // Advisory identity is still the only identity there is here.
-    expect(trail[0]).toMatchObject({ actor: 'self-reported', actorName: 'Anon' })
-    ws.close()
-  })
-})
+    expect(trail[0]).toMatchObject({ actor: "self-reported", actorName: "Anon" });
+    ws.close();
+  });
+});

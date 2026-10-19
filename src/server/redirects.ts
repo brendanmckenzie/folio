@@ -21,25 +21,25 @@
  *   and gets it for free in its own guard below: the other two cannot arise from
  *   a path that a write has just this moment vacated.
  */
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
-import { DEFAULT_SITE } from '../core/sites'
-import { isSafeHref } from '../core/values'
-import type { FolioDb } from './db'
-import type { FolioLogger } from './types'
+import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
+import { DEFAULT_SITE } from "../core/sites";
+import { isSafeHref } from "../core/values";
+import type { FolioDb } from "./db";
+import type { FolioLogger } from "./types";
 
 export interface Redirect {
-  from: string
-  to: string
-  status: 301 | 302 | 307 | 308
-  source: 'auto' | 'manual'
-  storyId: string | null
-  createdAt: number
+  from: string;
+  to: string;
+  status: 301 | 302 | 307 | 308;
+  source: "auto" | "manual";
+  storyId: string | null;
+  createdAt: number;
 }
 
-const COLS = `from_path as "from", to_path as "to", status, source, story_id as storyId, created_at as createdAt`
+const COLS = `from_path as "from", to_path as "to", status, source, story_id as storyId, created_at as createdAt`;
 
 /** A colon that starts a scheme, the same test `isSafeHref` parses off a stored URL. */
-const SCHEME = /^[a-z][a-z0-9+.-]*:/i
+const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 
 /**
  * Is this an absolute URL rather than a path on this site?
@@ -53,7 +53,7 @@ const SCHEME = /^[a-z][a-z0-9+.-]*:/i
  * says "path".
  */
 export function isAbsoluteTarget(input: string): boolean {
-  return SCHEME.test(input.trim())
+  return SCHEME.test(input.trim());
 }
 
 /**
@@ -63,8 +63,8 @@ export function isAbsoluteTarget(input: string): boolean {
  * `''` is the root, exactly like `stories.path`.
  */
 export function normalisePath(input: string): string {
-  const withoutQuery = input.split('?')[0] ?? ''
-  return withoutQuery.toLowerCase().replace(/^\/+|\/+$/g, '')
+  const withoutQuery = input.split("?")[0] ?? "";
+  return withoutQuery.toLowerCase().replace(/^\/+|\/+$/g, "");
 }
 
 /**
@@ -81,9 +81,9 @@ export function normalisePath(input: string): string {
  * "are these the same target".
  */
 export function normaliseTarget(input: string): string {
-  const trimmed = input.trim()
-  if (isAbsoluteTarget(trimmed)) return trimmed.split('?')[0] ?? trimmed
-  return normalisePath(trimmed)
+  const trimmed = input.trim();
+  if (isAbsoluteTarget(trimmed)) return trimmed.split("?")[0] ?? trimmed;
+  return normalisePath(trimmed);
 }
 
 /**
@@ -101,9 +101,9 @@ export function normaliseTarget(input: string): string {
  * protocol-relative URL to another origin; a bare stored path gets its slash.
  */
 export function rootedTarget(to: string): string {
-  const trimmed = to.trim()
-  if (isAbsoluteTarget(trimmed) || trimmed.startsWith('/')) return trimmed
-  return `/${trimmed}`
+  const trimmed = to.trim();
+  if (isAbsoluteTarget(trimmed) || trimmed.startsWith("/")) return trimmed;
+  return `/${trimmed}`;
 }
 
 export interface RedirectWrite {
@@ -112,14 +112,14 @@ export interface RedirectWrite {
    * every statement below binds it, because a redirect is one scope's routing and a
    * rename on one site must not rewrite, collapse or delete another's.
    */
-  site: string
+  site: string;
   /** The path just vacated, already in `stories.path` form. */
-  from: string
+  from: string;
   /** Where it now resolves to. */
-  to: string
-  storyId: string | null
-  status?: 301 | 302 | 307 | 308
-  source?: 'auto' | 'manual'
+  to: string;
+  storyId: string | null;
+  status?: 301 | 302 | 307 | 308;
+  source?: "auto" | "manual";
 }
 
 /**
@@ -132,20 +132,20 @@ export interface RedirectWrite {
  * same path (a title-only edit; the root, which never moves) needs no redirect.
  */
 export function redirectStatements(db: FolioDb, input: RedirectWrite): D1PreparedStatement[] {
-  const from = normalisePath(input.from)
-  const to = normaliseTarget(input.to)
-  if (!from || from === to) return []
+  const from = normalisePath(input.from);
+  const to = normaliseTarget(input.to);
+  if (!from || from === to) return [];
 
-  const status = input.status ?? 301
-  const source = input.source ?? 'auto'
-  const createdAt = Date.now()
+  const status = input.status ?? 301;
+  const source = input.source ?? "auto";
+  const createdAt = Date.now();
 
   return [
     // 1. The page lives at `to` now: any redirect *away* from it is wrong.
-    db.prepare('delete from redirects where site_id = ? and from_path = ?').bind(input.site, to),
+    db.prepare("delete from redirects where site_id = ? and from_path = ?").bind(input.site, to),
     // 2. Collapse every existing chain that pointed at the path just vacated.
     db
-      .prepare('update redirects set to_path = ? where site_id = ? and to_path = ?')
+      .prepare("update redirects set to_path = ? where site_id = ? and to_path = ?")
       .bind(to, input.site, from),
     // 3. The redirect for the path just vacated. `or replace` because the same
     //    path can be vacated more than once over a site's life. The key is
@@ -162,7 +162,7 @@ export function redirectStatements(db: FolioDb, input: RedirectWrite): D1Prepare
          values (?, ?, ?, ?, ?, ?, ?)`,
       )
       .bind(from, to, status, source, input.storyId, createdAt, input.site),
-  ]
+  ];
 }
 
 /**
@@ -181,8 +181,8 @@ export function clearRedirectAtStatement(
   site: string = DEFAULT_SITE,
 ): D1PreparedStatement {
   return db
-    .prepare('delete from redirects where site_id = ? and from_path = ?')
-    .bind(site, normalisePath(path))
+    .prepare("delete from redirects where site_id = ? and from_path = ?")
+    .bind(site, normalisePath(path));
 }
 
 /**
@@ -202,17 +202,17 @@ export async function lookupRedirect(
   path: string,
   logger: FolioLogger = console,
 ): Promise<{ to: string; status: number } | null> {
-  if (chain.length === 0) return null
-  const from = normalisePath(path)
+  if (chain.length === 0) return null;
+  const from = normalisePath(path);
   const { results } = await redirectAtStatement(db, chain, path).all<
     RedirectRow & { site: string }
-  >()
-  const nearest = chain.map((scope) => results.find((row) => row.site === scope)).find(Boolean)
-  return redirectOf(from, nearest && { to: nearest.to, status: nearest.status }, logger)
+  >();
+  const nearest = chain.map((scope) => results.find((row) => row.site === scope)).find(Boolean);
+  return redirectOf(from, nearest && { to: nearest.to, status: nearest.status }, logger);
 }
 
 /** What a redirect lookup selects, before `redirectOf` has screened it. */
-export type RedirectRow = { to: string; status: number }
+export type RedirectRow = { to: string; status: number };
 
 /**
  * The lookup half of `lookupRedirect`, as a statement rather than an answer, so
@@ -229,13 +229,13 @@ export function redirectAtStatement(
   chain: readonly string[],
   path: string,
 ): D1PreparedStatement {
-  const holes = chain.map(() => '?').join(', ')
+  const holes = chain.map(() => "?").join(", ");
   return db
     .prepare(
       `select to_path as "to", status, site_id as site from redirects
        where site_id in (${holes}) and from_path = ?`,
     )
-    .bind(...chain, normalisePath(path))
+    .bind(...chain, normalisePath(path));
 }
 
 /**
@@ -252,17 +252,17 @@ export async function redirectsAtPaths(
   chain: readonly string[],
   paths: readonly string[],
 ): Promise<(RedirectRow & { site: string; path: string })[]> {
-  if (chain.length === 0 || paths.length === 0) return []
-  const scopes = chain.map(() => '?').join(', ')
-  const holes = paths.map(() => '?').join(', ')
+  if (chain.length === 0 || paths.length === 0) return [];
+  const scopes = chain.map(() => "?").join(", ");
+  const holes = paths.map(() => "?").join(", ");
   const { results } = await db
     .prepare(
       `select from_path as path, to_path as "to", status, site_id as site from redirects
        where site_id in (${scopes}) and from_path in (${holes})`,
     )
     .bind(...chain, ...paths.map(normalisePath))
-    .all<RedirectRow & { site: string; path: string }>()
-  return results
+    .all<RedirectRow & { site: string; path: string }>();
+  return results;
 }
 
 /**
@@ -275,12 +275,12 @@ export function redirectOf(
   row: RedirectRow | null | undefined,
   logger: FolioLogger = console,
 ): RedirectRow | null {
-  if (!row) return null
+  if (!row) return null;
   if (!isSafeHref(row.to)) {
-    logger.error(`folio: redirect ${from} -> ${row.to} refused an unsafe target`)
-    return null
+    logger.error(`folio: redirect ${from} -> ${row.to} refused an unsafe target`);
+    return null;
   }
-  return row
+  return row;
 }
 
 export interface ListRedirectsOptions {
@@ -290,9 +290,9 @@ export interface ListRedirectsOptions {
    * has, and bound either way: `redirects`' primary key leads with `site_id`, so a
    * list that leaves it out is a scan.
    */
-  scope?: string
-  limit?: number
-  source?: 'auto' | 'manual'
+  scope?: string;
+  limit?: number;
+  source?: "auto" | "manual";
   /**
    * Substring match over **both** paths, because both are questions a person
    * asks of this table: "what happens to /old-services" is a `from` search and
@@ -301,23 +301,23 @@ export interface ListRedirectsOptions {
    * screen distinguishes which side matched, and it does not need to — both
    * columns are on the row.
    */
-  q?: string
+  q?: string;
   /**
    * Adds `total` for the same filter — one extra `count(*)`, only when asked
    * (`../../docs/specs/foundation/pagination.md` decision 5). The Redirects
    * screen's header asks, because `Showing n of N` is the paging control
    * (`ui-architecture.md` Resolved 5); a caller walking the cursor should not.
    */
-  count?: boolean
+  count?: boolean;
   /** Opaque cursor from a previous page's `RedirectPage.cursor`. */
-  cursor?: string
+  cursor?: string;
 }
 
 /**
  * `Page<Redirect>` by another name, kept as an alias because this route's shape is
  * already public through `folio.redirects()`.
  */
-export type RedirectPage = Page<Redirect>
+export type RedirectPage = Page<Redirect>;
 
 /**
  * Newest first, paginated. `source` filters to only the automatic or only the
@@ -346,8 +346,8 @@ export async function listRedirects(
   db: FolioDb,
   opts: ListRedirectsOptions = {},
 ): Promise<RedirectPage> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const limit = clampLimit(opts.limit, 50, 200);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
   // A malformed cursor is refused by the route (a 400), so reaching here with one
   // means the caller is a method rather than a request. Treating it as "no cursor"
   // is the right answer for that path: `folio.redirects()` passing nonsense is a
@@ -358,30 +358,31 @@ export async function listRedirects(
   // `count(*)` that also carried the cursor clause would answer "how many rows are
   // left" rather than "how many match", and the header reads `n of N` where N is
   // the whole filter. The same split `listStoryLevel` makes, for the same reason.
-  const narrow: string[] = ['site_id = ?']
-  const narrowBinds: unknown[] = [opts.scope ?? DEFAULT_SITE]
+  const narrow: string[] = ["site_id = ?"];
+  const narrowBinds: unknown[] = [opts.scope ?? DEFAULT_SITE];
   if (opts.source) {
-    narrow.push('source = ?')
-    narrowBinds.push(opts.source)
+    narrow.push("source = ?");
+    narrowBinds.push(opts.source);
   }
   if (opts.q) {
     // The same unescaped `like` `storyFilters` uses, deliberately: `%` and `_` in
     // a search term are the user's wildcards rather than an injection (the term is
     // a bound parameter), and making them literal here alone would leave the two
     // search boxes in the admin behaving differently.
-    const like = `%${opts.q}%`
-    narrow.push('(from_path like ? or to_path like ?)')
-    narrowBinds.push(like, like)
+    const like = `%${opts.q}%`;
+    narrow.push("(from_path like ? or to_path like ?)");
+    narrowBinds.push(like, like);
   }
 
-  const clauses = [...narrow]
-  const params = [...narrowBinds]
+  const clauses = [...narrow];
+  const params = [...narrowBinds];
   if (cursor) {
-    const [createdAt, from] = cursor
-    clauses.push('(created_at < ? or (created_at = ? and from_path < ?))')
-    params.push(createdAt, createdAt, from)
+    const [createdAt, from] = cursor;
+    clauses.push("(created_at < ? or (created_at = ? and from_path < ?))");
+    params.push(createdAt, createdAt, from);
   }
-  const whereOf = (parts: readonly string[]) => (parts.length ? `where ${parts.join(' and ')}` : '')
+  const whereOf = (parts: readonly string[]) =>
+    parts.length ? `where ${parts.join(" and ")}` : "";
 
   const [rows, total] = await Promise.all([
     db
@@ -397,16 +398,16 @@ export async function listRedirects(
           .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  const page = paginate(rows.results, limit, (row) => [row.createdAt, row.from])
-  return total ? { ...page, total: total.n } : page
+  const page = paginate(rows.results, limit, (row) => [row.createdAt, row.from]);
+  return total ? { ...page, total: total.n } : page;
 }
 
 export interface UpsertRedirectInput {
-  from: string
-  to: string
-  status?: 301 | 302 | 307 | 308
+  from: string;
+  to: string;
+  status?: 301 | 302 | 307 | 308;
 }
 
 /**
@@ -419,10 +420,10 @@ export async function upsertRedirect(
   /** The scope the redirect is added to. Required: the key is `(site_id, from_path)`. */
   site: string,
 ): Promise<Redirect> {
-  const from = normalisePath(input.from)
-  const to = normaliseTarget(input.to)
-  const status = input.status ?? 301
-  const createdAt = Date.now()
+  const from = normalisePath(input.from);
+  const to = normaliseTarget(input.to);
+  const status = input.status ?? 301;
+  const createdAt = Date.now();
 
   await db
     .prepare(
@@ -430,9 +431,9 @@ export async function upsertRedirect(
        values (?, ?, ?, 'manual', null, ?, ?)`,
     )
     .bind(from, to, status, createdAt, site)
-    .run()
+    .run();
 
-  return { from, to, status, source: 'manual', storyId: null, createdAt }
+  return { from, to, status, source: "manual", storyId: null, createdAt };
 }
 
 /**
@@ -442,8 +443,8 @@ export async function upsertRedirect(
  */
 export async function deleteRedirect(db: FolioDb, from: string, site: string): Promise<boolean> {
   const result = await db
-    .prepare('delete from redirects where site_id = ? and from_path = ?')
+    .prepare("delete from redirects where site_id = ? and from_path = ?")
     .bind(site, normalisePath(from))
-    .run()
-  return (result.meta.changes ?? 0) > 0
+    .run();
+  return (result.meta.changes ?? 0) > 0;
 }

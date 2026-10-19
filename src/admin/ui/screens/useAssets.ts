@@ -1,9 +1,9 @@
-import type { Dispatch, DragEvent, SetStateAction } from 'react'
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import type { Fit } from '../fit'
-import { type AssetRow, type AssetsUrl, assetsParams, type UploadEntry } from './assets-model'
-import { messageOf } from './useContent'
+import type { Dispatch, DragEvent, SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import type { Fit } from "../fit";
+import { type AssetRow, type AssetsUrl, assetsParams, type UploadEntry } from "./assets-model";
+import { messageOf } from "./useContent";
 
 /**
  * The Assets screen's impure half: one page of the media library, and the upload
@@ -31,12 +31,12 @@ import { messageOf } from './useContent'
  * rather than the end of a page. A measured size gets the same property for free, by
  * being a whole number of measured rows.
  */
-export const ASSETS_PAGE = 48
+export const ASSETS_PAGE = 48;
 
 /** The route's own clamp (`routes/assets.ts`). Asking past it is not refused, it is
  * silently reduced — which would leave the pager's arithmetic disagreeing with the
  * server's about what a page holds. */
-export const ASSETS_PAGE_MAX = 200
+export const ASSETS_PAGE_MAX = 200;
 
 /**
  * What the pager measures, for `useFittedPage`.
@@ -50,10 +50,10 @@ export const ASSETS_PAGE_MAX = 200
  * row — so one selector serves both views and the loading state that precedes either.
  */
 export const ASSETS_FIT: Fit = {
-  cells: '[data-fit]',
+  cells: "[data-fit]",
   fallback: ASSETS_PAGE,
   max: ASSETS_PAGE_MAX,
-}
+};
 
 /**
  * How long the search box waits before it is a request.
@@ -70,18 +70,18 @@ export const ASSETS_FIT: Fit = {
  * deliberately not done here, because it means editing `useDocuments.ts`, which
  * belongs to a port phase that has already landed and is not this one's to reopen.
  */
-const DEBOUNCE_MS = 150
+const DEBOUNCE_MS = 150;
 
 export interface AssetsData {
-  page: Page<AssetRow> & { loading: boolean; error?: string }
+  page: Page<AssetRow> & { loading: boolean; error?: string };
   /** Cursors already visited, so *previous* is a pop rather than a reverse query.
    * Keyset paging only goes forwards; a client-side stack is what makes next /
    * previous work without the route learning a second direction. */
-  canGoBack: boolean
-  nextPage: () => void
-  prevPage: () => void
+  canGoBack: boolean;
+  nextPage: () => void;
+  prevPage: () => void;
   /** Re-read the current page, after an upload or a delete. */
-  reload: () => void
+  reload: () => void;
 }
 
 /**
@@ -97,13 +97,13 @@ export function useAssets(
   /** A picker on a deployment with `sites`: the chain's library, not only the scope's. */
   chain = false,
 ): AssetsData {
-  const [page, setPage] = useState<AssetsData['page']>({
+  const [page, setPage] = useState<AssetsData["page"]>({
     rows: [],
     cursor: null,
     loading: true,
-  })
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [history, setHistory] = useState<readonly (string | null)[]>([])
+  });
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [history, setHistory] = useState<readonly (string | null)[]>([]);
 
   /**
    * The query the *request* uses, which trails the box by `DEBOUNCE_MS`.
@@ -113,8 +113,8 @@ export function useAssets(
    * time, and it is the only one of them whose intermediate states nobody asked to
    * see.
    */
-  const q = useDebounced(url.q)
-  const settled = { ...url, q }
+  const q = useDebounced(url.q);
+  const settled = { ...url, q };
 
   // Serialised, because a fresh object every render would restart the effect below.
   // The string is also exactly what goes on the wire, so there is no second
@@ -124,23 +124,23 @@ export function useAssets(
     cursor,
     count: true,
     chain,
-  }).toString()
+  }).toString();
 
   const fetchPage = useCallback(async () => {
-    setPage((prev) => ({ ...prev, loading: true }))
+    setPage((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`${apiBase}/assets?${params}`)
-      if (!res.ok) throw new Error(await messageOf(res))
-      setPage({ ...((await res.json()) as Page<AssetRow>), loading: false })
+      const res = await fetch(`${apiBase}/assets?${params}`);
+      if (!res.ok) throw new Error(await messageOf(res));
+      setPage({ ...((await res.json()) as Page<AssetRow>), loading: false });
     } catch (e) {
-      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message })
+      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message });
     }
-  }, [apiBase, params])
+  }, [apiBase, params]);
 
   useEffect(() => {
-    if (pageSize === null) return
-    void fetchPage()
-  }, [fetchPage, pageSize])
+    if (pageSize === null) return;
+    void fetchPage();
+  }, [fetchPage, pageSize]);
 
   /**
    * A filter, a sort or a direction change invalidates the cursor stack: each is a
@@ -158,42 +158,42 @@ export function useAssets(
    * a position does not stop being one because the page that follows it got taller.
    * Keying on it would mean a window resize threw you back to page one.
    */
-  const identity = assetsParams(settled, { limit: ASSETS_PAGE, count: true }).toString()
+  const identity = assetsParams(settled, { limit: ASSETS_PAGE, count: true }).toString();
   // biome-ignore lint/correctness/useExhaustiveDependencies: `identity` is the trigger, not a value the body reads — it only clears. Naming it is the point; reading it to satisfy the rule would misstate what this depends on
   useEffect(() => {
-    setCursor(null)
-    setHistory([])
-  }, [identity])
+    setCursor(null);
+    setHistory([]);
+  }, [identity]);
 
   const nextPage = useCallback(() => {
-    if (!page.cursor) return
-    setHistory((prev) => [...prev, cursor])
-    setCursor(page.cursor)
-  }, [page.cursor, cursor])
+    if (!page.cursor) return;
+    setHistory((prev) => [...prev, cursor]);
+    setCursor(page.cursor);
+  }, [page.cursor, cursor]);
 
   const prevPage = useCallback(() => {
     setHistory((prev) => {
-      if (prev.length === 0) return prev
-      setCursor(prev[prev.length - 1] ?? null)
-      return prev.slice(0, -1)
-    })
-  }, [])
+      if (prev.length === 0) return prev;
+      setCursor(prev[prev.length - 1] ?? null);
+      return prev.slice(0, -1);
+    });
+  }, []);
 
-  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage }
+  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage };
 }
 
 /* --------------------------------------------------------------- one asset --- */
 
 export interface AssetLookup {
-  row: AssetRow | null
+  row: AssetRow | null;
   /** The route answered 404: the file has been deleted. Separate from `error` on
    * purpose — see `PanelSubject`. */
-  gone: boolean
-  error: string | null
-  loading: boolean
+  gone: boolean;
+  error: string | null;
+  loading: boolean;
   /** Ask again. Only ever offered for `error`: a 404 is not something a retry
    * changes, and offering one would suggest the file might come back. */
-  retry: () => void
+  retry: () => void;
 }
 
 /**
@@ -219,50 +219,50 @@ export interface AssetLookup {
  * was deleted because their wifi dropped.
  */
 export function useAsset(apiBase: string, id: string | undefined): AssetLookup {
-  const [state, setState] = useState<Omit<AssetLookup, 'retry'>>({
+  const [state, setState] = useState<Omit<AssetLookup, "retry">>({
     row: null,
     gone: false,
     error: null,
     loading: false,
-  })
+  });
   // A nonce rather than a `fetch` the caller can invoke: the request has to be the
   // effect's, or a retry and an id change could be in flight together and the loser
   // would overwrite the winner.
-  const [attempt, setAttempt] = useState(0)
-  const retry = useCallback(() => setAttempt((n) => n + 1), [])
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is the trigger, not a value the body reads — it exists so `retry` can re-run this. Reading it to satisfy the rule would misstate what the request depends on
   useEffect(() => {
     if (!id) {
-      setState({ row: null, gone: false, error: null, loading: false })
-      return
+      setState({ row: null, gone: false, error: null, loading: false });
+      return;
     }
-    let live = true
-    setState({ row: null, gone: false, error: null, loading: true })
+    let live = true;
+    setState({ row: null, gone: false, error: null, loading: true });
     void (async () => {
       try {
-        const res = await fetch(`${apiBase}/assets/${encodeURIComponent(id)}`)
+        const res = await fetch(`${apiBase}/assets/${encodeURIComponent(id)}`);
         // Read before the `ok` check so a 404 is told apart by its status rather than
         // by matching its message text, which is a string somebody is free to reword.
         if (res.status === 404) {
-          if (live) setState({ row: null, gone: true, error: null, loading: false })
-          return
+          if (live) setState({ row: null, gone: true, error: null, loading: false });
+          return;
         }
-        if (!res.ok) throw new Error(await messageOf(res))
-        const row = (await res.json()) as AssetRow
-        if (live) setState({ row, gone: false, error: null, loading: false })
+        if (!res.ok) throw new Error(await messageOf(res));
+        const row = (await res.json()) as AssetRow;
+        if (live) setState({ row, gone: false, error: null, loading: false });
       } catch (e) {
         if (live) {
-          setState({ row: null, gone: false, error: (e as Error).message, loading: false })
+          setState({ row: null, gone: false, error: (e as Error).message, loading: false });
         }
       }
-    })()
+    })();
     return () => {
-      live = false
-    }
-  }, [apiBase, id, attempt])
+      live = false;
+    };
+  }, [apiBase, id, attempt]);
 
-  return { ...state, retry }
+  return { ...state, retry };
 }
 
 /* ----------------------------------------------------------------- uploads --- */
@@ -270,11 +270,11 @@ export function useAsset(apiBase: string, id: string | undefined): AssetLookup {
 export interface Uploads {
   /** The batch in flight, or the one that just finished. Empty when there is
    * nothing to say. */
-  entries: readonly UploadEntry[]
-  busy: boolean
-  add: (files: FileList | readonly File[] | null) => void
+  entries: readonly UploadEntry[];
+  busy: boolean;
+  add: (files: FileList | readonly File[] | null) => void;
   /** Clear the report. Only offered once nothing is in flight. */
-  dismiss: () => void
+  dismiss: () => void;
 }
 
 /**
@@ -308,75 +308,75 @@ export function useUploads(
   apiBase: string,
   onFinished: (done: readonly AssetRow[], failed: number) => void,
 ): Uploads {
-  const [entries, setEntries] = useState<readonly UploadEntry[]>([])
-  const finished = useRef(onFinished)
-  finished.current = onFinished
-  const live = useRef(true)
+  const [entries, setEntries] = useState<readonly UploadEntry[]>([]);
+  const finished = useRef(onFinished);
+  finished.current = onFinished;
+  const live = useRef(true);
   useEffect(
     () => () => {
-      live.current = false
+      live.current = false;
     },
     [],
-  )
+  );
 
   const add = useCallback(
     (files: FileList | readonly File[] | null) => {
-      const list = files ? [...files] : []
-      if (list.length === 0) return
+      const list = files ? [...files] : [];
+      if (list.length === 0) return;
 
       // A new batch replaces the previous report rather than appending to it.
       // Keeping old failures would let the list grow without bound across a session
       // and would mix a file that failed ten minutes ago into the outcome of the
       // drop that just happened.
-      const stamp = Date.now()
+      const stamp = Date.now();
       const batch: UploadEntry[] = list.map((file, i) => ({
         id: `${stamp}:${i}:${file.name}`,
         filename: file.name,
-        status: 'uploading',
-      }))
-      setEntries(batch)
+        status: "uploading",
+      }));
+      setEntries(batch);
 
       void (async () => {
-        const done: AssetRow[] = []
-        let failed = 0
+        const done: AssetRow[] = [];
+        let failed = 0;
         for (const [i, file] of list.entries()) {
-          const id = batch[i]!.id
+          const id = batch[i]!.id;
           try {
-            done.push(await uploadOne(apiBase, file))
-            if (live.current) mark(setEntries, id, 'done')
+            done.push(await uploadOne(apiBase, file));
+            if (live.current) mark(setEntries, id, "done");
           } catch (e) {
-            failed += 1
-            if (live.current) mark(setEntries, id, 'failed', (e as Error).message)
+            failed += 1;
+            if (live.current) mark(setEntries, id, "failed", (e as Error).message);
           }
         }
-        if (!live.current) return
+        if (!live.current) return;
         // A clean batch clears its own report: the new rows appearing in the grid
         // are the confirmation, and a list of ticks beside them is furniture. A
         // batch with any failure keeps the whole list, successes included, because
         // "which of the ten did not make it" is the question being answered.
-        if (failed === 0) setEntries([])
-        finished.current(done, failed)
-      })()
+        if (failed === 0) setEntries([]);
+        finished.current(done, failed);
+      })();
     },
     [apiBase],
-  )
+  );
 
-  const dismiss = useCallback(() => setEntries([]), [])
+  const dismiss = useCallback(() => setEntries([]), []);
 
-  return { entries, busy: entries.some((e) => e.status === 'uploading'), add, dismiss }
+  return { entries, busy: entries.some((e) => e.status === "uploading"), add, dismiss };
 }
 
 function mark(
   setEntries: Dispatch<SetStateAction<readonly UploadEntry[]>>,
   id: string,
-  status: UploadEntry['status'],
+  status: UploadEntry["status"],
   error?: string,
 ) {
   setEntries((prev) =>
     prev.map((entry) =>
       entry.id === id ? { ...entry, status, ...(error ? { error } : {}) } : entry,
     ),
-  )
+  );
 }
 
 /**
@@ -392,25 +392,25 @@ function mark(
  */
 async function uploadOne(apiBase: string, file: File): Promise<AssetRow> {
   const res = await fetch(`${apiBase}/assets?filename=${encodeURIComponent(file.name)}`, {
-    method: 'POST',
-    headers: { 'content-type': file.type || 'application/octet-stream' },
+    method: "POST",
+    headers: { "content-type": file.type || "application/octet-stream" },
     body: file,
-  })
-  if (!res.ok) throw new Error(await messageOf(res))
-  return ((await res.json()) as { asset: AssetRow }).asset
+  });
+  if (!res.ok) throw new Error(await messageOf(res));
+  return ((await res.json()) as { asset: AssetRow }).asset;
 }
 
 /* ------------------------------------------------------------------- drops --- */
 
 export interface DropTarget {
   /** A drag is over the target: the caller draws the invitation. */
-  over: boolean
+  over: boolean;
   handlers: {
-    onDragEnter: (e: DragEvent) => void
-    onDragOver: (e: DragEvent) => void
-    onDragLeave: (e: DragEvent) => void
-    onDrop: (e: DragEvent) => void
-  }
+    onDragEnter: (e: DragEvent) => void;
+    onDragOver: (e: DragEvent) => void;
+    onDragLeave: (e: DragEvent) => void;
+    onDrop: (e: DragEvent) => void;
+  };
 }
 
 /**
@@ -441,58 +441,58 @@ export function useDropTarget(
   onFiles: (files: FileList | null) => void,
   enabled = true,
 ): DropTarget {
-  const [depth, setDepth] = useState(0)
+  const [depth, setDepth] = useState(0);
 
   const onDragEnter = useCallback(
     (e: DragEvent) => {
-      if (!hasFiles(e)) return
-      e.preventDefault()
-      if (enabled) setDepth((d) => d + 1)
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (enabled) setDepth((d) => d + 1);
     },
     [enabled],
-  )
+  );
 
   const onDragOver = useCallback(
     (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (!hasFiles(e)) return;
       // Without this the browser navigates to the dropped file, which is the default
       // and is the single most common way a drop target silently does not work.
-      e.preventDefault()
-      e.dataTransfer.dropEffect = enabled ? 'copy' : 'none'
+      e.preventDefault();
+      e.dataTransfer.dropEffect = enabled ? "copy" : "none";
     },
     [enabled],
-  )
+  );
 
   const onDragLeave = useCallback(
     (e: DragEvent) => {
-      if (!hasFiles(e) || !enabled) return
-      setDepth((d) => Math.max(0, d - 1))
+      if (!hasFiles(e) || !enabled) return;
+      setDepth((d) => Math.max(0, d - 1));
     },
     [enabled],
-  )
+  );
 
   const onDrop = useCallback(
     (e: DragEvent) => {
-      if (!hasFiles(e)) return
+      if (!hasFiles(e)) return;
       // Prevented whether or not this caller may upload — see the header.
-      e.preventDefault()
-      if (!enabled) return
-      setDepth(0)
-      onFiles(e.dataTransfer.files)
+      e.preventDefault();
+      if (!enabled) return;
+      setDepth(0);
+      onFiles(e.dataTransfer.files);
     },
     [onFiles, enabled],
-  )
+  );
 
   return {
     over: enabled && depth > 0,
     handlers: { onDragEnter, onDragOver, onDragLeave, onDrop },
-  }
+  };
 }
 
 /** Whether this drag carries files at all. A dragged *link* or a text selection
  * also fires these events, and offering to upload one would be a lie. */
 function hasFiles(e: DragEvent): boolean {
-  return [...e.dataTransfer.types].includes('Files')
+  return [...e.dataTransfer.types].includes("Files");
 }
 
 /**
@@ -500,10 +500,10 @@ function hasFiles(e: DragEvent): boolean {
  * the second copy and where the shared one belongs.
  */
 function useDebounced(value: string): string {
-  const [settled, setSettled] = useState(value)
+  const [settled, setSettled] = useState(value);
   useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [value])
-  return settled
+    const timer = setTimeout(() => setSettled(value), DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [value]);
+  return settled;
 }

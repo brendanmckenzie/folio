@@ -1,5 +1,5 @@
-import { compareSiblings, type Doc, keyAtIndex } from '../core/doc'
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
+import { compareSiblings, type Doc, keyAtIndex } from "../core/doc";
+import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
 import {
   canNest,
   type DocumentType,
@@ -7,8 +7,8 @@ import {
   SINGLETON_PREFIX,
   singletonId,
   typeByName,
-} from '../core/schema'
-import { DEFAULT_SITE, layerId, SINGLE_SITE_CHAIN } from '../core/sites'
+} from "../core/schema";
+import { DEFAULT_SITE, layerId, SINGLE_SITE_CHAIN } from "../core/sites";
 import {
   ancestorPaths,
   buildTree,
@@ -26,8 +26,15 @@ import {
   type StoryFilter,
   type StoryMeta,
   type StoryNode,
-} from '../core/story'
-import { type Direction, type Keyset, keysetWhere, orderBy, SIBLING_ORDER, whereOf } from './keyset'
+} from "../core/story";
+import {
+  type Direction,
+  type Keyset,
+  keysetWhere,
+  orderBy,
+  SIBLING_ORDER,
+  whereOf,
+} from "./keyset";
 import {
   clearIndexStatements,
   clearInboundRefStatements,
@@ -35,9 +42,9 @@ import {
   type IndexedValue,
   indexedValuesFor,
   referencesTo,
-} from './content-index'
-import { FolioError } from './errors'
-import type { StoryChange } from './hooks'
+} from "./content-index";
+import { FolioError } from "./errors";
+import type { StoryChange } from "./hooks";
 import {
   clearRedirectAtStatement,
   normalisePath,
@@ -46,16 +53,16 @@ import {
   type RedirectRow,
   redirectStatements,
   rootedTarget,
-} from './redirects'
-import type { MissArm } from './types'
-import { clearSchedulesStatements } from './schedules'
-import { BIND_BUDGET, bindChunks, type FolioDb } from './db'
+} from "./redirects";
+import type { MissArm } from "./types";
+import { clearSchedulesStatements } from "./schedules";
+import { BIND_BUDGET, bindChunks, type FolioDb } from "./db";
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
               published_at as publishedAt, unpublished_at as unpublishedAt,
               updated_at as updatedAt, draft_sync_id as draftSyncId,
               draft_updated_at as draftUpdatedAt, published_sync_id as publishedSyncId,
-              schema_id as schemaId, site_id as site, forked_from as forkedFrom`
+              schema_id as schemaId, site_id as site, forked_from as forkedFrom`;
 
 /**
  * `StoryState`, in SQL — the same rule `core/story.ts`'s `draftState` states in
@@ -84,7 +91,7 @@ export const STATE_EXPR = `case
   when published_at is not null then 'live'
   when unpublished_at is not null then 'unpublished'
   else 'draft'
-end`
+end`;
 
 /**
  * `COLS`, for the one module that assembles its own `select` over `stories`:
@@ -95,7 +102,7 @@ end`
  * Unqualified on purpose — `query.ts` uses `from stories` with no table alias, and
  * `content_index` shares none of these names, so there is nothing to qualify.
  */
-export const STORY_COLS = COLS
+export const STORY_COLS = COLS;
 
 /**
  * A `COLS` row before `state`/`hasUnpublishedChanges` are derived onto it.
@@ -104,9 +111,9 @@ export const STORY_COLS = COLS
  * JSON in D1 and a `string` here — `withState` is what turns it into the
  * `titleI18n` record callers see, so the parse happens once for every reader.
  */
-export type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges' | 'titleI18n'> & {
-  title_i18n?: string | null
-}
+export type StoryRow = Omit<StoryMeta, "state" | "hasUnpublishedChanges" | "titleI18n"> & {
+  title_i18n?: string | null;
+};
 
 /**
  * `state` is derived here, once, rather than stored: the four columns it needs
@@ -117,14 +124,19 @@ export type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges' | 'titl
  * callers that only want the yes/no (`unpublished-changes.md`).
  */
 function withState(row: StoryRow): StoryMeta {
-  const { title_i18n, ...rest } = row
-  const state = draftState(row.publishedAt, row.unpublishedAt, row.draftSyncId, row.publishedSyncId)
+  const { title_i18n, ...rest } = row;
+  const state = draftState(
+    row.publishedAt,
+    row.unpublishedAt,
+    row.draftSyncId,
+    row.publishedSyncId,
+  );
   return {
     ...rest,
     titleI18n: parseTitleI18n(title_i18n),
     state,
-    hasUnpublishedChanges: state === 'changed',
-  }
+    hasUnpublishedChanges: state === "changed",
+  };
 }
 
 /**
@@ -136,23 +148,23 @@ function withState(row: StoryRow): StoryMeta {
  * story read on the site. Non-string values are dropped for the same reason.
  */
 function parseTitleI18n(raw: string | null | undefined): Record<string, string> | null {
-  if (!raw) return null
-  let parsed: unknown
+  if (!raw) return null;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(raw);
   } catch {
-    return null
+    return null;
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
-  const out: Record<string, string> = {}
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const out: Record<string, string> = {};
   for (const [code, title] of Object.entries(parsed as Record<string, unknown>)) {
-    if (typeof title === 'string') out[code] = title
+    if (typeof title === "string") out[code] = title;
   }
-  return Object.keys(out).length > 0 ? out : null
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 /** `withState`, for `query.ts`. See `STORY_COLS`. */
-export const toStoryMeta = withState
+export const toStoryMeta = withState;
 
 /* ------------------------------------------------------------ scopes --- */
 
@@ -171,10 +183,10 @@ export const toStoryMeta = withState
  */
 export function chainClause(
   chain: readonly string[],
-  column = 'site_id',
+  column = "site_id",
 ): { sql: string; binds: string[] } {
-  if (chain.length === 0) return { sql: '0 = 1', binds: [] }
-  return { sql: `${column} in (${chain.map(() => '?').join(', ')})`, binds: [...chain] }
+  if (chain.length === 0) return { sql: "0 = 1", binds: [] };
+  return { sql: `${column} in (${chain.map(() => "?").join(", ")})`, binds: [...chain] };
 }
 
 /**
@@ -193,25 +205,25 @@ export function chainClause(
  * nearer scope, so there is nothing to shadow and no subquery to pay for.
  */
 export function servedClause(chain: readonly string[]): { sql: string; binds: string[] } {
-  const own = chainClause(chain, 'stories.site_id')
-  if (chain.length <= 1) return own
-  const binds: string[] = [...own.binds, chain[0]!]
-  const shadowed: string[] = []
+  const own = chainClause(chain, "stories.site_id");
+  if (chain.length <= 1) return own;
+  const binds: string[] = [...own.binds, chain[0]!];
+  const shadowed: string[] = [];
   for (let i = 1; i < chain.length; i++) {
-    const nearer = chain.slice(0, i)
-    const holes = nearer.map(() => '?').join(', ')
+    const nearer = chain.slice(0, i);
+    const holes = nearer.map(() => "?").join(", ");
     shadowed.push(`(stories.site_id = ?
       and not exists (select 1 from stories near
                        where near.site_id in (${holes}) and near.path = stories.path
                          and (near.published_at is not null or near.unpublished_at is not null))
       and not exists (select 1 from redirects rd
-                       where rd.site_id in (${holes}) and rd.from_path = stories.path))`)
-    binds.push(chain[i]!, ...nearer, ...nearer)
+                       where rd.site_id in (${holes}) and rd.from_path = stories.path))`);
+    binds.push(chain[i]!, ...nearer, ...nearer);
   }
   return {
-    sql: `${own.sql} and (stories.path is null or stories.site_id = ? or ${shadowed.join(' or ')})`,
+    sql: `${own.sql} and (stories.path is null or stories.site_id = ? or ${shadowed.join(" or ")})`,
     binds,
-  }
+  };
 }
 
 /**
@@ -236,7 +248,7 @@ export async function listStories(
    */
   chain: readonly string[] = SINGLE_SITE_CHAIN,
 ): Promise<StoryMeta[]> {
-  const served = servedClause(chain)
+  const served = servedClause(chain);
   const { results } = opts
     ? await db
         .prepare(`select ${COLS} from stories where ${served.sql} order by id limit ? offset ?`)
@@ -245,8 +257,8 @@ export async function listStories(
     : await db
         .prepare(`select ${COLS} from stories where ${served.sql} order by rowid`)
         .bind(...served.binds)
-        .all<StoryRow>()
-  return results.map(withState)
+        .all<StoryRow>();
+  return results.map(withState);
 }
 
 /**
@@ -304,41 +316,41 @@ export async function storiesFor(
    */
   chain: readonly string[] | null,
 ): Promise<StoryMeta[]> {
-  if (ids.length === 0 && paths.length === 0) return []
+  if (ids.length === 0 && paths.length === 0) return [];
   if (paths.length > 0 && chain === null) {
-    throw new Error('storiesFor: a path read needs the chain it is a path in')
+    throw new Error("storiesFor: a path read needs the chain it is a path in");
   }
-  if (chain?.length === 0) return []
+  if (chain?.length === 0) return [];
 
   // One bind per term whichever column it constrains, so the two lists share a
   // single budget rather than each getting one of their own — less the chain's
   // binds, which each half of the `or` repeats.
   const terms: Term[] = [
-    ...ids.map((id) => ['id', id] as const),
-    ...paths.map((path) => ['path', path] as const),
-  ]
-  const scope = chain ? chainClause(chain) : null
-  const perChunk = BIND_BUDGET - 2 * (scope?.binds.length ?? 0)
-  const chunks: Term[][] = []
-  for (let at = 0; at < terms.length; at += perChunk) chunks.push(terms.slice(at, at + perChunk))
+    ...ids.map((id) => ["id", id] as const),
+    ...paths.map((path) => ["path", path] as const),
+  ];
+  const scope = chain ? chainClause(chain) : null;
+  const perChunk = BIND_BUDGET - 2 * (scope?.binds.length ?? 0);
+  const chunks: Term[][] = [];
+  for (let at = 0; at < terms.length; at += perChunk) chunks.push(terms.slice(at, at + perChunk));
 
   const pages = await Promise.all(
     chunks.map(async (chunk) => {
-      const chunkIds = chunk.filter(([column]) => column === 'id').map(([, value]) => value)
-      const chunkPaths = chunk.filter(([column]) => column === 'path').map(([, value]) => value)
-      const clauses: string[] = []
-      const binds: string[] = []
+      const chunkIds = chunk.filter(([column]) => column === "id").map(([, value]) => value);
+      const chunkPaths = chunk.filter(([column]) => column === "path").map(([, value]) => value);
+      const clauses: string[] = [];
+      const binds: string[] = [];
       // The chain inside each half rather than around the `or`, so each half is
       // a seek on its own index — the primary key for ids, `stories_path`
       // `(site_id, path)` for paths — and neither is a scan.
       if (chunkIds.length > 0) {
-        const holes = chunkIds.map(() => '?').join(', ')
-        clauses.push(scope ? `(id in (${holes}) and ${scope.sql})` : `id in (${holes})`)
-        binds.push(...chunkIds, ...(scope?.binds ?? []))
+        const holes = chunkIds.map(() => "?").join(", ");
+        clauses.push(scope ? `(id in (${holes}) and ${scope.sql})` : `id in (${holes})`);
+        binds.push(...chunkIds, ...(scope?.binds ?? []));
       }
       if (chunkPaths.length > 0 && scope) {
-        clauses.push(`(${scope.sql} and path in (${chunkPaths.map(() => '?').join(', ')}))`)
-        binds.push(...scope.binds, ...chunkPaths)
+        clauses.push(`(${scope.sql} and path in (${chunkPaths.map(() => "?").join(", ")}))`);
+        binds.push(...scope.binds, ...chunkPaths);
       }
       // The order this read answered in before the chain made both halves seeks:
       // `id` for ids alone (the primary key's order), `rowid` once a path is in
@@ -346,24 +358,24 @@ export async function storiesFor(
       // leading, a bare `path in` could not use it and the read scanned).
       // `resolve()` builds its story map from these rows and a map serialises in
       // insertion order, so this is what keeps a resolution byte-identical.
-      const order = chunkPaths.length > 0 ? 'rowid' : 'id'
+      const order = chunkPaths.length > 0 ? "rowid" : "id";
       const { results } = await db
-        .prepare(`select ${COLS} from stories where ${clauses.join(' or ')} order by ${order}`)
+        .prepare(`select ${COLS} from stories where ${clauses.join(" or ")} order by ${order}`)
         .bind(...binds)
-        .all<StoryRow>()
-      return results
+        .all<StoryRow>();
+      return results;
     }),
-  )
+  );
 
-  const seen = new Map<string, StoryMeta>()
+  const seen = new Map<string, StoryMeta>();
   for (const rows of pages) {
-    for (const row of rows) seen.set(row.id, withState(row))
+    for (const row of rows) seen.set(row.id, withState(row));
   }
-  return [...seen.values()]
+  return [...seen.values()];
 }
 
 /** One `where` term of `storiesFor`: the column it constrains, and its one bind. */
-type Term = readonly ['id' | 'path', string]
+type Term = readonly ["id" | "path", string];
 
 /**
  * `id` plus every descendant, read from the database instead of filtered out of
@@ -397,8 +409,8 @@ export async function subtreeRows(db: FolioDb, id: string): Promise<StoryMeta[]>
        select ${COLS} from stories where id in (select id from tree)`,
     )
     .bind(id)
-    .all<StoryRow>()
-  return results.map(withState)
+    .all<StoryRow>();
+  return results.map(withState);
 }
 
 /**
@@ -412,7 +424,7 @@ export async function subtreeRows(db: FolioDb, id: string): Promise<StoryMeta[]>
  * which is why it is still here rather than deleted.
  */
 export async function storyTree(db: FolioDb): Promise<StoryNode[]> {
-  return buildTree(await listStories(db))
+  return buildTree(await listStories(db));
 }
 
 /* --------------------------------------------------------- paged tree reads --- */
@@ -432,7 +444,7 @@ export async function storyTree(db: FolioDb): Promise<StoryNode[]> {
  * `parent_id = null` and is not a child of anything in the tree.
  */
 export interface StoryLevelRow extends StoryMeta {
-  childCount: number
+  childCount: number;
 }
 
 /**
@@ -455,10 +467,10 @@ export interface StoryLevelRow extends StoryMeta {
  */
 const ORDERS = {
   ord: SIBLING_ORDER,
-  edited: { columns: ['coalesce(draft_updated_at, updated_at)', 'id'], direction: 'desc' },
-  title: { columns: ['title', 'id'], direction: 'asc' },
-  path: { columns: ['path', 'id'], direction: 'asc' },
-} satisfies Record<FlatSort | DocumentSort, Keyset>
+  edited: { columns: ["coalesce(draft_updated_at, updated_at)", "id"], direction: "desc" },
+  title: { columns: ["title", "id"], direction: "asc" },
+  path: { columns: ["path", "id"], direction: "asc" },
+} satisfies Record<FlatSort | DocumentSort, Keyset>;
 
 /**
  * The sort key of a row, component for component with `ORDERS`. The
@@ -467,32 +479,32 @@ const ORDERS = {
  */
 function keyOf(order: keyof typeof ORDERS, row: StoryMeta): [string | number, string] {
   switch (order) {
-    case 'ord':
-      return [row.ord, row.id]
-    case 'edited':
-      return [row.draftUpdatedAt ?? row.updatedAt, row.id]
-    case 'title':
-      return [row.title, row.id]
-    case 'path':
-      return [row.path ?? '', row.id]
+    case "ord":
+      return [row.ord, row.id];
+    case "edited":
+      return [row.draftUpdatedAt ?? row.updatedAt, row.id];
+    case "title":
+      return [row.title, row.id];
+    case "path":
+      return [row.path ?? "", row.id];
   }
 }
 
 export interface StoryPageOptions {
-  limit?: number
-  cursor?: string
+  limit?: number;
+  cursor?: string;
   /**
    * The one scope whose own rows to list (`multi-site.md`, "scope's own rows").
    * Defaulted to `default`, the only scope a deployment with no `sites` has, and
    * bound either way: every index a list reads leads with `site_id` since `0011`.
    */
-  scope?: string
+  scope?: string;
   /** Everything except `parentId`, which the level reader takes as its own
    * argument because it is structure rather than a filter. */
-  filter?: StoryFilter
+  filter?: StoryFilter;
   /** Adds `total` for the same filter — one extra `count(*)`, only when asked
    * (`../../docs/specs/foundation/pagination.md` decision 5). */
-  count?: boolean
+  count?: boolean;
 }
 
 /**
@@ -520,46 +532,46 @@ function storyFilters(
   filter: StoryFilter | undefined,
   opts: { indexedText?: boolean } = {},
 ): { sql: string[]; binds: unknown[] } {
-  const sql: string[] = []
-  const binds: unknown[] = []
-  if (!filter) return { sql, binds }
+  const sql: string[] = [];
+  const binds: unknown[] = [];
+  if (!filter) return { sql, binds };
   // Absent is every level; `null` is the top one. `!== undefined` rather than
   // `in`, because a valibot-parsed body carries the key with an `undefined` value
   // for an absent optional and the two must stay tellable apart.
   if (filter.parentId !== undefined) {
     if (filter.parentId === null) {
-      sql.push('parent_id is null')
+      sql.push("parent_id is null");
     } else {
-      sql.push('parent_id = ?')
-      binds.push(filter.parentId)
+      sql.push("parent_id = ?");
+      binds.push(filter.parentId);
     }
   }
   if (filter.routed !== undefined) {
-    sql.push(filter.routed ? 'path is not null' : 'path is null')
+    sql.push(filter.routed ? "path is not null" : "path is null");
   }
   if (filter.type) {
-    sql.push('type = ?')
-    binds.push(filter.type)
+    sql.push("type = ?");
+    binds.push(filter.type);
   }
   if (filter.state) {
-    sql.push(`(${STATE_EXPR}) = ?`)
-    binds.push(filter.state)
+    sql.push(`(${STATE_EXPR}) = ?`);
+    binds.push(filter.state);
   }
   if (filter.q) {
     // Title, slug and path: the three things a person types when looking for a
     // page, and the same three `matches` compared client-side in the prototype.
     // `coalesce(path, '')` because an unrouted row has none and `null like ?` is
     // null rather than false — which would drop the whole row from an OR chain.
-    const like = `%${filter.q}%`
+    const like = `%${filter.q}%`;
     if (opts.indexedText) {
-      sql.push(`(title like ? or slug like ? or coalesce(path, '') like ? or ${INDEXED_TEXT})`)
-      binds.push(like, like, like, like)
+      sql.push(`(title like ? or slug like ? or coalesce(path, '') like ? or ${INDEXED_TEXT})`);
+      binds.push(like, like, like, like);
     } else {
-      sql.push("(title like ? or slug like ? or coalesce(path, '') like ?)")
-      binds.push(like, like, like)
+      sql.push("(title like ? or slug like ? or coalesce(path, '') like ?)");
+      binds.push(like, like, like);
     }
   }
-  return { sql, binds }
+  return { sql, binds };
 }
 
 /**
@@ -589,7 +601,7 @@ function storyFilters(
 const INDEXED_TEXT = `exists (select 1 from content_index ci
                               where ci.story_id = stories.id
                                 and ci.locale = ''
-                                and ci.text_value like ?)`
+                                and ci.text_value like ?)`;
 
 /**
  * One parent's children, paged over `(ord, id)`.
@@ -610,15 +622,15 @@ export async function listStoryLevel(
   parentId: string | null,
   opts: StoryPageOptions = {},
 ): Promise<Page<StoryLevelRow>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const resume = keysetWhere(SIBLING_ORDER, cursor)
-  const filters = storyFilters(opts.filter)
+  const limit = clampLimit(opts.limit, 50, 200);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const resume = keysetWhere(SIBLING_ORDER, cursor);
+  const filters = storyFilters(opts.filter);
 
-  const level = parentId === null ? 'parent_id is null' : 'parent_id = ?'
-  const levelBinds = parentId === null ? [] : [parentId]
-  const narrow = ['site_id = ?', 'path is not null', level, ...filters.sql]
-  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...levelBinds, ...filters.binds]
+  const level = parentId === null ? "parent_id is null" : "parent_id = ?";
+  const levelBinds = parentId === null ? [] : [parentId];
+  const narrow = ["site_id = ?", "path is not null", level, ...filters.sql];
+  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...levelBinds, ...filters.binds];
 
   const [rows, total] = await Promise.all([
     db
@@ -634,20 +646,20 @@ export async function listStoryLevel(
           .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
   const page = paginate(
     rows.results.map((row) => ({ ...withState(row), childCount: row.childCount })),
     limit,
     (row) => [row.ord, row.id],
-  )
-  return total ? { ...page, total: total.n } : page
+  );
+  return total ? { ...page, total: total.n } : page;
 }
 
 /** The correlated child count. See `StoryLevelRow`. */
 const CHILD_COUNT = `(select count(*) from stories kids
                       where kids.site_id = stories.site_id and kids.parent_id = stories.id
-                        and kids.path is not null) as childCount`
+                        and kids.path is not null) as childCount`;
 
 /**
  * Every routed page, flat and paged, in one of three orderings — the `[ Tree |
@@ -663,13 +675,13 @@ export async function listStoriesFlat(
   sort: FlatSort,
   opts: StoryPageOptions = {},
 ): Promise<Page<StoryMeta>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const keyset = ORDERS[sort]
-  const resume = keysetWhere(keyset, cursor)
-  const filters = storyFilters(opts.filter)
-  const narrow = ['site_id = ?', 'path is not null', ...filters.sql]
-  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...filters.binds]
+  const limit = clampLimit(opts.limit, 50, 200);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const keyset = ORDERS[sort];
+  const resume = keysetWhere(keyset, cursor);
+  const filters = storyFilters(opts.filter);
+  const narrow = ["site_id = ?", "path is not null", ...filters.sql];
+  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...filters.binds];
 
   const [rows, total] = await Promise.all([
     db
@@ -684,10 +696,10 @@ export async function listStoriesFlat(
           .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row))
-  return total ? { ...page, total: total.n } : page
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row));
+  return total ? { ...page, total: total.n } : page;
 }
 
 /* ---------------------------------------------------- the document listing --- */
@@ -711,13 +723,13 @@ export async function listStoriesFlat(
  * second dimension nobody asked for.
  */
 export interface DocumentRow extends StoryMeta {
-  indexed: Record<string, IndexedValue>
+  indexed: Record<string, IndexedValue>;
 }
 
 export interface DocumentPageOptions extends StoryPageOptions {
   /** Fetch the `indexed` values. Skipped on a site that marks nothing `indexed`,
    * where the query would be one round trip for an empty answer. */
-  indexed?: boolean
+  indexed?: boolean;
   /**
    * Reverses the ordering. Absent means each sort's natural direction — `title`
    * ascending, `edited` newest first — which is what a column header shows on its
@@ -729,7 +741,7 @@ export interface DocumentPageOptions extends StoryPageOptions {
    * direction on every column, so a paged replacement that could only sort one way
    * would be a regression somebody notices on the first click.
    */
-  dir?: Direction
+  dir?: Direction;
 }
 
 /**
@@ -758,20 +770,20 @@ export async function listDocumentPage(
   sort: DocumentSort,
   opts: DocumentPageOptions = {},
 ): Promise<Page<DocumentRow>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort]
-  const resume = keysetWhere(keyset, cursor)
+  const limit = clampLimit(opts.limit, 50, 200);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort];
+  const resume = keysetWhere(keyset, cursor);
   // `type` is the positional argument and not `filter.type`, for the same reason
   // `parentId` is on the level reader: it is the list's identity rather than a
   // narrowing of it, and its absence means something specific (every unrouted
   // document) rather than "any type".
-  const filters = storyFilters(opts.filter, { indexedText: true })
+  const filters = storyFilters(opts.filter, { indexedText: true });
   const narrow = type
-    ? ['site_id = ?', 'type = ?', ...filters.sql]
-    : ['site_id = ?', 'path is null', ...filters.sql]
-  const scope = opts.scope ?? DEFAULT_SITE
-  const narrowBinds = type ? [scope, type, ...filters.binds] : [scope, ...filters.binds]
+    ? ["site_id = ?", "type = ?", ...filters.sql]
+    : ["site_id = ?", "path is null", ...filters.sql];
+  const scope = opts.scope ?? DEFAULT_SITE;
+  const narrowBinds = type ? [scope, type, ...filters.binds] : [scope, ...filters.binds];
 
   const [rows, total] = await Promise.all([
     db
@@ -786,9 +798,9 @@ export async function listDocumentPage(
           .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row))
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row));
   // Over the page's ids only, and *after* the window has been cut rather than
   // over the over-fetched row too: the extra row exists to answer "is there
   // more" and is never shown, so fetching its values would be work for a cell
@@ -798,11 +810,11 @@ export async function listDocumentPage(
         db,
         page.rows.map((row) => row.id),
       )
-    : {}
-  const rowsWithValues = page.rows.map((row) => ({ ...row, indexed: indexed[row.id] ?? {} }))
+    : {};
+  const rowsWithValues = page.rows.map((row) => ({ ...row, indexed: indexed[row.id] ?? {} }));
   return total
     ? { ...page, rows: rowsWithValues, total: total.n }
-    : { ...page, rows: rowsWithValues }
+    : { ...page, rows: rowsWithValues };
 }
 
 /**
@@ -828,13 +840,13 @@ export async function listSingletons(
   /** The scope whose layers these are (`ensureSingleton`'s). */
   scope: string = DEFAULT_SITE,
 ): Promise<StoryMeta[]> {
-  const singletons = types.filter((t) => t.kind === 'singleton')
-  const rows: StoryMeta[] = []
+  const singletons = types.filter((t) => t.kind === "singleton");
+  const rows: StoryMeta[] = [];
   // Sequential rather than `Promise.all`: each is a read then a conditional
   // insert on the same table, and a site declares a handful of globals, not
   // hundreds. Declaration order is also the order the sidebar shows them in.
-  for (const type of singletons) rows.push(await ensureSingleton(db, type, schemaId, scope))
-  return rows
+  for (const type of singletons) rows.push(await ensureSingleton(db, type, schemaId, scope));
+  return rows;
 }
 
 /* ------------------------------------------------------- site-wide recency --- */
@@ -866,13 +878,13 @@ export async function listRecentlyEdited(
   db: FolioDb,
   opts: StoryPageOptions = {},
 ): Promise<Page<StoryMeta>> {
-  const limit = clampLimit(opts.limit, 20, 100)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const keyset = ORDERS.edited
-  const resume = keysetWhere(keyset, cursor)
-  const filters = storyFilters(opts.filter)
-  const narrow = ['site_id = ?', ...filters.sql]
-  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...filters.binds]
+  const limit = clampLimit(opts.limit, 20, 100);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const keyset = ORDERS.edited;
+  const resume = keysetWhere(keyset, cursor);
+  const filters = storyFilters(opts.filter);
+  const narrow = ["site_id = ?", ...filters.sql];
+  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...filters.binds];
 
   const [rows, total] = await Promise.all([
     db
@@ -887,10 +899,10 @@ export async function listRecentlyEdited(
           .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  const page = paginate(rows.results.map(withState), limit, (row) => keyOf('edited', row))
-  return total ? { ...page, total: total.n } : page
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf("edited", row));
+  return total ? { ...page, total: total.n } : page;
 }
 
 /**
@@ -919,12 +931,12 @@ export async function countStories(
   /** The scope counted, as `StoryPageOptions.scope`. */
   scope: string = DEFAULT_SITE,
 ): Promise<number> {
-  const filters = storyFilters(filter)
+  const filters = storyFilters(filter);
   const row = await db
-    .prepare(`select count(*) as n from stories ${whereOf('site_id = ?', ...filters.sql)}`)
+    .prepare(`select count(*) as n from stories ${whereOf("site_id = ?", ...filters.sql)}`)
     .bind(scope, ...filters.binds)
-    .first<{ n: number }>()
-  return row?.n ?? 0
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 /**
@@ -969,33 +981,33 @@ export async function storiesMatching(
   db: FolioDb,
   filter: StoryFilter,
   opts: {
-    limit: number
-    after?: string | null
-    exclude?: readonly string[]
+    limit: number;
+    after?: string | null;
+    exclude?: readonly string[];
     /** The scope walked, as `StoryPageOptions.scope`. */
-    scope?: string
+    scope?: string;
   },
 ): Promise<StoryMeta[]> {
-  const filters = storyFilters(filter)
-  const sql = ['site_id = ?', ...filters.sql]
-  const binds: unknown[] = [opts.scope ?? DEFAULT_SITE, ...filters.binds]
+  const filters = storyFilters(filter);
+  const sql = ["site_id = ?", ...filters.sql];
+  const binds: unknown[] = [opts.scope ?? DEFAULT_SITE, ...filters.binds];
   if (opts.after) {
-    sql.push('id > ?')
-    binds.push(opts.after)
+    sql.push("id > ?");
+    binds.push(opts.after);
   }
-  const excluded = new Set(opts.exclude ?? [])
+  const excluded = new Set(opts.exclude ?? []);
   const { results } = await db
     .prepare(`select ${COLS} from stories ${whereOf(...sql)} order by id limit ?`)
     .bind(...binds, opts.limit + excluded.size)
-    .all<StoryRow>()
+    .all<StoryRow>();
 
-  const out: StoryMeta[] = []
+  const out: StoryMeta[] = [];
   for (const row of results) {
-    if (excluded.has(row.id)) continue
-    out.push(withState(row))
-    if (out.length === opts.limit) break
+    if (excluded.has(row.id)) continue;
+    out.push(withState(row));
+    if (out.length === opts.limit) break;
   }
-  return out
+  return out;
 }
 
 /* ------------------------------------------------------------------ search --- */
@@ -1011,16 +1023,16 @@ export interface SearchOptions extends StoryPageOptions {
    * `?kind=singleton` on a site that declares no singleton has to answer an empty
    * page, not the whole table.
    */
-  types?: readonly string[]
+  types?: readonly string[];
   /** Which twenty rows get ranked. See `core/story.ts`'s `SearchSort`. */
-  sort?: SearchSort
+  sort?: SearchSort;
   /**
    * The chain searched (`multi-site.md`: `GET /search` is "chain, each hit
    * carrying its `site`"). Every row in it, with no dedupe — this is the admin
    * finding a document, not a visitor being served one. Defaulted to the
    * single-site chain.
    */
-  chain?: readonly string[]
+  chain?: readonly string[];
 }
 
 /**
@@ -1050,25 +1062,25 @@ export async function searchStories(
   db: FolioDb,
   opts: SearchOptions = {},
 ): Promise<Page<StoryMeta>> {
-  const limit = clampLimit(opts.limit, 20, 100)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const sort = opts.sort ?? DEFAULT_SEARCH_SORT
-  const keyset = ORDERS[sort]
-  const resume = keysetWhere(keyset, cursor)
-  const filters = storyFilters(opts.filter, { indexedText: true })
+  const limit = clampLimit(opts.limit, 20, 100);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const sort = opts.sort ?? DEFAULT_SEARCH_SORT;
+  const keyset = ORDERS[sort];
+  const resume = keysetWhere(keyset, cursor);
+  const filters = storyFilters(opts.filter, { indexedText: true });
 
   // `1 = 0` rather than an early return, so `count` is answered by the same code
   // path and comes back as 0 instead of being quietly absent.
-  const types = opts.types
+  const types = opts.types;
   const scope =
     types === undefined
-      ? ''
+      ? ""
       : types.length > 0
-        ? `type in (${types.map(() => '?').join(', ')})`
-        : '1 = 0'
-  const inChain = chainClause(opts.chain ?? SINGLE_SITE_CHAIN)
-  const narrow = [inChain.sql, scope, ...filters.sql]
-  const narrowBinds = [...inChain.binds, ...(types ?? []), ...filters.binds]
+        ? `type in (${types.map(() => "?").join(", ")})`
+        : "1 = 0";
+  const inChain = chainClause(opts.chain ?? SINGLE_SITE_CHAIN);
+  const narrow = [inChain.sql, scope, ...filters.sql];
+  const narrowBinds = [...inChain.binds, ...(types ?? []), ...filters.binds];
 
   const [rows, total] = await Promise.all([
     db
@@ -1083,10 +1095,10 @@ export async function searchStories(
           .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
-  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row))
-  return total ? { ...page, total: total.n } : page
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row));
+  return total ? { ...page, total: total.n } : page;
 }
 
 /*
@@ -1107,16 +1119,16 @@ export async function searchStories(
  * this reader has no business knowing it.
  */
 export interface UsageRef {
-  story: StoryMeta
-  kind: 'link' | 'reference'
+  story: StoryMeta;
+  kind: "link" | "reference";
 }
 
 export interface DocumentUsage {
-  published: UsageRef[]
+  published: UsageRef[];
   /** Distinct published documents — what "Used on N published pages" counts. */
-  total: number
-  links: number
-  references: number
+  total: number;
+  links: number;
+  references: number;
   /**
    * Distinct published documents that use this one from a scope **outside the
    * chain** asked about (`multi-site.md`: "uses in readable scopes listed; others
@@ -1124,7 +1136,7 @@ export interface DocumentUsage {
    * no role on, and the delete dialog needs to say how many, not which. Always 0 on
    * a deployment with no `sites`, and then not sent.
    */
-  elsewhere: number
+  elsewhere: number;
 }
 
 /**
@@ -1157,8 +1169,8 @@ export async function documentUsage(
   /** The scopes whose uses are named; a use anywhere else is counted in `elsewhere`. */
   chain: readonly string[],
 ): Promise<DocumentUsage> {
-  const [counts, rows] = await Promise.all([countReferencesTo(db, id), referencesTo(db, id)])
-  if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0, elsewhere: 0 }
+  const [counts, rows] = await Promise.all([countReferencesTo(db, id), referencesTo(db, id)]);
+  if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0, elsewhere: 0 };
 
   /**
    * The id list here is unbounded, and that is worth naming even though
@@ -1175,16 +1187,16 @@ export async function documentUsage(
    */
   // Read wherever they live (`null`), then split: the fence is on what is *named*,
   // not on what can be counted, and the sources are primary-key seeks either way.
-  const sources = await storiesFor(db, [...new Set(rows.map((r) => r.from))], [], null)
-  const byId = new Map(sources.map((s) => [s.id, s]))
+  const sources = await storiesFor(db, [...new Set(rows.map((r) => r.from))], [], null);
+  const byId = new Map(sources.map((s) => [s.id, s]));
 
-  const published: UsageRef[] = []
-  const outside = new Set<string>()
+  const published: UsageRef[] = [];
+  const outside = new Set<string>();
   for (const row of rows) {
-    const story = byId.get(row.from)
-    if (!story) continue
-    if (!chain.includes(story.site ?? DEFAULT_SITE)) outside.add(story.id)
-    else published.push({ story, kind: row.kind === 'link' ? 'link' : 'reference' })
+    const story = byId.get(row.from);
+    if (!story) continue;
+    if (!chain.includes(story.site ?? DEFAULT_SITE)) outside.add(story.id);
+    else published.push({ story, kind: row.kind === "link" ? "link" : "reference" });
   }
   // Routed documents first, by path, then unrouted by title: an editor scanning
   // "what breaks" wants the pages before the records.
@@ -1193,7 +1205,7 @@ export async function documentUsage(
       (a.story.path === null ? 1 : 0) - (b.story.path === null ? 1 : 0) ||
       (a.story.path ?? a.story.title).localeCompare(b.story.path ?? b.story.title) ||
       a.kind.localeCompare(b.kind),
-  )
+  );
 
   return {
     published,
@@ -1201,22 +1213,22 @@ export async function documentUsage(
     links: counts.links,
     references: counts.references,
     elsewhere: outside.size,
-  }
+  };
 }
 
 /* ------------------------------------------------------ lookups by path --- */
 
 /** What a path lookup selects of a story row, published document included. */
-type PathRow = StoryRow & { published_doc?: string | null }
+type PathRow = StoryRow & { published_doc?: string | null };
 
 /** A `PathRow` without its document, as `withState` takes it. */
 function metaOf(row: PathRow): StoryRow {
-  const { published_doc, ...meta } = row
-  return meta
+  const { published_doc, ...meta } = row;
+  return meta;
 }
 
 /** A redirect row as a path lookup reads it, with the scope that owns it. */
-type ScopedRedirect = RedirectRow & { site: string }
+type ScopedRedirect = RedirectRow & { site: string };
 
 /**
  * What a site serves at a path (`../../docs/specs/foundation/multi-site.md`
@@ -1241,24 +1253,24 @@ type ScopedRedirect = RedirectRow & { site: string }
  * Pure, over rows one batch already read, so a render costs the round trips it
  * always did. Null when nothing in the chain has anything at the path.
  */
-export function pickServing<S extends Pick<StoryMeta, 'site' | 'publishedAt' | 'unpublishedAt'>>(
+export function pickServing<S extends Pick<StoryMeta, "site" | "publishedAt" | "unpublishedAt">>(
   chain: readonly string[],
   stories: readonly S[],
   redirects: readonly ScopedRedirect[] = [],
 ):
-  | { kind: 'story'; story: S }
-  | { kind: 'redirect'; redirect: ScopedRedirect }
-  | { kind: 'gone'; story: S }
+  | { kind: "story"; story: S }
+  | { kind: "redirect"; redirect: ScopedRedirect }
+  | { kind: "gone"; story: S }
   | null {
   for (const scope of chain) {
-    const story = stories.find((row) => (row.site ?? DEFAULT_SITE) === scope)
-    const state = story ? storyState(story.publishedAt, story.unpublishedAt) : null
-    if (story && state === 'live') return { kind: 'story', story }
-    const redirect = redirects.find((row) => row.site === scope)
-    if (redirect) return { kind: 'redirect', redirect }
-    if (story && state === 'unpublished') return { kind: 'gone', story }
+    const story = stories.find((row) => (row.site ?? DEFAULT_SITE) === scope);
+    const state = story ? storyState(story.publishedAt, story.unpublishedAt) : null;
+    if (story && state === "live") return { kind: "story", story };
+    const redirect = redirects.find((row) => row.site === scope);
+    if (redirect) return { kind: "redirect", redirect };
+    if (story && state === "unpublished") return { kind: "gone", story };
   }
-  return null
+  return null;
 }
 
 /**
@@ -1268,15 +1280,15 @@ export function pickServing<S extends Pick<StoryMeta, 'site' | 'publishedAt' | '
  * editor wants to look at, even while visitors are still served the page it
  * shadows.
  */
-export function pickEditing<S extends Pick<StoryMeta, 'site'>>(
+export function pickEditing<S extends Pick<StoryMeta, "site">>(
   chain: readonly string[],
   stories: readonly S[],
 ): S | null {
   for (const scope of chain) {
-    const story = stories.find((row) => (row.site ?? DEFAULT_SITE) === scope)
-    if (story) return story
+    const story = stories.find((row) => (row.site ?? DEFAULT_SITE) === scope);
+    if (story) return story;
   }
-  return null
+  return null;
 }
 
 /** The story rows at `path` in every scope of `chain`, as one statement. */
@@ -1286,13 +1298,13 @@ function storiesAtStatement(
   path: string,
   withDoc: boolean,
 ): D1PreparedStatement {
-  const scope = chainClause(chain)
+  const scope = chainClause(chain);
   return db
     .prepare(
-      `select ${COLS}${withDoc ? ', published_doc' : ''} from stories
+      `select ${COLS}${withDoc ? ", published_doc" : ""} from stories
        where ${scope.sql} and path = ?`,
     )
-    .bind(...scope.binds, path)
+    .bind(...scope.binds, path);
 }
 
 /**
@@ -1314,17 +1326,17 @@ async function rowsAt(
   path: string,
   opts: { doc?: boolean; redirects: boolean },
 ): Promise<{ stories: PathRow[]; redirects: ScopedRedirect[] }> {
-  if (chain.length === 0) return { stories: [], redirects: [] }
-  const stories = storiesAtStatement(db, chain, path, opts.doc === true)
+  if (chain.length === 0) return { stories: [], redirects: [] };
+  const stories = storiesAtStatement(db, chain, path, opts.doc === true);
   if (!opts.redirects) {
-    const { results } = await stories.all<PathRow>()
-    return { stories: results, redirects: [] }
+    const { results } = await stories.all<PathRow>();
+    return { stories: results, redirects: [] };
   }
-  const [storyRows, redirectRows] = await db.batch([stories, redirectAtStatement(db, chain, path)])
+  const [storyRows, redirectRows] = await db.batch([stories, redirectAtStatement(db, chain, path)]);
   return {
     stories: (storyRows?.results ?? []) as PathRow[],
     redirects: (redirectRows?.results ?? []) as ScopedRedirect[],
-  }
+  };
 }
 
 /**
@@ -1340,17 +1352,17 @@ export async function storyByPath(
   chain: readonly string[],
   path: string,
 ): Promise<StoryMeta | null> {
-  const { stories } = await rowsAt(db, chain, path, { redirects: false })
-  const row = pickEditing(chain, stories)
-  return row && withState(row)
+  const { stories } = await rowsAt(db, chain, path, { redirects: false });
+  const row = pickEditing(chain, stories);
+  return row && withState(row);
 }
 
 export async function storyById(db: FolioDb, id: string): Promise<StoryMeta | null> {
   const row = await db
     .prepare(`select ${COLS} from stories where id = ?`)
     .bind(id)
-    .first<StoryRow>()
-  return row && withState(row)
+    .first<StoryRow>();
+  return row && withState(row);
 }
 
 /**
@@ -1369,11 +1381,11 @@ export async function storyStatus(
   db: FolioDb,
   chain: readonly string[],
   path: string,
-): Promise<'live' | 'unpublished' | 'unknown'> {
-  const rows = await rowsAt(db, chain, path, { redirects: chain.length > 1 })
-  const served = pickServing(chain, rows.stories, rows.redirects)
-  if (served?.kind === 'story') return 'live'
-  return served?.kind === 'gone' ? 'unpublished' : 'unknown'
+): Promise<"live" | "unpublished" | "unknown"> {
+  const rows = await rowsAt(db, chain, path, { redirects: chain.length > 1 });
+  const served = pickServing(chain, rows.stories, rows.redirects);
+  if (served?.kind === "story") return "live";
+  return served?.kind === "gone" ? "unpublished" : "unknown";
 }
 
 /**
@@ -1396,12 +1408,12 @@ export async function pathMiss(
   chain: readonly string[],
   path: string,
 ): Promise<MissArm> {
-  const rows = await rowsAt(db, chain, path, { redirects: true })
-  const served = pickServing(chain, rows.stories, rows.redirects)
+  const rows = await rowsAt(db, chain, path, { redirects: true });
+  const served = pickServing(chain, rows.stories, rows.redirects);
   // Screened exactly as `lookupRedirect` screens a row, so a stored
   // `javascript:` target is refused here too.
   const redirect =
-    served?.kind === 'redirect' ? redirectOf(normalisePath(path), served.redirect) : null
+    served?.kind === "redirect" ? redirectOf(normalisePath(path), served.redirect) : null;
   // **Rooted, unlike everything else Folio calls a path.** Stored paths carry no
   // leading slash (`guides/safari`), and this one value leaves the library as a
   // `Location` header — where a bare `guides/…` is a *relative* URL the browser
@@ -1415,8 +1427,8 @@ export async function pathMiss(
   // origin)` — what the handbook and both examples do — answers the same URL for
   // a rooted path as for a bare one, so the careful spelling keeps working and
   // the obvious one stops being wrong.
-  if (redirect) return { kind: 'redirect', to: rootedTarget(redirect.to), status: redirect.status }
-  return served?.kind === 'gone' ? { kind: 'gone' } : { kind: 'not-found' }
+  if (redirect) return { kind: "redirect", to: rootedTarget(redirect.to), status: redirect.status };
+  return served?.kind === "gone" ? { kind: "gone" } : { kind: "not-found" };
 }
 
 /** What `pageAt` answers: the page a visitor is served, and the row an editor sees. */
@@ -1426,15 +1438,15 @@ export interface PageAt {
    * sees there (`editing`), so `folio.status` and the unpublished/never-existed
    * distinction still have a row to talk about.
    */
-  story: StoryMeta
+  story: StoryMeta;
   /** `story`'s published document, or null when nothing at the path is live. */
-  doc: Doc | null
+  doc: Doc | null;
   /**
    * `pickEditing`'s row: what draft mode reads the draft of. The same row as
    * `story` on a single-site deployment; on a chain it differs exactly when a
    * nearer scope holds a fork that is not yet live.
    */
-  editing: StoryMeta
+  editing: StoryMeta;
 }
 
 /**
@@ -1455,16 +1467,16 @@ export async function pageAt(
   chain: readonly string[],
   path: string,
 ): Promise<PageAt | null> {
-  const rows = await rowsAt(db, chain, path, { doc: true, redirects: chain.length > 1 })
-  const editing = pickEditing(chain, rows.stories)
-  if (!editing) return null
-  const served = pickServing(chain, rows.stories, rows.redirects)
-  const serving = served?.kind === 'story' ? served.story : null
+  const rows = await rowsAt(db, chain, path, { doc: true, redirects: chain.length > 1 });
+  const editing = pickEditing(chain, rows.stories);
+  if (!editing) return null;
+  const served = pickServing(chain, rows.stories, rows.redirects);
+  const serving = served?.kind === "story" ? served.story : null;
   return {
     story: withState(metaOf(serving ?? editing)),
     doc: serving?.published_doc ? (JSON.parse(serving.published_doc) as Doc) : null,
     editing: withState(metaOf(editing)),
-  }
+  };
 }
 
 export async function publishedDoc(
@@ -1472,10 +1484,10 @@ export async function publishedDoc(
   chain: readonly string[],
   path: string,
 ): Promise<Doc | null> {
-  const rows = await rowsAt(db, chain, path, { doc: true, redirects: chain.length > 1 })
-  const served = pickServing(chain, rows.stories, rows.redirects)
-  const doc = served?.kind === 'story' ? served.story.published_doc : null
-  return doc ? (JSON.parse(doc) as Doc) : null
+  const rows = await rowsAt(db, chain, path, { doc: true, redirects: chain.length > 1 });
+  const served = pickServing(chain, rows.stories, rows.redirects);
+  const doc = served?.kind === "story" ? served.story.published_doc : null;
+  return doc ? (JSON.parse(doc) as Doc) : null;
 }
 
 /**
@@ -1501,42 +1513,42 @@ export async function publishedDocsByIds(
    */
   chain: readonly string[] | null,
 ): Promise<Record<string, Doc>> {
-  if (ids.length === 0 || chain?.length === 0) return {}
-  const scope = chain ? chainClause(chain) : null
-  const perChunk = BIND_BUDGET - (scope?.binds.length ?? 0)
-  const chunks: string[][] = []
-  for (let at = 0; at < ids.length; at += perChunk) chunks.push(ids.slice(at, at + perChunk))
+  if (ids.length === 0 || chain?.length === 0) return {};
+  const scope = chain ? chainClause(chain) : null;
+  const perChunk = BIND_BUDGET - (scope?.binds.length ?? 0);
+  const chunks: string[][] = [];
+  for (let at = 0; at < ids.length; at += perChunk) chunks.push(ids.slice(at, at + perChunk));
   const pages = await Promise.all(
     chunks.map(async (chunk) => {
-      const placeholders = chunk.map(() => '?').join(', ')
+      const placeholders = chunk.map(() => "?").join(", ");
       const { results } = await db
         .prepare(
           `select id, published_doc from stories where id in (${placeholders})${
-            scope ? ` and ${scope.sql}` : ''
+            scope ? ` and ${scope.sql}` : ""
           }`,
         )
         .bind(...chunk, ...(scope?.binds ?? []))
-        .all<{ id: string; published_doc: string | null }>()
-      return results
+        .all<{ id: string; published_doc: string | null }>();
+      return results;
     }),
-  )
+  );
 
-  const out: Record<string, Doc> = {}
+  const out: Record<string, Doc> = {};
   for (const rows of pages) {
     for (const row of rows) {
-      if (row.published_doc) out[row.id] = JSON.parse(row.published_doc) as Doc
+      if (row.published_doc) out[row.id] = JSON.parse(row.published_doc) as Doc;
     }
   }
-  return out
+  return out;
 }
 
 /* ---------------------------------------------- content migrations (0008) --- */
 
 /** One document the migration runner has work to consider (`schema-migrations.md`). */
 export interface BehindStory {
-  story: StoryMeta
+  story: StoryMeta;
   /** The published snapshot as stored, or null when nothing is live. */
-  publishedDoc: Doc | null
+  publishedDoc: Doc | null;
 }
 
 /**
@@ -1544,7 +1556,7 @@ export interface BehindStory {
  * "before the first migration", which is what makes a row written before 0008
  * pick up the whole set.
  */
-const BEHIND = '(schema_id is null or schema_id < ?)'
+const BEHIND = "(schema_id is null or schema_id < ?)";
 
 /**
  * `and site_id in (…)` for a sweep over one brand's scopes (`multi-brand.md`
@@ -1553,8 +1565,8 @@ const BEHIND = '(schema_id is null or schema_id < ?)'
  */
 function inScopes(scopes: readonly string[] | undefined): { sql: string; binds: string[] } {
   return scopes === undefined
-    ? { sql: '', binds: [] }
-    : { sql: ' and site_id in (select value from json_each(?))', binds: [JSON.stringify(scopes)] }
+    ? { sql: "", binds: [] }
+    : { sql: " and site_id in (select value from json_each(?))", binds: [JSON.stringify(scopes)] };
 }
 
 /**
@@ -1572,19 +1584,19 @@ export async function storiesBehind(
   limit: number,
   scopes?: readonly string[],
 ): Promise<BehindStory[]> {
-  const within = inScopes(scopes)
+  const within = inScopes(scopes);
   const { results } = await db
     .prepare(
       `select ${COLS}, published_doc from stories
        where ${BEHIND}${within.sql} and id > ? order by id limit ?`,
     )
-    .bind(latestId, ...within.binds, after ?? '', limit)
-    .all<StoryRow & { published_doc: string | null }>()
+    .bind(latestId, ...within.binds, after ?? "", limit)
+    .all<StoryRow & { published_doc: string | null }>();
 
   return results.map(({ published_doc, ...row }) => ({
     story: withState(row),
     publishedDoc: published_doc ? (JSON.parse(published_doc) as Doc) : null,
-  }))
+  }));
 }
 
 /**
@@ -1598,12 +1610,12 @@ export async function countBehind(
   latestId: string,
   scopes?: readonly string[],
 ): Promise<number> {
-  const within = inScopes(scopes)
+  const within = inScopes(scopes);
   const row = await db
     .prepare(`select count(*) as n from stories where ${BEHIND}${within.sql}`)
     .bind(latestId, ...within.binds)
-    .first<{ n: number }>()
-  return row?.n ?? 0
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 /**
@@ -1623,10 +1635,10 @@ export function stampSchemaStatement(
   publishedDoc?: Doc,
 ): D1PreparedStatement {
   return publishedDoc === undefined
-    ? db.prepare('update stories set schema_id = ? where id = ?').bind(schemaId, id)
+    ? db.prepare("update stories set schema_id = ? where id = ?").bind(schemaId, id)
     : db
-        .prepare('update stories set schema_id = ?, published_doc = ? where id = ?')
-        .bind(schemaId, JSON.stringify(publishedDoc), id)
+        .prepare("update stories set schema_id = ?, published_doc = ? where id = ?")
+        .bind(schemaId, JSON.stringify(publishedDoc), id);
 }
 
 /*
@@ -1655,19 +1667,19 @@ export async function publishedDocsAfter(
   limit: number,
   scopes?: readonly string[],
 ): Promise<PublishedDocRow[]> {
-  const within = inScopes(scopes)
+  const within = inScopes(scopes);
   const { results } = await db
     .prepare(
       `select id, type, published_doc from stories
        where published_doc is not null${within.sql} and id > ? order by id limit ?`,
     )
-    .bind(...within.binds, after ?? '', limit)
-    .all<{ id: string; type: string; published_doc: string }>()
+    .bind(...within.binds, after ?? "", limit)
+    .all<{ id: string; type: string; published_doc: string }>();
   return results.map((row) => ({
     id: row.id,
     type: row.type,
     doc: JSON.parse(row.published_doc) as Doc,
-  }))
+  }));
 }
 
 /**
@@ -1682,9 +1694,9 @@ export async function publishedDocsAfter(
  * ids it is about to draw.
  */
 export interface PublishedDocRow {
-  id: string
-  type: string
-  doc: Doc
+  id: string;
+  type: string;
+  doc: Doc;
 }
 
 /**
@@ -1702,7 +1714,7 @@ export interface PublishedDocRow {
 type SiblingGroup = { site: string } & (
   | { routed: true; parentId: string | null }
   | { routed: false; type: string }
-)
+);
 
 /**
  * **Within one scope** (`multi-site.md` decision 3), because every unique index a
@@ -1711,10 +1723,10 @@ type SiblingGroup = { site: string } & (
  * on another.
  */
 function inGroup(row: StoryMeta, group: SiblingGroup): boolean {
-  if ((row.site ?? DEFAULT_SITE) !== group.site) return false
+  if ((row.site ?? DEFAULT_SITE) !== group.site) return false;
   return group.routed
     ? row.path !== null && row.parentId === group.parentId
-    : row.path === null && row.type === group.type
+    : row.path === null && row.type === group.type;
 }
 
 /**
@@ -1750,9 +1762,9 @@ async function siblingGroupRows(db: FolioDb, group: SiblingGroup): Promise<Story
           .bind(group.site, group.parentId)
     : db
         .prepare(`select ${COLS} from stories where site_id = ? and path is null and type = ?`)
-        .bind(group.site, group.type)
-  const { results } = await query.all<StoryRow>()
-  return results.map(withState)
+        .bind(group.site, group.type);
+  const { results } = await query.all<StoryRow>();
+  return results.map(withState);
 }
 
 /**
@@ -1765,11 +1777,11 @@ async function siblingGroupRows(db: FolioDb, group: SiblingGroup): Promise<Story
 function orderAt(rows: readonly StoryMeta[], group: SiblingGroup, index: number, ignore?: string) {
   const sibs = rows
     .filter((r) => inGroup(r, group) && r.id !== ignore)
-    .sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
+    .sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id));
   return keyAtIndex(
     sibs.map((r) => r.ord),
     index,
-  )
+  );
 }
 
 function uniqueSlug(
@@ -1778,11 +1790,13 @@ function uniqueSlug(
   wanted: string,
   ignore?: string,
 ) {
-  const taken = new Set(rows.filter((r) => inGroup(r, group) && r.id !== ignore).map((r) => r.slug))
-  if (!taken.has(wanted)) return wanted
+  const taken = new Set(
+    rows.filter((r) => inGroup(r, group) && r.id !== ignore).map((r) => r.slug),
+  );
+  if (!taken.has(wanted)) return wanted;
   for (let n = 2; ; n++) {
-    const candidate = `${wanted}-${n}`
-    if (!taken.has(candidate)) return candidate
+    const candidate = `${wanted}-${n}`;
+    if (!taken.has(candidate)) return candidate;
   }
 }
 
@@ -1795,20 +1809,20 @@ function uniqueSlug(
  */
 function underError(type: DocumentType): Error {
   return new Error(
-    `A '${type.name}' document is only allowed under: ${(type.under ?? []).join(', ')}`,
-  )
+    `A '${type.name}' document is only allowed under: ${(type.under ?? []).join(", ")}`,
+  );
 }
 
 export interface CreateStoryInput {
-  title: string
-  slug?: string
-  parentId?: string | null
+  title: string;
+  slug?: string;
+  parentId?: string | null;
   /**
    * Which shape of document this is. A `page` kind lands in the tree with a
    * derived path; anything else is created unrouted, with `parent_id` and `path`
    * both null.
    */
-  type: DocumentType
+  type: DocumentType;
   /**
    * The content-migration watermark to stamp (`schema-migrations.md`). Callers
    * pass `FolioRuntime.schemaId` — the last configured migration — because a
@@ -1820,26 +1834,26 @@ export interface CreateStoryInput {
    * `undefined` writes null, which is the honest answer for a caller that has no
    * migrations to speak of.
    */
-  schemaId?: string | null
+  schemaId?: string | null;
   /**
    * The scope that will own the document (`multi-site.md` decision 3). Default
    * `default`, the one scope of a deployment with no `sites`. A parent must be in
    * the same scope: a site page under a shared parent is the design decision 5
    * rejected, since renaming one shared section would move pages on every site.
    */
-  site?: string
+  site?: string;
   /**
    * Create the scope's **root** — `slug = ''`, `path = ''`, no parent — rather
    * than a page under one (decision 5, "Create home page"). Refused when the
    * scope already has one; a routed type only.
    */
-  root?: boolean
+  root?: boolean;
   /**
    * The inherited row this one overrides (`multi-site.md` decision 5), recorded so a
    * fork can say "the shared version has changed since you forked it". Written by
    * `forkStory` and nothing else.
    */
-  forkedFrom?: string
+  forkedFrom?: string;
 }
 
 /**
@@ -1852,18 +1866,19 @@ export async function createStory(
   input: CreateStoryInput,
   types: readonly DocumentType[] = [],
 ): Promise<StoryMeta> {
-  const type = input.type
-  const routed = isRouted(type)
-  const site = input.site ?? DEFAULT_SITE
+  const type = input.type;
+  const routed = isRouted(type);
+  const site = input.site ?? DEFAULT_SITE;
 
-  if (!routed && input.parentId) throw new Error('An unrouted document cannot have a parent')
-  if (input.root && !routed) throw new FolioError('bad_request', 'Only a page can be a home page')
-  if (input.root && input.parentId) throw new FolioError('bad_request', 'A home page has no parent')
+  if (!routed && input.parentId) throw new Error("An unrouted document cannot have a parent");
+  if (input.root && !routed) throw new FolioError("bad_request", "Only a page can be a home page");
+  if (input.root && input.parentId)
+    throw new FolioError("bad_request", "A home page has no parent");
 
-  const parentId = routed && !input.root ? (input.parentId ?? null) : null
+  const parentId = routed && !input.root ? (input.parentId ?? null) : null;
   const group: SiblingGroup = routed
     ? { site, routed: true, parentId }
-    : { site, routed: false, type: type.name }
+    : { site, routed: false, type: type.name };
 
   /**
    * Two narrow reads in place of one read of every story on the site: the parent
@@ -1875,29 +1890,29 @@ export async function createStory(
   const [parent, siblings] = await Promise.all([
     parentId ? storyById(db, parentId) : Promise.resolve(undefined),
     siblingGroupRows(db, group),
-  ])
-  if (parentId && !parent) throw new Error('Unknown parent')
+  ]);
+  if (parentId && !parent) throw new Error("Unknown parent");
   // A record has no path, so nothing beneath it could derive one.
   if (parent && parent.path === null) {
-    throw new Error('Cannot create a page under an unrouted document')
+    throw new Error("Cannot create a page under an unrouted document");
   }
   if (parent && (parent.site ?? DEFAULT_SITE) !== site) {
-    throw new FolioError('conflict', `"${parent.title}" belongs to another scope`)
+    throw new FolioError("conflict", `"${parent.title}" belongs to another scope`);
   }
-  if (routed && !canNest(type, typeByName(types, parent?.type))) throw underError(type)
-  if (input.root && siblings.some((row) => row.path === '')) {
-    throw new FolioError('conflict', 'This scope already has a home page')
+  if (routed && !canNest(type, typeByName(types, parent?.type))) throw underError(type);
+  if (input.root && siblings.some((row) => row.path === "")) {
+    throw new FolioError("conflict", "This scope already has a home page");
   }
 
-  const slug = input.root ? '' : uniqueSlug(siblings, group, slugify(input.slug || input.title))
+  const slug = input.root ? "" : uniqueSlug(siblings, group, slugify(input.slug || input.title));
   const story: StoryMeta = {
     id: newStoryId(),
     type: type.name,
     parentId,
     slug,
-    path: input.root ? '' : routed ? joinPath(parent?.path ?? '', slug) : null,
+    path: input.root ? "" : routed ? joinPath(parent?.path ?? "", slug) : null,
     ord: orderAt(siblings, group, siblings.length),
-    title: input.title.trim() || 'Untitled',
+    title: input.title.trim() || "Untitled",
     publishedAt: null,
     unpublishedAt: null,
     draftSyncId: 0,
@@ -1907,10 +1922,10 @@ export async function createStory(
     // Every write names its scope (`0011_sites.sql`), `default` included.
     site,
     forkedFrom: input.forkedFrom ?? null,
-    state: 'draft',
+    state: "draft",
     hasUnpublishedChanges: false,
     updatedAt: Date.now(),
-  }
+  };
 
   // A redirect can only ever be a trap once something is created at the path it
   // claims (redirects.md's edge case "a path vacated and reoccupied by a
@@ -1935,12 +1950,12 @@ export async function createStory(
       story.schemaId ?? null,
       story.site,
       story.forkedFrom ?? null,
-    )
+    );
   await db.batch(
     story.path === null ? [insert] : [insert, clearRedirectAtStatement(db, story.path, site)],
-  )
+  );
 
-  return story
+  return story;
 }
 
 /**
@@ -1969,14 +1984,14 @@ export async function ensureSingleton(
    */
   scope: string = DEFAULT_SITE,
 ): Promise<StoryMeta> {
-  if (type.kind !== 'singleton') {
-    throw new Error(`Document type '${type.name}' is not a singleton`)
+  if (type.kind !== "singleton") {
+    throw new Error(`Document type '${type.name}' is not a singleton`);
   }
-  const id = scope === DEFAULT_SITE ? singletonId(type) : layerId(type.name, scope)
-  const existing = await storyById(db, id)
-  if (existing) return existing
+  const id = scope === DEFAULT_SITE ? singletonId(type) : layerId(type.name, scope);
+  const existing = await storyById(db, id);
+  if (existing) return existing;
 
-  const now = Date.now()
+  const now = Date.now();
   await db
     .prepare(
       `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id, site_id)
@@ -1984,11 +1999,11 @@ export async function ensureSingleton(
        on conflict (id) do nothing`,
     )
     .bind(id, type.name, type.name, type.label, now, schemaId, scope)
-    .run()
+    .run();
 
-  const row = await storyById(db, id)
-  if (!row) throw new Error(`Could not create the '${type.name}' singleton`)
-  return row
+  const row = await storyById(db, id);
+  if (!row) throw new Error(`Could not create the '${type.name}' singleton`);
+  return row;
 }
 
 /**
@@ -2018,30 +2033,30 @@ export async function duplicateStory(
   db: FolioDb,
   id: string,
   patch: {
-    title?: string
-    parentId?: string | null
+    title?: string;
+    parentId?: string | null;
     /** The scope the copy lands in (`multi-site.md`: "source in chain, copy in
      * scope"). Default: the source's own. */
-    site?: string
+    site?: string;
   },
   /** Required, unlike everywhere else this appears: the source's own type is
    * what says whether it is a singleton, and duplicating one has to be refused.
    * A default would turn a caller's omission into a runtime throw. */
   types: readonly DocumentType[],
 ): Promise<StoryMeta> {
-  const source = await storyById(db, id)
-  if (!source) throw new Error('Unknown story')
+  const source = await storyById(db, id);
+  if (!source) throw new Error("Unknown story");
 
-  const type = typeByName(types, source.type)
-  if (!type) throw new Error(`Unknown document type: ${source.type}`)
+  const type = typeByName(types, source.type);
+  if (!type) throw new Error(`Unknown document type: ${source.type}`);
   // The debt `duplicate-and-paste.md` deferred to this spec: there is exactly
   // one of a singleton by definition, so a second copy is not a document its
   // own schema can describe. Refused here rather than at the route so a direct
   // caller cannot route around it.
-  if (type.kind === 'singleton') throw new Error('Cannot duplicate a singleton document')
+  if (type.kind === "singleton") throw new Error("Cannot duplicate a singleton document");
 
-  const title = patch.title?.trim() || `${source.title} (copy)`
-  const target = patch.site ?? source.site ?? DEFAULT_SITE
+  const title = patch.title?.trim() || `${source.title} (copy)`;
+  const target = patch.site ?? source.site ?? DEFAULT_SITE;
   return createStory(
     db,
     {
@@ -2067,7 +2082,7 @@ export async function duplicateStory(
       site: target,
     },
     types,
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ forks --- */
@@ -2103,51 +2118,51 @@ export async function forkStory(
   source: StoryMeta,
   opts: {
     /** The scope that will own the fork: the request's. */
-    site: string
+    site: string;
     /** That scope's chain, nearest first. */
-    chain: readonly string[]
-    types: readonly DocumentType[]
-    schemaId?: string | null
+    chain: readonly string[];
+    types: readonly DocumentType[];
+    schemaId?: string | null;
   },
 ): Promise<StoryMeta> {
-  const owner = source.site ?? DEFAULT_SITE
-  if (source.path === null) throw new FolioError('bad_request', 'Only a page can be forked')
-  const type = typeByName(opts.types, source.type)
-  if (!type) throw new FolioError('bad_request', `Unknown document type: ${source.type}`)
+  const owner = source.site ?? DEFAULT_SITE;
+  if (source.path === null) throw new FolioError("bad_request", "Only a page can be forked");
+  const type = typeByName(opts.types, source.type);
+  if (!type) throw new FolioError("bad_request", `Unknown document type: ${source.type}`);
   if (owner === opts.site) {
-    throw new FolioError('conflict', `"${source.title}" already belongs to this site`)
+    throw new FolioError("conflict", `"${source.title}" already belongs to this site`);
   }
   if (!opts.chain.slice(1).includes(owner)) {
     // Not owned above the scope: outside the chain is absent, and a row in the
     // chain but not above it is the scope itself, refused above.
-    throw new FolioError('not_found', 'Unknown story')
+    throw new FolioError("not_found", "Unknown story");
   }
 
-  const own = await storyByPath(db, [opts.site], source.path)
+  const own = await storyByPath(db, [opts.site], source.path);
   if (own) {
     throw new FolioError(
-      'conflict',
+      "conflict",
       `"${own.title}" already lives at /${source.path} on this site. Open it instead of forking.`,
-    )
+    );
   }
 
-  let parentId: string | null = null
-  const root = source.path === ''
+  let parentId: string | null = null;
+  const root = source.path === "";
   if (!root) {
-    const parentPath = source.path.includes('/')
-      ? source.path.slice(0, source.path.lastIndexOf('/'))
-      : ''
-    if (parentPath !== '') {
-      const parent = await storyByPath(db, [opts.site], parentPath)
+    const parentPath = source.path.includes("/")
+      ? source.path.slice(0, source.path.lastIndexOf("/"))
+      : "";
+    if (parentPath !== "") {
+      const parent = await storyByPath(db, [opts.site], parentPath);
       if (!parent) {
-        const inherited = await storyByPath(db, opts.chain, parentPath)
-        const named = inherited?.title ?? parentPath
+        const inherited = await storyByPath(db, opts.chain, parentPath);
+        const named = inherited?.title ?? parentPath;
         throw new FolioError(
-          'conflict',
+          "conflict",
           `Fork ${named} first: "${source.title}" sits under it, and a site's page can only sit under a page the site owns.`,
-        )
+        );
       }
-      parentId = parent.id
+      parentId = parent.id;
     }
   }
 
@@ -2164,7 +2179,7 @@ export async function forkStory(
       ...(root ? { root: true } : {}),
     },
     opts.types,
-  )
+  );
 }
 
 /**
@@ -2177,36 +2192,36 @@ export async function forkStory(
  * second the fork was made is not news.
  */
 function changedSince(sourcePublishedAt: number | null, forkCreatedAtSeconds: number): boolean {
-  return sourcePublishedAt !== null && sourcePublishedAt >= (forkCreatedAtSeconds + 1) * 1000
+  return sourcePublishedAt !== null && sourcePublishedAt >= (forkCreatedAtSeconds + 1) * 1000;
 }
 
 /** A fork's source, and whether it has moved on — null for a story that is not a fork. */
 export interface ForkStatus {
   /** The row this one was forked from, or null once it has been deleted. */
-  source: StoryMeta | null
+  source: StoryMeta | null;
   /** The source has been published since the fork was made. */
-  changed: boolean
+  changed: boolean;
 }
 
 export async function forkStatus(db: FolioDb, story: StoryMeta): Promise<ForkStatus | null> {
-  if (!story.forkedFrom) return null
+  if (!story.forkedFrom) return null;
   const [source, row] = await Promise.all([
     storyById(db, story.forkedFrom),
     db
-      .prepare('select created_at as at from stories where id = ?')
+      .prepare("select created_at as at from stories where id = ?")
       .bind(story.id)
       .first<{ at: number }>(),
-  ])
-  return { source, changed: source !== null && changedSince(source.publishedAt, row?.at ?? 0) }
+  ]);
+  return { source, changed: source !== null && changedSince(source.publishedAt, row?.at ?? 0) };
 }
 
 /** One inherited page, with what this site has done about it. */
 export interface InheritedRow extends StoryMeta {
   /** The id of this site's own row at the same path — a fork, or a page made by hand
    * there — or null while the site is still showing the inherited one. */
-  shadowedBy: string | null
+  shadowedBy: string | null;
   /** The site's row is a fork of this one and this one has been published since. */
-  forkedSince: boolean
+  forkedSince: boolean;
 }
 
 /**
@@ -2224,40 +2239,40 @@ export async function listInherited(
   chain: readonly string[],
   opts: { limit?: number; cursor?: string } = {},
 ): Promise<Page<InheritedRow>> {
-  const own = chain[0]
-  const above = chain.slice(1)
-  if (own === undefined || above.length === 0) return { rows: [], cursor: null }
+  const own = chain[0];
+  const above = chain.slice(1);
+  if (own === undefined || above.length === 0) return { rows: [], cursor: null };
 
-  const limit = clampLimit(opts.limit, 50, 200)
-  const keyset = ORDERS.path
-  const resume = keysetWhere(keyset, opts.cursor ? decodeCursor(opts.cursor) : null)
-  const served = servedClause(above)
+  const limit = clampLimit(opts.limit, 50, 200);
+  const keyset = ORDERS.path;
+  const resume = keysetWhere(keyset, opts.cursor ? decodeCursor(opts.cursor) : null);
+  const served = servedClause(above);
   const { results } = await db
     .prepare(
       `select ${COLS} from stories
-       ${whereOf(served.sql, 'stories.path is not null', resume.sql)} ${orderBy(keyset)} limit ?`,
+       ${whereOf(served.sql, "stories.path is not null", resume.sql)} ${orderBy(keyset)} limit ?`,
     )
     .bind(...served.binds, ...resume.binds, limit + 1)
-    .all<StoryRow>()
-  const page = paginate(results.map(withState), limit, (row) => keyOf('path', row))
+    .all<StoryRow>();
+  const page = paginate(results.map(withState), limit, (row) => keyOf("path", row));
 
-  const paths = page.rows.map((row) => row.path).filter((path): path is string => path !== null)
-  const shadows = new Map<string, { id: string; forkedFrom: string | null; at: number }>()
+  const paths = page.rows.map((row) => row.path).filter((path): path is string => path !== null);
+  const shadows = new Map<string, { id: string; forkedFrom: string | null; at: number }>();
   for (const chunk of bindChunks(paths, 1)) {
     const { results: mine } = await db
       .prepare(
         `select id, path, forked_from as forkedFrom, created_at as at from stories
-         where site_id = ? and path in (${chunk.map(() => '?').join(', ')})`,
+         where site_id = ? and path in (${chunk.map(() => "?").join(", ")})`,
       )
       .bind(own, ...chunk)
-      .all<{ id: string; path: string; forkedFrom: string | null; at: number }>()
-    for (const row of mine) shadows.set(row.path, row)
+      .all<{ id: string; path: string; forkedFrom: string | null; at: number }>();
+    for (const row of mine) shadows.set(row.path, row);
   }
 
   return {
     ...page,
     rows: page.rows.map((row) => {
-      const mine = row.path === null ? undefined : shadows.get(row.path)
+      const mine = row.path === null ? undefined : shadows.get(row.path);
       return {
         ...row,
         shadowedBy: mine?.id ?? null,
@@ -2265,9 +2280,9 @@ export async function listInherited(
           mine !== undefined &&
           mine.forkedFrom === row.id &&
           changedSince(row.publishedAt, mine.at),
-      }
+      };
     }),
-  }
+  };
 }
 
 /**
@@ -2279,9 +2294,9 @@ export async function listInherited(
  * hook has to fire at the route, not inside this file.
  */
 export interface PathChange {
-  id: string
-  from: string
-  to: string
+  id: string;
+  from: string;
+  to: string;
 }
 
 /**
@@ -2297,17 +2312,17 @@ export interface PathChange {
  * right than a recursive CTE.
  */
 export interface StoryPatch {
-  title?: string
-  slug?: string
-  parentId?: string | null
-  index?: number
+  title?: string;
+  slug?: string;
+  parentId?: string | null;
+  index?: number;
   /**
    * Accepted only when it matches the row's existing type, so a client that
    * round-trips a whole story object is not punished for it. An actual change is
    * refused: moving a document between types is a schema migration, which needs
    * the `retype` mutation `../../docs/specs/foundation/schema-migrations.md` adds.
    */
-  type?: string
+  type?: string;
 }
 
 export async function updateStoryStatement(
@@ -2316,9 +2331,9 @@ export async function updateStoryStatement(
   patch: StoryPatch,
   types: readonly DocumentType[] = [],
 ): Promise<{
-  next: StoryMeta
-  statements: D1PreparedStatement[]
-  changes: PathChange[]
+  next: StoryMeta;
+  statements: D1PreparedStatement[];
+  changes: PathChange[];
   /**
    * Which of the row's own fields this patch actually altered, for the
    * `updated` hook (`../../docs/specs/platform/caching.md`). Computed here, beside the
@@ -2326,7 +2341,7 @@ export async function updateStoryStatement(
    * statements run, and a caller recomputing it would be a second answer that
    * could drift from this one.
    */
-  updated: StoryChange[]
+  updated: StoryChange[];
 }> {
   /**
    * The subtree, not the site. Everything below reads one of three things: the row
@@ -2334,58 +2349,59 @@ export async function updateStoryStatement(
    * sibling group (the slug and the position) — and `siblingGroupRows` fetches the
    * third once the new parent is known.
    */
-  const rows = await subtreeRows(db, id)
-  const current = rows.find((r) => r.id === id)
-  if (!current) throw new Error('Unknown story')
+  const rows = await subtreeRows(db, id);
+  const current = rows.find((r) => r.id === id);
+  if (!current) throw new Error("Unknown story");
   if (patch.type !== undefined && patch.type !== current.type) {
-    throw new Error("Cannot change a document's type")
+    throw new Error("Cannot change a document's type");
   }
 
   // The root story owns '/' and cannot be reslugged or reparented.
-  const isRoot = current.path === ''
+  const isRoot = current.path === "";
   // An unrouted document is not in the tree at all, so there is no parent for a
   // patch to change. An explicit `null` is allowed through as the no-op it is.
-  const unrouted = current.path === null
+  const unrouted = current.path === null;
   if (unrouted && patch.parentId != null) {
-    throw new Error('Cannot move an unrouted document into the page tree')
+    throw new Error("Cannot move an unrouted document into the page tree");
   }
-  const subtree = new Set(descendants(rows, id))
+  const subtree = new Set(descendants(rows, id));
 
   const parentId = unrouted
     ? null
     : patch.parentId !== undefined && !isRoot
       ? patch.parentId
-      : current.parentId
-  if (parentId && subtree.has(parentId)) throw new Error('Cannot move a story into its own subtree')
-  const parent = parentId ? await storyById(db, parentId) : undefined
-  if (parentId && !parent) throw new Error('Unknown parent')
+      : current.parentId;
+  if (parentId && subtree.has(parentId))
+    throw new Error("Cannot move a story into its own subtree");
+  const parent = parentId ? await storyById(db, parentId) : undefined;
+  if (parentId && !parent) throw new Error("Unknown parent");
   if (parent && parent.path === null) {
-    throw new Error('Cannot move a page under an unrouted document')
+    throw new Error("Cannot move a page under an unrouted document");
   }
   // A story never moves between scopes (`multi-site.md`'s edge cases): fork it,
   // then delete the original. So its new parent is in its own scope or it has
   // none.
-  const site = current.site ?? DEFAULT_SITE
+  const site = current.site ?? DEFAULT_SITE;
   if (parent && (parent.site ?? DEFAULT_SITE) !== site) {
-    throw new FolioError('conflict', `"${parent.title}" belongs to another scope`)
+    throw new FolioError("conflict", `"${parent.title}" belongs to another scope`);
   }
   // `under` is re-checked here, so a drag is constrained exactly as creation is
   // — but only when the parent actually changes. Checking it on every patch
   // would make a plain title edit fail on a tree that predates the constraint.
   if (!unrouted && parentId !== current.parentId) {
-    const type = typeByName(types, current.type)
-    if (type && !canNest(type, typeByName(types, parent?.type))) throw underError(type)
+    const type = typeByName(types, current.type);
+    if (type && !canNest(type, typeByName(types, parent?.type))) throw underError(type);
   }
 
   const group: SiblingGroup = unrouted
     ? { site, routed: false, type: current.type }
-    : { site, routed: true, parentId }
-  const siblings = await siblingGroupRows(db, group)
+    : { site, routed: true, parentId };
+  const siblings = await siblingGroupRows(db, group);
   const next: StoryMeta = {
     ...current,
     title: patch.title?.trim() || current.title,
     slug: isRoot
-      ? ''
+      ? ""
       : // **`patch.title` is deliberately not a slug source here.** Creating a
         // document derives its slug from its title (`createStoryStatement`
         // does exactly that, and it is the right default for a row that has no
@@ -2405,7 +2421,7 @@ export async function updateStoryStatement(
         ? orderAt(siblings, group, patch.index ?? 0, id)
         : current.ord,
     updatedAt: Date.now(),
-  }
+  };
 
   /**
    * **The subtree alone is not enough to derive a path from, and the failure is
@@ -2419,15 +2435,15 @@ export async function updateStoryStatement(
    */
   const chain = parent
     ? [parent, ...(await storiesFor(db, [], ancestorPaths(parent.path), [site]))]
-    : []
-  const merged = [...rows.map((r) => (r.id === id ? next : r)), ...chain]
+    : [];
+  const merged = [...rows.map((r) => (r.id === id ? next : r)), ...chain];
   // Routed rows only: an unrouted one has no ancestor chain to derive from and
   // is absent from the map, so `paths.get(r.id) ?? r.path` keeps its null.
-  const paths = derivePaths(merged)
+  const paths = derivePaths(merged);
 
   const changed = merged.filter(
     (r) => r.id === id || (r.path !== null && paths.get(r.id) !== r.path),
-  )
+  );
   const statements = changed.map((r) =>
     db
       .prepare(
@@ -2435,31 +2451,31 @@ export async function updateStoryStatement(
          where id = ?`,
       )
       .bind(r.parentId, r.slug, paths.get(r.id) ?? r.path, r.ord, r.title, Date.now(), r.id),
-  )
+  );
 
   // redirects.md's decision 1: every path this rename or move actually vacates
   // gets its redirect written in the same batch as the row update, so a rename
   // either records where it used to live or does not happen at all. An unrouted
   // document vacates nothing, so it contributes no redirect.
-  const changes: PathChange[] = []
+  const changes: PathChange[] = [];
   for (const r of changed) {
-    const from = r.path
-    const to = paths.get(r.id) ?? r.path
-    if (from === null || to === null || from === to) continue
-    changes.push({ id: r.id, from, to })
-    statements.push(...redirectStatements(db, { from, to, storyId: r.id, site }))
+    const from = r.path;
+    const to = paths.get(r.id) ?? r.path;
+    if (from === null || to === null || from === to) continue;
+    changes.push({ id: r.id, from, to });
+    statements.push(...redirectStatements(db, { from, to, storyId: r.id, site }));
   }
 
   // The target row only. A descendant whose path moved because its ancestor did
   // has none of *its* own fields changed, and is already fully described by
   // `changes`.
-  const updated: StoryChange[] = []
-  if (next.title !== current.title) updated.push('title')
-  if (next.slug !== current.slug) updated.push('slug')
-  if (next.parentId !== current.parentId) updated.push('parent')
-  if (next.ord !== current.ord) updated.push('ord')
+  const updated: StoryChange[] = [];
+  if (next.title !== current.title) updated.push("title");
+  if (next.slug !== current.slug) updated.push("slug");
+  if (next.parentId !== current.parentId) updated.push("parent");
+  if (next.ord !== current.ord) updated.push("ord");
 
-  return { next: { ...next, path: paths.get(id) ?? next.path }, statements, changes, updated }
+  return { next: { ...next, path: paths.get(id) ?? next.path }, statements, changes, updated };
 }
 
 /** `updateStoryStatement`, run. What every caller wanted before this spec's
@@ -2470,9 +2486,9 @@ export async function updateStory(
   patch: StoryPatch,
   types: readonly DocumentType[] = [],
 ): Promise<StoryMeta> {
-  const { next, statements } = await updateStoryStatement(db, id, patch, types)
-  if (statements.length) await db.batch(statements)
-  return next
+  const { next, statements } = await updateStoryStatement(db, id, patch, types);
+  if (statements.length) await db.batch(statements);
+  return next;
 }
 
 /**
@@ -2503,37 +2519,37 @@ export async function deleteStoryStatement(
   db: FolioDb,
   id: string,
   opts: {
-    redirect?: boolean
+    redirect?: boolean;
     /**
      * The chain of the scope that owns `id`, nearest first — what decides whether
      * its root may go (below). Default: the owner alone, which is the whole chain
      * of a deployment with no `sites`, and on which a root is never deletable.
      */
-    chain?: readonly string[]
+    chain?: readonly string[];
     /**
      * The same, for a caller that does not know the owner until the row is read
      * (`documents.ts`): asked only when the target is a root, with the owner's id.
      * `chain` wins when both are given.
      */
-    chainOf?: (scope: string) => Promise<readonly string[]>
+    chainOf?: (scope: string) => Promise<readonly string[]>;
   } = {},
   types: readonly DocumentType[] = [],
 ): Promise<{
-  ids: string[]
+  ids: string[];
   /**
    * `ids`' own paths, same order — what `publish-hooks.md`'s `deleted` hook
    * fires with, so a host can purge a cache without a second lookup for rows
    * this call already read and is about to remove. `null` for an unrouted
    * document, which never had a URL for a cache to hold.
    */
-  paths: (string | null)[]
+  paths: (string | null)[];
   /**
    * `ids`' own document types, same order — the third fact that is gone the
    * moment this statement runs, needed for the same reason `paths` is: a
    * deleted document leaves every collection over its type, and
    * `../../docs/specs/platform/caching.md`'s purge hook has to name that type.
    */
-  types: string[]
+  types: string[];
   /**
    * The `delete from stories` statements themselves — **plural, and chunked
    * against `db.ts`'s `BIND_BUDGET`.**
@@ -2548,8 +2564,8 @@ export async function deleteStoryStatement(
    * statements cost the delete round trips inside a transaction it already had,
    * not the transaction.
    */
-  storyStatements: D1PreparedStatement[]
-  redirectStatements: D1PreparedStatement[]
+  storyStatements: D1PreparedStatement[];
+  redirectStatements: D1PreparedStatement[];
   /**
    * `content_index` / `content_refs` rows for the same ids
    * (`../../docs/specs/content-model/collections.md`), for the same batch: a deleted story must
@@ -2564,7 +2580,7 @@ export async function deleteStoryStatement(
    * document is next published, so a site that never republishes accumulates
    * them forever.
    */
-  indexStatements: D1PreparedStatement[]
+  indexStatements: D1PreparedStatement[];
   /**
    * Pending and failed schedules for the same ids
    * (`../../docs/specs/platform/scheduled-publishing.md`), for the same batch.
@@ -2581,64 +2597,64 @@ export async function deleteStoryStatement(
    * so in as many words. The sweep drops an orphan too, for the delete that races
    * it.
    */
-  scheduleStatements: D1PreparedStatement[]
+  scheduleStatements: D1PreparedStatement[];
   /**
    * The scope that owned `ids` — the whole subtree is one scope's, because a child
    * is always in its parent's — for the `deleted` hook, whose purge and space
    * broadcast are the owner's (`multi-site.md` decisions 15 and 19). The rows are
    * gone by the time anything could ask.
    */
-  site: string
+  site: string;
 } | null> {
   // The subtree is exactly what a delete cascades over, so it is exactly what this
   // needs to read. The only row outside it that matters is the parent, and only
   // when a redirect is being offered — fetched below, once, rather than found in a
   // list of every story on the site.
-  const rows = await subtreeRows(db, id)
-  const target = rows.find((r) => r.id === id)
-  if (!target) return null
-  const owner = target.site ?? DEFAULT_SITE
-  const chain = opts.chain ?? (opts.chainOf ? await opts.chainOf(owner) : [owner])
-  if (target.path === '' && !(await rootAbove(db, chain))) {
-    throw new Error('Cannot delete the root story')
+  const rows = await subtreeRows(db, id);
+  const target = rows.find((r) => r.id === id);
+  if (!target) return null;
+  const owner = target.site ?? DEFAULT_SITE;
+  const chain = opts.chain ?? (opts.chainOf ? await opts.chainOf(owner) : [owner]);
+  if (target.path === "" && !(await rootAbove(db, chain))) {
+    throw new Error("Cannot delete the root story");
   }
   // A singleton exists because the schema says it does (`document-types.md`
   // architecture decision 7). Recognised by its declared kind, falling back to
   // the derived id so a row whose type has since been removed from the code is
   // still refused rather than quietly deleted.
   if (
-    typeByName(types, target.type)?.kind === 'singleton' ||
+    typeByName(types, target.type)?.kind === "singleton" ||
     target.id.startsWith(SINGLETON_PREFIX)
   ) {
-    throw new Error('Cannot delete a singleton document')
+    throw new Error("Cannot delete a singleton document");
   }
 
-  const ids = descendants(rows, id)
+  const ids = descendants(rows, id);
   // One index over the subtree, read three times below — `paths`, `types` and the
   // redirect loop each wanted a row by id and each did its own `rows.find`, which
   // is three O(n^2) walks at exactly the widths this function's chunking is about.
-  const byId = new Map(rows.map((r) => [r.id, r]))
-  const paths = ids.map((descId) => byId.get(descId)?.path ?? null)
-  const types_ = ids.map((descId) => byId.get(descId)?.type ?? '')
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const paths = ids.map((descId) => byId.get(descId)?.path ?? null);
+  const types_ = ids.map((descId) => byId.get(descId)?.type ?? "");
   // Chunked, one bind per id. `stories.parent_id` carries no foreign key
   // (`migrations/0001_init.sql`), so a chunk boundary between a parent and its
   // child is not a constraint violation and the chunks may run in any order.
   const storyStatements = bindChunks(ids, 1).map((chunk) => {
-    const placeholders = chunk.map(() => '?').join(', ')
-    return db.prepare(`delete from stories where id in (${placeholders})`).bind(...chunk)
-  })
+    const placeholders = chunk.map(() => "?").join(", ");
+    return db.prepare(`delete from stories where id in (${placeholders})`).bind(...chunk);
+  });
 
-  const redirects: D1PreparedStatement[] = []
+  const redirects: D1PreparedStatement[] = [];
   if (opts.redirect) {
-    const parent = target.parentId ? await storyById(db, target.parentId) : undefined
-    const parentPath = parent?.path ?? ''
+    const parent = target.parentId ? await storyById(db, target.parentId) : undefined;
+    const parentPath = parent?.path ?? "";
     for (const descId of ids) {
-      const row = byId.get(descId)
+      const row = byId.get(descId);
       // No path vacated, so no redirect to write.
-      if (!row || row.path === null) continue
+      if (!row || row.path === null) continue;
       // A path a scope above still serves is not vacated: deleting falls back to it
       // (decision 5), and a redirect here would beat it.
-      if (await servedAbove(db, chain.slice(1), row.path)) continue
+      if (await servedAbove(db, chain.slice(1), row.path)) continue;
       redirects.push(
         ...redirectStatements(db, {
           from: row.path,
@@ -2646,7 +2662,7 @@ export async function deleteStoryStatement(
           storyId: row.id,
           site: row.site ?? DEFAULT_SITE,
         }),
-      )
+      );
     }
   }
 
@@ -2659,7 +2675,7 @@ export async function deleteStoryStatement(
     redirectStatements: redirects,
     indexStatements: [...clearIndexStatements(db, ids), ...clearInboundRefStatements(db, ids)],
     scheduleStatements: clearSchedulesStatements(db, ids),
-  }
+  };
 }
 
 /**
@@ -2668,9 +2684,9 @@ export async function deleteStoryStatement(
  * deployment, or `shared`) is never.
  */
 async function servedAbove(db: FolioDb, above: readonly string[], path: string): Promise<boolean> {
-  if (above.length === 0) return false
-  const scope = chainClause(above)
-  const rscope = chainClause(above, 'site_id')
+  if (above.length === 0) return false;
+  const scope = chainClause(above);
+  const rscope = chainClause(above, "site_id");
   const row = await db
     .prepare(
       `select 1 as found from stories
@@ -2680,8 +2696,8 @@ async function servedAbove(db: FolioDb, above: readonly string[], path: string):
        limit 1`,
     )
     .bind(...scope.binds, path, ...rscope.binds, path)
-    .first<{ found: number }>()
-  return row !== null
+    .first<{ found: number }>();
+  return row !== null;
 }
 
 /**
@@ -2692,14 +2708,14 @@ async function servedAbove(db: FolioDb, above: readonly string[], path: string):
  * or its group has one of its own.
  */
 async function rootAbove(db: FolioDb, chain: readonly string[]): Promise<boolean> {
-  const above = chain.slice(1)
-  if (above.length === 0) return false
-  const scope = chainClause(above)
+  const above = chain.slice(1);
+  if (above.length === 0) return false;
+  const scope = chainClause(above);
   const row = await db
     .prepare(`select 1 as found from stories where ${scope.sql} and path = '' limit 1`)
     .bind(...scope.binds)
-    .first<{ found: number }>()
-  return row !== null
+    .first<{ found: number }>();
+  return row !== null;
 }
 
 /** Removes the story and everything beneath it. */
@@ -2708,10 +2724,10 @@ export async function deleteStory(
   id: string,
   types: readonly DocumentType[] = [],
 ): Promise<string[]> {
-  const found = await deleteStoryStatement(db, id, {}, types)
-  if (!found) return []
-  await db.batch([...found.storyStatements, ...found.indexStatements, ...found.scheduleStatements])
-  return found.ids
+  const found = await deleteStoryStatement(db, id, {}, types);
+  if (!found) return [];
+  await db.batch([...found.storyStatements, ...found.indexStatements, ...found.scheduleStatements]);
+  return found.ids;
 }
 
 /**
@@ -2753,8 +2769,9 @@ export function publishStoryStatement(
   publishedSyncId: number,
   titleI18n?: Record<string, string> | null,
 ): { publishedAt: number; title: string; statement: D1PreparedStatement } {
-  const publishedAt = Date.now()
-  const i18nJson = titleI18n && Object.keys(titleI18n).length > 0 ? JSON.stringify(titleI18n) : null
+  const publishedAt = Date.now();
+  const i18nJson =
+    titleI18n && Object.keys(titleI18n).length > 0 ? JSON.stringify(titleI18n) : null;
   const statement =
     titleI18n === undefined
       ? db
@@ -2770,8 +2787,16 @@ export function publishStoryStatement(
              updated_at = ?, unpublished_at = null, unpublished_by = null, published_sync_id = ?
              where id = ?`,
           )
-          .bind(JSON.stringify(doc), publishedAt, title, i18nJson, publishedAt, publishedSyncId, id)
-  return { publishedAt, title, statement }
+          .bind(
+            JSON.stringify(doc),
+            publishedAt,
+            title,
+            i18nJson,
+            publishedAt,
+            publishedSyncId,
+            id,
+          );
+  return { publishedAt, title, statement };
 }
 
 /** Snapshot a draft into D1, caching the document's title for the tree. */
@@ -2790,9 +2815,9 @@ export async function publishStory(
     fallbackTitle,
     publishedSyncId,
     titleI18n,
-  )
-  await statement.run()
-  return publishedAt
+  );
+  await statement.run();
+  return publishedAt;
 }
 
 /**
@@ -2813,13 +2838,13 @@ export function unpublishStoryStatement(
   id: string,
   actor: string | null,
 ): { unpublishedAt: number; statement: D1PreparedStatement } {
-  const unpublishedAt = Date.now()
+  const unpublishedAt = Date.now();
   const statement = db
     .prepare(
       `update stories set published_doc = null, published_at = null,
        unpublished_at = ?, unpublished_by = ?, updated_at = ?
        where id = ?`,
     )
-    .bind(unpublishedAt, actor, unpublishedAt, id)
-  return { unpublishedAt, statement }
+    .bind(unpublishedAt, actor, unpublishedAt, id);
+  return { unpublishedAt, statement };
 }

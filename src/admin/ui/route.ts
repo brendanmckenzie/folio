@@ -23,42 +23,42 @@
 /** The screens. `docs/ui-architecture.md`'s table, minus `login`, which is
  * server-rendered and ships no JavaScript on purpose. */
 export type Screen =
-  | { name: 'home' }
-  | { name: 'content' }
-  | { name: 'documents'; type: string }
-  | { name: 'assets' }
-  | { name: 'edit'; id: string }
-  | { name: 'access' }
-  | { name: 'model' }
-  | { name: 'redirects' }
-  | { name: 'schedules' }
-  | { name: 'settings' }
+  | { name: "home" }
+  | { name: "content" }
+  | { name: "documents"; type: string }
+  | { name: "assets" }
+  | { name: "edit"; id: string }
+  | { name: "access" }
+  | { name: "model" }
+  | { name: "redirects" }
+  | { name: "schedules" }
+  | { name: "settings" }
   /** The forms list (`docs/specs/content-model/forms.md` decision 12: "A `Forms`
    * nav item and three screens"). */
-  | { name: 'forms' }
+  | { name: "forms" }
   /** The builder for one form — its questions, its settings, its concurrency
    * guard. Its own top-level segment, the way `edit` is its own segment beside
    * `documents`: a form is not a document, and the id is what a save's
    * `expectedUpdatedAt` names, never a slug (decision 3). */
-  | { name: 'form'; id: string }
+  | { name: "form"; id: string }
   /** One form's responses: the table, the filters, the CSV export. `id` is the
    * form's, not a response's — a response is opened inside this screen rather
    * than routed to its own URL. */
-  | { name: 'responses'; id: string }
+  | { name: "responses"; id: string }
   /** Passkeys, sessions and recent sign-ins for whoever is signed in.
    * `docs/specs/foundation/passkeys.md` decision 6: reached from the user menu,
    * deliberately **not** in `nav()` — `ui-nav.test.ts` asserts the absence. */
-  | { name: 'account' }
+  | { name: "account" }
   /** The site registry — sites, groups, hostnames, status
    * (`docs/specs/foundation/multi-site.md` decision 1). Only a deployment with
    * `sites` has it, and `nav()` offers it only to the platform. */
-  | { name: 'sites' }
-  | { name: 'missing'; path: string }
+  | { name: "sites" }
+  | { name: "missing"; path: string };
 
-export type ScreenName = Screen['name']
+export type ScreenName = Screen["name"];
 
 export interface Route {
-  screen: Screen
+  screen: Screen;
   /**
    * Everything after `?`, flattened. Screens read their own keys from it —
    * `state`, `type` and `q` on Content; `blok`, `locale`, `version` and `panel`
@@ -68,22 +68,22 @@ export interface Route {
    * the alternative (`URLSearchParams` itself) is not comparable by value, which
    * makes it a poor thing to hold in state.
    */
-  query: Readonly<Record<string, string>>
+  query: Readonly<Record<string, string>>;
 }
 
 /** Screens with no parameters, by their single path segment. */
 const FLAT = [
-  'content',
-  'assets',
-  'access',
-  'model',
-  'redirects',
-  'schedules',
-  'settings',
-  'forms',
-  'account',
-  'sites',
-] as const
+  "content",
+  "assets",
+  "access",
+  "model",
+  "redirects",
+  "schedules",
+  "settings",
+  "forms",
+  "account",
+  "sites",
+] as const;
 
 /* ------------------------------------------------------------------ scopes --- */
 
@@ -91,7 +91,7 @@ const FLAT = [
  * The `~<scope>` segment (`multi-site.md` decision 11), the same shape
  * `server/index.tsx` strips: a site, group or `shared` id.
  */
-const SCOPE_SEGMENT = /^~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)$/
+const SCOPE_SEGMENT = /^~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)$/;
 
 /**
  * Which scope a path is in, and the mount its screens are relative to.
@@ -112,16 +112,16 @@ export function splitScope(
   base: string,
 ): { scope: string | null; mount: string } {
   if (pathname.startsWith(`${base}/`)) {
-    const segment = pathname.slice(base.length + 1).split('/')[0] ?? ''
-    const match = SCOPE_SEGMENT.exec(segment)
-    if (match) return { scope: match[1]!, mount: `${base}/${segment}` }
+    const segment = pathname.slice(base.length + 1).split("/")[0] ?? "";
+    const match = SCOPE_SEGMENT.exec(segment);
+    if (match) return { scope: match[1]!, mount: `${base}/${segment}` };
   }
-  return { scope: null, mount: base }
+  return { scope: null, mount: base };
 }
 
 /** `{base}/~<scope>`, or `base` for none. */
 export function scopedMount(base: string, scope: string | null): string {
-  return scope === null ? base : `${base}/~${scope}`
+  return scope === null ? base : `${base}/~${scope}`;
 }
 
 /**
@@ -131,8 +131,8 @@ export function scopedMount(base: string, scope: string | null): string {
  * assuming so.
  */
 export function scopedApiBase(apiBase: string, base: string, scope: string | null): string {
-  if (scope === null || !apiBase.startsWith(base)) return apiBase
-  return `${scopedMount(base, scope)}${apiBase.slice(base.length)}`
+  if (scope === null || !apiBase.startsWith(base)) return apiBase;
+  return `${scopedMount(base, scope)}${apiBase.slice(base.length)}`;
 }
 
 /**
@@ -142,36 +142,36 @@ export function scopedApiBase(apiBase: string, base: string, scope: string | nul
  * the shell.
  */
 export function scopeOfApiBase(apiBase: string): string | null {
-  const match = /\/~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)(?:\/|$)/.exec(apiBase)
-  return match ? match[1]! : null
+  const match = /\/~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)(?:\/|$)/.exec(apiBase);
+  return match ? match[1]! : null;
 }
 
 /** The mount with any `~<scope>` segment taken off: `{base}/~alpha` → `{base}`. What a
  * link into *another* scope, or a handoff (`paneSrc`), is built from. */
 export function bareMount(mount: string): string {
-  return mount.replace(/\/~[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/, '')
+  return mount.replace(/\/~[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/, "");
 }
 
 /** The screens that mean the same thing in every scope, so switching scope keeps you on
  * them; anything else (an open document, a form) belongs to the scope it was opened in. */
-const SCOPE_STABLE: ReadonlySet<Screen['name']> = new Set([
-  'home',
-  'content',
-  'assets',
-  'forms',
-  'redirects',
-  'schedules',
-  'model',
-  'settings',
-  'access',
-])
+const SCOPE_STABLE: ReadonlySet<Screen["name"]> = new Set([
+  "home",
+  "content",
+  "assets",
+  "forms",
+  "redirects",
+  "schedules",
+  "model",
+  "settings",
+  "access",
+]);
 
 /**
  * Where the scope switcher goes: the same screen in the other scope when the screen is
  * one that exists in every scope, else that scope's home.
  */
 export function switchScopeUrl(base: string, scope: string, from: Screen): string {
-  return href(SCOPE_STABLE.has(from.name) ? from : { name: 'home' }, scopedMount(base, scope))
+  return href(SCOPE_STABLE.has(from.name) ? from : { name: "home" }, scopedMount(base, scope));
 }
 
 /**
@@ -181,10 +181,10 @@ export function switchScopeUrl(base: string, scope: string, from: Screen): strin
  * the new scope's shell boots against its own `apiBase`.
  */
 export function isInsideMount(pathname: string, mount: string, base: string): boolean {
-  if (pathname !== mount && !pathname.startsWith(`${mount}/`)) return false
-  if (mount !== base) return true
-  const next = pathname.slice(base.length + 1).split('/')[0] ?? ''
-  return !SCOPE_SEGMENT.test(next)
+  if (pathname !== mount && !pathname.startsWith(`${mount}/`)) return false;
+  if (mount !== base) return true;
+  const next = pathname.slice(base.length + 1).split("/")[0] ?? "";
+  return !SCOPE_SEGMENT.test(next);
 }
 
 /**
@@ -195,36 +195,36 @@ export function isInsideMount(pathname: string, mount: string, base: string): bo
  * that reached us by mistake is a screen saying so, not a crash.
  */
 export function parse(url: string, mount: string): Route {
-  const cut = url.indexOf('?')
-  const path = cut === -1 ? url : url.slice(0, cut)
-  const query = parseQuery(cut === -1 ? '' : url.slice(cut + 1))
+  const cut = url.indexOf("?");
+  const path = cut === -1 ? url : url.slice(0, cut);
+  const query = parseQuery(cut === -1 ? "" : url.slice(cut + 1));
 
-  const rest = relative(path, mount)
-  if (rest === null) return { screen: { name: 'missing', path }, query }
+  const rest = relative(path, mount);
+  if (rest === null) return { screen: { name: "missing", path }, query };
 
-  const segments = rest.split('/').filter(Boolean).map(decodeURIComponent)
-  return { screen: screenOf(segments, path), query }
+  const segments = rest.split("/").filter(Boolean).map(decodeURIComponent);
+  return { screen: screenOf(segments, path), query };
 }
 
 function screenOf(segments: string[], path: string): Screen {
-  const [head, second] = segments
-  if (head === undefined) return { name: 'home' }
+  const [head, second] = segments;
+  if (head === undefined) return { name: "home" };
 
   if (segments.length === 1) {
-    const flat = FLAT.find((name) => name === head)
-    if (flat) return { name: flat }
+    const flat = FLAT.find((name) => name === head);
+    if (flat) return { name: flat };
   }
 
   if (segments.length === 2 && second) {
     // Four two-segment screens, and all refuse an empty parameter above rather
     // than routing to a screen that would immediately fetch `/documents/`.
-    if (head === 'documents') return { name: 'documents', type: second }
-    if (head === 'edit') return { name: 'edit', id: second }
-    if (head === 'form') return { name: 'form', id: second }
-    if (head === 'responses') return { name: 'responses', id: second }
+    if (head === "documents") return { name: "documents", type: second };
+    if (head === "edit") return { name: "edit", id: second };
+    if (head === "form") return { name: "form", id: second };
+    if (head === "responses") return { name: "responses", id: second };
   }
 
-  return { name: 'missing', path }
+  return { name: "missing", path };
 }
 
 /**
@@ -234,15 +234,15 @@ function screenOf(segments: string[], path: string): Screen {
  * `{base}/ui` and one to `{base}/ui/` must not be two different screens.
  */
 function relative(path: string, mount: string): string | null {
-  if (path === mount) return ''
-  if (path.startsWith(`${mount}/`)) return path.slice(mount.length + 1)
-  return null
+  if (path === mount) return "";
+  if (path.startsWith(`${mount}/`)) return path.slice(mount.length + 1);
+  return null;
 }
 
 function parseQuery(search: string): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [key, value] of new URLSearchParams(search)) out[key] = value
-  return out
+  const out: Record<string, string> = {};
+  for (const [key, value] of new URLSearchParams(search)) out[key] = value;
+  return out;
 }
 
 /**
@@ -258,40 +258,40 @@ export function href(
   mount: string,
   query?: Readonly<Record<string, string | undefined>>,
 ): string {
-  const search = new URLSearchParams()
+  const search = new URLSearchParams();
   for (const [key, value] of Object.entries(query ?? {})) {
-    if (value !== undefined && value !== '') search.append(key, value)
+    if (value !== undefined && value !== "") search.append(key, value);
   }
-  const tail = search.toString()
-  return `${mount}${pathOf(screen)}${tail ? `?${tail}` : ''}`
+  const tail = search.toString();
+  return `${mount}${pathOf(screen)}${tail ? `?${tail}` : ""}`;
 }
 
 function pathOf(screen: Screen): string {
   switch (screen.name) {
-    case 'home':
-      return ''
-    case 'documents':
-      return `/documents/${encodeURIComponent(screen.type)}`
-    case 'edit':
-      return `/edit/${encodeURIComponent(screen.id)}`
-    case 'form':
-      return `/form/${encodeURIComponent(screen.id)}`
-    case 'responses':
-      return `/responses/${encodeURIComponent(screen.id)}`
-    case 'missing':
-      return screen.path
+    case "home":
+      return "";
+    case "documents":
+      return `/documents/${encodeURIComponent(screen.type)}`;
+    case "edit":
+      return `/edit/${encodeURIComponent(screen.id)}`;
+    case "form":
+      return `/form/${encodeURIComponent(screen.id)}`;
+    case "responses":
+      return `/responses/${encodeURIComponent(screen.id)}`;
+    case "missing":
+      return screen.path;
     default:
       // Exhaustive over the flat screens: `Screen` is a closed union and every
       // other variant is handled above, so a new parameterless screen needs a
       // `FLAT` entry and nothing else.
-      return `/${screen.name}`
+      return `/${screen.name}`;
   }
 }
 
 /** True when two routes are the same place, so the hook can skip a `pushState`
  * that would add a history entry for the URL already showing. */
 export function same(a: Route, b: Route): boolean {
-  return href(a.screen, '', a.query) === href(b.screen, '', b.query)
+  return href(a.screen, "", a.query) === href(b.screen, "", b.query);
 }
 
 /**
@@ -313,15 +313,15 @@ export function isSameDocumentFragment(
   anchor: { hash: string; pathname: string; search: string },
   here: { pathname: string; search: string },
 ): boolean {
-  return anchor.hash !== '' && anchor.pathname === here.pathname && anchor.search === here.search
+  return anchor.hash !== "" && anchor.pathname === here.pathname && anchor.search === here.search;
 }
 
 /* ------------------------------------------------------------- breadcrumbs --- */
 
 export interface Crumb {
-  text: string
+  text: string;
   /** Absent for the last crumb, which is where you already are. */
-  screen?: Screen
+  screen?: Screen;
 }
 
 export interface CrumbContext {
@@ -331,16 +331,16 @@ export interface CrumbContext {
    * (`multi-brand.md` decision 20). Absent with no `sites` and on a page with no
    * scope, and the title is then what it always was. Not a crumb: `crumbs` ignores it.
    */
-  site?: string
+  site?: string;
   /** A document type's label, by name. */
-  label?: (type: string) => string | undefined
+  label?: (type: string) => string | undefined;
   /**
    * The open document's ancestors, root first, the document itself last. What
    * turns `Content / About / Our team` from a claim into three links — and the
    * answer to `docs/ui-review.md`'s finding that a record in form mode had no
    * way back to the list it came from.
    */
-  chain?: readonly { id: string; title: string }[]
+  chain?: readonly { id: string; title: string }[];
   /**
    * What sits above the open document: `Content` for a page, its own type's list
    * for a record, and **nothing at all** for a global — a singleton is linked
@@ -353,7 +353,7 @@ export interface CrumbContext {
    * chain and rooted every global at `Content`, which was wrong in a way only the
    * running shell showed.
    */
-  root?: Crumb | null
+  root?: Crumb | null;
   /**
    * A form's own label, by id — for the builder's and the responses table's
    * breadcrumb and tab title. Absent while the form has not loaded yet, the
@@ -361,74 +361,77 @@ export interface CrumbContext {
    * module is pure parse/format and holds no fetch of its own
    * (`docs/specs/content-model/forms.md` phase 6).
    */
-  formLabel?: (id: string) => string | undefined
+  formLabel?: (id: string) => string | undefined;
 }
 
 const TITLES: Record<
-  Exclude<ScreenName, 'documents' | 'edit' | 'form' | 'responses' | 'missing'>,
+  Exclude<ScreenName, "documents" | "edit" | "form" | "responses" | "missing">,
   string
 > = {
-  home: 'Home',
-  content: 'Content',
-  assets: 'Assets',
-  access: 'Access',
-  model: 'Model',
-  redirects: 'Redirects',
-  schedules: 'Schedules',
-  settings: 'Settings',
-  forms: 'Forms',
-  account: 'Your account',
-  sites: 'Sites',
-}
+  home: "Home",
+  content: "Content",
+  assets: "Assets",
+  access: "Access",
+  model: "Model",
+  redirects: "Redirects",
+  schedules: "Schedules",
+  settings: "Settings",
+  forms: "Forms",
+  account: "Your account",
+  sites: "Sites",
+};
 
 /**
  * The top bar's breadcrumb: a trail, never a title. The last crumb has no
  * screen, so it renders as text rather than a link to the page you are on.
  */
 export function crumbs(route: Route, ctx: CrumbContext = {}): Crumb[] {
-  const s = route.screen
-  if (s.name === 'home') return [{ text: 'Home' }]
-  if (s.name === 'missing') return [{ text: 'Not found' }]
+  const s = route.screen;
+  if (s.name === "home") return [{ text: "Home" }];
+  if (s.name === "missing") return [{ text: "Not found" }];
 
-  if (s.name === 'documents') {
-    return [{ text: ctx.label?.(s.type) ?? s.type }]
+  if (s.name === "documents") {
+    return [{ text: ctx.label?.(s.type) ?? s.type }];
   }
 
-  if (s.name === 'form') {
-    return [{ text: 'Forms', screen: { name: 'forms' } }, { text: ctx.formLabel?.(s.id) ?? 'Form' }]
-  }
-
-  if (s.name === 'responses') {
+  if (s.name === "form") {
     return [
-      { text: 'Forms', screen: { name: 'forms' } },
-      { text: ctx.formLabel?.(s.id) ?? 'Form', screen: { name: 'form', id: s.id } },
-      { text: 'Responses' },
-    ]
+      { text: "Forms", screen: { name: "forms" } },
+      { text: ctx.formLabel?.(s.id) ?? "Form" },
+    ];
   }
 
-  if (s.name === 'edit') {
-    const chain = ctx.chain ?? []
+  if (s.name === "responses") {
+    return [
+      { text: "Forms", screen: { name: "forms" } },
+      { text: ctx.formLabel?.(s.id) ?? "Form", screen: { name: "form", id: s.id } },
+      { text: "Responses" },
+    ];
+  }
+
+  if (s.name === "edit") {
+    const chain = ctx.chain ?? [];
     const trail = chain.map((node, i) => ({
       text: node.title,
       // Every ancestor is a link to itself; the open document is not.
-      ...(i === chain.length - 1 ? {} : { screen: { name: 'edit' as const, id: node.id } }),
-    }))
+      ...(i === chain.length - 1 ? {} : { screen: { name: "edit" as const, id: node.id } }),
+    }));
     // `root === undefined` means "not known yet" — the manifest has not landed —
     // and Content is the stable answer, so the bar does not reflow a moment later.
     // `root === null` means "there is nothing above this", which is a global.
     const above =
-      ctx.root === undefined ? { text: 'Content', screen: { name: 'content' as const } } : ctx.root
-    return above ? [above, ...trail] : trail
+      ctx.root === undefined ? { text: "Content", screen: { name: "content" as const } } : ctx.root;
+    return above ? [above, ...trail] : trail;
   }
 
-  return [{ text: TITLES[s.name] }]
+  return [{ text: TITLES[s.name] }];
 }
 
 /** `document.title`. Deepest crumb first, because a tab strip truncates from the
  * right and "Our team" is what tells two tabs apart. On a deployment with `sites` the
  * scope's name follows it: `<crumb> · <site name> · Folio`. */
 export function documentTitle(route: Route, ctx: CrumbContext = {}): string {
-  const trail = crumbs(route, ctx)
-  const last = trail[trail.length - 1]
-  return `${last ? `${last.text} · ` : ''}${ctx.site ? `${ctx.site} · ` : ''}Folio`
+  const trail = crumbs(route, ctx);
+  const last = trail[trail.length - 1];
+  return `${last ? `${last.text} · ` : ""}${ctx.site ? `${ctx.site} · ` : ""}Folio`;
 }

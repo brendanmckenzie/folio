@@ -13,21 +13,21 @@
  * worse *and* read worse. Nothing else in these scripts changes as a result.
  */
 
-const DEFAULT_BASE = 'http://localhost:5199'
+const DEFAULT_BASE = "http://localhost:5199";
 
 /** The admin seeded by examples/demo/seed.sql. */
-export const DEMO_ADMIN = 'demo@example.com'
-export const DEMO_EDITOR = 'editor@example.com'
-export const DEMO_VIEWER = 'viewer@example.com'
+export const DEMO_ADMIN = "demo@example.com";
+export const DEMO_EDITOR = "editor@example.com";
+export const DEMO_VIEWER = "viewer@example.com";
 
 /** The session cookie out of a `Set-Cookie` list, under either name. */
 export function sessionCookieFrom(res) {
-  const values = res.headers.getSetCookie?.() ?? [res.headers.get('set-cookie')]
+  const values = res.headers.getSetCookie?.() ?? [res.headers.get("set-cookie")];
   for (const value of values) {
-    const match = /(^|[;,]\s*)(__Host-folio_session|folio_session)=([^;]+)/.exec(value ?? '')
-    if (match) return `${match[2]}=${match[3]}`
+    const match = /(^|[;,]\s*)(__Host-folio_session|folio_session)=([^;]+)/.exec(value ?? "");
+    if (match) return `${match[2]}=${match[3]}`;
   }
-  return null
+  return null;
 }
 
 /**
@@ -39,26 +39,26 @@ export function sessionCookieFrom(res) {
  */
 export async function signIn(base = DEFAULT_BASE, email = DEMO_ADMIN, doFetch = fetch) {
   const asked = await doFetch(`${base}/folio/login/email`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ email }),
-  })
-  if (!asked.ok) throw new Error(`sign-in request failed: ${asked.status}`)
+  });
+  if (!asked.ok) throw new Error(`sign-in request failed: ${asked.status}`);
 
-  const outbox = await doFetch(`${base}/dev/last-signin`)
-  const { url } = await outbox.json()
+  const outbox = await doFetch(`${base}/dev/last-signin`);
+  const { url } = await outbox.json();
   if (!url) {
     throw new Error(
-      'no sign-in link was captured — is examples/demo configured with magicLink, and is the seed applied?',
-    )
+      "no sign-in link was captured — is examples/demo configured with magicLink, and is the seed applied?",
+    );
   }
 
   // `redirect: 'manual'` so the 302 (and its Set-Cookie) is what comes back,
   // rather than whatever the editor answers after the redirect.
-  const verified = await doFetch(url, { redirect: 'manual' })
-  const cookie = sessionCookieFrom(verified)
-  if (!cookie) throw new Error(`sign-in set no session cookie (status ${verified.status})`)
-  return cookie
+  const verified = await doFetch(url, { redirect: "manual" });
+  const cookie = sessionCookieFrom(verified);
+  if (!cookie) throw new Error(`sign-in set no session cookie (status ${verified.status})`);
+  return cookie;
 }
 
 /**
@@ -70,21 +70,21 @@ export async function signIn(base = DEFAULT_BASE, email = DEMO_ADMIN, doFetch = 
  * through its (non-standard) options argument.
  */
 export async function signInGlobally(base = DEFAULT_BASE, email = DEMO_ADMIN) {
-  const realFetch = globalThis.fetch
-  const cookie = await signIn(base, email, realFetch)
+  const realFetch = globalThis.fetch;
+  const cookie = await signIn(base, email, realFetch);
 
   globalThis.fetch = (input, init = {}) => {
-    const headers = new Headers(init.headers)
-    if (!headers.has('cookie')) headers.set('cookie', cookie)
-    return realFetch(input, { ...init, headers })
-  }
+    const headers = new Headers(init.headers);
+    if (!headers.has("cookie")) headers.set("cookie", cookie);
+    return realFetch(input, { ...init, headers });
+  };
 
-  const RealWebSocket = globalThis.WebSocket
+  const RealWebSocket = globalThis.WebSocket;
   globalThis.WebSocket = class extends RealWebSocket {
     constructor(url, options) {
-      super(url, { ...(options ?? {}), headers: { cookie, ...(options?.headers ?? {}) } })
+      super(url, { ...(options ?? {}), headers: { cookie, ...(options?.headers ?? {}) } });
     }
-  }
+  };
 
-  return { cookie, realFetch, RealWebSocket }
+  return { cookie, realFetch, RealWebSocket };
 }

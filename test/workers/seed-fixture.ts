@@ -1,4 +1,4 @@
-import { splitSqlStatements } from './sql-split'
+import { splitSqlStatements } from "./sql-split";
 
 /**
  * The exact file `pnpm db:seed` runs against a real deployment
@@ -15,16 +15,16 @@ import { splitSqlStatements } from './sql-split'
  * a typo in it fails the same tests that already assume it worked, instead of
  * shipping silently.
  */
-const modules = import.meta.glob('../../examples/demo/seed.sql', {
+const modules = import.meta.glob("../../examples/demo/seed.sql", {
   eager: true,
-  query: '?raw',
-  import: 'default',
-}) as Record<string, string>
+  query: "?raw",
+  import: "default",
+}) as Record<string, string>;
 
-const seedSql = Object.values(modules)[0]
-if (seedSql === undefined) throw new Error('examples/demo/seed.sql not found from test/workers')
+const seedSql = Object.values(modules)[0];
+if (seedSql === undefined) throw new Error("examples/demo/seed.sql not found from test/workers");
 
-const statements = splitSqlStatements(seedSql)
+const statements = splitSqlStatements(seedSql);
 
 /**
  * Inserts the three demo stories (see examples/demo/seed.sql) into `db`.
@@ -50,10 +50,10 @@ export async function applySeedFixture(db: D1Database): Promise<void> {
   // no foreign key at all and could go anywhere. `site_roles` is cleared explicitly
   // rather than left to its `on delete cascade`, as `deleteUser` does.
   await db.batch([
-    db.prepare('delete from shares'),
-    db.prepare('delete from api_tokens'),
-    db.prepare('delete from site_roles'),
-    db.prepare('delete from users'),
-  ])
-  await db.batch(statements.map((sql) => db.prepare(sql)))
+    db.prepare("delete from shares"),
+    db.prepare("delete from api_tokens"),
+    db.prepare("delete from site_roles"),
+    db.prepare("delete from users"),
+  ]);
+  await db.batch(statements.map((sql) => db.prepare(sql)));
 }

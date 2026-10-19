@@ -1,17 +1,17 @@
-import { button } from './button'
-import { contactForm } from './contact'
-import { cta } from './cta'
-import { embed, section } from './embed'
-import { feature, features } from './features'
-import { headerRoot } from './header'
-import { hero } from './hero'
-import { insightList, insightPage } from './insight'
-import { gallery, image } from './media'
-import { page } from './page'
-import { leadership, officeCard, officeRecord, personCard, personRecord } from './person'
-import { prose, pullquote } from './prose'
-import { searchResults } from './search'
-import { settingsRoot } from './settings'
+import { button } from "./button";
+import { contactForm } from "./contact";
+import { cta } from "./cta";
+import { embed, section } from "./embed";
+import { feature, features } from "./features";
+import { headerRoot } from "./header";
+import { hero } from "./hero";
+import { insightList, insightPage } from "./insight";
+import { gallery, image } from "./media";
+import { page } from "./page";
+import { leadership, officeCard, officeRecord, personCard, personRecord } from "./person";
+import { prose, pullquote } from "./prose";
+import { searchResults } from "./search";
+import { settingsRoot } from "./settings";
 
 /**
  * The only thing this project hands to Folio. The Worker renders with it, the
@@ -57,4 +57,4 @@ export const blocks = [
   // `/search` route builds its own in-memory `Doc` around this one block
   // (`content-model/full-text-search.md` decision 10).
   searchResults,
-]
+];

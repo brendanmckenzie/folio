@@ -1,12 +1,12 @@
-import { useState } from 'react'
-import type { Grants, Role } from '../../../server/auth/roles'
-import type { Me } from '../../me'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { Field, Input, Select } from '../Field'
-import css from './Access.module.css'
-import { GrantsEditor } from './AccessGrants'
-import { grantsRefusal, ROLE_MEANING, ROLE_OPTIONS, showsGrants } from './access-model'
+import { useState } from "react";
+import type { Grants, Role } from "../../../server/auth/roles";
+import type { Me } from "../../me";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { Field, Input, Select } from "../Field";
+import css from "./Access.module.css";
+import { GrantsEditor } from "./AccessGrants";
+import { grantsRefusal, ROLE_MEANING, ROLE_OPTIONS, showsGrants } from "./access-model";
 
 /**
  * Giving somebody access.
@@ -31,21 +31,21 @@ export function AccessInviteDialog({
   onInvite,
   me,
 }: {
-  onClose: () => void
-  onInvite: (body: { email: string; name?: string; role?: Role; grants?: Grants }) => Promise<void>
+  onClose: () => void;
+  onInvite: (body: { email: string; name?: string; role?: Role; grants?: Grants }) => Promise<void>;
   /**
    * On a deployment with `sites` the role is a set of grants, one per scope, and the
    * route refuses an invitation that names neither (`multi-site.md` decision 10).
    * Absent with none, and then this is the single role it always was.
    */
-  me?: Me
+  me?: Me;
 }) {
-  const [email, setEmail] = useState('')
-  const [name, setName] = useState('')
-  const [role, setRole] = useState<Role>('editor')
-  const [grants, setGrants] = useState<Grants>({})
-  const [pending, setPending] = useState(false)
-  const many = me !== undefined && showsGrants(me)
+  const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [role, setRole] = useState<Role>("editor");
+  const [grants, setGrants] = useState<Grants>({});
+  const [pending, setPending] = useState(false);
+  const many = me !== undefined && showsGrants(me);
 
   // The server's own rule, stated here only so the button can explain itself
   // before the click: `UserCreateBody`'s `EMAIL` requires an address, and a 400 for
@@ -55,21 +55,21 @@ export function AccessInviteDialog({
     ? many
       ? grantsRefusal(grants)
       : undefined
-    : 'Enter an email address'
+    : "Enter an email address";
 
   const submit = async () => {
-    if (refusal) return
-    setPending(true)
+    if (refusal) return;
+    setPending(true);
     try {
       await onInvite({
         email: email.trim(),
         ...(name.trim() ? { name: name.trim() } : {}),
         ...(many ? { grants } : { role }),
-      })
+      });
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Dialog
@@ -82,7 +82,7 @@ export function AccessInviteDialog({
           <Button
             variant="primary"
             disabled={pending || refusal !== undefined}
-            reason={pending ? 'Adding…' : refusal}
+            reason={pending ? "Adding…" : refusal}
             onClick={() => void submit()}
           >
             Give access
@@ -96,8 +96,8 @@ export function AccessInviteDialog({
       <form
         className={css.form}
         onSubmit={(e) => {
-          e.preventDefault()
-          void submit()
+          e.preventDefault();
+          void submit();
         }}
       >
         <Field label="Email" help="Stored lowercased. One account per address." required>
@@ -143,5 +143,5 @@ export function AccessInviteDialog({
         )}
       </form>
     </Dialog>
-  )
+  );
 }

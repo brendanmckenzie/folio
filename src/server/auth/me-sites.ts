@@ -12,41 +12,41 @@
  *
  * Absent on a deployment with no `sites`: that is how the admin knows it is one.
  */
-import { ALL_SCOPES, chain, type Registry, SHARED_SCOPE, type SiteStatus } from '../../core/sites'
-import type { BrandRef } from '../types'
-import { effectiveRole, type Grants, previewEligible, type Role } from './roles'
+import { ALL_SCOPES, chain, type Registry, SHARED_SCOPE, type SiteStatus } from "../../core/sites";
+import type { BrandRef } from "../types";
+import { effectiveRole, type Grants, previewEligible, type Role } from "./roles";
 
 /** One scope the caller reaches, with their role there. */
 export interface MeScope {
-  id: string
-  name: string
-  kind: 'site' | 'group' | 'shared'
+  id: string;
+  name: string;
+  kind: "site" | "group" | "shared";
   /** The group a site belongs to, or null. */
-  group: string | null
+  group: string | null;
   /** The caller's effective role on this scope. A read up the chain is `viewer`. */
-  role: Role
+  role: Role;
   /** The scopes this one reads from, nearest first, itself included. */
-  chain: readonly string[]
+  chain: readonly string[];
   /** A site's status; null for a group and for `shared`. */
-  status: SiteStatus | null
+  status: SiteStatus | null;
   /** A site's preview origin, or null. */
-  preview: string | null
+  preview: string | null;
   /**
    * The scope's brand (`multi-brand.md` decision 20), which the switcher groups by.
    * Null for `shared` and on a deployment with no `brands`.
    */
-  brand: BrandRef | null
+  brand: BrandRef | null;
 }
 
 /** A site the caller may preview, and where its preview origin is. */
 export interface MePreview {
-  id: string
-  name: string
-  preview: string | null
-  status: SiteStatus
+  id: string;
+  name: string;
+  preview: string | null;
+  status: SiteStatus;
   /** The scopes this site reads from, nearest first, itself included: what decides
    * which sites a page owned by a shared or group scope can be previewed in. */
-  chain: readonly string[]
+  chain: readonly string[];
 }
 
 export interface MeSites {
@@ -55,19 +55,19 @@ export interface MeSites {
    * deployment with `brands`**, where the settings type is the brand's and rides on
    * the scoped manifest (`multi-brand.md` decision 20).
    */
-  settings: string | null
+  settings: string | null;
   /**
    * The configured brands, for the Sites screen's brand field: a brand with no site
    * yet is in no scope's `brand`. **Present only on a deployment with `brands`**, so
    * a single-brand `/me` has no such key.
    */
-  brands?: BrandRef[]
+  brands?: BrandRef[];
   /** `*` + `admin`: the registry, users and tokens are theirs. */
-  platform: boolean
+  platform: boolean;
   /** The caller's own grants, by scope. Empty under `auth: 'open'`. */
-  grants: Grants
-  scopes: MeScope[]
-  previewable: MePreview[]
+  grants: Grants;
+  scopes: MeScope[];
+  previewable: MePreview[];
 }
 
 /**
@@ -82,12 +82,12 @@ export function meSites(
   brands?: readonly BrandRef[],
 ): MeSites {
   const brandOf = (id: string | null): BrandRef | null =>
-    id === null ? null : (brands?.find((b) => b.id === id) ?? null)
+    id === null ? null : (brands?.find((b) => b.id === id) ?? null);
 
   const roleOn = (scope: string): Role | null =>
-    grants === null ? 'admin' : effectiveRole(grants, registry, scope)
+    grants === null ? "admin" : effectiveRole(grants, registry, scope);
 
-  const candidates: Omit<MeScope, 'role'>[] = [
+  const candidates: Omit<MeScope, "role">[] = [
     // No `shared` on a deployment with `brands` (`multi-brand.md` decision 5):
     // offered anyway, it would be a scope every platform admin could pick and that
     // answers 404 to every call.
@@ -95,8 +95,8 @@ export function meSites(
       ? [
           {
             id: SHARED_SCOPE,
-            name: 'Shared',
-            kind: 'shared' as const,
+            name: "Shared",
+            kind: "shared" as const,
             group: null,
             chain: chain(registry, SHARED_SCOPE),
             status: null,
@@ -108,7 +108,7 @@ export function meSites(
     ...registry.groups.map((g) => ({
       id: g.id,
       name: g.name,
-      kind: 'group' as const,
+      kind: "group" as const,
       group: null,
       chain: chain(registry, g.id),
       status: null,
@@ -118,19 +118,19 @@ export function meSites(
     ...registry.sites.map((s) => ({
       id: s.id,
       name: s.name,
-      kind: 'site' as const,
+      kind: "site" as const,
       group: s.group,
       chain: chain(registry, s.id),
       status: s.status,
       preview: s.preview,
       brand: brandOf(s.brand),
     })),
-  ]
+  ];
 
-  const scopes: MeScope[] = []
+  const scopes: MeScope[] = [];
   for (const candidate of candidates) {
-    const role = roleOn(candidate.id)
-    if (role !== null) scopes.push({ ...candidate, role })
+    const role = roleOn(candidate.id);
+    if (role !== null) scopes.push({ ...candidate, role });
   }
 
   const previewable: MePreview[] = registry.sites
@@ -141,14 +141,14 @@ export function meSites(
       preview: s.preview,
       status: s.status,
       chain: chain(registry, s.id),
-    }))
+    }));
 
   return {
     settings: settings ?? null,
     ...(brands ? { brands: [...brands] } : {}),
-    platform: grants === null || grants[ALL_SCOPES] === 'admin',
+    platform: grants === null || grants[ALL_SCOPES] === "admin",
     grants: grants ?? {},
     scopes,
     previewable,
-  }
+  };
 }

@@ -20,25 +20,25 @@
  * *letter*, and answers `Page<T>` (`../../../core/pagination.ts:24`), not
  * `ContentPage` — the two are already different types on purpose.
  */
-import { Hono } from 'hono'
-import type { Page } from '../../../core/pagination'
-import type { StoryMeta } from '../../../core/story'
-import { READ } from '../../auth/roles'
-import { requestChain, requestUrls, requireAccess } from '../../middleware'
-import type { FolioRuntime } from '../../runtime'
-import { searchStories } from '../../stories'
-import type { FolioEnv } from '../../types'
+import { Hono } from "hono";
+import type { Page } from "../../../core/pagination";
+import type { StoryMeta } from "../../../core/story";
+import { READ } from "../../auth/roles";
+import { requestChain, requestUrls, requireAccess } from "../../middleware";
+import type { FolioRuntime } from "../../runtime";
+import { searchStories } from "../../stories";
+import type { FolioEnv } from "../../types";
 import {
   limitParam,
   parentIdQuery,
   requireCursor,
   routedQuery,
   storyFilterQuery,
-} from '../../validate'
-import { type ApiDocumentMeta, toApiDocumentMeta } from './documents'
+} from "../../validate";
+import { type ApiDocumentMeta, toApiDocumentMeta } from "./documents";
 
 export function searchRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * `parentId` and `routed` are read here rather than by extending
@@ -54,31 +54,31 @@ export function searchRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * surface, and `searchStories`' own default ordering (title, ascending) is
    * what a caller with no opinion about order wants.
    */
-  app.get('/search', requireAccess<Env>(rt, READ), async (c) => {
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
+  app.get("/search", requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
 
     const page: Page<StoryMeta> = await searchStories(c.var.bindings().db, {
       // The whole chain, each hit carrying its `site` (`ApiDocumentMeta.site`): a link
       // may point up it and never sideways (`multi-site.md`'s route table).
       chain: await requestChain(c, rt),
-      limit: limitParam(c.req.query('limit'), 20, 100),
+      limit: limitParam(c.req.query("limit"), 20, 100),
       cursor,
       filter: {
         ...storyFilterQuery(c.req),
-        parentId: parentIdQuery(c.req.query('parentId')),
-        routed: routedQuery(c.req.query('routed')),
+        parentId: parentIdQuery(c.req.query("parentId")),
+        routed: routedQuery(c.req.query("routed")),
       },
-      count: c.req.query('count') === '1',
-    })
+      count: c.req.query("count") === "1",
+    });
 
-    const urls = await requestUrls(c, rt)
+    const urls = await requestUrls(c, rt);
     const result: Page<ApiDocumentMeta> = {
       ...page,
       rows: page.rows.map((row) => toApiDocumentMeta(rt, row, urls)),
-    }
-    return c.json(result)
-  })
+    };
+    return c.json(result);
+  });
 
-  return app
+  return app;
 }

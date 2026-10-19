@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode } from "react";
 
 /**
  * JSON that is safe to embed inside a <script> tag. Only `<` needs escaping:
@@ -11,12 +11,14 @@ import type { ReactNode } from 'react'
  * sentinel just for this call site.
  */
 export function serializeJson(value: unknown): string {
-  return JSON.stringify(value ?? null).replace(/</g, '\\u003c')
+  return JSON.stringify(value ?? null).replace(/</g, "\\u003c");
 }
 
 export function Bootstrap({ global, value }: { global: string; value: unknown }) {
-  // biome-ignore lint/security/noDangerouslySetInnerHtml: value goes through serializeJson (escapes `<`); `global` is only ever a library literal
-  return <script dangerouslySetInnerHTML={{ __html: `window.${global}=${serializeJson(value)}` }} />
+  return (
+    // biome-ignore lint/security/noDangerouslySetInnerHtml: value goes through serializeJson (escapes `<`); `global` is only ever a library literal
+    <script dangerouslySetInnerHTML={{ __html: `window.${global}=${serializeJson(value)}` }} />
+  );
 }
 
 /**
@@ -67,10 +69,10 @@ export function ReactRefreshPreamble() {
           `window.$RefreshReg$ = () => {}`,
           `window.$RefreshSig$ = () => (type) => type`,
           `window.__vite_plugin_react_preamble_installed__ = true`,
-        ].join('\n'),
+        ].join("\n"),
       }}
     />
-  )
+  );
 }
 
 /**
@@ -83,23 +85,23 @@ export function Shell({
   stylesheets = [],
   bodyClass,
   head,
-  lang = 'en',
+  lang = "en",
   brand,
   children,
 }: {
-  title: string
-  stylesheets?: string[]
-  bodyClass?: string
-  head?: ReactNode
+  title: string;
+  stylesheets?: string[];
+  bodyClass?: string;
+  head?: ReactNode;
   /** `<html lang>`. Defaults to `'en'`, which is what this was hard-coded to
    * before locales existed (`localisation.md`); a host rendering its own
    * document sets its own. */
-  lang?: string
+  lang?: string;
   /** `<html data-folio-brand>` (`multi-brand.md` decision 10): the brand a
    * branded deployment's preview renders as, so a brand's global stylesheet can be
    * scoped under `[data-folio-brand="<id>"]`. Absent writes no attribute. */
-  brand?: string
-  children: ReactNode
+  brand?: string;
+  children: ReactNode;
 }) {
   return (
     <html lang={lang} data-folio-brand={brand}>
@@ -114,5 +116,5 @@ export function Shell({
       </head>
       <body className={bodyClass}>{children}</body>
     </html>
-  )
+  );
 }

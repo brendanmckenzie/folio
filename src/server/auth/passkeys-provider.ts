@@ -25,11 +25,11 @@
  * enrolment needs a session and a session needs a first sign-in, so a
  * passkey-only deployment is one nobody could ever enrol on.
  */
-import type { PasskeyProvider } from './config'
+import type { PasskeyProvider } from "./config";
 
 export interface PasskeyOptions {
   /** Button label on the login page. */
-  label?: string
+  label?: string;
   /**
    * The human-readable relying-party name a browser shows during enrolment
    * ("Sign in to …"). Defaults to the request host — there is deliberately no
@@ -37,20 +37,20 @@ export interface PasskeyOptions {
    * request host, so a passkey enrolled on a preview never works on production
    * and there is no key to misconfigure.
    */
-  rpName?: string
+  rpName?: string;
 }
 
 export function passkeys(opts: PasskeyOptions = {}): PasskeyProvider {
   return {
-    kind: 'passkey',
+    kind: "passkey",
     // Fixed, not configurable: `sessions.provider` and `users.provider` store
     // it, the enforced-domain map compares against it, and a per-deployment id
     // would make "signed in with a passkey" a string only that deployment can
     // read. `resolveAuth` refuses any other value.
-    id: 'passkey',
-    label: opts.label ?? 'Sign in with a passkey',
+    id: "passkey",
+    label: opts.label ?? "Sign in with a passkey",
     // Spread rather than `rpName: opts.rpName`, so an omitted option leaves the
     // key absent and the route's `?? host` default is reached.
     ...(opts.rpName ? { rpName: opts.rpName } : {}),
-  }
+  };
 }

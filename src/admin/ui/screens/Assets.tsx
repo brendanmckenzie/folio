@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { canAdmin, canManageAssets, type Me } from '../../me'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
+import { useCallback, useEffect, useRef, useState } from "react";
+import { canAdmin, canManageAssets, type Me } from "../../me";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
 import {
   type AssetRow,
   type AssetsUrl,
@@ -9,36 +9,36 @@ import {
   assetsQuery,
   panelSubject,
   parseAssetsUrl,
-} from './assets-model'
-import { AssetBrowser } from './AssetBrowser'
-import { AssetDeleteDialog } from './AssetDeleteDialog'
-import { AssetDetail } from './AssetDetail'
-import css from './Assets.module.css'
-import { useFittedPage } from '../fit'
-import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from './useAssets'
-import { messageOf } from './useContent'
+} from "./assets-model";
+import { AssetBrowser } from "./AssetBrowser";
+import { AssetDeleteDialog } from "./AssetDeleteDialog";
+import { AssetDetail } from "./AssetDetail";
+import css from "./Assets.module.css";
+import { useFittedPage } from "../fit";
+import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from "./useAssets";
+import { messageOf } from "./useContent";
 
 interface Props {
   /** The admin's internal JSON base — `{base}/api`. Every read and write here. */
-  apiBase: string
+  apiBase: string;
   /** Where Folio is mounted — `{base}`. Thumbnails and the download link come off
    * `/asset/:key`, which is not part of the internal API, and the usage list's links
    * are real `<a href>` into the shell. */
-  mount: string
+  mount: string;
   /**
    * Who is signed in, for the two role gates this screen computes and hands to
    * `AssetBrowser`. Every write in the media library is `ASSETS` (editor) except
    * the bulk describe run, which is `ADMIN` because it spends money — see
    * `AssetBrowser`'s `mayWrite` and `mayDescribe`.
    */
-  me: Me
-  query: Readonly<Record<string, string>>
+  me: Me;
+  query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
-  onQuery: (next: Record<string, string | undefined>) => void
-  onNotice: (message: string) => void
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onNotice: (message: string) => void;
   /** The remembered view, used when the URL names none. */
-  remembered: { view: AssetView }
-  onRemember: (next: { view: AssetView }) => void
+  remembered: { view: AssetView };
+  onRemember: (next: { view: AssetView }) => void;
 }
 
 /**
@@ -77,7 +77,7 @@ interface Props {
  *   `panelSubject` between them keep it to one request and four honest states.
  */
 export function Assets(props: Props) {
-  const { apiBase, mount, onQuery, onNotice, onRemember } = props
+  const { apiBase, mount, onQuery, onNotice, onRemember } = props;
   /**
    * The two role gates, computed here because this is the mount that has `me` —
    * `AssetBrowser` takes booleans rather than `me` for the reason its own props
@@ -87,9 +87,9 @@ export function Assets(props: Props) {
    * implies `mayWrite`, so there is no state where the describe run is offered
    * over a selection layer that is not.
    */
-  const mayWrite = canManageAssets(props.me)
-  const mayDescribe = canAdmin(props.me)
-  const url = parseAssetsUrl(props.query, props.remembered)
+  const mayWrite = canManageAssets(props.me);
+  const mayDescribe = canAdmin(props.me);
+  const url = parseAssetsUrl(props.query, props.remembered);
   /**
    * The page size, fitted to the viewport rather than fixed.
    *
@@ -98,11 +98,11 @@ export function Assets(props: Props) {
    * skeletons `AssetBrowser` has already put in the box, so opening this screen is
    * still exactly one request.
    */
-  const results = useRef<HTMLDivElement>(null)
-  const pageSize = useFittedPage(results, ASSETS_FIT)
-  const data = useAssets(apiBase, url, pageSize)
+  const results = useRef<HTMLDivElement>(null);
+  const pageSize = useFittedPage(results, ASSETS_FIT);
+  const data = useAssets(apiBase, url, pageSize);
 
-  const [deleting, setDeleting] = useState<AssetRow | null>(null)
+  const [deleting, setDeleting] = useState<AssetRow | null>(null);
 
   const go = useCallback(
     (next: AssetsUrl) => {
@@ -110,11 +110,11 @@ export function Assets(props: Props) {
       // and the same order Content's `[ Tree | Flat ]` toggle follows. The URL is what
       // a person sends a colleague; the memory is what they get when they arrive
       // without one.
-      onRemember({ view: next.view })
-      onQuery(assetsQuery(next))
+      onRemember({ view: next.view });
+      onQuery(assetsQuery(next));
     },
     [onQuery, onRemember],
-  )
+  );
 
   /**
    * The last row the selected id resolved to, kept so the panel does not blank.
@@ -131,9 +131,9 @@ export function Assets(props: Props) {
    * that keeps it to **one** request. In hand beats a lookup, and a lookup is only
    * asked for when nothing is in hand — see `panelSubject`.
    */
-  const [known, setKnown] = useState<AssetRow | null>(null)
-  const found = url.asset ? (data.page.rows.find((row) => row.id === url.asset) ?? null) : null
-  const inHand = found ?? (known && known.id === url.asset ? known : null)
+  const [known, setKnown] = useState<AssetRow | null>(null);
+  const found = url.asset ? (data.page.rows.find((row) => row.id === url.asset) ?? null) : null;
+  const inHand = found ?? (known && known.id === url.asset ? known : null);
 
   /**
    * The cold-link resolution, and it asks for nothing whenever the row is already
@@ -143,50 +143,50 @@ export function Assets(props: Props) {
    * does not fetch it again — and so the panel does not flicker back to a skeleton the
    * moment the list is re-read.
    */
-  const lookup = useAsset(apiBase, inHand ? undefined : url.asset)
+  const lookup = useAsset(apiBase, inHand ? undefined : url.asset);
   useEffect(() => {
-    const row = found ?? lookup.row
-    if (row) setKnown(row)
-  }, [found, lookup.row])
-  const subject = panelSubject(url.asset, inHand, lookup)
+    const row = found ?? lookup.row;
+    if (row) setKnown(row);
+  }, [found, lookup.row]);
+  const subject = panelSubject(url.asset, inHand, lookup);
 
   const onUploaded = useCallback(
     (done: readonly AssetRow[]) => {
-      if (done.length === 0) return
-      data.reload()
+      if (done.length === 0) return;
+      data.reload();
       onNotice(
         done.length === 1 ? `Uploaded ${done[0]!.filename}` : `Uploaded ${done.length} files`,
-      )
+      );
       // Opens the panel on what just arrived, which is the thing somebody uploading an
       // image is about to want: its alt text. Failures are not announced here — they
       // are per file, in the browser's own report, because a batch of ten can land
       // nine and one toast cannot say which.
-      go({ ...url, asset: done[done.length - 1]!.id })
+      go({ ...url, asset: done[done.length - 1]!.id });
     },
     [data, go, onNotice, url],
-  )
-  const upload = useUploads(apiBase, onUploaded)
+  );
+  const upload = useUploads(apiBase, onUploaded);
 
-  const onFiles = useCallback((files: FileList | null) => upload.add(files), [upload])
-  const drop = useDropTarget(onFiles, mayWrite)
+  const onFiles = useCallback((files: FileList | null) => upload.add(files), [upload]);
+  const drop = useDropTarget(onFiles, mayWrite);
 
   const remove = useCallback(
     async (row: AssetRow) => {
       try {
         const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
-          method: 'DELETE',
-        })
-        if (!res.ok) throw new Error(await messageOf(res))
-        onNotice(`Deleted ${row.filename}`)
-        setKnown(null)
-        go({ ...url, asset: undefined })
-        data.reload()
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(await messageOf(res));
+        onNotice(`Deleted ${row.filename}`);
+        setKnown(null);
+        go({ ...url, asset: undefined });
+        data.reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       }
     },
     [apiBase, data, go, onNotice, url],
-  )
+  );
 
   if (data.page.error && data.page.rows.length === 0) {
     return (
@@ -201,7 +201,7 @@ export function Assets(props: Props) {
           }
         />
       </div>
-    )
+    );
   }
 
   return (
@@ -222,7 +222,7 @@ export function Assets(props: Props) {
         message below is also a panel and wants the same second column, or it stretches
         to the screen's width to say two sentences.
       */}
-      <div className={css.body} data-open={url.asset ? '' : undefined}>
+      <div className={css.body} data-open={url.asset ? "" : undefined}>
         <AssetBrowser
           resultsRef={results}
           apiBase={apiBase}
@@ -261,7 +261,7 @@ export function Assets(props: Props) {
           person hunting a network problem that is not there and tell another their file
           is gone because their wifi dropped.
         */}
-        {subject.state === 'row' ? (
+        {subject.state === "row" ? (
           <AssetDetail
             apiBase={apiBase}
             mount={mount}
@@ -269,8 +269,8 @@ export function Assets(props: Props) {
             onClose={() => go({ ...url, asset: undefined })}
             onDelete={() => setDeleting(subject.row)}
             onChanged={(next) => {
-              setKnown(next)
-              data.reload()
+              setKnown(next);
+              data.reload();
             }}
             onNotice={onNotice}
             // The same gate the browser gets, and the panel needs it separately:
@@ -279,7 +279,7 @@ export function Assets(props: Props) {
             // controls the grid had already stopped offering.
             mayWrite={mayWrite}
           />
-        ) : subject.state === 'loading' ? (
+        ) : subject.state === "loading" ? (
           // A skeleton panel, not a spinner: the panel's shape is known before its
           // contents arrive, which is the rule `ui-architecture.md` states once for
           // every list and applies just as well to a fixed-layout column.
@@ -289,7 +289,7 @@ export function Assets(props: Props) {
             <div className={css.skeletonLine} data-short="" />
             <div className={css.skeletonLine} />
           </aside>
-        ) : subject.state === 'gone' ? (
+        ) : subject.state === "gone" ? (
           <aside className={css.panel}>
             <h2 className={css.panelHeading}>That file is gone</h2>
             <p className={css.note}>
@@ -301,7 +301,7 @@ export function Assets(props: Props) {
               Close
             </Button>
           </aside>
-        ) : subject.state === 'error' ? (
+        ) : subject.state === "error" ? (
           <aside className={css.panel}>
             <h2 className={css.panelHeading}>Could not load that file</h2>
             {/* The file is very probably still there. The message is the server's or
@@ -337,12 +337,12 @@ export function Assets(props: Props) {
           row={deleting}
           onClose={() => setDeleting(null)}
           onConfirm={() => {
-            const row = deleting
-            setDeleting(null)
-            void remove(row)
+            const row = deleting;
+            setDeleting(null);
+            void remove(row);
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }

@@ -6,17 +6,17 @@
  * upgrade is indistinguishable on the wire from a dropped connection — so neither
  * uses `loadStory`.
  */
-import { Hono } from 'hono'
-import { chain, layerId, type Registry } from '../../core/sites'
-import { type SocketIdentity, withIdentity } from '../auth/identity'
-import { READ_DRAFT } from '../auth/roles'
-import { inFence, requestChain, requestScope, requireHtmlAccess, roleOnScope } from '../middleware'
-import { shellPage, previewPage } from '../pages'
-import type { FolioRuntime, SiteRender } from '../runtime'
-import { ensureSingleton, listStories, storyById, storyByPath } from '../stories'
-import type { FolioEnv } from '../types'
-import { isId } from '../validate'
-import { brandOf, draftOf } from './stories'
+import { Hono } from "hono";
+import { chain, layerId, type Registry } from "../../core/sites";
+import { type SocketIdentity, withIdentity } from "../auth/identity";
+import { READ_DRAFT } from "../auth/roles";
+import { inFence, requestChain, requestScope, requireHtmlAccess, roleOnScope } from "../middleware";
+import { shellPage, previewPage } from "../pages";
+import type { FolioRuntime, SiteRender } from "../runtime";
+import { ensureSingleton, listStories, storyById, storyByPath } from "../stories";
+import type { FolioEnv } from "../types";
+import { isId } from "../validate";
+import { brandOf, draftOf } from "./stories";
 
 /**
  * Application close codes, mirroring story-do.ts's own (private) constants by
@@ -27,9 +27,9 @@ import { brandOf, draftOf } from './stories'
  * `CLOSE_UNAUTHENTICATED`: no session, or one that has ended.
  * `CLOSE_FORBIDDEN`: a valid credential that may not hold an editing session.
  */
-const CLOSE_PURGED = 4002
-const CLOSE_UNAUTHENTICATED = 4003
-const CLOSE_FORBIDDEN = 4004
+const CLOSE_PURGED = 4002;
+const CLOSE_UNAUTHENTICATED = 4003;
+const CLOSE_FORBIDDEN = 4004;
 
 /**
  * Accepts the upgrade and immediately closes with an application code.
@@ -42,14 +42,14 @@ const CLOSE_FORBIDDEN = 4004
  * purged story, and every refusal below now shares it.
  */
 function refuseSocket(code: number, reason: string): Response {
-  const pair = new WebSocketPair()
-  pair[1]!.accept()
-  pair[1]!.close(code, reason)
-  return new Response(null, { status: 101, webSocket: pair[0] })
+  const pair = new WebSocketPair();
+  pair[1]!.accept();
+  pair[1]!.close(code, reason);
+  return new Response(null, { status: 101, webSocket: pair[0] });
 }
 
 export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * The sync socket. Deliberately **not** behind `requireAccess`: every refusal
@@ -65,26 +65,26 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * A *token* does not. A token is a script, and an editing session is a person
    * with a cursor; 4004 says so rather than pretending the credential is unknown.
    */
-  app.get('/story/:id/socket', async (c) => {
-    if (c.req.header('Upgrade') !== 'websocket') return c.text('Expected websocket', 426)
-    const bindings = c.var.bindings()
-    const id = c.req.param('id')
+  app.get("/story/:id/socket", async (c) => {
+    if (c.req.header("Upgrade") !== "websocket") return c.text("Expected websocket", 426);
+    const bindings = c.var.bindings();
+    const id = c.req.param("id");
     // A malformed id cannot name a story, so it takes the close path below
     // rather than a 400, for the reason documented above.
-    const found = isId(id) ? await storyById(bindings.db, id) : null
+    const found = isId(id) ? await storyById(bindings.db, id) : null;
     // Outside the request's chain it is not there (`multi-site.md` decision 10),
     // which on the wire is the same terminal close a deleted story gets.
-    const story = found && (await inFence(c, rt, found, 'read')) ? found : null
-    if (!story) return refuseSocket(CLOSE_PURGED, 'story deleted')
+    const story = found && (await inFence(c, rt, found, "read")) ? found : null;
+    if (!story) return refuseSocket(CLOSE_PURGED, "story deleted");
 
     // The verified identity handed to the object, or null under `auth: 'open'`,
     // where `hello`'s self-report is the only identity there is.
-    let identity: SocketIdentity | null = null
-    if (rt.auth.mode === 'session') {
-      const actor = c.var.actor
-      if (!actor) return refuseSocket(CLOSE_UNAUTHENTICATED, 'not signed in')
-      if (actor.kind !== 'user') {
-        return refuseSocket(CLOSE_FORBIDDEN, 'an API token cannot open an editing session')
+    let identity: SocketIdentity | null = null;
+    if (rt.auth.mode === "session") {
+      const actor = c.var.actor;
+      if (!actor) return refuseSocket(CLOSE_UNAUTHENTICATED, "not signed in");
+      if (actor.kind !== "user") {
+        return refuseSocket(CLOSE_FORBIDDEN, "an API token cannot open an editing session");
       }
       /**
        * **The role on the story's own scope**, not the request's (decision 10):
@@ -94,8 +94,8 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
        * effective role would have been `editor`, and the socket is the one write
        * path no `requireAccess` stands in front of.
        */
-      const role = await roleOnScope(c, rt, actor, story.site ?? 'default')
-      if (role === null) return refuseSocket(CLOSE_FORBIDDEN, 'no role on this document')
+      const role = await roleOnScope(c, rt, actor, story.site ?? "default");
+      if (role === null) return refuseSocket(CLOSE_FORBIDDEN, "no role on this document");
       identity = {
         actor: actor.id,
         name: actor.name,
@@ -103,17 +103,17 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         role,
         session: actor.session,
         expiresAt: actor.expiresAt,
-      }
+      };
     }
 
-    await draftOf(c, rt)(story)
+    await draftOf(c, rt)(story);
     // `withIdentity` always sets or deletes the header, never leaves it: this
     // forwards the client's own request, so a conditional set would let a client
     // assert an identity by sending the header itself.
-    return rt.stub(bindings, story.id).fetch(withIdentity(c.req.raw, identity))
-  })
+    return rt.stub(bindings, story.id).fetch(withIdentity(c.req.raw, identity));
+  });
 
-  return app
+  return app;
 }
 
 /**
@@ -129,18 +129,18 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * shell already routes it.
  */
 export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
-  app.get('/edit/:id', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
-    const id = c.req.param('id')
+  app.get("/edit/:id", requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
+    const id = c.req.param("id");
     // An HTML route: an id nothing is behind — malformed or simply gone — is a
     // 404 page, not a JSON envelope. Checked *before* the bindings are taken, so
     // an id that cannot name a story never touches the host's environment
     // (test/workers/app.test.ts pins exactly this).
-    if (!isId(id)) return c.notFound()
-    const bindings = c.var.bindings()
-    const story = await storyById(bindings.db, id)
-    if (!story || !(await inFence(c, rt, story, 'read'))) return c.notFound()
+    if (!isId(id)) return c.notFound();
+    const bindings = c.var.bindings();
+    const story = await storyById(bindings.db, id);
+    if (!story || !(await inFence(c, rt, story, "read"))) return c.notFound();
     /**
      * **The rebuilt shell, not `adminPage`** — port phase 7 landed and this URL is
      * the new editor's.
@@ -165,8 +165,8 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * on `GET {base}/api/me` now, so this route renders the same shell as every
      * other one.
      */
-    return shellPage(rt)
-  })
+    return shellPage(rt);
+  });
 
   /**
    * `{base}/edit` with no id: open the root story, or *any* story on a site whose
@@ -177,16 +177,16 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * cheap to write and the same cost as rendering the tree, on a path that runs
    * every time somebody opens the editor without a bookmark.
    */
-  app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
-    const db = c.var.bindings().db
-    const within = await requestChain(c, rt)
+  app.get("/edit", requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
+    const db = c.var.bindings().db;
+    const within = await requestChain(c, rt);
     // A multi-site request with no scope has no root to open: the admin shell at
     // `{base}/` picks the caller's first scope, so an old bookmark lands there.
-    if (within.length === 0) return c.redirect(`${rt.base}/`)
-    const root = await storyByPath(db, within, '')
-    const first = root ?? (await listStories(db, { limit: 1, offset: 0 }, within))[0]
-    return first ? c.redirect(`${rt.base}/edit/${first.id}`) : c.notFound()
-  })
+    if (within.length === 0) return c.redirect(`${rt.base}/`);
+    const root = await storyByPath(db, within, "");
+    const first = root ?? (await listStories(db, { limit: 1, offset: 0 }, within))[0];
+    return first ? c.redirect(`${rt.base}/edit/${first.id}`) : c.notFound();
+  });
 
   /**
    * The bare preview for a singleton with no `previewPath` (`globals.md`
@@ -198,12 +198,12 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Gated like the editor page, not like a published one: what it renders is a
    * live draft.
    */
-  app.get('/preview/global/:name', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
-    const name = c.req.param('name')
-    const brand = brandOf(c)
-    const type = brand.typeOf(name)
-    if (type?.kind !== 'singleton') return c.notFound()
-    const bindings = c.var.bindings()
+  app.get("/preview/global/:name", requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
+    const name = c.req.param("name");
+    const brand = brandOf(c);
+    const type = brand.typeOf(name);
+    if (type?.kind !== "singleton") return c.notFound();
+    const bindings = c.var.bindings();
     /**
      * `?mode=draft`, for `preview_document`'s benefit
      * (`../../../docs/specs/platform/mcp-server.md` phase 5, decision 5a's
@@ -219,7 +219,7 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * admin's own bare-preview URL (`admin/ui/useStory.ts`, which never sets
      * this) is unchanged.
      */
-    const mode = c.req.query('mode') === 'draft' ? 'draft' : 'preview'
+    const mode = c.req.query("mode") === "draft" ? "draft" : "preview";
     if (rt.sites) {
       /**
        * **A preview never writes a layer into existence** (`multi-site.md`
@@ -228,9 +228,9 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
        * 404, not an `ensureSingleton`, so a read-only grant on a draft site cannot
        * leave it with rows and objects that make it undeletable.
        */
-      const scope = requestScope(c, rt)
-      const layer = scope === null ? null : await storyById(bindings.db, layerId(name, scope))
-      if (!layer || !(await inFence(c, rt, layer, 'read'))) return c.notFound()
+      const scope = requestScope(c, rt);
+      const layer = scope === null ? null : await storyById(bindings.db, layerId(name, scope));
+      if (!layer || !(await inFence(c, rt, layer, "read"))) return c.notFound();
       // The request's brand renders it (`multi-brand.md` decision 10); with
       // `brands` the layer's seed is its chain's, so the snapshot goes with it.
       //
@@ -239,20 +239,20 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // preview surface. A group has no site of its own, so it renders as a
       // host-less stand-in for one, on **its own chain**: the references and links
       // the group's layer carries are to the group's content, and resolve.
-      const registry = brand.brand !== null ? await rt.sites.registry(c.env) : undefined
-      const render = registry && scope !== null ? scopeRender(registry, scope) : null
+      const registry = brand.brand !== null ? await rt.sites.registry(c.env) : undefined;
+      const render = registry && scope !== null ? scopeRender(registry, scope) : null;
       return previewPage(rt, bindings, layer, {
         bare: true,
         mode,
         brand,
         ...(registry ? { registry, site: render } : {}),
-      })
+      });
     }
-    const story = await ensureSingleton(bindings.db, type, brand.schemaId)
-    return previewPage(rt, bindings, story, { bare: true, mode, brand })
-  })
+    const story = await ensureSingleton(bindings.db, type, brand.schemaId);
+    return previewPage(rt, bindings, story, { bare: true, mode, brand });
+  });
 
-  return app
+  return app;
 }
 
 /**
@@ -264,21 +264,21 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * scope the snapshot does not hold.
  */
 function scopeRender(registry: Registry, scope: string): SiteRender | null {
-  const site = registry.sites.find((s) => s.id === scope)
-  if (site) return { site, surface: 'preview', chain: chain(registry, site.id) }
-  const group = registry.groups.find((g) => g.id === scope)
-  if (!group) return null
+  const site = registry.sites.find((s) => s.id === scope);
+  if (site) return { site, surface: "preview", chain: chain(registry, site.id) };
+  const group = registry.groups.find((g) => g.id === scope);
+  if (!group) return null;
   return {
     site: {
       id: group.id,
       name: group.name,
       group: null,
-      status: 'preview',
+      status: "preview",
       hosts: [],
       preview: null,
       brand: group.brand,
     },
-    surface: 'preview',
+    surface: "preview",
     chain: chain(registry, group.id),
-  }
+  };
 }

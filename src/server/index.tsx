@@ -1,11 +1,11 @@
-import { cacheHeaders, cacheTags, NO_STORE } from '../core/cache-tags'
-import { type Blok, childrenOf, type Doc, type Json } from '../core/doc'
-import { gateValue, isUngated, type PageAccess, redactDoc } from '../core/gate'
-import { mergeLayers } from '../core/layers'
-import { dataOf, isKnownLocale, type LocaleContext } from '../core/locales'
-import type { Resolution } from '../core/resolve'
-import type { SchemaIndex } from '../core/schema'
-import { buildTree, type StoryMeta } from '../core/story'
+import { cacheHeaders, cacheTags, NO_STORE } from "../core/cache-tags";
+import { type Blok, childrenOf, type Doc, type Json } from "../core/doc";
+import { gateValue, isUngated, type PageAccess, redactDoc } from "../core/gate";
+import { mergeLayers } from "../core/layers";
+import { dataOf, isKnownLocale, type LocaleContext } from "../core/locales";
+import type { Resolution } from "../core/resolve";
+import type { SchemaIndex } from "../core/schema";
+import { buildTree, type StoryMeta } from "../core/story";
 import {
   chain as chainOf,
   DEFAULT_SITE,
@@ -15,34 +15,34 @@ import {
   SHARED_SCOPE,
   SINGLE_SITE_CHAIN,
   type SiteRef,
-} from '../core/sites'
-import { FolioDoc, renderGlobalNode } from '../preview/Render'
-import { createApp } from './app'
-import { audit } from './audit'
-import { cacheKeyFor, cacheVerdictFor } from './cache-request'
-import { deleteStaleChallenges } from './auth/challenges'
-import { hasDraftCookie, readGrantCookie, shareCookieTokens } from './auth/cookie'
-import { sweepEvents } from './auth/events'
-import { readGrant, sweepGrants } from './auth/grants'
-import { credentialOf, type PreviewSite, resolveActor } from './auth/resolve'
-import { allows, mayPreviewDrafts, READ_DRAFT } from './auth/roles'
-import { deleteExpiredSessions } from './auth/session'
-import { claimShare, sharedStoriesAt } from './auth/shares'
-import { PRIMARY_FIRST, readBookmark, sessionFor } from './db'
-import { answerMiss, envelope, FolioError } from './errors'
-import type { ResolvedGate } from './gate'
-import { appliedMigrations, type MigrateReport, ownMigrations, runMigrations } from './migrate'
-import { previewPage } from './pages'
-import { lookupRedirect } from './redirects'
-import { reindex } from './reindex'
+} from "../core/sites";
+import { FolioDoc, renderGlobalNode } from "../preview/Render";
+import { createApp } from "./app";
+import { audit } from "./audit";
+import { cacheKeyFor, cacheVerdictFor } from "./cache-request";
+import { deleteStaleChallenges } from "./auth/challenges";
+import { hasDraftCookie, readGrantCookie, shareCookieTokens } from "./auth/cookie";
+import { sweepEvents } from "./auth/events";
+import { readGrant, sweepGrants } from "./auth/grants";
+import { credentialOf, type PreviewSite, resolveActor } from "./auth/resolve";
+import { allows, mayPreviewDrafts, READ_DRAFT } from "./auth/roles";
+import { deleteExpiredSessions } from "./auth/session";
+import { claimShare, sharedStoriesAt } from "./auth/shares";
+import { PRIMARY_FIRST, readBookmark, sessionFor } from "./db";
+import { answerMiss, envelope, FolioError } from "./errors";
+import type { ResolvedGate } from "./gate";
+import { appliedMigrations, type MigrateReport, ownMigrations, runMigrations } from "./migrate";
+import { previewPage } from "./pages";
+import { lookupRedirect } from "./redirects";
+import { reindex } from "./reindex";
 import {
   alarmHookCtx,
   type BrandRuntime,
   createRuntime,
   type FolioRuntime,
   type SiteRender,
-} from './runtime'
-import { runSchedules, scheduleDeps } from './scheduler'
+} from "./runtime";
+import { runSchedules, scheduleDeps } from "./scheduler";
 import {
   candidateFor,
   INTERNAL_HEADERS,
@@ -51,7 +51,7 @@ import {
   SITE_HEADER,
   type SiteRoute,
   SURFACE_HEADER,
-} from './sites'
+} from "./sites";
 import {
   countBehind,
   listStories,
@@ -65,9 +65,9 @@ import {
   storyById,
   storyStatus,
   storyTree,
-} from './stories'
-import { SpaceDO } from './space-do'
-import { createStoryDO, StoryDO } from './story-do'
+} from "./stories";
+import { SpaceDO } from "./space-do";
+import { createStoryDO, StoryDO } from "./story-do";
 import type {
   Folio,
   FolioConfig,
@@ -76,8 +76,8 @@ import type {
   GatedReaderFrom,
   PreviewMode,
   ReadBindings,
-} from './types'
-import { commitAll } from './write'
+} from "./types";
+import { commitAll } from "./write";
 
 /**
  * The story object, ready made for a host whose D1 binding is named `DB`.
@@ -93,8 +93,8 @@ import { commitAll } from './write'
  * refuses, because the only reader is a background alarm and the symptom was a
  * content tree that never showed unpublished changes.
  */
-export { StoryDO, createStoryDO }
-export type { StoryDOConfig, StoryDOInstance } from './story-do'
+export { StoryDO, createStoryDO };
+export type { StoryDOConfig, StoryDOInstance } from "./story-do";
 /**
  * The space channel's Durable Object
  * (`../../docs/specs/editing/live-collaboration.md`). A host exports this and
@@ -104,20 +104,20 @@ export type { StoryDOConfig, StoryDOInstance } from './story-do'
  * **Declared with `new_classes`, not `new_sqlite_classes`** — it holds no storage
  * at all. See README.
  */
-export { SpaceDO }
-export type { SpaceEvent, SpacePresence } from '../core/protocol'
+export { SpaceDO };
+export type { SpaceEvent, SpacePresence } from "../core/protocol";
 /**
  * The Content API (`../../docs/specs/platform/content-api.md`): what one write
  * reports, and the payload shapes the routes answer. `toNested` / `fromNested`
  * themselves ship from `folio/engine`, with the rest of the document tooling.
  */
-export type { WriteResult } from './write'
-export type { ApiDocument, ApiDocumentMeta } from './routes/api/documents'
-export { API_VERSION } from './routes/api'
-export type { DocumentKind, DocumentType } from '../core/schema'
-export type { Migration } from '../core/migrate'
-export type { VersionKind, VersionMeta } from './versions'
-export type { Redirect } from './redirects'
+export type { WriteResult } from "./write";
+export type { ApiDocument, ApiDocumentMeta } from "./routes/api/documents";
+export { API_VERSION } from "./routes/api";
+export type { DocumentKind, DocumentType } from "../core/schema";
+export type { Migration } from "../core/migrate";
+export type { VersionKind, VersionMeta } from "./versions";
+export type { Redirect } from "./redirects";
 /**
  * The migration and audit surface a host reads off a report. The *authoring*
  * side (`defineMigration`, `field`, `block`) lives in `folio/engine`, where the
@@ -129,7 +129,7 @@ export type {
   MigrateOversized,
   MigrateReport,
   MigrationStatus,
-} from './migrate'
+} from "./migrate";
 export type {
   AuditOptions,
   AuditReport,
@@ -137,13 +137,13 @@ export type {
   DocumentSizeFinding,
   SchemaFinding,
   StoryFinding,
-} from './audit'
+} from "./audit";
 /**
  * Collections (`../../docs/specs/content-model/collections.md`): the query
  * shapes a host writes and reads. `collection()` itself, and the resolved value a
  * block renders, ship from `folio/core` with the rest of the field builders.
  */
-export type { ReindexOptions, ReindexReport } from './reindex'
+export type { ReindexOptions, ReindexReport } from "./reindex";
 /**
  * Scheduled publishing (`../../docs/specs/platform/scheduled-publishing.md`):
  * what `folio.runSchedules` takes and reports, and the row itself — a host writing
@@ -153,25 +153,25 @@ export type { ReindexOptions, ReindexReport } from './reindex'
  * them too; they are re-exported here so a host holding a `folio` object needs one
  * import rather than two.
  */
-export type { ScheduleFailure, ScheduleRunOptions, ScheduleRunReport } from './scheduler'
-export { MAX_SCHEDULE_ATTEMPTS } from './scheduler'
-export type { Schedule, ScheduleAction, ScheduleStatus } from '../core/story'
+export type { ScheduleFailure, ScheduleRunOptions, ScheduleRunReport } from "./scheduler";
+export { MAX_SCHEDULE_ATTEMPTS } from "./scheduler";
+export type { Schedule, ScheduleAction, ScheduleStatus } from "../core/story";
 export type {
   ContentOrder,
   ContentPage,
   ContentQuery,
   ContentWhere,
   ResolvedCollection,
-} from '../core/query'
-export { countReferencesTo, referencesTo } from './content-index'
+} from "../core/query";
+export { countReferencesTo, referencesTo } from "./content-index";
 /**
  * Data documents (`../../docs/specs/content-model/data-documents.md`): what
  * points at a document, for the warning shown before deleting it. Exported for a
  * host that wants the same answer outside the admin — a deploy check, a report —
  * rather than only from `GET {base}/documents/:id/usage`.
  */
-export { documentUsage } from './stories'
-export type { DocumentUsage, UsageRef } from './stories'
+export { documentUsage } from "./stories";
+export type { DocumentUsage, UsageRef } from "./stories";
 export type {
   CheckpointedHookPayload,
   CreatedHookPayload,
@@ -190,7 +190,7 @@ export type {
   SubmittedHookPayload,
   UnpublishedHookPayload,
   UpdatedHookPayload,
-} from './hooks'
+} from "./hooks";
 /**
  * The multi-site surface (`../../docs/specs/foundation/multi-brand.md` decision 14).
  * The sites registry is exported **as `SiteRegistry`**, the alias `types.ts` already
@@ -203,19 +203,19 @@ export type {
   SiteRef,
   SiteStatus,
   Surface,
-} from '../core/sites'
+} from "../core/sites";
 export type {
   BrandRef,
   FolioBrand,
   FolioBrandedConfig,
   FolioSingleConfig,
   SitesConfig,
-} from './types'
-export type { PurgeIssued } from './cache-purge'
-export { FolioError } from './errors'
-export type { ErrorEnvelope, FolioErrorCode } from './errors'
-export { magicLink } from './auth/magic-link'
-export { oidc } from './auth/oidc'
+} from "./types";
+export type { PurgeIssued } from "./cache-purge";
+export { FolioError } from "./errors";
+export type { ErrorEnvelope, FolioErrorCode } from "./errors";
+export { magicLink } from "./auth/magic-link";
+export { oidc } from "./auth/oidc";
 /**
  * Trusted identity (`../../docs/specs/foundation/auth-providers.md` decision 4):
  * a host that already authenticates people hands Folio the verified email, and
@@ -226,18 +226,18 @@ export { oidc } from './auth/oidc'
  * verifying a JWT signature — the step a host writing its own would most likely
  * skip, and the step that is the whole of the security.
  */
-export { trusted } from './auth/trusted'
-export type { TrustedOptions } from './auth/trusted'
-export { cloudflareAccess } from './auth/cloudflare-access'
-export type { CloudflareAccessOptions } from './auth/cloudflare-access'
+export { trusted } from "./auth/trusted";
+export type { TrustedOptions } from "./auth/trusted";
+export { cloudflareAccess } from "./auth/cloudflare-access";
+export type { CloudflareAccessOptions } from "./auth/cloudflare-access";
 /**
  * Roles from an identity provider's claims
  * (`../../docs/specs/foundation/auth-providers.md` decision 5). `RoleMapper` is
  * a function a host writes; `roleFromClaim` is the one shape common enough to
  * ship — a flat claim of group names, looked up in a table, highest role wins.
  */
-export { roleFromClaim } from './auth/roles-from'
-export type { RoleFromClaimOptions } from './auth/roles-from'
+export { roleFromClaim } from "./auth/roles-from";
+export type { RoleFromClaimOptions } from "./auth/roles-from";
 /**
  * Passkeys (`../../docs/specs/foundation/passkeys.md` decision 1): opt-in per
  * deployment, and listing `passkeys()` in `auth.providers` is the whole of the
@@ -245,8 +245,8 @@ export type { RoleFromClaimOptions } from './auth/roles-from'
  * first sign-in is always another door — and `resolveAuth` says so at
  * construction.
  */
-export { passkeys } from './auth/passkeys-provider'
-export type { PasskeyOptions } from './auth/passkeys-provider'
+export { passkeys } from "./auth/passkeys-provider";
+export type { PasskeyOptions } from "./auth/passkeys-provider";
 /**
  * The `sha256-…` of the login page's one inline script
  * (`../../docs/specs/foundation/passkeys.md` decision 4): what a host applying
@@ -254,7 +254,7 @@ export type { PasskeyOptions } from './auth/passkeys-provider'
  * Computed once in `pages.tsx` from the literal itself, so a one-character edit
  * to the script cannot silently break every such host's CSP.
  */
-export { LOGIN_PASSKEY_SCRIPT_HASH } from './pages'
+export { LOGIN_PASSKEY_SCRIPT_HASH } from "./pages";
 export {
   ADMIN,
   ASSETS,
@@ -268,8 +268,8 @@ export {
   READ_DRAFT,
   ROLES,
   SCOPES,
-} from './auth/roles'
-export type { Access, Actor, Role, Scope, TokenActor, UserActor } from './auth/roles'
+} from "./auth/roles";
+export type { Access, Actor, Role, Scope, TokenActor, UserActor } from "./auth/roles";
 export type {
   AuthConfig,
   AuthProvider,
@@ -282,9 +282,9 @@ export type {
   RoleMapper,
   TrustedProvider,
   VerifiedIdentity,
-} from './auth/config'
-export type { UserRow } from './auth/users'
-export type { TokenRow } from './auth/tokens'
+} from "./auth/config";
+export type { UserRow } from "./auth/users";
+export type { TokenRow } from "./auth/tokens";
 /**
  * Draft preview sharing (`../../docs/specs/platform/draft-sharing.md`): the row a
  * screen draws, and the two bounds on a link's life.
@@ -294,20 +294,20 @@ export type { TokenRow } from './auth/tokens'
  * authorises, it is meaningful only inside `handle()`'s preview branch, and putting
  * it on the public surface would invite somebody to build a second gate out of it.
  */
-export type { ShareRow, ShareState } from './auth/shares'
-export { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS } from './auth/shares'
-export { FolioDoc } from '../preview/Render'
+export type { ShareRow, ShareState } from "./auth/shares";
+export { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS } from "./auth/shares";
+export { FolioDoc } from "../preview/Render";
 /**
  * The two vocabularies the chrome-free draft render introduced
  * (`../../docs/specs/platform/mcp-server.md` decision 5): `RenderMode` is what
  * `folio.render`/`folio.renderGlobal` take — it replaced an `edit?: boolean` that
  * could not spell `mark` — and `PreviewMode` is the value of `?_folio=`.
  */
-export type { RenderMode } from '../preview/Render'
-export type { PreviewMode } from './types'
-export { Shell } from './Document'
-export type { StoryMeta, StoryNode } from '../core/story'
-export type { Resolution } from '../core/resolve'
+export type { RenderMode } from "../preview/Render";
+export type { PreviewMode } from "./types";
+export { Shell } from "./Document";
+export type { StoryMeta, StoryNode } from "../core/story";
+export type { Resolution } from "../core/resolve";
 /**
  * Caching (`../../docs/specs/platform/caching.md`): what `folio.cacheTags`
  * and `folio.cacheHeaders` take and answer. The functions themselves also ship
@@ -319,22 +319,22 @@ export type {
   CacheHeaders,
   CacheTagOptions,
   CacheTags,
-} from '../core/cache-tags'
-export { ANY_TYPE_TAG, NO_STORE, SITE_TAG, globalTag, storyTag, typeTag } from '../core/cache-tags'
+} from "../core/cache-tags";
+export { ANY_TYPE_TAG, NO_STORE, SITE_TAG, globalTag, storyTag, typeTag } from "../core/cache-tags";
 /** Locales (`localisation.md`): the config a host declares, and the context a
  * render reads. `fieldValue`/`dataOf` ship from `folio/core`, with the rest of
  * what a block author needs. */
-export type { LocaleConfig, LocaleContext, LocaleDef, TranslationStatus } from '../core/locales'
-export type { AssetRow } from './assets'
-export type { CacheVerdict } from './cache-request'
+export type { LocaleConfig, LocaleContext, LocaleDef, TranslationStatus } from "../core/locales";
+export type { AssetRow } from "./assets";
+export type { CacheVerdict } from "./cache-request";
 /**
  * Visitor access (`../../docs/specs/platform/visitor-access.md`): the two
  * predicates a host declares, what the second is told, and the outcome it reads
  * back off `FolioPage.access`. `PageAccess` also ships from `folio/core`, with
  * the pure half — `redactDoc` and friends — a host never needs to call itself.
  */
-export type { FolioGate, FolioGateContext } from './types'
-export type { PageAccess } from '../core/gate'
+export type { FolioGate, FolioGateContext } from "./types";
+export type { PageAccess } from "../core/gate";
 /**
  * The describe seam (`../../docs/specs/content-model/media-library.md`
  * decision 8): the one function a host declares to give its media library
@@ -342,7 +342,7 @@ export type { PageAccess } from '../core/gate'
  * holds no API key and makes no model call of its own, so these three types are
  * the entire contract.
  */
-export type { DescribeInput, DescribeResult, FolioDescribe } from './types'
+export type { DescribeInput, DescribeResult, FolioDescribe } from "./types";
 /**
  * …and the one adapter over it, so the common case is a line of config rather
  * than a research project. `anthropicDescriber` is the only place in this
@@ -350,12 +350,12 @@ export type { DescribeInput, DescribeResult, FolioDescribe } from './types'
  * it *returns* a `describe.fn` and holds no privileged access to anything, so
  * deleting it would cost a host twenty lines and no capability.
  */
-export type { AnthropicDescriberOptions } from './describe-anthropic'
+export type { AnthropicDescriberOptions } from "./describe-anthropic";
 export {
   anthropicDescriber,
   DEFAULT_DESCRIBE_MODEL,
   DEFAULT_DESCRIBE_PROMPT,
-} from './describe-anthropic'
+} from "./describe-anthropic";
 export type {
   Folio,
   FolioBindings,
@@ -364,7 +364,7 @@ export type {
   FolioPage,
   FolioPageOptions,
   FolioReader,
-} from './types'
+} from "./types";
 
 /**
  * What `folio.reader(env)` with no request and no site, and every one-shot read,
@@ -373,7 +373,7 @@ export type {
  * would be empty, with nothing anywhere to say why.
  */
 const NEEDS_SITE =
-  'folio: this deployment has `sites`, so a read must say which site it is for — use folio.reader(env, req | { site })'
+  "folio: this deployment has `sites`, so a read must say which site it is for — use folio.reader(env, req | { site })";
 
 /**
  * What a reader with no site throws on a deployment with `brands` when asked to
@@ -381,13 +381,13 @@ const NEEDS_SITE =
  * and so no registry to read with. Never the first brand's.
  */
 const NO_BRAND =
-  "folio: this deployment has `brands`, and this reader has no site, so it has no brand's registry to read with"
+  "folio: this deployment has `brands`, and this reader has no site, so it has no brand's registry to read with";
 
 /**
  * The `~<scope>` segment (decision 11) at the front of a path below `{base}`: a
  * site, group or `shared` id, then the rest of the path.
  */
-const SCOPE_SEGMENT = /^\/~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)(\/.*)?$/
+const SCOPE_SEGMENT = /^\/~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)(\/.*)?$/;
 
 /**
  * `req` with every internal header removed and `set` written — the one way an
@@ -396,10 +396,10 @@ const SCOPE_SEGMENT = /^\/~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)(\/.*)?$/
  * and the upgrade headers, and answers a request whose headers can be written.
  */
 function internalRequest(req: Request, url: string, set: Record<string, string>): Request {
-  const next = new Request(url, req)
-  for (const name of INTERNAL_HEADERS) next.headers.delete(name)
-  for (const [name, value] of Object.entries(set)) next.headers.set(name, value)
-  return next
+  const next = new Request(url, req);
+  for (const name of INTERNAL_HEADERS) next.headers.delete(name);
+  for (const [name, value] of Object.entries(set)) next.headers.set(name, value);
+  return next;
 }
 
 /**
@@ -409,19 +409,19 @@ function internalRequest(req: Request, url: string, set: Record<string, string>)
  * Everything else is the host's to route.
  */
 function servesOnSite(
-  surface: 'live' | 'preview',
+  surface: "live" | "preview",
   method: string,
   below: string,
   scope: string | null,
   site: string,
 ): boolean {
-  const reads = method === 'GET' || method === 'HEAD'
-  if (scope === null && reads && below.startsWith('/asset/')) return true
-  if (scope === null && /^\/f\/[^/]+$/.test(below)) return true
-  if (surface !== 'preview') return false
+  const reads = method === "GET" || method === "HEAD";
+  if (scope === null && reads && below.startsWith("/asset/")) return true;
+  if (scope === null && /^\/f\/[^/]+$/.test(below)) return true;
+  if (surface !== "preview") return false;
   if (scope === null)
-    return ['/share', '/site/enter', '/draft/enter', '/draft/exit'].includes(below)
-  return scope === site && reads && below.startsWith('/api/v1/')
+    return ["/share", "/site/enter", "/draft/enter", "/draft/exit"].includes(below);
+  return scope === site && reads && below.startsWith("/api/v1/");
 }
 
 /**
@@ -432,15 +432,15 @@ function servesOnSite(
  * origin, and is handed back untouched if it ever were.
  */
 function framedBy(res: Response, admin: string): Response {
-  if (res.status === 101 || res.webSocket) return res
+  if (res.status === 101 || res.webSocket) return res;
   // **Never replace a policy a route already set.** `{base}/asset/:key` answers
   // `default-src 'none'; sandbox`, which is the whole reason an uploaded SVG may
   // render inline; overwriting it let such an SVG run script as the preview
   // origin, beside the grant cookie. A sandboxed response is no useful frame.
-  if (res.headers.has('content-security-policy')) return res
-  const out = new Response(res.body, res)
-  out.headers.set('content-security-policy', `frame-ancestors ${admin}`)
-  return out
+  if (res.headers.has("content-security-policy")) return res;
+  const out = new Response(res.body, res);
+  out.headers.set("content-security-policy", `frame-ancestors ${admin}`);
+  return out;
 }
 
 /**
@@ -449,25 +449,25 @@ function framedBy(res: Response, admin: string): Response {
  * to the stories in `shareOnly`.
  */
 interface Admission {
-  shareOnly: ReadonlySet<string> | null
+  shareOnly: ReadonlySet<string> | null;
 }
 
 /** The gated site a `?_folio=` request arrived for, on its preview origin. */
 interface PreviewOn {
-  render: SiteRender
-  registry: Registry
+  render: SiteRender;
+  registry: Registry;
   /** `sites.admin`, the one origin the preview talks to. */
-  admin: string
+  admin: string;
 }
 
 /** A scope's display name, for the "Alpha overrides this page" banner. */
 function scopeName(registry: Registry, scope: string): string {
-  if (scope === SHARED_SCOPE) return 'Shared content'
+  if (scope === SHARED_SCOPE) return "Shared content";
   return (
     registry.sites.find((s) => s.id === scope)?.name ??
     registry.groups.find((g) => g.id === scope)?.name ??
     scope
-  )
+  );
 }
 
 /**
@@ -481,19 +481,21 @@ function plainBlok(
   schema: SchemaIndex,
   locale: LocaleContext | undefined,
 ): Record<string, Json> {
-  const fields = schema[blok.type]?.fields
-  const data = dataOf(blok, locale)
-  if (!fields) return data
-  const out: Record<string, Json> = {}
+  const fields = schema[blok.type]?.fields;
+  const data = dataOf(blok, locale);
+  if (!fields) return data;
+  const out: Record<string, Json> = {};
   for (const [name, field] of Object.entries(fields)) {
-    if (field.kind === 'blocks') {
-      const kids = childrenOf(doc, blok.uid, name).map((kid) => plainBlok(doc, kid, schema, locale))
-      out[name] = field.max === 1 ? (kids[0] ?? null) : kids
-      continue
+    if (field.kind === "blocks") {
+      const kids = childrenOf(doc, blok.uid, name).map((kid) =>
+        plainBlok(doc, kid, schema, locale),
+      );
+      out[name] = field.max === 1 ? (kids[0] ?? null) : kids;
+      continue;
     }
-    if (name in data) out[name] = data[name] as Json
+    if (name in data) out[name] = data[name] as Json;
   }
-  return out
+  return out;
 }
 
 /**
@@ -508,27 +510,27 @@ function plainBlok(
  * its parent path.
  */
 function treeByPath(chain: readonly string[], rows: readonly StoryMeta[]) {
-  const byPath = new Map<string, StoryMeta[]>()
-  const unrouted: StoryMeta[] = []
+  const byPath = new Map<string, StoryMeta[]>();
+  const unrouted: StoryMeta[] = [];
   for (const row of rows) {
-    if (row.path === null) unrouted.push(row)
-    else byPath.set(row.path, [...(byPath.get(row.path) ?? []), row])
+    if (row.path === null) unrouted.push(row);
+    else byPath.set(row.path, [...(byPath.get(row.path) ?? []), row]);
   }
-  const one = new Map<string, StoryMeta>()
+  const one = new Map<string, StoryMeta>();
   for (const [path, here] of byPath) {
-    const served = pickServing(chain, here)
-    const pick = served?.kind === 'story' ? served.story : pickEditing(chain, here)
-    if (pick) one.set(path, pick)
+    const served = pickServing(chain, here);
+    const pick = served?.kind === "story" ? served.story : pickEditing(chain, here);
+    if (pick) one.set(path, pick);
   }
   const parentOf = (path: string) => {
-    if (path === '') return null
-    const cut = path.lastIndexOf('/')
-    return one.get(cut === -1 ? '' : path.slice(0, cut))?.id ?? null
-  }
+    if (path === "") return null;
+    const cut = path.lastIndexOf("/");
+    return one.get(cut === -1 ? "" : path.slice(0, cut))?.id ?? null;
+  };
   return buildTree([
     ...[...one.values()].map((row) => ({ ...row, parentId: parentOf(row.path!) })),
     ...unrouted,
-  ])
+  ]);
 }
 
 /**
@@ -541,7 +543,7 @@ function treeByPath(chain: readonly string[], rows: readonly StoryMeta[]) {
  * `basePath`, and publish.ts holds the workflows a route only translates for.
  */
 export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
-  const rt = createRuntime(config)
+  const rt = createRuntime(config);
   /**
    * The one brand of a deployment with no `brands`, and undefined on one with them
    * (`multi-brand.md` decision 6). Every entry point below that is off a request
@@ -549,22 +551,22 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    * single-brand deployment makes exactly the reads it always made and a branded
    * one never answers as a default brand.
    */
-  const one = rt.brands.get(null)
+  const one = rt.brands.get(null);
   /** The brand `scope` belongs to by `registry`: always `one` with no `brands`. */
   const brandAt = (registry: Registry | null, scope: string | null): BrandRuntime | null =>
-    one ?? (registry ? rt.forScope(registry, scope) : null)
+    one ?? (registry ? rt.forScope(registry, scope) : null);
   // `readerWith` is defined below, after the app that will call it at request time.
-  const app = createApp(config, rt, (env, from) => readerWith(env, from))
+  const app = createApp(config, rt, (env, from) => readerWith(env, from));
 
   /**
    * The site a grant may be read for, on the primary (`PreviewSite`'s own comment
    * says why a grant is the one credential read there).
    */
-  const previewSite = (env: Env, on: Pick<PreviewOn, 'render' | 'registry'>): PreviewSite => ({
+  const previewSite = (env: Env, on: Pick<PreviewOn, "render" | "registry">): PreviewSite => ({
     id: on.render.site.id,
     registry: on.registry,
     db: config.bindings(env).db.withSession(PRIMARY_FIRST),
-  })
+  });
 
   /**
    * The site a grant or share cookie on this request verifies for, when `site` is
@@ -584,34 +586,34 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     site: string,
     below: string | null,
   ): Promise<Admission | null> => {
-    if (rt.auth.mode !== 'session') return { shareOnly: null }
-    const cookie = req.headers.get('cookie')
-    const grant = readGrantCookie(cookie)
-    const shared = shareCookieTokens(cookie)
-    if (!grant && shared.length === 0) return null
-    const raw = config.bindings(env).db
+    if (rt.auth.mode !== "session") return { shareOnly: null };
+    const cookie = req.headers.get("cookie");
+    const grant = readGrantCookie(cookie);
+    const shared = shareCookieTokens(cookie);
+    if (!grant && shared.length === 0) return null;
+    const raw = config.bindings(env).db;
     if (grant && (await readGrant(raw.withSession(PRIMARY_FIRST), grant, { id: site, registry }))) {
-      return { shareOnly: null }
+      return { shareOnly: null };
     }
     // A share admits a request for **its own story's path** and nothing else
     // (decision 4's "a story this site serves", decision 13's "limits it to its one
     // story"). Only a host path can be one: under `{base}` the pre-grant paths are
     // admitted already and nothing else is a share's.
     if (shared.length > 0 && below === null) {
-      const url = new URL(req.url)
-      const asked = url.searchParams.get('locale')
-      const locale = asked !== null && isKnownLocale(rt.locales, asked) ? asked : undefined
-      const db = sessionFor(raw, { bookmark: readBookmark(cookie) })
+      const url = new URL(req.url);
+      const asked = url.searchParams.get("locale");
+      const locale = asked !== null && isKnownLocale(rt.locales, asked) ? asked : undefined;
+      const db = sessionFor(raw, { bookmark: readBookmark(cookie) });
       const stories = await sharedStoriesAt(
         db,
         shared,
         site,
         rt.pathForLocale(url.pathname, locale),
-      )
-      if (stories.length > 0) return { shareOnly: new Set(stories) }
+      );
+      if (stories.length > 0) return { shareOnly: new Set(stories) };
     }
-    return null
-  }
+    return null;
+  };
 
   /**
    * `routeRequest`, and — when the gate refused a request on a site's preview
@@ -620,21 +622,21 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    * pay for the second look.
    */
   const routeGranted = async (
-    sites: NonNullable<FolioRuntime['sites']>,
+    sites: NonNullable<FolioRuntime["sites"]>,
     registry: Registry,
     req: Request,
     path: string | null,
     env: Env,
   ): Promise<SiteRoute & { shareOnly?: ReadonlySet<string> | null }> => {
-    const routed = routeRequest(sites, registry, req, { path, grantFor: null })
-    if (routed.kind !== 'none') return routed
-    const chosen = candidateFor(sites, registry, req)
-    if (!chosen || chosen === 'admin' || chosen.surface !== 'preview') return routed
-    const admitted = await grantFor(env, req, registry, chosen.site, path)
-    if (!admitted) return routed
-    const again = routeRequest(sites, registry, req, { path, grantFor: chosen.site })
-    return again.kind === 'site' ? { ...again, shareOnly: admitted.shareOnly } : again
-  }
+    const routed = routeRequest(sites, registry, req, { path, grantFor: null });
+    if (routed.kind !== "none") return routed;
+    const chosen = candidateFor(sites, registry, req);
+    if (!chosen || chosen === "admin" || chosen.surface !== "preview") return routed;
+    const admitted = await grantFor(env, req, registry, chosen.site, path);
+    if (!admitted) return routed;
+    const again = routeRequest(sites, registry, req, { path, grantFor: chosen.site });
+    return again.kind === "site" ? { ...again, shareOnly: admitted.shareOnly } : again;
+  };
 
   /**
    * `?_folio=preview|draft` on a host's own URL: Folio's render of the story at
@@ -658,13 +660,13 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     // The gated site's brand (`multi-brand.md` decision 10): its registry, its
     // globals and its preview bundle. Read off the snapshot `on` already holds, so
     // it costs nothing; a site the snapshot serves always has one.
-    const brand = brandAt(on?.registry ?? null, on?.render.site.id ?? null)
-    if (!brand) return null
-    const bound = config.bindings(env)
+    const brand = brandAt(on?.registry ?? null, on?.render.site.id ?? null);
+    if (!brand) return null;
+    const bound = config.bindings(env);
     const bindings: ReadBindings = {
       ...bound,
-      db: sessionFor(bound.db, { bookmark: readBookmark(req.headers.get('cookie')) }),
-    }
+      db: sessionFor(bound.db, { bookmark: readBookmark(req.headers.get("cookie")) }),
+    };
 
     // A preview renders the *draft*, so it needs the same gate the API routes
     // got in identity-and-access.md — and it is the one such surface that lives
@@ -695,20 +697,20 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * discipline is intact: a stranger appending the flag to a random URL still
      * costs the database nothing.
      */
-    let shared: string[] = []
-    if (rt.auth.mode === 'session') {
+    let shared: string[] = [];
+    if (rt.auth.mode === "session") {
       // On a site's preview origin the credential is a preview grant (decision 13),
       // read on the primary; the admin's session cookie never reaches this origin.
-      const preview = on ? previewSite(env, on) : undefined
-      const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req), { preview })
+      const preview = on ? previewSite(env, on) : undefined;
+      const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req), { preview });
       // On a preview origin, decision 13's rule for this site, never `allows()`
       // alone, which ignores the scope.
       const mayDraft = on
         ? mayPreviewDrafts(actor, on.registry, on.render.site.id)
-        : allows(actor, READ_DRAFT)
+        : allows(actor, READ_DRAFT);
       if (!mayDraft) {
-        shared = shareCookieTokens(req.headers.get('cookie'))
-        if (shared.length === 0) return null
+        shared = shareCookieTokens(req.headers.get("cookie"));
+        if (shared.length === 0) return null;
       }
     }
 
@@ -716,17 +718,17 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     // decision 6). An undeclared code is refused the same way an undeclared
     // `as` below is — by handing the request back, so the host's own routes
     // win rather than Folio guessing what was meant.
-    const asked = url.searchParams.get('locale')
-    if (asked !== null && !isKnownLocale(rt.locales, asked)) return null
-    const locale = asked ?? undefined
+    const asked = url.searchParams.get("locale");
+    if (asked !== null && !isKnownLocale(rt.locales, asked)) return null;
+    const locale = asked ?? undefined;
 
     // The path with the host's own locale decoration removed. Derived by
     // asking `config.route` rather than by assuming a prefix convention: the
     // admin built this URL from `previewUrls`, which `route` produced, so the
     // inverse is exact for whatever shape the host chose (`pathForLocale`).
-    const path = rt.pathForLocale(url.pathname, locale)
-    const chain = on ? on.render.chain : SINGLE_SITE_CHAIN
-    const nearest = await storyByPath(bindings.db, chain, path)
+    const path = rt.pathForLocale(url.pathname, locale);
+    const chain = on ? on.render.chain : SINGLE_SITE_CHAIN;
+    const nearest = await storyByPath(bindings.db, chain, path);
     /**
      * `_folio_id` names the story the pane is previewing (decision 13, "preview URLs
      * carry the story"), on a deployment with `sites` only. It renders when it is in
@@ -734,15 +736,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * it** — the national team previews the shared page itself on a site that
      * forked it, with a banner saying so. Anything else hands the request back.
      */
-    const named = on ? url.searchParams.get('_folio_id') : null
-    const story = named !== null ? await storyById(bindings.db, named) : nearest
-    if (named !== null && (!story || !chain.includes(story.site ?? DEFAULT_SITE))) return null
+    const named = on ? url.searchParams.get("_folio_id") : null;
+    const story = named !== null ? await storyById(bindings.db, named) : nearest;
+    if (named !== null && (!story || !chain.includes(story.site ?? DEFAULT_SITE))) return null;
     // Not a story: hand it back so the host's own routing wins. An unrouted
     // document can never be reached here anyway — `storyByPath` matches on
     // `path = ?` and one stores NULL — but the check is spelled out because
     // "a preview request for a record is the host's, not Folio's" is a rule
     // (`document-types.md`), not an accident of SQL semantics.
-    if (!story || story.path === null || story.path !== path) return null
+    if (!story || story.path === null || story.path !== path) return null;
 
     /**
      * The share gate, and the reason it is *here* rather than beside the actor
@@ -757,7 +759,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       shared.length > 0 &&
       !(await claimShare(bindings.db, shared, story.id, undefined, on?.render.site.id))
     ) {
-      return null
+      return null;
     }
     const site = on
       ? {
@@ -767,15 +769,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             ? { overriddenBy: scopeName(on.registry, nearest.site ?? DEFAULT_SITE) }
             : {}),
         }
-      : {}
+      : {};
     // The registry only on a deployment with `brands`, where a layer's seed needs it.
-    const branded = { brand, ...(!one && on ? { registry: on.registry } : {}) }
+    const branded = { brand, ...(!one && on ? { registry: on.registry } : {}) };
 
     // `as` previews a singleton in the context of this page (`globals.md`
     // decision 4). Naming anything that is not a configured global is the
     // same refusal shape as a path with no story: null, so the host's own
     // routes win rather than Folio guessing at what was meant.
-    const as = url.searchParams.get('as')
+    const as = url.searchParams.get("as");
     /**
      * **A share grant may not use it.** `?as=` swaps the editable document for a
      * *global's* draft — the site header, site settings — and the grant covers one
@@ -791,43 +793,43 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * refusal. Refused by handing the request back, like every other refusal in
      * this branch.
      */
-    if (as !== null && (shared.length > 0 || mode === 'draft')) return null
+    if (as !== null && (shared.length > 0 || mode === "draft")) return null;
     if (as !== null) {
-      const type = brand.typeOf(as)
-      if (type?.kind !== 'singleton' || !brand.globals.includes(as)) return null
-      return previewPage(rt, bindings, story, { as, locale, mode, ...site, ...branded })
+      const type = brand.typeOf(as);
+      if (type?.kind !== "singleton" || !brand.globals.includes(as)) return null;
+      return previewPage(rt, bindings, story, { as, locale, mode, ...site, ...branded });
     }
 
-    return previewPage(rt, bindings, story, { locale, mode, ...site, ...branded })
-  }
+    return previewPage(rt, bindings, story, { locale, mode, ...site, ...branded });
+  };
 
-  const handle: Folio<Env>['handle'] = async (inbound, env, ctx) => {
-    const url = new URL(inbound.url)
-    const underBase = url.pathname === rt.base || url.pathname.startsWith(`${rt.base}/`)
-    const below = underBase ? url.pathname.slice(rt.base.length) || '/' : null
-    const segment = below === null ? null : SCOPE_SEGMENT.exec(below)
+  const handle: Folio<Env>["handle"] = async (inbound, env, ctx) => {
+    const url = new URL(inbound.url);
+    const underBase = url.pathname === rt.base || url.pathname.startsWith(`${rt.base}/`);
+    const below = underBase ? url.pathname.slice(rt.base.length) || "/" : null;
+    const segment = below === null ? null : SCOPE_SEGMENT.exec(below);
     // The internal headers are deleted from **every** inbound request before
     // anything below sets one (`sites.ts`'s `INTERNAL_HEADERS`). Rebuilt only
     // when one is actually present, so an ordinary request — a socket upgrade
     // included — reaches the app as the object the host handed over.
     const req = INTERNAL_HEADERS.some((name) => inbound.headers.has(name))
       ? internalRequest(inbound, inbound.url, {})
-      : inbound
+      : inbound;
 
-    if (rt.sites) return handleSites(rt.sites, req, url, below, segment, env, ctx)
+    if (rt.sites) return handleSites(rt.sites, req, url, below, segment, env, ctx);
 
     if (underBase) {
       // `{base}/~<scope>/…` is a multi-site address, and this deployment has one
       // scope (decision 11): a 404, rather than the shell's wildcard answering
       // it with an admin page for a URL that means nothing here.
-      if (below?.startsWith('/~')) {
-        return Response.json(envelope(new FolioError('not_found', 'No such route')), {
+      if (below?.startsWith("/~")) {
+        return Response.json(envelope(new FolioError("not_found", "No such route")), {
           status: 404,
-        })
+        });
       }
       // The one cast in the server: `Env` is unconstrained by design, and Hono
       // requires an object. See `FolioEnv` in types.ts.
-      return app.fetch(req, env as Env & object, ctx)
+      return app.fetch(req, env as Env & object, ctx);
     }
 
     /**
@@ -838,11 +840,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * the host untouched, which is what an unrecognised value has always done here
      * and is the only answer that keeps "a host's own routes win at any path" true.
      */
-    const mode = url.searchParams.get('_folio')
-    if (mode === 'preview' || mode === 'draft') return previewBranch(req, url, env, mode, null)
+    const mode = url.searchParams.get("_folio");
+    if (mode === "preview" || mode === "draft") return previewBranch(req, url, env, mode, null);
 
-    return null
-  }
+    return null;
+  };
 
   /**
    * `handle()` on a deployment with `sites` (decisions 4, 11 and 12), in the
@@ -866,7 +868,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    * naming the admin (`framedBy`).
    */
   const handleSites = async (
-    sites: NonNullable<FolioRuntime['sites']>,
+    sites: NonNullable<FolioRuntime["sites"]>,
     req: Request,
     url: URL,
     below: string | null,
@@ -875,45 +877,45 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     ctx: ExecutionContext,
   ): Promise<Response | null> => {
     if (below === null) {
-      const mode = url.searchParams.get('_folio')
-      if (mode !== 'preview' && mode !== 'draft') return null
-      const registry = await sites.registry(env)
-      const routed = await routeGranted(sites, registry, req, null, env)
-      if (routed.kind !== 'site' || routed.surface !== 'preview') return null
+      const mode = url.searchParams.get("_folio");
+      if (mode !== "preview" && mode !== "draft") return null;
+      const registry = await sites.registry(env);
+      const routed = await routeGranted(sites, registry, req, null, env);
+      if (routed.kind !== "site" || routed.surface !== "preview") return null;
       const render: SiteRender = {
         site: routed.site,
         surface: routed.surface,
         chain: chainOf(registry, routed.site.id),
-      }
+      };
       const res = await previewBranch(req, url, env, mode, {
         render,
         registry,
         admin: sites.admin,
-      })
-      return res && framedBy(res, sites.admin)
+      });
+      return res && framedBy(res, sites.admin);
     }
-    const scope = segment ? segment[1]! : null
-    if (below.startsWith('/~') && !segment) return null
-    const rest = segment ? segment[2] || '/' : below
-    const target = `${url.origin}${rt.base}${rest === '/' && segment ? '' : rest}${url.search}`
+    const scope = segment ? segment[1]! : null;
+    if (below.startsWith("/~") && !segment) return null;
+    const rest = segment ? segment[2] || "/" : below;
+    const target = `${url.origin}${rt.base}${rest === "/" && segment ? "" : rest}${url.search}`;
 
-    const registry = await sites.registry(env)
-    const routed = await routeGranted(sites, registry, req, rest, env)
+    const registry = await sites.registry(env);
+    const routed = await routeGranted(sites, registry, req, rest, env);
 
-    if (routed.kind === 'admin') {
-      const next = segment ? internalRequest(req, target, { [SCOPE_HEADER]: scope! }) : req
-      return app.fetch(next, env as Env & object, ctx)
+    if (routed.kind === "admin") {
+      const next = segment ? internalRequest(req, target, { [SCOPE_HEADER]: scope! }) : req;
+      return app.fetch(next, env as Env & object, ctx);
     }
-    if (routed.kind === 'none') return null
-    if (!servesOnSite(routed.surface, req.method, rest, scope, routed.site.id)) return null
+    if (routed.kind === "none") return null;
+    if (!servesOnSite(routed.surface, req.method, rest, scope, routed.site.id)) return null;
     const next = internalRequest(req, segment ? target : req.url, {
       ...(scope ? { [SCOPE_HEADER]: scope } : {}),
       [SITE_HEADER]: routed.site.id,
       [SURFACE_HEADER]: routed.surface,
-    })
-    const res = await app.fetch(next, env as Env & object, ctx)
-    return routed.surface === 'preview' ? framedBy(res, sites.admin) : res
-  }
+    });
+    const res = await app.fetch(next, env as Env & object, ctx);
+    return routed.surface === "preview" ? framedBy(res, sites.admin) : res;
+  };
 
   /**
    * One request's worth of reads, on one D1 session (`FolioReader`, `db.ts`).
@@ -934,17 +936,17 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     from?: Request | { site: string } | GatedReaderFrom,
   ): FolioReader => {
     const gatedFrom =
-      from !== undefined && !(from instanceof Request) && 'gated' in from ? from : undefined
-    const req = from instanceof Request ? from : gatedFrom?.request
+      from !== undefined && !(from instanceof Request) && "gated" in from ? from : undefined;
+    const req = from instanceof Request ? from : gatedFrom?.request;
     const named =
-      from !== undefined && !(from instanceof Request) && 'site' in from ? from.site : undefined
-    if (rt.sites && from === undefined) throw new Error(NEEDS_SITE)
+      from !== undefined && !(from instanceof Request) && "site" in from ? from.site : undefined;
+    if (rt.sites && from === undefined) throw new Error(NEEDS_SITE);
     if (!rt.sites && named !== undefined && named !== DEFAULT_SITE) {
-      throw new Error(`folio: reader(env, { site: '${named}' }) needs \`sites\` configured`)
+      throw new Error(`folio: reader(env, { site: '${named}' }) needs \`sites\` configured`);
     }
-    const bound = config.bindings(env)
-    const db = sessionFor(bound.db, { bookmark: readBookmark(req?.headers.get('cookie')) })
-    const bindings: ReadBindings = { ...bound, db }
+    const bound = config.bindings(env);
+    const db = sessionFor(bound.db, { bookmark: readBookmark(req?.headers.get("cookie")) });
+    const bindings: ReadBindings = { ...bound, db };
 
     /**
      * The site this reader reads for, and the chain every lookup binds —
@@ -959,26 +961,26 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * content".
      */
     type Scoped = {
-      render: SiteRender | null
+      render: SiteRender | null;
       /**
        * What every lookup binds. **Empty for a request a share admitted to a draft
        * site**, so it reads nothing but its one story: `page()` and `draftAt()` look
        * that story up on the render's own chain and refuse any other id.
        */
-      chain: readonly string[]
-      registry: Registry | null
-      shareOnly: ReadonlySet<string> | null
+      chain: readonly string[];
+      registry: Registry | null;
+      shareOnly: ReadonlySet<string> | null;
       /**
        * The site's brand (`multi-brand.md` decision 6), which every registry read
        * below goes through. Always `one` with no `brands`; with them null only
        * when there is no site, and then the chain is empty.
        */
-      brand: BrandRuntime | null
-    }
-    let scoped: Promise<Scoped> | null = null
+      brand: BrandRuntime | null;
+    };
+    let scoped: Promise<Scoped> | null = null;
     const scopeOnce = (): Promise<Scoped> => {
       scoped ??= (async (): Promise<Scoped> => {
-        const sites = rt.sites
+        const sites = rt.sites;
         if (!sites) {
           return {
             render: null,
@@ -986,72 +988,72 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             registry: null,
             shareOnly: null,
             brand: one ?? null,
-          }
+          };
         }
-        const registry = await sites.registry(env)
-        let site: SiteRef | null = null
-        let surface: 'live' | 'preview' = 'live'
-        let shareOnly: ReadonlySet<string> | null = null
+        const registry = await sites.registry(env);
+        let site: SiteRef | null = null;
+        let surface: "live" | "preview" = "live";
+        let shareOnly: ReadonlySet<string> | null = null;
         if (gatedFrom) {
           // Gated by the caller (`GatedReaderFrom`), once, in its own route.
-          site = gatedFrom.gated
-          surface = gatedFrom.surface
+          site = gatedFrom.gated;
+          surface = gatedFrom.surface;
         } else if (req) {
           // With the grant or share the request carries, so a host's own route on
           // a draft site's preview origin reads that site for its previewer.
-          const routed = await routeGranted(sites, registry, req, null, env)
-          if (routed.kind === 'site') {
-            site = routed.site
-            surface = routed.surface
-            shareOnly = routed.shareOnly ?? null
+          const routed = await routeGranted(sites, registry, req, null, env);
+          if (routed.kind === "site") {
+            site = routed.site;
+            surface = routed.surface;
+            shareOnly = routed.shareOnly ?? null;
           }
         } else if (named !== undefined) {
           site = siteGate(
             registry,
-            { site: named, surface: 'live' },
+            { site: named, surface: "live" },
             { path: null, grantFor: null },
-          )
+          );
         }
         if (!site) {
-          return { render: null, chain: [], registry, shareOnly: null, brand: brandAt(null, null) }
+          return { render: null, chain: [], registry, shareOnly: null, brand: brandAt(null, null) };
         }
-        const chain = chainOf(registry, site.id)
+        const chain = chainOf(registry, site.id);
         return {
           render: { site, surface, chain },
           chain: shareOnly ? [] : chain,
           registry,
           shareOnly,
           brand: brandAt(registry, site.id),
-        }
-      })()
-      return scoped
-    }
+        };
+      })();
+      return scoped;
+    };
     /** The single-site `resolve` option, or this reader's site — or, with `sites`
      * and no site, `null`, which `resolve` reads as an empty chain. */
-    const siteOption = (s: Scoped) => (rt.sites ? { site: s.render } : {})
+    const siteOption = (s: Scoped) => (rt.sites ? { site: s.render } : {});
 
     /**
      * This reader's brand. With no `brands` it is `one`, answered before the site is
      * looked up so a single-brand reader makes the reads it always made; with them
      * it is the site's, and no site is no brand.
      */
-    const brandNow = async (): Promise<BrandRuntime | null> => one ?? (await scopeOnce()).brand
+    const brandNow = async (): Promise<BrandRuntime | null> => one ?? (await scopeOnce()).brand;
     const requireBrand = async (): Promise<BrandRuntime> => {
-      const brand = await brandNow()
-      if (!brand) throw new Error(NO_BRAND)
-      return brand
-    }
+      const brand = await brandNow();
+      if (!brand) throw new Error(NO_BRAND);
+      return brand;
+    };
     /**
      * `story`'s draft under this reader's brand. Every story a reader reaches is in
      * its chain, and a chain lies inside one brand (decision 5), so the site's brand
      * is the story's.
      */
     const draftOf = async (story: StoryMeta): Promise<Doc> => {
-      if (one) return one.draftFor(bindings, story)
-      const within = await scopeOnce()
-      if (!within.brand) throw new Error(NO_BRAND)
-      return within.brand.draftFor(bindings, story, within.registry ?? undefined)
-    }
+      if (one) return one.draftFor(bindings, story);
+      const within = await scopeOnce();
+      if (!within.brand) throw new Error(NO_BRAND);
+      return within.brand.draftFor(bindings, story, within.registry ?? undefined);
+    };
 
     /**
      * Is this request *asking* for a draft — the presence of a credential, not a
@@ -1067,9 +1069,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       gatedFrom !== undefined
         ? gatedFrom.draft
         : req !== undefined &&
-          (hasDraftCookie(req.headers.get('cookie')) ||
-            shareCookieTokens(req.headers.get('cookie')).length > 0 ||
-            asksByCredential())
+          (hasDraftCookie(req.headers.get("cookie")) ||
+            shareCookieTokens(req.headers.get("cookie")).length > 0 ||
+            asksByCredential());
 
     /**
      * On a multi-site deployment **a credential is itself the ask** (decision 13,
@@ -1081,10 +1083,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * because there an editor is signed in all day on the one origin.
      */
     const asksByCredential = (): boolean => {
-      if (!rt.sites || !req || rt.auth.mode !== 'session') return false
-      const presented = credentialOf(req)
-      return presented.grant !== null || presented.cookie !== null || presented.bearer !== null
-    }
+      if (!rt.sites || !req || rt.auth.mode !== "session") return false;
+      const presented = credentialOf(req);
+      return presented.grant !== null || presented.cookie !== null || presented.bearer !== null;
+    };
 
     /**
      * May this request see `story`'s draft, and if so, what is it.
@@ -1102,45 +1104,45 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     const draftFor = async (story: StoryMeta): Promise<Doc | null> => {
       // The caller that gated the site also decided whether it may read drafts, with
       // `mayPreviewDrafts`; there is no cookie to ask about (`GatedReaderFrom`).
-      if (gatedFrom) return gatedFrom.draft && story.path !== null ? draftOf(story) : null
-      if (!req || story.path === null) return null
+      if (gatedFrom) return gatedFrom.draft && story.path !== null ? draftOf(story) : null;
+      if (!req || story.path === null) return null;
       // On a multi-site deployment drafts are served only on a site's preview
       // origin (decision 13), so a live host never reads one whatever the cookie
       // says.
-      const within = await scopeOnce()
-      if (rt.sites && within.render?.surface !== 'preview') return null
-      const header = req.headers.get('cookie')
-      const wants = hasDraftCookie(header)
+      const within = await scopeOnce();
+      if (rt.sites && within.render?.surface !== "preview") return null;
+      const header = req.headers.get("cookie");
+      const wants = hasDraftCookie(header);
 
-      if ((wants || asksByCredential()) && rt.auth.mode === 'session') {
+      if ((wants || asksByCredential()) && rt.auth.mode === "session") {
         // There, the credential is a preview grant (decision 13, step 4): a host's
         // route calling `reader.page()` gets the chain's drafts by `pickEditing`.
         const preview =
           within.render && within.registry
             ? previewSite(env, { render: within.render, registry: within.registry })
-            : undefined
-        const actor = await resolveActor(() => db, rt.auth, credentialOf(req), { preview })
+            : undefined;
+        const actor = await resolveActor(() => db, rt.auth, credentialOf(req), { preview });
         const mayDraft =
           within.render && within.registry
             ? mayPreviewDrafts(actor, within.registry, within.render.site.id)
-            : allows(actor, READ_DRAFT)
-        if (mayDraft) return draftOf(story)
+            : allows(actor, READ_DRAFT);
+        if (mayDraft) return draftOf(story);
       }
       // `auth: 'open'` has no actor to resolve and no role to check, so the
       // draft cookie alone is the authority — the same authority `handle()`'s
       // preview branch grants there, on a site that has declared it has no
       // editors to distinguish.
-      if (wants && rt.auth.mode !== 'session') return draftOf(story)
+      if (wants && rt.auth.mode !== "session") return draftOf(story);
 
-      const shared = shareCookieTokens(header)
+      const shared = shareCookieTokens(header);
       if (
         shared.length > 0 &&
         (await claimShare(db, shared, story.id, undefined, within.render?.site.id))
       ) {
-        return draftOf(story)
+        return draftOf(story);
       }
-      return null
-    }
+      return null;
+    };
 
     /**
      * Who is asking, as the host's `gate.visitor` answers it — **once per
@@ -1162,11 +1164,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * build or a warm-up has nobody to be — and `allows` is handed `null`,
      * because "no request" is "nobody".
      */
-    let asked: Promise<unknown> | null = null
+    let asked: Promise<unknown> | null = null;
     const visitorOnce = (gate: ResolvedGate): Promise<unknown> => {
-      asked ??= (async () => (req ? await gate.config.visitor(req, env) : null))()
-      return asked
-    }
+      asked ??= (async () => (req ? await gate.config.visitor(req, env) : null))();
+      return asked;
+    };
 
     /**
      * What this visitor may see of `doc` (`visitor-access.md` decisions 1, 6, 7).
@@ -1192,45 +1194,45 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       drafted: boolean,
       locale: string | undefined,
     ): Promise<PageAccess> => {
-      const gate = brand.gate
-      if (!gate) return 'public'
+      const gate = brand.gate;
+      if (!gate) return "public";
 
-      const root = doc.bloks[doc.root]
+      const root = doc.bloks[doc.root];
       // Read from `data`, never `fieldValue` — `gateValue`'s header argues why,
       // and it is the one deliberate exception to this repo's rule.
-      const value = gateValue(doc, gate.config.field)
+      const value = gateValue(doc, gate.config.field);
       if (!root || !gate.roots.has(root.type) || isUngated(value, gate.config.public)) {
-        return 'public'
+        return "public";
       }
-      if (drafted) return 'granted'
+      if (drafted) return "granted";
 
       const ctx: FolioGateContext = {
         story,
         doc,
         ...(locale !== undefined ? { locale } : {}),
         site: (await scopeOnce()).render?.site ?? null,
-      }
-      let who: unknown
+      };
+      let who: unknown;
       try {
-        who = await visitorOnce(gate)
+        who = await visitorOnce(gate);
       } catch (err) {
         // The IdP is down, or a token is malformed. The host's route answers a
         // paywall rather than a 500, and this line is where the outage shows.
-        rt.logger.error('folio: gate.visitor threw; denying', err)
-        return 'denied'
+        rt.logger.error("folio: gate.visitor threw; denying", err);
+        return "denied";
       }
       try {
-        return (await gate.config.allows(who, value, ctx)) ? 'granted' : 'denied'
+        return (await gate.config.allows(who, value, ctx)) ? "granted" : "denied";
       } catch (err) {
-        rt.logger.error('folio: gate.allows threw; denying', err)
-        return 'denied'
+        rt.logger.error("folio: gate.allows threw; denying", err);
+        return "denied";
       }
-    }
+    };
 
     return {
       published: async (path, locale) => {
-        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
-        return publishedDoc(db, (await scopeOnce()).chain, path)
+        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null;
+        return publishedDoc(db, (await scopeOnce()).chain, path);
       },
       /**
        * Draft mode's whole contract (`../../docs/specs/platform/draft-mode.md`).
@@ -1252,34 +1254,34 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
        * four unrelated things.
        */
       draftAt: async (path, locale) => {
-        if (!wantsDraft()) return null
-        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
+        if (!wantsDraft()) return null;
+        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null;
         // Unrouted documents are unreachable here by construction (`storyByPath`
         // matches `path = ?` and one stores NULL), but a record's draft not
         // being the host's to render at a URL is a rule, not an accident of SQL.
-        const within = await scopeOnce()
-        const story = await storyByPath(db, within.render?.chain ?? within.chain, path)
-        if (within.shareOnly && !(story && within.shareOnly.has(story.id))) return null
-        return story ? draftFor(story) : null
+        const within = await scopeOnce();
+        const story = await storyByPath(db, within.render?.chain ?? within.chain, path);
+        if (within.shareOnly && !(story && within.shareOnly.has(story.id))) return null;
+        return story ? draftFor(story) : null;
       },
       page: async (path, opts) => {
-        const locale = opts?.locale
-        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
+        const locale = opts?.locale;
+        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null;
 
         // One read for the row and its published document. `storyAt` and
         // `published` select the same row by the same indexed column, and a host
         // that sets cache tags needs both — a page never appears in its own
         // resolution, so `story:<id>` is the one tag it cannot derive.
-        const within = await scopeOnce()
+        const within = await scopeOnce();
         const found = await pageAt(
           db,
           within.shareOnly ? (within.render?.chain ?? []) : within.chain,
           path,
-        )
-        if (!found) return null
+        );
+        if (!found) return null;
         // A request a share admitted to a draft site reads its one story, as its
         // draft, and nothing else — not even what is published at the same path.
-        if (within.shareOnly && !within.shareOnly.has(found.editing.id)) return null
+        if (within.shareOnly && !within.shareOnly.has(found.editing.id)) return null;
 
         // Asked before the published document is used, not after: an editor in
         // draft mode is reading this page *instead of* what is live, and a story
@@ -1287,11 +1289,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // `editing`'s — on a chain, the nearest row whatever its state, which is
         // a fork its editor is preparing while visitors still get the page it
         // will shadow (decision 5).
-        const drafted = wantsDraft() ? await draftFor(found.editing) : null
-        if (within.shareOnly && !drafted) return null
-        const doc = drafted ?? found.doc
-        if (!doc) return null
-        const story = drafted ? found.editing : found.story
+        const drafted = wantsDraft() ? await draftFor(found.editing) : null;
+        if (within.shareOnly && !drafted) return null;
+        const doc = drafted ?? found.doc;
+        if (!doc) return null;
+        const story = drafted ? found.editing : found.story;
 
         // Decided here, before the resolve, because a denied visitor's
         // resolution must be built from the *redacted* document: resolving the
@@ -1299,10 +1301,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // and URLs of everything the withheld body points at.
         // The site's brand: `found` is in this reader's chain, so a site — and its
         // brand — exists whenever anything was found.
-        const brand = one ?? within.brand
-        if (!brand) throw new Error(NO_BRAND)
-        const access = await accessFor(brand, story, doc, drafted !== null, locale)
-        const shown = access === 'denied' ? redactDoc(doc, brand.schema) : doc
+        const brand = one ?? within.brand;
+        if (!brand) throw new Error(NO_BRAND);
+        const access = await accessFor(brand, story, doc, drafted !== null, locale);
+        const shown = access === "denied" ? redactDoc(doc, brand.schema) : doc;
 
         const resolution = await brand.resolve(bindings, shown, {
           ...(locale !== undefined ? { locale } : {}),
@@ -1313,7 +1315,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           // internally inconsistent.
           ...(drafted ? { draft: true } : {}),
           ...siteOption(within),
-        })
+        });
 
         return {
           doc: shown,
@@ -1341,19 +1343,19 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
            * at the edge, for everyone, forever.
            */
           headers: {
-            ...(drafted || access !== 'public'
-              ? { 'cache-control': NO_STORE }
+            ...(drafted || access !== "public"
+              ? { "cache-control": NO_STORE }
               : cacheHeaders(resolution, { story: story.id })),
             // On a site's preview origin the admin is the one page that may frame
             // this, exactly as `framedBy` says of Folio's own responses (decision
             // 13). Here because a host's page never passes through `framedBy`,
             // and never on the live surface, where it would break every embed.
             // `cacheHeaders` and `NO_STORE` set no policy, so nothing is replaced.
-            ...(rt.sites && within.render?.surface === 'preview'
-              ? { 'content-security-policy': `frame-ancestors ${rt.sites.admin}` }
+            ...(rt.sites && within.render?.surface === "preview"
+              ? { "content-security-policy": `frame-ancestors ${rt.sites.admin}` }
               : {}),
           },
-        }
+        };
       },
       resolve: async (doc, opts) =>
         (await requireBrand()).resolve(bindings, doc, {
@@ -1362,107 +1364,107 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         }),
       status: async (path) => storyStatus(db, (await scopeOnce()).chain, path),
       storyAt: async (path) => {
-        const within = await scopeOnce()
-        const story = await storyByPath(db, within.chain, path)
-        return story && rt.urlsFor(within.render?.site)(story)
+        const within = await scopeOnce();
+        const story = await storyByPath(db, within.chain, path);
+        return story && rt.urlsFor(within.render?.site)(story);
       },
       redirect: async (path) => {
-        const within = await scopeOnce()
-        if (!rt.sites) return lookupRedirect(db, within.chain, path, rt.logger)
+        const within = await scopeOnce();
+        if (!rt.sites) return lookupRedirect(db, within.chain, path, rt.logger);
         // On a chain the redirect that applies is decision 5's walk — a nearer
         // scope that took the page down answers `gone`, not a farther redirect —
         // so it is `miss`'s answer, rather than the nearest row on its own.
-        const miss = await pathMiss(db, within.chain, path)
-        return miss.kind === 'redirect' ? { to: miss.to, status: miss.status } : null
+        const miss = await pathMiss(db, within.chain, path);
+        return miss.kind === "redirect" ? { to: miss.to, status: miss.status } : null;
       },
       miss: async (path) => {
-        const within = await scopeOnce()
+        const within = await scopeOnce();
         return answerMiss(
           await pathMiss(db, within.chain, path),
           within.render?.site?.id ?? null,
           path,
-        )
+        );
       },
       stories: async (opts) => {
-        const within = await scopeOnce()
-        const page = Math.max(Math.trunc(opts?.page ?? 1), 1)
+        const within = await scopeOnce();
+        const page = Math.max(Math.trunc(opts?.page ?? 1), 1);
         const perPage =
-          opts?.perPage === undefined ? undefined : Math.max(Math.trunc(opts.perPage), 1)
+          opts?.perPage === undefined ? undefined : Math.max(Math.trunc(opts.perPage), 1);
         const window =
-          perPage === undefined ? undefined : { limit: perPage, offset: (page - 1) * perPage }
-        return (await listStories(db, window, within.chain)).map(rt.urlsFor(within.render?.site))
+          perPage === undefined ? undefined : { limit: perPage, offset: (page - 1) * perPage };
+        return (await listStories(db, window, within.chain)).map(rt.urlsFor(within.render?.site));
       },
       tree: async () => {
-        const within = await scopeOnce()
-        if (!rt.sites) return rt.decorate(await storyTree(db))
+        const within = await scopeOnce();
+        if (!rt.sites) return rt.decorate(await storyTree(db));
         return rt.decorate(
           treeByPath(within.chain, await listStories(db, undefined, within.chain)),
           within.render?.site,
-        )
+        );
       },
       query: async (q) => {
-        const brand = await requireBrand()
-        const within = await scopeOnce()
-        return brand.query(bindings, q, within.chain, within.render?.site)
+        const brand = await requireBrand();
+        const within = await scopeOnce();
+        return brand.query(bindings, q, within.chain, within.render?.site);
       },
       global: async (name) => {
         // No site on a deployment with `brands` is no brand, and so no singleton.
-        const brand = await brandNow()
-        const type = brand?.typeOf(name)
-        if (!brand || type?.kind !== 'singleton') return null
+        const brand = await brandNow();
+        const type = brand?.typeOf(name);
+        if (!brand || type?.kind !== "singleton") return null;
         // The chain's layers, merged (`multi-site.md` decision 8). With no `sites`
         // the chain is `['default']` and this is the one `sng_<type>` read it was.
         // A request a share admitted to a draft site reads the gated site's whole
         // chain here — the same chain `page()` resolves with, so its one story has
         // its header and navigation — and, like every read, **published layers
         // only**: the share drafts its one story and nothing else.
-        const within = await scopeOnce()
-        const chain = within.shareOnly ? (within.render?.chain ?? []) : within.chain
-        const ids = [...chain].reverse().map((scope) => layerId(name, scope))
-        const docs = await publishedDocsByIds(db, ids, chain)
+        const within = await scopeOnce();
+        const chain = within.shareOnly ? (within.render?.chain ?? []) : within.chain;
+        const ids = [...chain].reverse().map((scope) => layerId(name, scope));
+        const docs = await publishedDocsByIds(db, ids, chain);
         return (
           mergeLayers(
             ids.map((id) => docs[id]),
             brand.schema,
           ) ?? null
-        )
+        );
       },
       site: async () => (await scopeOnce()).render?.site ?? null,
       bookmark: () => db.getBookmark(),
-    }
-  }
+    };
+  };
 
   /** The public `folio.reader`: a request or a bare site, never a caller-gated site. */
-  const reader: Folio<Env>['reader'] = (env, from) => readerWith(env, from)
+  const reader: Folio<Env>["reader"] = (env, from) => readerWith(env, from);
 
   /**
    * `folio.cacheProps` (decision 15): the gated site and its surface, or `{}`. A
    * deployment with no `sites` answers `{}` without reading anything.
    */
-  const cacheProps: Folio<Env>['cacheProps'] = async (req, env) => {
-    const sites = rt.sites
-    if (!sites) return {}
-    const url = new URL(req.url)
-    const underBase = url.pathname === rt.base || url.pathname.startsWith(`${rt.base}/`)
+  const cacheProps: Folio<Env>["cacheProps"] = async (req, env) => {
+    const sites = rt.sites;
+    if (!sites) return {};
+    const url = new URL(req.url);
+    const underBase = url.pathname === rt.base || url.pathname.startsWith(`${rt.base}/`);
     const routed = routeRequest(sites, await sites.registry(env), req, {
-      path: underBase ? url.pathname.slice(rt.base.length) || '/' : null,
+      path: underBase ? url.pathname.slice(rt.base.length) || "/" : null,
       grantFor: null,
-    })
-    return routed.kind === 'site' ? { site: routed.site.id, surface: routed.surface } : {}
-  }
+    });
+    return routed.kind === "site" ? { site: routed.site.id, surface: routed.surface } : {};
+  };
 
   /** `folio.settings` (decision 2): the settings type's merged root, as a plain value. */
-  const settings: Folio<Env>['settings'] = (resolution: Resolution) => {
+  const settings: Folio<Env>["settings"] = (resolution: Resolution) => {
     // The resolution's brand (decision 21): `site.brand` is present only with
     // `brands`, and absent there is no brand, so no settings type rather than the
     // first brand's. With no `brands` it is `one`, whose settings type is
     // `sites.settings`.
-    const brand = rt.brands.get(resolution.site?.brand ?? null)
-    const name = rt.sites ? brand?.settings : undefined
-    const doc = name ? resolution.globals?.[name] : undefined
-    const root = doc?.bloks[doc.root]
-    return brand && doc && root ? plainBlok(doc, root, brand.schema, resolution.locale) : null
-  }
+    const brand = rt.brands.get(resolution.site?.brand ?? null);
+    const name = rt.sites ? brand?.settings : undefined;
+    const doc = name ? resolution.globals?.[name] : undefined;
+    const root = doc?.bloks[doc.root];
+    return brand && doc && root ? plainBlok(doc, root, brand.schema, resolution.locale) : null;
+  };
 
   /**
    * The block registry a render of `resolution` uses (decision 21): its site's
@@ -1470,14 +1472,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    * resolution that names no site has no brand, and that throws.
    */
   const blocksFor = (resolution: Resolution | undefined, what: string) => {
-    const brand = rt.brands.get(resolution?.site?.brand ?? null)
+    const brand = rt.brands.get(resolution?.site?.brand ?? null);
     if (!brand) {
       throw new Error(
         `folio: ${what} on a deployment with 'brands' needs a resolution that names a site, whose brand's blocks render it`,
-      )
+      );
     }
-    return brand.registry
-  }
+    return brand.registry;
+  };
 
   /**
    * A story's brand and the registry snapshot that said so, off a request with
@@ -1489,22 +1491,22 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     env: Env,
     story: StoryMeta,
   ): Promise<{ brand: BrandRuntime; registry: Registry } | null> => {
-    const registry = await rt.sites!.registry(env)
-    const brand = rt.forScope(registry, story.site ?? DEFAULT_SITE)
-    return brand ? { brand, registry } : null
-  }
+    const registry = await rt.sites!.registry(env);
+    const brand = rt.forScope(registry, story.site ?? DEFAULT_SITE);
+    return brand ? { brand, registry } : null;
+  };
   /** `story`'s draft, created on first touch, under its own brand. */
   const draftOfStory = async (env: Env, bindings: ReadBindings, story: StoryMeta) => {
-    if (one) return one.draftFor(bindings, story)
-    const found = await brandOfStory(env, story)
+    if (one) return one.draftFor(bindings, story);
+    const found = await brandOfStory(env, story);
     if (!found) {
       throw new FolioError(
-        'not_found',
+        "not_found",
         `No configured brand serves the scope '${story.site ?? DEFAULT_SITE}'`,
-      )
+      );
     }
-    return found.brand.draftFor(bindings, story, found.registry)
-  }
+    return found.brand.draftFor(bindings, story, found.registry);
+  };
 
   /**
    * A batch job run one brand at a time on a deployment with `brands`
@@ -1531,34 +1533,34 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       after: string | null,
     ) => Promise<R>,
   ): Promise<R & { brand: string }> => {
-    const ids = [...rt.brands.keys()].filter((id): id is string => id !== null)
-    let at = 0
-    let after: string | null = null
+    const ids = [...rt.brands.keys()].filter((id): id is string => id !== null);
+    let at = 0;
+    let after: string | null = null;
     if (continueFrom) {
-      const cut = continueFrom.indexOf('/')
-      at = cut === -1 ? -1 : ids.indexOf(continueFrom.slice(0, cut))
+      const cut = continueFrom.indexOf("/");
+      at = cut === -1 ? -1 : ids.indexOf(continueFrom.slice(0, cut));
       if (at === -1) {
         throw new FolioError(
-          'bad_request',
+          "bad_request",
           `continueFrom '${continueFrom}' names no brand: on a deployment with 'brands' it is '<brand>/<cursor>'`,
-        )
+        );
       }
-      after = continueFrom.slice(cut + 1) || null
+      after = continueFrom.slice(cut + 1) || null;
     }
-    const id = ids[at]!
-    const registry = await rt.sites!.fresh(env)
+    const id = ids[at]!;
+    const registry = await rt.sites!.fresh(env);
     const scopes = [...registry.sites, ...registry.groups]
       .filter((row) => row.brand === id)
-      .map((row) => row.id)
-    const report = await run(rt.brands.get(id)!, { id, scopes, registry }, after)
+      .map((row) => row.id);
+    const report = await run(rt.brands.get(id)!, { id, scopes, registry }, after);
     const next =
       report.continueFrom !== null
         ? `${id}/${report.continueFrom}`
         : at + 1 < ids.length
           ? `${ids[at + 1]}/`
-          : null
-    return { ...report, continueFrom: next, brand: id }
-  }
+          : null;
+    return { ...report, continueFrom: next, brand: id };
+  };
 
   /**
    * `pending`, `behind` and `complete` across **every** brand, for a branded
@@ -1567,28 +1569,28 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    * must mean the deployment, not whichever brand came last.
    */
   const everyBrandBehind = async (
-    db: ReadBindings['db'],
+    db: ReadBindings["db"],
     report: MigrateReport & { brand: string },
     registry: Registry,
-  ): Promise<Pick<MigrateReport, 'pending' | 'behind' | 'complete'>> => {
-    const applied = await appliedMigrations(db)
-    const pending: string[] = []
-    let behind = 0
+  ): Promise<Pick<MigrateReport, "pending" | "behind" | "complete">> => {
+    const applied = await appliedMigrations(db);
+    const pending: string[] = [];
+    let behind = 0;
     for (const [id, brand] of rt.brands) {
-      if (id === null || brand.migrations.length === 0) continue
-      const done = new Set(ownMigrations(applied, id))
-      pending.push(...brand.migrations.filter((m) => !done.has(m.id)).map((m) => m.id))
+      if (id === null || brand.migrations.length === 0) continue;
+      const done = new Set(ownMigrations(applied, id));
+      pending.push(...brand.migrations.filter((m) => !done.has(m.id)).map((m) => m.id));
       if (id === report.brand) {
-        behind += report.behind
-        continue
+        behind += report.behind;
+        continue;
       }
       const scopes = [...registry.sites, ...registry.groups]
         .filter((row) => row.brand === id)
-        .map((row) => row.id)
-      behind += await countBehind(db, brand.migrations[brand.migrations.length - 1]!.id, scopes)
+        .map((row) => row.id);
+      behind += await countBehind(db, brand.migrations[brand.migrations.length - 1]!.id, scopes);
     }
-    return { pending, behind, complete: behind === 0 }
-  }
+    return { pending, behind, complete: behind === 0 };
+  };
 
   return {
     handle,
@@ -1608,16 +1610,16 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     redirect: (env, path) => reader(env).redirect(path),
     miss: (env, path) => reader(env).miss(path),
     draft: async (env, id) => {
-      if (one) return one.draft(config.bindings(env), id)
+      if (one) return one.draft(config.bindings(env), id);
       // With `brands` a seed is a brand's, so an id with no row has none to start
       // from: refused, rather than seeded as the first brand's page.
-      const bindings = config.bindings(env)
-      const story = await storyById(bindings.db, id)
-      if (!story) throw new FolioError('not_found', 'Unknown document')
-      return draftOfStory(env, bindings, story)
+      const bindings = config.bindings(env);
+      const story = await storyById(bindings.db, id);
+      if (!story) throw new FolioError("not_found", "Unknown document");
+      return draftOfStory(env, bindings, story);
     },
-    inDraftMode: (req) => hasDraftCookie(req.headers.get('cookie')),
-    noStore: () => ({ 'cache-control': NO_STORE }),
+    inDraftMode: (req) => hasDraftCookie(req.headers.get("cookie")),
+    noStore: () => ({ "cache-control": NO_STORE }),
     /** Draft mode's whole contract, implemented on `reader` — see `FolioReader.draftAt`. */
     draftAt: (env, req, path, locale) => reader(env, req).draftAt(path, locale),
     /**
@@ -1631,13 +1633,13 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * resurrection `purge()` exists to prevent.
      */
     write: async (env, id, mutations, opts) => {
-      const bindings = config.bindings(env)
-      const story = await storyById(bindings.db, id)
-      if (!story) throw new FolioError('not_found', 'Unknown document')
+      const bindings = config.bindings(env);
+      const story = await storyById(bindings.db, id);
+      if (!story) throw new FolioError("not_found", "Unknown document");
       // `commit` refuses an object that holds no document, and its job is not to
       // know what a seed looks like. Creating it here is what makes writing to a
       // story nobody has opened in the editor work.
-      await draftOfStory(env, bindings, story)
+      await draftOfStory(env, bindings, story);
       return commitAll(
         rt.stub(bindings, id),
         mutations,
@@ -1645,7 +1647,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // A caller-supplied txId is already an identity for this write, which is
         // what `commitAll` derives its per-chunk ids from.
         opts.txId,
-      )
+      );
     },
     /**
      * `opts` pages this (`collections.md` decision 6). Absent still answers
@@ -1663,20 +1665,20 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       if (!one) {
         throw new Error(
           "folio: folio.registry has no brand on a deployment with 'brands': use folio.registryFor(brand)",
-        )
+        );
       }
-      return one.registry
+      return one.registry;
     },
     registryFor: (id) => {
-      const brand = one ? undefined : rt.brands.get(id)
+      const brand = one ? undefined : rt.brands.get(id);
       if (!brand) {
         throw new Error(
           one
             ? "folio: registryFor needs 'brands'; this deployment has one registry, folio.registry"
             : `folio: registryFor('${id}') names no brand in 'brands'`,
-        )
+        );
       }
-      return brand.registry
+      return brand.registry;
     },
     resolve: (env, doc, opts) => reader(env).resolve(doc, opts),
     query: (env, q) => reader(env).query(q),
@@ -1695,11 +1697,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         typeOf: brand.typeOf,
         locales: rt.locales,
         hooks: rt.hookRunner(alarmHookCtx(env, rt.logger), brand.brand?.id ?? null),
-      })
-      if (one) return reindex(deps(one), opts)
+      });
+      if (one) return reindex(deps(one), opts);
       return perBrand(env, opts?.continueFrom, (brand, within, after) =>
         reindex({ ...deps(brand), scopes: within.scopes }, { ...opts, continueFrom: after }),
-      )
+      );
     },
     /**
      * The scheduler's sweep (`../../docs/specs/platform/scheduled-publishing.md`).
@@ -1729,23 +1731,23 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * read session: this is a background delete, never a request's own read.
      */
     sweepAuth: async (env, opts) => {
-      const db = config.bindings(env).db
-      const now = opts?.now ?? Date.now()
+      const db = config.bindings(env).db;
+      const now = opts?.now ?? Date.now();
       // Preview grants first: their sweep drops the grants of sessions already
       // gone, and `deleteExpiredSessions` takes the expired sessions' own grants
       // in its batch. Not counted in the report, whose shape is the public type's.
-      await sweepGrants(db, now)
+      await sweepGrants(db, now);
       const [sessions, challenges, events] = await Promise.all([
         deleteExpiredSessions(db, now),
         deleteStaleChallenges(db, now),
         sweepEvents(db, now),
-      ])
-      return { sessions, challenges, events }
+      ]);
+      return { sessions, challenges, events };
     },
     render: (doc, opts) => (
       <FolioDoc
         doc={doc}
-        registry={blocksFor(opts?.resolution, 'folio.render')}
+        registry={blocksFor(opts?.resolution, "folio.render")}
         mode={opts?.mode}
         resolution={opts?.resolution}
       />
@@ -1762,14 +1764,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     cacheKey: (url) => cacheKeyFor(url),
     global: (env, name) => reader(env).global(name),
     renderGlobal: (resolution, name, opts) =>
-      renderGlobalNode(blocksFor(resolution, 'folio.renderGlobal'), resolution, name, opts),
+      renderGlobalNode(blocksFor(resolution, "folio.renderGlobal"), resolution, name, opts),
     /**
      * Explicit, never automatic (`schema-migrations.md` checkpoint 5). Assembled
      * from bindings alone, exactly as `publishDeps` is, so a deploy script and
      * the `POST {base}/migrate` route reach the identical runner.
      */
     migrate: async (env, opts) => {
-      const bindings = config.bindings(env)
+      const bindings = config.bindings(env);
       const deps = (brand: BrandRuntime, registry?: Registry) => ({
         db: bindings.db,
         schema: brand.schema,
@@ -1781,27 +1783,27 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // leaves content_index and content_text describing the old document.
         projection: brand.projection,
         hooks: rt.hookRunner(alarmHookCtx(env, rt.logger), brand.brand?.id ?? null),
-      })
-      if (one) return runMigrations(deps(one), opts)
+      });
+      if (one) return runMigrations(deps(one), opts);
       // Each brand's list over that brand's scopes (decision 16), a brand per call.
-      let registry: Registry | undefined
+      let registry: Registry | undefined;
       const report: MigrateReport & { brand: string } = await perBrand(
         env,
         opts?.continueFrom,
         (brand, within, after) => {
-          registry = within.registry
-          const own = { id: within.id, scopes: within.scopes }
+          registry = within.registry;
+          const own = { id: within.id, scopes: within.scopes };
           return runMigrations(
             { ...deps(brand, within.registry), brand: own },
             { ...opts, continueFrom: after },
-          )
+          );
         },
-      )
-      return { ...report, ...(await everyBrandBehind(bindings.db, report, registry!)) }
+      );
+      return { ...report, ...(await everyBrandBehind(bindings.db, report, registry!)) };
     },
     audit: async (env, opts) => {
-      const db = config.bindings(env).db
-      if (one) return audit(db, one.schema, await one.auditContext(env), opts)
+      const db = config.bindings(env).db;
+      if (one) return audit(db, one.schema, await one.auditContext(env), opts);
       return perBrand(env, opts?.continueFrom, async (brand, within, after) =>
         audit(
           db,
@@ -1810,7 +1812,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           { ...opts, continueFrom: after },
           within,
         ),
-      )
+      );
     },
-  }
+  };
 }

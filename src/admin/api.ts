@@ -24,10 +24,10 @@
  *
  * Null on an `auth: 'open'` deployment, where a 401 cannot happen.
  */
-let unauthorizedHandler: ((next: string) => void) | null = null
+let unauthorizedHandler: ((next: string) => void) | null = null;
 
 export function onUnauthorized(handler: ((next: string) => void) | null): void {
-  unauthorizedHandler = handler
+  unauthorizedHandler = handler;
 }
 
 /**
@@ -36,7 +36,7 @@ export function onUnauthorized(handler: ((next: string) => void) | null): void {
  * rather than dumping you at the root of the CMS.
  */
 export function signInUrl(loginUrl: string, next: string): string {
-  return `${loginUrl}?next=${encodeURIComponent(next)}`
+  return `${loginUrl}?next=${encodeURIComponent(next)}`;
 }
 
 /**
@@ -45,8 +45,8 @@ export function signInUrl(loginUrl: string, next: string): string {
  * died before reaching the worker — because there is no message to quote then.
  */
 export async function failureOf(res: Response, fallback?: string): Promise<string> {
-  const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
-  return body.error?.message ?? fallback ?? `Request failed (${res.status})`
+  const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+  return body.error?.message ?? fallback ?? `Request failed (${res.status})`;
 }
 
 /**
@@ -65,15 +65,15 @@ export async function failureOf(res: Response, fallback?: string): Promise<strin
  * to a permissions refusal, and redirecting there would be a loop.
  */
 export async function expectOk(res: Response, fallback?: string): Promise<Response> {
-  if (res.ok) return res
-  const message = await failureOf(res, fallback)
-  if (res.status === 401) unauthorizedHandler?.(message)
-  throw new Error(message)
+  if (res.ok) return res;
+  const message = await failureOf(res, fallback);
+  if (res.status === 401) unauthorizedHandler?.(message);
+  throw new Error(message);
 }
 
 /** `expectOk` plus the parsed body, for the calls whose answer is used. */
 export async function expectJson<T>(res: Response, fallback?: string): Promise<T> {
-  return (await expectOk(res, fallback)).json() as Promise<T>
+  return (await expectOk(res, fallback)).json() as Promise<T>;
 }
 
 /**
@@ -91,15 +91,15 @@ export function afterWrite(refresh: Promise<unknown>): Promise<void> {
   return refresh.then(
     () => {},
     () => {},
-  )
+  );
 }
 
-const JSON_HEADERS = { 'content-type': 'application/json' } as const
+const JSON_HEADERS = { "content-type": "application/json" } as const;
 
 /** A JSON-bodied request. Its answer still has to go through `expectOk`. */
-export function send(url: string, method: 'POST' | 'PATCH', body?: unknown): Promise<Response> {
+export function send(url: string, method: "POST" | "PATCH", body?: unknown): Promise<Response> {
   return fetch(url, {
     method,
     ...(body === undefined ? {} : { headers: JSON_HEADERS, body: JSON.stringify(body) }),
-  })
+  });
 }

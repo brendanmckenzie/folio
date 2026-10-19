@@ -30,10 +30,10 @@ import type {
   ResolvedAuth,
   RoleGrants,
   VerifiedIdentity,
-} from './config'
-import { recordEventStatement } from './events'
-import { type Role, isRole } from './roles'
-import { type NewSession, newSession, sessionStatements, userSessionsDelete } from './session'
+} from "./config";
+import { recordEventStatement } from "./events";
+import { type Role, isRole } from "./roles";
+import { type NewSession, newSession, sessionStatements, userSessionsDelete } from "./session";
 import {
   createUserStatement,
   grantMap,
@@ -42,20 +42,20 @@ import {
   replaceGrantsStatements,
   type UserRow,
   userByEmail,
-} from './users'
-import type { FolioDb } from '../db'
-import type { FolioLogger } from '../types'
+} from "./users";
+import type { FolioDb } from "../db";
+import type { FolioLogger } from "../types";
 
 /** Why a sign-in did not happen. The same two words the login page's `?error=`
  * vocabulary already uses, so a route translates rather than invents. */
-export type SignInRefusal = 'refused' | 'provider'
+export type SignInRefusal = "refused" | "provider";
 
 export type SignInResult =
   | { ok: true; user: UserRow; session: NewSession; roleChanged: boolean }
-  | { ok: false; reason: SignInRefusal }
+  | { ok: false; reason: SignInRefusal };
 
 /** The session arm of `ResolvedAuth`: the only mode a sign-in can happen in. */
-export type SessionAuth = Extract<ResolvedAuth<unknown>, { mode: 'session' }>
+export type SessionAuth = Extract<ResolvedAuth<unknown>, { mode: "session" }>;
 
 /**
  * The domain of an address, lowercased, or `''` for something with no `@`.
@@ -65,9 +65,9 @@ export type SessionAuth = Extract<ResolvedAuth<unknown>, { mode: 'session' }>
  * feature exists for names its domains.
  */
 export function domainOf(email: string): string {
-  const normalised = normaliseEmail(email)
-  const at = normalised.lastIndexOf('@')
-  return at === -1 ? '' : normalised.slice(at + 1)
+  const normalised = normaliseEmail(email);
+  const at = normalised.lastIndexOf("@");
+  return at === -1 ? "" : normalised.slice(at + 1);
 }
 
 /**
@@ -76,7 +76,7 @@ export function domainOf(email: string): string {
  * wide and says nothing about which account, and this is the other half — the
  * admin's cue, on a surface only an admin can read.
  */
-type RefusalDetail = 'domain' | 'not_invited' | 'role_removed' | 'mapper'
+type RefusalDetail = "domain" | "not_invited" | "role_removed" | "mapper";
 
 /**
  * Signs a verified identity in, or refuses.
@@ -96,8 +96,8 @@ export async function completeSignIn(
   provider: AuthProvider<unknown>,
   identity: VerifiedIdentity,
   ctx: {
-    userAgent: string | null
-    now?: number
+    userAgent: string | null;
+    now?: number;
     /**
      * Statements the *caller* wants in the same batch, run only when the
      * sign-in actually happens.
@@ -113,20 +113,20 @@ export async function completeSignIn(
      * **Not run on a refusal.** A refused assertion is not a use, so nothing
      * stamps `last_used_at`; the refusal's own event is the only write.
      */
-    extra?: readonly D1PreparedStatement[]
+    extra?: readonly D1PreparedStatement[];
   } = { userAgent: null },
   logger: FolioLogger = console,
 ): Promise<SignInResult> {
-  const now = ctx.now ?? Date.now()
-  const email = normaliseEmail(identity.email)
+  const now = ctx.now ?? Date.now();
+  const email = normaliseEmail(identity.email);
 
   /** A refusal, recorded. Batched even when it is the only statement: an event
    * nobody wrote is a refusal nobody can explain afterwards, and this is the
    * one path where the person being refused is told nothing specific. */
   /** Scopes a mapper named that the registry does not hold, for the event rows. */
-  let dropped: string[] = []
+  let dropped: string[] = [];
   const note = (): { dropped: string[] } | Record<string, never> =>
-    dropped.length > 0 ? { dropped } : {}
+    dropped.length > 0 ? { dropped } : {};
 
   const refuse = async (
     reason: SignInRefusal,
@@ -135,7 +135,7 @@ export async function completeSignIn(
   ): Promise<SignInResult> => {
     await db.batch([
       recordEventStatement(db, {
-        kind: 'sign_in_refused',
+        kind: "sign_in_refused",
         // The row when Folio has one, null when it does not. The address is in
         // `detail` either way, because "somebody at this address tried and was
         // turned away" is the fact an admin acts on and half of these refusals
@@ -146,9 +146,9 @@ export async function completeSignIn(
         detail: { email, reason: why, ...note() },
         at: now,
       }),
-    ])
-    return { ok: false, reason }
-  }
+    ]);
+    return { ok: false, reason };
+  };
 
   // (1) Domain enforcement, for **every kind** (decision 6). An enforced domain
   // is exactly one door: the point is that the client's directory controls
@@ -156,13 +156,13 @@ export async function completeSignIn(
   // passkey for that domain is a way around it. `POST /login/email` consults the
   // same map before it reads D1; this is the defensive re-check, and it is what
   // covers the four paths that route does not.
-  const enforced = auth.domains.get(domainOf(email))
+  const enforced = auth.domains.get(domainOf(email));
   if (enforced !== undefined && enforced !== provider.id) {
-    return refuse('refused', 'domain', null)
+    return refuse("refused", "domain", null);
   }
 
   // (2) The user row, if there is one.
-  const existing = await userByEmail(db, email)
+  const existing = await userByEmail(db, email);
 
   // (3) The role the provider's claims place, if it places one. `undefined` is
   // "this provider has no opinion" and is not the same as `null`, which is "this
@@ -171,78 +171,78 @@ export async function completeSignIn(
   //
   // Read as **a grant set** (`multi-site.md` decision 17): a bare role is
   // `{ '*': role }`, which is all a deployment with no `sites` ever sees.
-  let mapped: RoleGrants | null | undefined
-  if ('roleFrom' in provider && typeof provider.roleFrom === 'function') {
-    let answer: unknown
+  let mapped: RoleGrants | null | undefined;
+  if ("roleFrom" in provider && typeof provider.roleFrom === "function") {
+    let answer: unknown;
     try {
-      answer = provider.roleFrom(identity)
+      answer = provider.roleFrom(identity);
     } catch (err) {
       // A configuration bug, never a silent default (decision 5). The person
       // sees `error=provider` and the host sees this line; what must not happen
       // is a role appearing from nowhere because a mapper threw.
-      logger.error(`folio: ${provider.id}'s roleFrom threw`, err)
-      return refuse('provider', 'mapper', existing?.id ?? null)
+      logger.error(`folio: ${provider.id}'s roleFrom threw`, err);
+      return refuse("provider", "mapper", existing?.id ?? null);
     }
-    const set = grantSetOf(answer)
+    const set = grantSetOf(answer);
     if (set === undefined) {
       logger.error(
         `folio: ${provider.id}'s roleFrom answered '${String(answer)}', which is not a role`,
-      )
-      return refuse('provider', 'mapper', existing?.id ?? null)
+      );
+      return refuse("provider", "mapper", existing?.id ?? null);
     }
-    mapped = set
+    mapped = set;
     // A scope the registry does not hold is dropped, not refused: a directory group
     // still mapped to a retired site must not lock its members out of the others.
     // If nothing remains, the mapper placed nothing (decision 17).
     if (mapped !== null) {
-      const known = await knownScopes(db, Object.keys(mapped))
-      dropped = Object.keys(mapped).filter((scope) => !known.has(scope))
+      const known = await knownScopes(db, Object.keys(mapped));
+      dropped = Object.keys(mapped).filter((scope) => !known.has(scope));
       if (dropped.length > 0) {
         logger.warn(
-          `folio: ${provider.id}'s roleFrom named ${dropped.map((d) => `'${d}'`).join(', ')}, which is not a site or group; ignored`,
-        )
-        const kept = Object.entries(mapped).filter(([scope]) => known.has(scope))
-        mapped = kept.length > 0 ? Object.fromEntries(kept) : null
+          `folio: ${provider.id}'s roleFrom named ${dropped.map((d) => `'${d}'`).join(", ")}, which is not a site or group; ignored`,
+        );
+        const kept = Object.entries(mapped).filter(([scope]) => known.has(scope));
+        mapped = kept.length > 0 ? Object.fromEntries(kept) : null;
       }
     }
   }
 
-  const writes: D1PreparedStatement[] = []
-  let user = existing
-  let roleChanged = false
+  const writes: D1PreparedStatement[] = [];
+  let user = existing;
+  let roleChanged = false;
 
   if (!user) {
     // (4) Provisioning, for an identity that matches no row. Three of the
     // interaction table's seven rows, and they differ in what role a created
     // user gets rather than in whether one is created.
-    const provision = provisioningOf(provider)
+    const provision = provisioningOf(provider);
     // Access is a list someone maintains, not a consequence of holding an
     // account at the provider — and for `mail` and `passkey` there is no
     // configuration that could say otherwise.
-    if (provision === 'refuse') return refuse('refused', 'not_invited', null)
+    if (provision === "refuse") return refuse("refused", "not_invited", null);
 
-    let role: Role
-    let roleFrom: string | null
-    let grants: RoleGrants | undefined
+    let role: Role;
+    let roleFrom: string | null;
+    let grants: RoleGrants | undefined;
     if (mapped === undefined) {
       // No mapper: as before this spec.
-      role = provision.role ?? 'editor'
-      roleFrom = null
+      role = provision.role ?? "editor";
+      roleFrom = null;
     } else if (mapped === null) {
       // A mapper that placed no role. `provision.role` is the host saying in as
       // many words what an unmapped person gets; the implicit `'editor'` above
       // is not, and falling back to it here is exactly the "in no group silently
       // means editor" failure checkpoint 3 refuses.
-      if (!provision.role) return refuse('refused', 'not_invited', null)
-      role = provision.role
-      roleFrom = null
+      if (!provision.role) return refuse("refused", "not_invited", null);
+      role = provision.role;
+      roleFrom = null;
     } else {
       // A lone `*` grant is written exactly as a role always was; anything else
       // is the set.
-      const star = starOnly(mapped)
-      role = star ?? 'viewer'
-      grants = star === null ? mapped : undefined
-      roleFrom = provider.id
+      const star = starOnly(mapped);
+      role = star ?? "viewer";
+      grants = star === null ? mapped : undefined;
+      roleFrom = provider.id;
     }
 
     const created = createUserStatement(
@@ -256,9 +256,9 @@ export async function completeSignIn(
         ...(grants ? { grants } : {}),
       },
       now,
-    )
-    user = created.user
-    writes.push(...created.statements)
+    );
+    user = created.user;
+    writes.push(...created.statements);
   } else if (mapped === null) {
     // Their group was removed. Refusing is checkpoint 3: this provider placed
     // the role, so keeping it would be stale privilege granted by a directory
@@ -266,35 +266,35 @@ export async function completeSignIn(
     // the provider was never the authority on it. Any grant it placed counts,
     // not only `*` (decision 17).
     if (user.grants.some((g) => g.roleFrom === provider.id) || user.roleFrom === provider.id) {
-      return refuse('refused', 'role_removed', user.id)
+      return refuse("refused", "role_removed", user.id);
     }
   } else if (mapped !== undefined && !sameGrants(grantMap(user.grants), mapped, user.role)) {
     // The one write nobody clicked, which is why `auth_events` exists at all.
-    roleChanged = true
-    const before = grantMap(user.grants)
-    const star = starOnly(mapped)
+    roleChanged = true;
+    const before = grantMap(user.grants);
+    const star = starOnly(mapped);
     // A change of one role on `*` keeps the event's shape a role always had; a
     // change of sets records both sets.
     const detail =
       star !== null && starOnly(before) !== null
         ? { from: user.role, to: star }
-        : { from: before, to: mapped }
+        : { from: before, to: mapped };
     user = {
       ...user,
-      role: mapped['*'] ?? 'viewer',
-      roleFrom: mapped['*'] === undefined ? null : provider.id,
+      role: mapped["*"] ?? "viewer",
+      roleFrom: mapped["*"] === undefined ? null : provider.id,
       grants: Object.entries(mapped).map(([scope, role]) => ({
         scope,
         role,
         roleFrom: provider.id,
       })),
-    }
+    };
     writes.push(
       // The grant set, never `users.role` (`0011_sites.sql`). A lone `*` is an
       // upsert, so a user created by old code in the migrate-to-deploy window, who
       // holds no grant yet, gets one here rather than an update that matches
       // nothing; a set replaces every row the user holds (decision 17).
-      ...(star !== null && Object.keys(before).every((scope) => scope === '*')
+      ...(star !== null && Object.keys(before).every((scope) => scope === "*")
         ? [grantStatement(db, user.id, star, provider.id, now)]
         : replaceGrantsStatements(db, user.id, mapped, provider.id, now)),
       // Every *other* browser, mirroring what `PATCH /users/:id` does for an
@@ -304,7 +304,7 @@ export async function completeSignIn(
       // Their preview grants go with them (`grants.ts`), in the same batch.
       ...userSessionsDelete(db, user.id),
       recordEventStatement(db, {
-        kind: 'role_changed',
+        kind: "role_changed",
         userId: user.id,
         // Nobody clicked. `provider:<id>` is the actor vocabulary for exactly
         // this, and it is the case the table was argued for.
@@ -313,13 +313,13 @@ export async function completeSignIn(
         detail,
         at: now,
       }),
-    )
+    );
   }
   // The two remaining rows — a provider with no mapper, and a mapper answering
   // the role already stored — write nothing and say nothing. A no-op is not an
   // event.
 
-  const session = await newSession({ days: auth.sessionDays, now })
+  const session = await newSession({ days: auth.sessionDays, now });
   writes.push(
     ...sessionStatements(db, user.id, session, {
       userAgent: ctx.userAgent,
@@ -327,7 +327,7 @@ export async function completeSignIn(
       now,
     }),
     recordEventStatement(db, {
-      kind: 'sign_in',
+      kind: "sign_in",
       userId: user.id,
       // Their own id: a sign-in is the one event whose actor is its subject.
       actor: user.id,
@@ -341,10 +341,10 @@ export async function completeSignIn(
     // credential that was just used, and an event ordered before the thing it
     // describes is the ordering `events.ts` refuses everywhere else.
     ...(ctx.extra ?? []),
-  )
+  );
 
-  await db.batch(writes)
-  return { ok: true, user, session, roleChanged }
+  await db.batch(writes);
+  return { ok: true, user, session, roleChanged };
 }
 
 /**
@@ -354,7 +354,7 @@ export async function completeSignIn(
  * default standing in for a missing value — it is what those kinds *mean*.
  */
 function provisioningOf(provider: AuthProvider<unknown>): Provisioning {
-  return 'provision' in provider ? (provider.provision ?? 'refuse') : 'refuse'
+  return "provision" in provider ? (provider.provision ?? "refuse") : "refuse";
 }
 
 /**
@@ -363,18 +363,18 @@ function provisioningOf(provider: AuthProvider<unknown>): Provisioning {
  * `undefined` for anything else, which the caller treats as a configuration bug.
  */
 function grantSetOf(answer: unknown): RoleGrants | null | undefined {
-  if (answer === null) return null
-  if (isRole(answer)) return { '*': answer }
-  if (typeof answer !== 'object' || Array.isArray(answer)) return undefined
-  const entries = Object.entries(answer as Record<string, unknown>)
-  if (!entries.every(([scope, role]) => scope !== '' && isRole(role))) return undefined
-  return entries.length > 0 ? (Object.fromEntries(entries) as RoleGrants) : null
+  if (answer === null) return null;
+  if (isRole(answer)) return { "*": answer };
+  if (typeof answer !== "object" || Array.isArray(answer)) return undefined;
+  const entries = Object.entries(answer as Record<string, unknown>);
+  if (!entries.every(([scope, role]) => scope !== "" && isRole(role))) return undefined;
+  return entries.length > 0 ? (Object.fromEntries(entries) as RoleGrants) : null;
 }
 
 /** The role when a set is exactly one `*` grant, else null. */
 function starOnly(set: RoleGrants): Role | null {
-  const keys = Object.keys(set)
-  return keys.length === 1 && keys[0] === '*' ? (set['*'] ?? null) : null
+  const keys = Object.keys(set);
+  return keys.length === 1 && keys[0] === "*" ? (set["*"] ?? null) : null;
 }
 
 /**
@@ -384,9 +384,9 @@ function starOnly(set: RoleGrants): Role | null {
  * and a mapper answering exactly that is no change either.
  */
 function sameGrants(held: RoleGrants, mapped: RoleGrants, role: Role): boolean {
-  const current = Object.keys(held).length === 0 ? { '*': role } : held
-  const a = Object.keys(current)
-  return a.length === Object.keys(mapped).length && a.every((s) => current[s] === mapped[s])
+  const current = Object.keys(held).length === 0 ? { "*": role } : held;
+  const a = Object.keys(current);
+  return a.length === Object.keys(mapped).length && a.every((s) => current[s] === mapped[s]);
 }
 
 /**
@@ -395,13 +395,13 @@ function sameGrants(held: RoleGrants, mapped: RoleGrants, role: Role): boolean {
  * so a deployment with no `sites`, whose mappers answer a bare role, pays nothing.
  */
 async function knownScopes(db: FolioDb, scopes: readonly string[]): Promise<Set<string>> {
-  const known = new Set<string>(scopes.filter((scope) => scope === '*' || scope === 'shared'))
-  const rest = scopes.filter((scope) => !known.has(scope))
-  if (rest.length === 0) return known
+  const known = new Set<string>(scopes.filter((scope) => scope === "*" || scope === "shared"));
+  const rest = scopes.filter((scope) => !known.has(scope));
+  if (rest.length === 0) return known;
   const { results } = await db
-    .prepare(`select id from sites where id in (${rest.map(() => '?').join(', ')})`)
+    .prepare(`select id from sites where id in (${rest.map(() => "?").join(", ")})`)
     .bind(...rest)
-    .all<{ id: string }>()
-  for (const row of results) known.add(row.id)
-  return known
+    .all<{ id: string }>();
+  for (const row of results) known.add(row.id);
+  return known;
 }

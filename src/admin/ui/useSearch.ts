@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import type { Page } from '../../core/pagination'
-import type { SearchSort, StoryMeta } from '../../core/story'
+import { useEffect, useState } from "react";
+import type { Page } from "../../core/pagination";
+import type { SearchSort, StoryMeta } from "../../core/story";
 
 /**
  * Documents matching a query, debounced — the client half of
@@ -25,16 +25,16 @@ import type { SearchSort, StoryMeta } from '../../core/story'
 
 /** Long enough that typing a word is one request, short enough to feel immediate.
  * The same figure the editor's debounced draft write uses. */
-const DEBOUNCE_MS = 150
+const DEBOUNCE_MS = 150;
 
 /** Twenty is what a palette shows before scrolling stops being a list and starts
  * being a page. It is also the route's own default. */
-const LIMIT = 20
+const LIMIT = 20;
 
 export interface SearchResults {
-  query: string
-  setQuery: (next: string) => void
-  rows: readonly StoryMeta[]
+  query: string;
+  setQuery: (next: string) => void;
+  rows: readonly StoryMeta[];
 }
 
 /**
@@ -47,44 +47,44 @@ export interface SearchResults {
 export function useSearch(
   apiBase: string,
   active: boolean,
-  sort: SearchSort = 'edited',
+  sort: SearchSort = "edited",
 ): SearchResults {
-  const [query, setQuery] = useState('')
-  const [rows, setRows] = useState<readonly StoryMeta[]>([])
+  const [query, setQuery] = useState("");
+  const [rows, setRows] = useState<readonly StoryMeta[]>([]);
 
   useEffect(() => {
     if (!active) {
       // Closing clears the results rather than caching them: the next ⌘K starts on
       // an empty query, so stale rows from the last search would be the first thing
       // it showed.
-      setQuery('')
-      setRows([])
-      return
+      setQuery("");
+      setRows([]);
+      return;
     }
-    let live = true
+    let live = true;
     const timer = setTimeout(() => {
-      const params = new URLSearchParams({ sort, limit: String(LIMIT) })
-      if (query.trim()) params.set('q', query.trim())
+      const params = new URLSearchParams({ sort, limit: String(LIMIT) });
+      if (query.trim()) params.set("q", query.trim());
       fetch(`${apiBase}/search?${params}`)
         .then(
           async (res): Promise<readonly StoryMeta[]> =>
             res.ok ? (await (res.json() as Promise<Page<StoryMeta>>)).rows : [],
         )
         .then((found) => {
-          if (live) setRows(found)
+          if (live) setRows(found);
         })
         .catch(() => {
           // A failed search is an empty list, not a toast: the palette is a
           // navigation aid and an error banner inside it would be in the way of the
           // screens it can still reach.
-          if (live) setRows([])
-        })
-    }, DEBOUNCE_MS)
+          if (live) setRows([]);
+        });
+    }, DEBOUNCE_MS);
     return () => {
-      live = false
-      clearTimeout(timer)
-    }
-  }, [apiBase, active, query, sort])
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [apiBase, active, query, sort]);
 
-  return { query, setQuery, rows }
+  return { query, setQuery, rows };
 }

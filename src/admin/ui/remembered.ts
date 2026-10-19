@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from "react";
 
 /**
  * A boolean the browser remembers, keyed by a string that may change.
@@ -15,41 +15,41 @@ import { useCallback, useEffect, useState } from 'react'
  * cost a remembered preference, not the admin.
  */
 export function useRemembered(key: string, fallback: boolean) {
-  const [value, set] = useState(() => read(key, fallback))
+  const [value, set] = useState(() => read(key, fallback));
 
   useEffect(() => {
-    set(read(key, fallback))
-  }, [key, fallback])
+    set(read(key, fallback));
+  }, [key, fallback]);
 
   const write = useCallback(
     (next: boolean) => {
-      set(next)
+      set(next);
       try {
-        localStorage.setItem(key, next ? '1' : '0')
+        localStorage.setItem(key, next ? "1" : "0");
       } catch {
         // Nothing to do, and nothing worth telling the user: it still toggled, it
         // just will not be that way next time.
       }
     },
     [key],
-  )
+  );
 
   // Closes over the current value rather than re-reading storage: a write that
   // threw would leave the two disagreeing, and the one the user can see is the
   // one a toggle has to invert. Safe against a stale closure because the only
   // long-lived holder is `useShortcuts`, which keeps its bindings in a ref it
   // refreshes every render.
-  const toggle = useCallback(() => write(!value), [value, write])
+  const toggle = useCallback(() => write(!value), [value, write]);
 
-  return { value, set: write, toggle }
+  return { value, set: write, toggle };
 }
 
 function read(key: string, fallback: boolean): boolean {
   try {
-    const saved = localStorage.getItem(key)
-    return saved === null ? fallback : saved === '1'
+    const saved = localStorage.getItem(key);
+    return saved === null ? fallback : saved === "1";
   } catch {
-    return fallback
+    return fallback;
   }
 }
 
@@ -69,25 +69,25 @@ export function useRememberedString<T extends string>(
   fallback: T,
   valid: (raw: string) => raw is T,
 ) {
-  const [value, set] = useState<T>(() => readString(key, fallback, valid))
+  const [value, set] = useState<T>(() => readString(key, fallback, valid));
 
   useEffect(() => {
-    set(readString(key, fallback, valid))
-  }, [key, fallback, valid])
+    set(readString(key, fallback, valid));
+  }, [key, fallback, valid]);
 
   const write = useCallback(
     (next: T) => {
-      set(next)
+      set(next);
       try {
-        localStorage.setItem(key, next)
+        localStorage.setItem(key, next);
       } catch {
         // As above: it still changed, it just will not be that way next time.
       }
     },
     [key],
-  )
+  );
 
-  return { value, set: write }
+  return { value, set: write };
 }
 
 function readString<T extends string>(
@@ -96,10 +96,10 @@ function readString<T extends string>(
   valid: (raw: string) => raw is T,
 ): T {
   try {
-    const saved = localStorage.getItem(key)
-    return saved !== null && valid(saved) ? saved : fallback
+    const saved = localStorage.getItem(key);
+    return saved !== null && valid(saved) ? saved : fallback;
   } catch {
-    return fallback
+    return fallback;
   }
 }
 
@@ -117,7 +117,7 @@ function readString<T extends string>(
  * row asks for — an expanded node inside a collapsed ancestor is never drawn, so it
  * is never fetched, however many of them are remembered.
  */
-const SET_LIMIT = 200
+const SET_LIMIT = 200;
 
 /**
  * The same again, for a set of ids — Content's expanded nodes, and nothing else yet.
@@ -135,47 +135,47 @@ const SET_LIMIT = 200
  * comma, so the encoding cannot be ambiguous and reading it back cannot throw.
  */
 export function useRememberedSet(key: string, valid: (raw: string) => boolean) {
-  const [value, setValue] = useState<ReadonlySet<string>>(() => readSet(key, valid))
+  const [value, setValue] = useState<ReadonlySet<string>>(() => readSet(key, valid));
 
   useEffect(() => {
-    setValue(readSet(key, valid))
-  }, [key, valid])
+    setValue(readSet(key, valid));
+  }, [key, valid]);
 
   const write = useCallback(
     (next: ReadonlySet<string>) => {
       // Trimmed once, so what is in memory and what is in storage cannot disagree
       // about which members survived.
-      const kept = next.size > SET_LIMIT ? new Set([...next].slice(-SET_LIMIT)) : next
-      setValue(kept)
+      const kept = next.size > SET_LIMIT ? new Set([...next].slice(-SET_LIMIT)) : next;
+      setValue(kept);
       try {
-        localStorage.setItem(key, [...kept].join(','))
+        localStorage.setItem(key, [...kept].join(","));
       } catch {
         // As above: it still changed, it just will not be that way next time.
       }
     },
     [key],
-  )
+  );
 
   // Closes over the current value for the same reason `useRemembered.toggle` does:
   // the one a caller can see is the one a toggle has to invert.
   const toggle = useCallback(
     (member: string) => {
-      const next = new Set(value)
-      if (!next.delete(member)) next.add(member)
-      write(next)
+      const next = new Set(value);
+      if (!next.delete(member)) next.add(member);
+      write(next);
     },
     [value, write],
-  )
+  );
 
-  return { value, set: write, toggle }
+  return { value, set: write, toggle };
 }
 
 function readSet(key: string, valid: (raw: string) => boolean): ReadonlySet<string> {
   try {
-    const saved = localStorage.getItem(key)
-    if (!saved) return new Set()
-    return new Set(saved.split(',').filter(valid).slice(-SET_LIMIT))
+    const saved = localStorage.getItem(key);
+    if (!saved) return new Set();
+    return new Set(saved.split(",").filter(valid).slice(-SET_LIMIT));
   } catch {
-    return new Set()
+    return new Set();
   }
 }

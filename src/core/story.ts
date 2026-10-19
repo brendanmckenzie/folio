@@ -1,4 +1,4 @@
-import { compareSiblings } from './doc'
+import { compareSiblings } from "./doc";
 
 /**
  * Story *structure*. Page metadata lives in the document's root block, not
@@ -6,15 +6,15 @@ import { compareSiblings } from './doc'
  * `title`, cached so the tree renders without loading every Durable Object.
  */
 export interface StoryMeta {
-  id: string
+  id: string;
   /**
    * Document type name, resolved against the `types` passed to `createFolio`.
    * A record and a page are the same row with a different value here
    * (`document-types.md` checkpoint 1) — there is no second table.
    */
-  type: string
-  parentId: string | null
-  slug: string
+  type: string;
+  parentId: string | null;
+  slug: string;
   /**
    * Null for an unrouted document (a record or a singleton), which leaves the
    * page tree entirely rather than squatting a URL: naming a record "Contact"
@@ -22,15 +22,15 @@ export interface StoryMeta {
    * (`document-types.md` checkpoint 2). Derived from the ancestor chain for
    * everything else.
    */
-  path: string | null
+  path: string | null;
   /** Fractional index among siblings: within the parent for a routed document,
    * within the type for an unrouted one. */
-  ord: string
-  title: string
-  publishedAt: number | null
+  ord: string;
+  title: string;
+  publishedAt: number | null;
   /** Set the moment a live page is taken down; cleared by the next publish. */
-  unpublishedAt: number | null
-  updatedAt: number
+  unpublishedAt: number | null;
+  updatedAt: number;
   /**
    * The Durable Object's log position last mirrored into D1, and the position
    * that was actually published — `unpublished-changes.md`'s watermark pair.
@@ -38,10 +38,10 @@ export interface StoryMeta {
    * published, which reads as "nothing changed" rather than "everything
    * changed" (see `stories.draft_sync_id` in migrations/0001_init.sql).
    */
-  draftSyncId: number
+  draftSyncId: number;
   /** When the watermark above was last written. Null until the first debounced write. */
-  draftUpdatedAt: number | null
-  publishedSyncId: number
+  draftUpdatedAt: number | null;
+  publishedSyncId: number;
   /**
    * The last content migration applied to this document
    * (`schema-migrations.md`), or null for "before the first migration" — which
@@ -52,7 +52,7 @@ export interface StoryMeta {
    * behind-the-model banner), and making it required would mean touching every
    * hand-built `StoryMeta` literal in the tree for no gain at either.
    */
-  schemaId?: string | null
+  schemaId?: string | null;
   /**
    * Translated titles by locale code, from `stories.title_i18n`
    * (`localisation.md` architecture decision 7) — so a translator's tree is not
@@ -67,7 +67,7 @@ export interface StoryMeta {
    * Optional for the same reason `schemaId` is: making it required would mean
    * touching every hand-built `StoryMeta` literal in the tree for no gain.
    */
-  titleI18n?: Record<string, string> | null
+  titleI18n?: Record<string, string> | null;
   /**
    * The scope that owns the document: a site id, a group id or `shared`
    * (`../../docs/specs/foundation/multi-site.md` decision 3). `'default'` on
@@ -77,27 +77,27 @@ export interface StoryMeta {
    * for the reason `schemaId` is: the spec's `site: string` would mean touching
    * every hand-built `StoryMeta` literal in the tests, which phase 1 does not own.
    */
-  site?: string
+  site?: string;
   /**
    * The inherited document this one was forked from, or null for one that was
    * written here (decision 5). Nothing on a single-site deployment sets it.
    */
-  forkedFrom?: string | null
+  forkedFrom?: string | null;
   /** Derived, not stored — see `draftState`. */
-  state: StoryState
+  state: StoryState;
   /** Derived, not stored: `state === 'changed'`, named for callers that only
    * care about the yes/no rather than the whole state machine. */
-  hasUnpublishedChanges: boolean
+  hasUnpublishedChanges: boolean;
   /** Filled server-side from the host's `route` config. */
-  url?: string
-  previewUrl?: string
+  url?: string;
+  previewUrl?: string;
   /**
    * The same document, rendered as the site would serve it rather than as the
    * editor sees it (`platform/mcp-server.md` decision 5): no `folio-editing`
    * body class, no uid markers on a component-returning block, no postMessage
    * bridge. `previewUrl` is an editing surface; this is a page.
    */
-  draftUrl?: string
+  draftUrl?: string;
   /**
    * The same two, per locale, filled only when `FolioConfig.locales` is
    * configured — the host's own `route(path, locale)` called once per declared
@@ -109,13 +109,13 @@ export interface StoryMeta {
    * new resolution, because the host's own chrome and `<html lang>` are part of
    * what changes and no postMessage can reach them.
    */
-  urls?: Record<string, string>
-  previewUrls?: Record<string, string>
-  draftUrls?: Record<string, string>
+  urls?: Record<string, string>;
+  previewUrls?: Record<string, string>;
+  draftUrls?: Record<string, string>;
 }
 
 export interface StoryNode extends StoryMeta {
-  children: StoryNode[]
+  children: StoryNode[];
 }
 
 /**
@@ -139,7 +139,7 @@ export interface StoryNode extends StoryMeta {
  * the page that is, in fact, live. A schedule is read separately (`Schedule`
  * below), and a screen draws it as its own marker beside the state chip.
  */
-export type StoryState = 'draft' | 'unpublished' | 'live' | 'changed'
+export type StoryState = "draft" | "unpublished" | "live" | "changed";
 
 /**
  * `published_doc is not null` is the actual liveness switch (server/stories.ts),
@@ -150,10 +150,10 @@ export type StoryState = 'draft' | 'unpublished' | 'live' | 'changed'
 export function storyState(
   publishedAt: number | null,
   unpublishedAt: number | null,
-): Exclude<StoryState, 'changed'> {
-  if (publishedAt !== null) return 'live'
-  if (unpublishedAt !== null) return 'unpublished'
-  return 'draft'
+): Exclude<StoryState, "changed"> {
+  if (publishedAt !== null) return "live";
+  if (unpublishedAt !== null) return "unpublished";
+  return "draft";
 }
 
 /**
@@ -188,8 +188,8 @@ export function draftState(
   draftSyncId: number,
   publishedSyncId: number,
 ): StoryState {
-  const base = storyState(publishedAt, unpublishedAt)
-  return base === 'live' && draftSyncId > publishedSyncId ? 'changed' : base
+  const base = storyState(publishedAt, unpublishedAt);
+  return base === "live" && draftSyncId > publishedSyncId ? "changed" : base;
 }
 
 /**
@@ -220,7 +220,7 @@ export function draftState(
  * enabled there too.
  */
 export function isLive(state: StoryState): boolean {
-  return state === 'live' || state === 'changed'
+  return state === "live" || state === "changed";
 }
 
 /**
@@ -236,7 +236,7 @@ export function isLive(state: StoryState): boolean {
  * that writes it and the reader that answers it have to share one vocabulary, and
  * `core/` is the only thing both import.
  */
-export type ScheduleAction = 'publish' | 'unpublish'
+export type ScheduleAction = "publish" | "unpublish";
 
 /**
  * Where a schedule has got to.
@@ -251,7 +251,7 @@ export type ScheduleAction = 'publish' | 'unpublish'
  * `'failed'` *is* retained, because a failure is recorded nowhere else. A schedule
  * nobody can see fail is the bug this feature has.
  */
-export type ScheduleStatus = 'pending' | 'failed'
+export type ScheduleStatus = "pending" | "failed";
 
 /**
  * One scheduled publish or unpublish, as stored.
@@ -264,21 +264,21 @@ export type ScheduleStatus = 'pending' | 'failed'
  * it can already name.
  */
 export interface Schedule {
-  id: string
-  storyId: string
-  action: ScheduleAction
+  id: string;
+  storyId: string;
+  action: ScheduleAction;
   /** Epoch milliseconds, UTC. Rendering it in an editor's timezone is the
    * screen's job — Folio stores no timezone anywhere. */
-  at: number
-  status: ScheduleStatus
+  at: number;
+  status: ScheduleStatus;
   /** Who scheduled it. Passed to `publish(deps, story, actor)` when it fires, so
    * the version row names the person rather than the cron. */
-  actor: string | null
-  createdAt: number
+  actor: string | null;
+  createdAt: number;
   /** Failed attempts so far. Non-zero with `status: 'pending'` means the sweep
    * will try again; see `server/scheduler.ts`'s `MAX_SCHEDULE_ATTEMPTS`. */
-  attempts: number
-  lastError: string | null
+  attempts: number;
+  lastError: string | null;
 }
 
 /**
@@ -298,14 +298,14 @@ export interface Schedule {
  */
 export interface StoryFilter {
   /** `null` for the top level. Absent for "any parent" — see above. */
-  parentId?: string | null
+  parentId?: string | null;
   /** A document type name. */
-  type?: string
-  state?: StoryState
+  type?: string;
+  state?: StoryState;
   /** Substring, matched against title, slug and path. */
-  q?: string
+  q?: string;
   /** A locale code, for translation completeness. */
-  locale?: string
+  locale?: string;
   /**
    * `true` for routed pages, `false` for unrouted documents, absent for both.
    *
@@ -318,7 +318,7 @@ export interface StoryFilter {
    * "every draft page" from "every draft document" would refuse every select-all
    * Content ever made.
    */
-  routed?: boolean
+  routed?: boolean;
 }
 
 /**
@@ -340,7 +340,7 @@ export interface StoryFilter {
  * media library's four, and a bare `BulkAction` exported beside it would be a
  * name that reads as "either" and means "one of them".
  */
-export type StoryBulkAction = 'publish' | 'unpublish' | 'duplicate' | 'move' | 'delete'
+export type StoryBulkAction = "publish" | "unpublish" | "duplicate" | "move" | "delete";
 
 /**
  * Flat mode's ordering (`pagination.md` decision 2a) — the other half of the
@@ -356,11 +356,11 @@ export type StoryBulkAction = 'publish' | 'unpublish' | 'duplicate' | 'move' | '
  * would need a fourth index for a sort nobody has asked for, over an expression
  * with four distinct values. Adding it later is one index and one `order by`.
  */
-export type FlatSort = 'edited' | 'title' | 'path'
+export type FlatSort = "edited" | "title" | "path";
 
 /** `edited`, the default: "what changed lately" is the question flat mode exists
  * to answer, so a URL that omits the sort wants it rather than an error. */
-export const DEFAULT_FLAT_SORT: FlatSort = 'edited'
+export const DEFAULT_FLAT_SORT: FlatSort = "edited";
 
 /**
  * The Documents screen's ordering — one type's records as a table
@@ -400,7 +400,7 @@ export const DEFAULT_FLAT_SORT: FlatSort = 'edited'
  * `query.ts` filters `published_doc is not null` — so it is a parallel
  * implementation, not a call.
  */
-export type DocumentSort = 'ord' | 'title' | 'edited'
+export type DocumentSort = "ord" | "title" | "edited";
 
 /**
  * `title`, the default, because it is what the list this replaces showed:
@@ -411,7 +411,7 @@ export type DocumentSort = 'ord' | 'title' | 'edited'
  * manual position (`createStory` appends, so it reads as creation order and the
  * screen labels it "Added"), not because it is the useful default.
  */
-export const DEFAULT_DOCUMENT_SORT: DocumentSort = 'title'
+export const DEFAULT_DOCUMENT_SORT: DocumentSort = "title";
 
 /**
  * `GET {base}/api/search`'s ordering (`pagination.md` decision 8).
@@ -426,11 +426,11 @@ export const DEFAULT_DOCUMENT_SORT: DocumentSort = 'title'
  *
  * `path` is absent because a record has none, and this route spans every kind.
  */
-export type SearchSort = 'title' | 'edited'
+export type SearchSort = "title" | "edited";
 
 /** `title`, so a picker that opens with no query reads as a list rather than a
  * feed. The palette asks for `edited` explicitly, because it *is* a feed. */
-export const DEFAULT_SEARCH_SORT: SearchSort = 'title'
+export const DEFAULT_SEARCH_SORT: SearchSort = "title";
 
 // `AssetSort` / `DEFAULT_ASSET_SORT` moved to `core/assets.ts` — the media
 // library organisation spec (`docs/specs/content-model/media-library.md`)
@@ -438,8 +438,8 @@ export const DEFAULT_SEARCH_SORT: SearchSort = 'title'
 // along; they were only ever here because that module did not exist yet.
 
 export function joinPath(parentPath: string, slug: string): string {
-  if (!slug) return parentPath
-  return parentPath ? `${parentPath}/${slug}` : slug
+  if (!slug) return parentPath;
+  return parentPath ? `${parentPath}/${slug}` : slug;
 }
 
 /**
@@ -455,11 +455,11 @@ export function joinPath(parentPath: string, slug: string): string {
  * `''` for the root story's own path, which has no ancestors.
  */
 export function ancestorPaths(path: string | null): string[] {
-  if (path === null || path === '') return []
-  const segments = path.split('/')
-  const out: string[] = ['']
-  for (let i = 1; i < segments.length; i++) out.push(segments.slice(0, i).join('/'))
-  return out
+  if (path === null || path === "") return [];
+  const segments = path.split("/");
+  const out: string[] = [""];
+  for (let i = 1; i < segments.length; i++) out.push(segments.slice(0, i).join("/"));
+  return out;
 }
 
 /**
@@ -470,25 +470,25 @@ export function ancestorPaths(path: string | null): string[] {
  * singleton is listed instead.
  */
 export function buildTree(rows: readonly StoryMeta[]): StoryNode[] {
-  const byId = new Map<string, StoryNode>()
+  const byId = new Map<string, StoryNode>();
   for (const row of rows) {
-    if (row.path === null) continue
-    byId.set(row.id, { ...row, children: [] })
+    if (row.path === null) continue;
+    byId.set(row.id, { ...row, children: [] });
   }
 
-  const roots: StoryNode[] = []
+  const roots: StoryNode[] = [];
   for (const node of byId.values()) {
-    const parent = node.parentId ? byId.get(node.parentId) : undefined
-    if (parent) parent.children.push(node)
-    else roots.push(node)
+    const parent = node.parentId ? byId.get(node.parentId) : undefined;
+    if (parent) parent.children.push(node);
+    else roots.push(node);
   }
 
   const sort = (nodes: StoryNode[]) => {
-    nodes.sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
-    for (const n of nodes) sort(n.children)
-  }
-  sort(roots)
-  return roots
+    nodes.sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id));
+    for (const n of nodes) sort(n.children);
+  };
+  sort(roots);
+  return roots;
 }
 
 /**
@@ -501,24 +501,24 @@ export function buildTree(rows: readonly StoryMeta[]): StoryNode[] {
  * untouched.
  */
 export function derivePaths(rows: readonly StoryMeta[]): Map<string, string> {
-  const byId = new Map(rows.filter((r) => r.path !== null).map((r) => [r.id, r]))
-  const out = new Map<string, string>()
-  const seen = new Set<string>()
+  const byId = new Map(rows.filter((r) => r.path !== null).map((r) => [r.id, r]));
+  const out = new Map<string, string>();
+  const seen = new Set<string>();
 
   const pathOf = (row: StoryMeta): string => {
-    const cached = out.get(row.id)
-    if (cached !== undefined) return cached
-    if (seen.has(row.id)) return row.slug // cycle guard
-    seen.add(row.id)
+    const cached = out.get(row.id);
+    if (cached !== undefined) return cached;
+    if (seen.has(row.id)) return row.slug; // cycle guard
+    seen.add(row.id);
 
-    const parent = row.parentId ? byId.get(row.parentId) : undefined
-    const path = parent ? joinPath(pathOf(parent), row.slug) : row.slug
-    out.set(row.id, path)
-    return path
-  }
+    const parent = row.parentId ? byId.get(row.parentId) : undefined;
+    const path = parent ? joinPath(pathOf(parent), row.slug) : row.slug;
+    out.set(row.id, path);
+    return path;
+  };
 
-  for (const row of byId.values()) pathOf(row)
-  return out
+  for (const row of byId.values()) pathOf(row);
+  return out;
 }
 
 /**
@@ -530,23 +530,23 @@ export function derivePaths(rows: readonly StoryMeta[]): Map<string, string> {
  * and `deleteStory`) both walk through here.
  */
 export function descendants(rows: readonly StoryMeta[], id: string): string[] {
-  const children = new Map<string, string[]>()
+  const children = new Map<string, string[]>();
   for (const r of rows) {
-    if (!r.parentId) continue
-    const list = children.get(r.parentId)
-    if (list) list.push(r.id)
-    else children.set(r.parentId, [r.id])
+    if (!r.parentId) continue;
+    const list = children.get(r.parentId);
+    if (list) list.push(r.id);
+    else children.set(r.parentId, [r.id]);
   }
-  const out: string[] = []
-  const seen = new Set<string>()
+  const out: string[] = [];
+  const seen = new Set<string>();
   const walk = (cur: string) => {
-    if (seen.has(cur)) return
-    seen.add(cur)
-    out.push(cur)
-    for (const child of children.get(cur) ?? []) walk(child)
-  }
-  walk(id)
-  return out
+    if (seen.has(cur)) return;
+    seen.add(cur);
+    out.push(cur);
+    for (const child of children.get(cur) ?? []) walk(child);
+  };
+  walk(id);
+  return out;
 }
 
 /**
@@ -560,22 +560,22 @@ export function descendants(rows: readonly StoryMeta[], id: string): string[] {
  * an untouched one — unpublishing its ancestor must still warn that it stays up.
  */
 export function liveDescendants(rows: readonly StoryMeta[], id: string): StoryMeta[] {
-  const ids = new Set(descendants(rows, id))
-  ids.delete(id)
-  return rows.filter((r) => ids.has(r.id) && isLive(r.state))
+  const ids = new Set(descendants(rows, id));
+  ids.delete(id);
+  return rows.filter((r) => ids.has(r.id) && isLive(r.state));
 }
 
 export function slugify(input: string): string {
   return (
     input
       .toLowerCase()
-      .normalize('NFKD')
-      .replace(/[^\p{Letter}\p{Number}]+/gu, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 64) || 'untitled'
-  )
+      .normalize("NFKD")
+      .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "untitled"
+  );
 }
 
 export function newStoryId(): string {
-  return `sty_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+  return `sty_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }

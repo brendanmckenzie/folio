@@ -1,22 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 import {
   FILE_ACCEPT,
   type FormField,
   type FormFieldKind,
   MAX_FORM_FIELDS,
   shapeOf,
-} from '../../../core/forms'
-import type { LocaleConfig } from '../../../core/locales'
-import type { Form } from '../../../server/forms'
-import { canDeleteForms, canEdit, type Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
-import { Field, Input, Select, Textarea } from '../Field'
-import { ListHeader } from '../List'
-import { Menu, type MenuItem } from '../Menu'
-import { FormDeleteDialog } from './FormDeleteDialog'
-import css from './FormBuilder.module.css'
+} from "../../../core/forms";
+import type { LocaleConfig } from "../../../core/locales";
+import type { Form } from "../../../server/forms";
+import { canDeleteForms, canEdit, type Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
+import { Field, Input, Select, Textarea } from "../Field";
+import { ListHeader } from "../List";
+import { Menu, type MenuItem } from "../Menu";
+import { FormDeleteDialog } from "./FormDeleteDialog";
+import css from "./FormBuilder.module.css";
 import {
   addField,
   addOption,
@@ -45,23 +45,23 @@ import {
   withFieldText,
   withGrow,
   withOptionLabel,
-} from './form-model'
-import { messageOf } from './useContent'
-import { useForm } from './useForm'
+} from "./form-model";
+import { messageOf } from "./useContent";
+import { useForm } from "./useForm";
 
 interface Props {
-  apiBase: string
-  id: string
-  me: Me
+  apiBase: string;
+  id: string;
+  me: Me;
   /** `FolioConfig.locales`, when the host declared one. Absent hides the
    *  locale switcher entirely — decision 12: "shown only when
    *  `config.locales` is set." */
-  locales?: LocaleConfig
-  onNotice: (message: string) => void
+  locales?: LocaleConfig;
+  onNotice: (message: string) => void;
   /** Reports the saved label, for the shell's breadcrumb and tab title. */
-  onLabel: (label: string) => void
-  onOpenResponses: (id: string) => void
-  onDeleted: () => void
+  onLabel: (label: string) => void;
+  onOpenResponses: (id: string) => void;
+  onDeleted: () => void;
 }
 
 /**
@@ -90,17 +90,17 @@ export function FormBuilder({
   onOpenResponses,
   onDeleted,
 }: Props) {
-  const data = useForm(apiBase, id)
-  const [draft, setDraft] = useState<Form | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [selectedInitialName, setSelectedInitialName] = useState<string | null>(null)
-  const [locale, setLocale] = useState(locales?.default ?? '')
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const data = useForm(apiBase, id);
+  const [draft, setDraft] = useState<Form | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [selectedInitialName, setSelectedInitialName] = useState<string | null>(null);
+  const [locale, setLocale] = useState(locales?.default ?? "");
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
-    if (data.form) setDraft(data.form)
-  }, [data.form])
+    if (data.form) setDraft(data.form);
+  }, [data.form]);
 
   // `onLabel` is a fresh closure on every render of the shell around this
   // screen; naming it here would refire this effect — and re-notify the
@@ -109,8 +109,8 @@ export function FormBuilder({
   // crumb track what was saved, not what is mid-edit.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above.
   useEffect(() => {
-    if (data.form) onLabel(data.form.label || 'Untitled form')
-  }, [data.form])
+    if (data.form) onLabel(data.form.label || "Untitled form");
+  }, [data.form]);
 
   if (data.notFound) {
     return (
@@ -118,7 +118,7 @@ export function FormBuilder({
         title="No such form"
         body="This form was deleted, or the link to it is stale. It no longer exists."
       />
-    )
+    );
   }
 
   if (!draft) {
@@ -133,65 +133,65 @@ export function FormBuilder({
             </Button>
           }
         />
-      )
+      );
     }
     return (
       <div className={css.screen}>
         <div className={css.loadingSkeleton} aria-hidden="true" />
       </div>
-    )
+    );
   }
 
-  const editable = canEdit(me)
-  const source = locales?.default ?? ''
-  const showLocales = showLocaleSwitcher(locales)
-  const hasResponses = (data.usage?.responses ?? 0) > 0
-  const selectedField = draft.fields.find((f) => f.name === selected) ?? null
+  const editable = canEdit(me);
+  const source = locales?.default ?? "";
+  const showLocales = showLocaleSwitcher(locales);
+  const hasResponses = (data.usage?.responses ?? 0) > 0;
+  const selectedField = draft.fields.find((f) => f.name === selected) ?? null;
   // Decision 7: `version` (and therefore `formChanged`) only bumps on a
   // *shape* change — a name, kind, required flag or option values added,
   // removed or retyped — never on a label, help, translation or layout edit.
   // `shapeOf` is the one function that says which, shared with the server so
   // this can never disagree with what actually triggers `formChanged`.
-  const structural = data.form ? shapeOf(draft.fields) !== shapeOf(data.form.fields) : false
+  const structural = data.form ? shapeOf(draft.fields) !== shapeOf(data.form.fields) : false;
   // The list's own row grouping (`form-model.ts`'s `fieldRows`), and whether
   // `beside` on the selected question could do anything at all — the first
   // question in the form, and the one right after a statement, always start a
   // fresh row regardless of it.
-  const rows = fieldRows(draft.fields)
-  const rowOfField = new Map(rows.flatMap((row, r) => row.map((i) => [draft.fields[i]?.name, r])))
+  const rows = fieldRows(draft.fields);
+  const rowOfField = new Map(rows.flatMap((row, r) => row.map((i) => [draft.fields[i]?.name, r])));
   // Every index but a row's first: the list draws these joined to the
   // question above rather than starting a fresh line for them.
-  const joinedIndices = new Set(rows.flatMap((row) => row.slice(1)))
-  const joinable = selectedField ? canJoinPrevious(draft.fields, selectedField.name) : false
+  const joinedIndices = new Set(rows.flatMap((row) => row.slice(1)));
+  const joinable = selectedField ? canJoinPrevious(draft.fields, selectedField.name) : false;
 
   const select = (name: string | null) => {
-    setSelected(name)
-    setSelectedInitialName(name)
-  }
+    setSelected(name);
+    setSelectedInitialName(name);
+  };
 
   const onAddField = (kind: FormFieldKind) => {
-    const next = addField(draft.fields, kind, draft.id)
-    setDraft({ ...draft, fields: next })
-    select(next[next.length - 1]?.name ?? null)
-  }
+    const next = addField(draft.fields, kind, draft.id);
+    setDraft({ ...draft, fields: next });
+    select(next[next.length - 1]?.name ?? null);
+  };
 
   const onFieldChange = (name: string, next: FormField) => {
-    setDraft({ ...draft, fields: updateField(draft.fields, name, next) })
-    if (selected === name) setSelected(next.name)
-  }
+    setDraft({ ...draft, fields: updateField(draft.fields, name, next) });
+    if (selected === name) setSelected(next.name);
+  };
 
   const onRemoveField = (name: string) => {
-    setDraft({ ...draft, fields: removeField(draft.fields, name) })
-    if (selected === name) select(null)
-  }
+    setDraft({ ...draft, fields: removeField(draft.fields, name) });
+    if (selected === name) select(null);
+  };
 
   const onMoveField = (index: number, direction: -1 | 1) => {
-    setDraft({ ...draft, fields: moveFieldStep(draft.fields, index, direction) })
-  }
+    setDraft({ ...draft, fields: moveFieldStep(draft.fields, index, direction) });
+  };
 
   const save = async () => {
-    if (!draft) return
-    setSaving(true)
+    if (!draft) return;
+    setSaving(true);
     const result = await data.save({
       label: draft.label,
       name: draft.name,
@@ -202,26 +202,26 @@ export function FormBuilder({
       closedMessage: draft.closedMessage,
       submitLabel: draft.submitLabel,
       redirectTo: draft.redirectTo,
-    })
-    setSaving(false)
+    });
+    setSaving(false);
     onNotice(
       result.ok
-        ? 'Saved.'
+        ? "Saved."
         : result.conflict
           ? `${result.message} Your unsaved change was discarded — the form below is the latest version.`
           : result.message,
-    )
-  }
+    );
+  };
 
   const remove = async () => {
-    const res = await fetch(`${apiBase}/forms/${encodeURIComponent(id)}`, { method: 'DELETE' })
+    const res = await fetch(`${apiBase}/forms/${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!res.ok) {
-      onNotice(await messageOf(res))
-      return
+      onNotice(await messageOf(res));
+      return;
     }
-    onNotice(`"${draft.label || 'Untitled form'}" and everything it collected are gone.`)
-    onDeleted()
-  }
+    onNotice(`"${draft.label || "Untitled form"}" and everything it collected are gone.`);
+    onDeleted();
+  };
 
   const addMenuItems: MenuItem[] = FIELD_KINDS.map((k) => ({
     id: k.kind,
@@ -232,8 +232,8 @@ export function FormBuilder({
       </span>
     ),
     run: () => onAddField(k.kind),
-  }))
-  const atLimit = draft.fields.length >= MAX_FORM_FIELDS
+  }));
+  const atLimit = draft.fields.length >= MAX_FORM_FIELDS;
 
   return (
     <div className={css.screen}>
@@ -249,7 +249,7 @@ export function FormBuilder({
                 {locales?.available.map((l) => (
                   <option key={l.code} value={l.code}>
                     {l.label}
-                    {l.code === source ? ' (source)' : ''}
+                    {l.code === source ? " (source)" : ""}
                   </option>
                 ))}
               </Select>
@@ -266,10 +266,10 @@ export function FormBuilder({
               size="sm"
               variant="primary"
               disabled={!editable || saving}
-              reason={!editable ? 'Your role may not edit forms' : undefined}
+              reason={!editable ? "Your role may not edit forms" : undefined}
               onClick={() => void save()}
             >
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? "Saving…" : "Save"}
             </Button>
           </>
         }
@@ -316,16 +316,16 @@ export function FormBuilder({
               >
                 <button
                   type="button"
-                  className={`${css.fieldRow} ${selected === field.name ? css.fieldRowSelected : ''}`}
+                  className={`${css.fieldRow} ${selected === field.name ? css.fieldRowSelected : ""}`}
                   onClick={() => select(field.name)}
                 >
                   <span className={css.fieldRowKind}>
                     {fieldKindLabel(field.kind)}
                     {/* Which row this question draws in — `hidden` has none,
                         being position-free on the live page. */}
-                    {field.kind !== 'hidden'
+                    {field.kind !== "hidden"
                       ? ` · Row ${(rowOfField.get(field.name) ?? 0) + 1}`
-                      : ''}
+                      : ""}
                   </span>
                   <span className={css.fieldRowLabel}>{field.label || field.name}</span>
                   {field.required ? <Badge tone="accent">Required</Badge> : null}
@@ -417,13 +417,13 @@ export function FormBuilder({
           label={draft.label}
           onClose={() => setDeleting(false)}
           onConfirm={() => {
-            setDeleting(false)
-            void remove()
+            setDeleting(false);
+            void remove();
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* -------------------------------------------------------------- field panel --- */
@@ -439,24 +439,24 @@ function FieldPanel({
   canJoinPrevious,
   onChange,
 }: {
-  field: FormField
-  formId: string
-  otherNames: readonly string[]
-  locale: string
-  source: string
-  editable: boolean
-  showRenameWarning: boolean
+  field: FormField;
+  formId: string;
+  otherNames: readonly string[];
+  locale: string;
+  source: string;
+  editable: boolean;
+  showRenameWarning: boolean;
   /** Whether `beside` on this question could do anything at all — false for
    *  the form's first real question and for one right after a `statement`. */
-  canJoinPrevious: boolean
-  onChange: (next: FormField) => void
+  canJoinPrevious: boolean;
+  onChange: (next: FormField) => void;
 }) {
-  const [nameDraft, setNameDraft] = useState(field.name)
-  useEffect(() => setNameDraft(field.name), [field.name])
+  const [nameDraft, setNameDraft] = useState(field.name);
+  useEffect(() => setNameDraft(field.name), [field.name]);
 
-  const text = (key: TranslatableKey) => fieldText(field, key, locale, source)
+  const text = (key: TranslatableKey) => fieldText(field, key, locale, source);
   const setText = (key: TranslatableKey, value: string) =>
-    onChange(withFieldText(field, key, value, locale, source))
+    onChange(withFieldText(field, key, value, locale, source));
 
   /**
    * What committing `nameDraft` would produce, and what is wrong with it — a
@@ -469,15 +469,15 @@ function FieldPanel({
    * rather than silently disambiguated, because a silent `_2` suffix is a
    * rename that did not do what it looked like it did.
    */
-  const previewName = normaliseFieldName(nameDraft)
-  const renamed = previewName !== field.name
-  const nameRefusal = renamed ? fieldNameRefusal(previewName, { formId, otherNames }) : null
+  const previewName = normaliseFieldName(nameDraft);
+  const renamed = previewName !== field.name;
+  const nameRefusal = renamed ? fieldNameRefusal(previewName, { formId, otherNames }) : null;
 
   const commitName = () => {
-    if (nameRefusal) return
-    setNameDraft(previewName)
-    if (previewName !== field.name) onChange({ ...field, name: previewName })
-  }
+    if (nameRefusal) return;
+    setNameDraft(previewName);
+    if (previewName !== field.name) onChange({ ...field, name: previewName });
+  };
 
   return (
     <div className={css.fieldPanel}>
@@ -514,23 +514,23 @@ function FieldPanel({
         {(id) => (
           <Input
             id={id}
-            value={text('label')}
+            value={text("label")}
             placeholder={locale === source ? undefined : field.label}
             disabled={!editable}
-            onChange={(e) => setText('label', e.target.value)}
+            onChange={(e) => setText("label", e.target.value)}
           />
         )}
       </Field>
 
-      {field.kind !== 'hidden' && field.kind !== 'statement' ? (
+      {field.kind !== "hidden" && field.kind !== "statement" ? (
         <Field label="Help text">
           {(id) => (
             <Input
               id={id}
-              value={text('help')}
+              value={text("help")}
               placeholder={locale === source ? undefined : field.help}
               disabled={!editable}
-              onChange={(e) => setText('help', e.target.value)}
+              onChange={(e) => setText("help", e.target.value)}
             />
           )}
         </Field>
@@ -541,16 +541,16 @@ function FieldPanel({
           {(id) => (
             <Input
               id={id}
-              value={text('placeholder')}
+              value={text("placeholder")}
               placeholder={locale === source ? undefined : field.placeholder}
               disabled={!editable}
-              onChange={(e) => setText('placeholder', e.target.value)}
+              onChange={(e) => setText("placeholder", e.target.value)}
             />
           )}
         </Field>
       ) : null}
 
-      {locale === source && field.kind !== 'hidden' && field.kind !== 'statement' ? (
+      {locale === source && field.kind !== "hidden" && field.kind !== "statement" ? (
         <Field label="Required" inline>
           {(id) => (
             <input
@@ -569,7 +569,7 @@ function FieldPanel({
           either still purges the cached page (`updateForm`'s
           `descriptorChanged`). Not shown for `hidden` (position-free) or
           `statement` (always its own row) — `rowsOf` ignores both anyway. */}
-      {locale === source && field.kind !== 'hidden' && field.kind !== 'statement' ? (
+      {locale === source && field.kind !== "hidden" && field.kind !== "statement" ? (
         <>
           <Field
             label="Sit beside the previous question"
@@ -577,7 +577,7 @@ function FieldPanel({
             help={
               canJoinPrevious
                 ? undefined
-                : 'The first question in a form, or the one right after a statement, always starts its own row.'
+                : "The first question in a form, or the one right after a statement, always starts its own row."
             }
           >
             {(id) => (
@@ -612,17 +612,17 @@ function FieldPanel({
       ) : null}
 
       {locale === source && supportsMax(field.kind) ? (
-        <Field label={field.kind === 'number' ? 'Maximum value' : 'Maximum length'}>
+        <Field label={field.kind === "number" ? "Maximum value" : "Maximum length"}>
           {(id) => (
             <Input
               id={id}
               type="number"
-              value={field.max ?? ''}
+              value={field.max ?? ""}
               disabled={!editable}
               onChange={(e) =>
                 onChange({
                   ...field,
-                  max: e.target.value === '' ? undefined : Number(e.target.value),
+                  max: e.target.value === "" ? undefined : Number(e.target.value),
                 })
               }
             />
@@ -630,18 +630,18 @@ function FieldPanel({
         </Field>
       ) : null}
 
-      {locale === source && field.kind === 'number' ? (
+      {locale === source && field.kind === "number" ? (
         <Field label="Minimum value">
           {(id) => (
             <Input
               id={id}
               type="number"
-              value={field.min ?? ''}
+              value={field.min ?? ""}
               disabled={!editable}
               onChange={(e) =>
                 onChange({
                   ...field,
-                  min: e.target.value === '' ? undefined : Number(e.target.value),
+                  min: e.target.value === "" ? undefined : Number(e.target.value),
                 })
               }
             />
@@ -657,11 +657,11 @@ function FieldPanel({
           {(id) => (
             <Input
               id={id}
-              value={field.pattern ?? ''}
+              value={field.pattern ?? ""}
               disabled={!editable}
               spellCheck={false}
               onChange={(e) =>
-                onChange({ ...field, pattern: e.target.value === '' ? undefined : e.target.value })
+                onChange({ ...field, pattern: e.target.value === "" ? undefined : e.target.value })
               }
             />
           )}
@@ -678,16 +678,16 @@ function FieldPanel({
         />
       ) : null}
 
-      {locale === source && field.kind === 'file' ? (
+      {locale === source && field.kind === "file" ? (
         <>
           <Field label="Accepts">
             {(id) => (
               <Select
                 id={id}
-                value={field.accept ?? 'documents'}
+                value={field.accept ?? "documents"}
                 disabled={!editable}
                 onChange={(e) =>
-                  onChange({ ...field, accept: e.target.value as FormField['accept'] })
+                  onChange({ ...field, accept: e.target.value as FormField["accept"] })
                 }
               >
                 {(Object.keys(FILE_ACCEPT) as (keyof typeof FILE_ACCEPT)[]).map((key) => (
@@ -706,12 +706,12 @@ function FieldPanel({
               <Input
                 id={id}
                 type="number"
-                value={field.maxBytes ?? ''}
+                value={field.maxBytes ?? ""}
                 disabled={!editable}
                 onChange={(e) =>
                   onChange({
                     ...field,
-                    maxBytes: e.target.value === '' ? undefined : Number(e.target.value),
+                    maxBytes: e.target.value === "" ? undefined : Number(e.target.value),
                   })
                 }
               />
@@ -720,12 +720,12 @@ function FieldPanel({
         </>
       ) : null}
 
-      {locale === source && field.kind === 'hidden' ? (
+      {locale === source && field.kind === "hidden" ? (
         <Field label="Value" help="The value the host's own markup emits for this input.">
           {(id) => (
             <Input
               id={id}
-              value={field.value ?? ''}
+              value={field.value ?? ""}
               disabled={!editable}
               onChange={(e) => onChange({ ...field, value: e.target.value })}
             />
@@ -733,20 +733,20 @@ function FieldPanel({
         </Field>
       ) : null}
 
-      {field.kind === 'statement' && locale === source ? (
+      {field.kind === "statement" && locale === source ? (
         <Field label="Text" help="Prose between questions. Renders no input and stores nothing.">
           {(id) => (
             <Textarea
               id={id}
               rows={3}
-              value={field.text ?? ''}
+              value={field.text ?? ""}
               disabled={!editable}
               onChange={(e) => onChange({ ...field, text: e.target.value })}
             />
           )}
         </Field>
       ) : null}
-      {field.kind === 'statement' && locale !== source ? (
+      {field.kind === "statement" && locale !== source ? (
         // `FormFieldI18n` has no `text` key (only `label`, `help`,
         // `placeholder` and `options`), and `compileField` in
         // `server/forms.ts` confirms why: `out.text = field.text` is written
@@ -758,7 +758,7 @@ function FieldPanel({
         </p>
       ) : null}
     </div>
-  )
+  );
 }
 
 function OptionsEditor({
@@ -768,13 +768,13 @@ function OptionsEditor({
   editable,
   onChange,
 }: {
-  field: FormField
-  locale: string
-  source: string
-  editable: boolean
-  onChange: (next: FormField) => void
+  field: FormField;
+  locale: string;
+  source: string;
+  editable: boolean;
+  onChange: (next: FormField) => void;
 }) {
-  const options = field.options ?? []
+  const options = field.options ?? [];
   return (
     <div className={css.options}>
       <span className={css.optionsLabel}>Options</span>
@@ -814,7 +814,7 @@ function OptionsEditor({
                 size="sm"
                 variant="danger"
                 disabled={!editable || options.length <= 1}
-                reason={options.length <= 1 ? 'At least one option is required' : undefined}
+                reason={options.length <= 1 ? "At least one option is required" : undefined}
                 aria-label={`Remove ${option.label || option.value}`}
                 onClick={() => onChange(removeOption(field, index))}
               >
@@ -830,21 +830,21 @@ function OptionsEditor({
         </Button>
       ) : null}
     </div>
-  )
+  );
 }
 
 function supportsPlaceholder(kind: FormFieldKind): boolean {
   return (
-    kind === 'text' || kind === 'textarea' || kind === 'email' || kind === 'tel' || kind === 'url'
-  )
+    kind === "text" || kind === "textarea" || kind === "email" || kind === "tel" || kind === "url"
+  );
 }
 
 function supportsMax(kind: FormFieldKind): boolean {
-  return kind === 'text' || kind === 'textarea' || kind === 'number'
+  return kind === "text" || kind === "textarea" || kind === "number";
 }
 
 function supportsPattern(kind: FormFieldKind): boolean {
-  return kind === 'text' || kind === 'email' || kind === 'tel' || kind === 'url'
+  return kind === "text" || kind === "email" || kind === "tel" || kind === "url";
 }
 
 /* ------------------------------------------------------------- form settings --- */
@@ -854,9 +854,9 @@ function FormSettingsPanel({
   editable,
   onChange,
 }: {
-  form: Form
-  editable: boolean
-  onChange: (next: Form) => void
+  form: Form;
+  editable: boolean;
+  onChange: (next: Form) => void;
 }) {
   return (
     <div className={css.fieldPanel}>
@@ -946,15 +946,15 @@ function FormSettingsPanel({
         {(id) => (
           <Input
             id={id}
-            value={form.redirectTo ?? ''}
+            value={form.redirectTo ?? ""}
             disabled={!editable}
             spellCheck={false}
             onChange={(e) =>
-              onChange({ ...form, redirectTo: e.target.value === '' ? null : e.target.value })
+              onChange({ ...form, redirectTo: e.target.value === "" ? null : e.target.value })
             }
           />
         )}
       </Field>
     </div>
-  )
+  );
 }

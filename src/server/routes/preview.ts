@@ -42,12 +42,12 @@
  * review, and putting it behind the role that manages accounts would make the
  * feature unusable by the people who need it.
  */
-import { type Context, Hono } from 'hono'
-import { NO_STORE } from '../../core/cache-tags'
-import { chain, DEFAULT_SITE, sitesUnder } from '../../core/sites'
-import type { StoryMeta } from '../../core/story'
-import { serialiseCookie, shareCookieName, withShareToken } from '../auth/cookie'
-import { actorString, PUBLISH } from '../auth/roles'
+import { type Context, Hono } from "hono";
+import { NO_STORE } from "../../core/cache-tags";
+import { chain, DEFAULT_SITE, sitesUnder } from "../../core/sites";
+import type { StoryMeta } from "../../core/story";
+import { serialiseCookie, shareCookieName, withShareToken } from "../auth/cookie";
+import { actorString, PUBLISH } from "../auth/roles";
 import {
   createShare,
   DEFAULT_SHARE_DAYS,
@@ -55,13 +55,13 @@ import {
   readShareByToken,
   revokeShare,
   shareExpiry,
-} from '../auth/shares'
-import { FolioError } from '../errors'
-import { loadStory, requestScope, requireAccess, requireAuthConfigured } from '../middleware'
-import { expiredLinkPage } from '../pages'
-import type { FolioRuntime } from '../runtime'
-import { storyById, storyByPath } from '../stories'
-import type { FolioEnv } from '../types'
+} from "../auth/shares";
+import { FolioError } from "../errors";
+import { loadStory, requestScope, requireAccess, requireAuthConfigured } from "../middleware";
+import { expiredLinkPage } from "../pages";
+import type { FolioRuntime } from "../runtime";
+import { storyById, storyByPath } from "../stories";
+import type { FolioEnv } from "../types";
 import {
   idParam,
   limitParam,
@@ -69,12 +69,12 @@ import {
   requireCursor,
   ShareCreateBody,
   shareStateQuery,
-} from '../validate'
+} from "../validate";
 
 /** A minted share token, as `mintSecret()` produces it. Screened before it reaches
  * `hashToken` or a D1 bind, the same rule `shareCookieTokens` follows for the
  * cookie's parts. */
-const SHARE_TOKEN = /^[0-9a-f]{64}$/
+const SHARE_TOKEN = /^[0-9a-f]{64}$/;
 
 /**
  * The absolute URL an editor sends. On the request's own origin, matching
@@ -84,12 +84,12 @@ const SHARE_TOKEN = /^[0-9a-f]{64}$/
  * link redeems.
  */
 function shareUrl(rt: FolioRuntime, requestUrl: string, token: string): string {
-  const url = new URL(requestUrl)
-  url.pathname = `${rt.base}/share`
-  url.search = ''
-  url.hash = ''
-  url.searchParams.set('t', token)
-  return url.toString()
+  const url = new URL(requestUrl);
+  url.pathname = `${rt.base}/share`;
+  url.search = "";
+  url.hash = "";
+  url.searchParams.set("t", token);
+  return url.toString();
 }
 
 /**
@@ -108,29 +108,29 @@ async function renderSite<Env>(
   rt: FolioRuntime,
   owner: string,
 ): Promise<{ id: string; preview: string } | null> {
-  if (!rt.sites) return null
-  const registry = await rt.sites.registry(c.env)
-  const named = c.req.query('site') ?? c.var.scope
-  const site = registry.sites.find((s) => s.id === named)
+  if (!rt.sites) return null;
+  const registry = await rt.sites.registry(c.env);
+  const named = c.req.query("site") ?? c.var.scope;
+  const site = registry.sites.find((s) => s.id === named);
   if (!site || !sitesUnder(registry, owner).includes(site.id)) {
     throw new FolioError(
-      'bad_request',
-      `Name the site to share this on: ?site=<one of ${sitesUnder(registry, owner).join(', ') || 'none'}>`,
-    )
+      "bad_request",
+      `Name the site to share this on: ?site=<one of ${sitesUnder(registry, owner).join(", ") || "none"}>`,
+    );
   }
   if (!site.preview) {
     throw new FolioError(
-      'conflict',
+      "conflict",
       `${site.name} has no preview origin, so a link cannot show its drafts yet.`,
-    )
+    );
   }
-  return { id: site.id, preview: site.preview }
+  return { id: site.id, preview: site.preview };
 }
 
 /* ------------------------------------------------ managing links (JSON) --- */
 
 export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * Mint a link for one document.
@@ -148,22 +148,22 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * built to avoid. Sharing a record is named in the spec's *Out of scope*.
    */
   app.post(
-    '/story/:id/share',
+    "/story/:id/share",
     requireAuthConfigured<Env>(rt),
     requireAccess<Env>(rt, PUBLISH),
     // `PUBLISH` on the story's own scope: the story must be in the request's scope,
     // as any publishing act's is (`multi-site.md` decision 13).
-    loadStory<Env>(rt, 'write'),
+    loadStory<Env>(rt, "write"),
     async (c) => {
-      const story = c.var.story
+      const story = c.var.story;
       if (story.path === null) {
         throw new FolioError(
-          'bad_request',
+          "bad_request",
           `“${story.title}” is not a page, so it has no URL to preview. Only routed documents can be shared.`,
-        )
+        );
       }
-      const render = await renderSite(c, rt, story.site ?? DEFAULT_SITE)
-      const body = await parseOptionalBody(c.req, ShareCreateBody)
+      const render = await renderSite(c, rt, story.site ?? DEFAULT_SITE);
+      const body = await parseOptionalBody(c.req, ShareCreateBody);
       const minted = await createShare(c.var.bindings().db, {
         storyId: story.id,
         // The default lives at the route, so the one place a link's terms are
@@ -174,18 +174,18 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         createdBy: actorString(c.var.actor),
         note: body.note ?? null,
         ...(render ? { site: render.id } : {}),
-      })
+      });
       /**
        * **The only response in this feature that contains the token**, and there is
        * no way to read it back — only its SHA-256 is stored. Same rule and same
        * comment as `POST {base}/api/tokens`.
        */
-      const on = render ? render.preview : c.req.url
+      const on = render ? render.preview : c.req.url;
       return c.json({ url: shareUrl(rt, on, minted.token), share: minted.row }, 201, {
-        'cache-control': NO_STORE,
-      })
+        "cache-control": NO_STORE,
+      });
     },
-  )
+  );
 
   /**
    * Which links exist: newest first, paged, filterable by document and by whether
@@ -200,26 +200,26 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * (`pagination.md` decision 7), and a screen drawing a share is drawing a document
    * it can already name.
    */
-  app.get('/shares', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, PUBLISH), async (c) => {
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
-    const story = c.req.query('story')
-    const state = shareStateQuery(c.req.query('state'))
+  app.get("/shares", requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, PUBLISH), async (c) => {
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
+    const story = c.req.query("story");
+    const state = shareStateQuery(c.req.query("state"));
     // Spread rather than assigned, so an absent filter is an absent key rather than
     // `undefined` — `listShares` reads presence, the discipline `listSchedules` follows.
     const page = await listShares(c.var.bindings().db, {
-      limit: limitParam(c.req.query('limit'), 50, 200),
+      limit: limitParam(c.req.query("limit"), 50, 200),
       cursor,
-      ...(story ? { storyId: idParam('story', story) } : {}),
+      ...(story ? { storyId: idParam("story", story) } : {}),
       ...(state ? { state } : {}),
       // The scope's own links (decision 10's fence), and every link with no `sites`.
-      ...(rt.sites ? { site: requestScope(c, rt) ?? '' } : {}),
-      count: c.req.query('count') === '1',
-    })
+      ...(rt.sites ? { site: requestScope(c, rt) ?? "" } : {}),
+      count: c.req.query("count") === "1",
+    });
     // Named `shares` rather than `rows`, the same way `/users` and `/tokens` name
     // their own collection: a screen reads it by name.
-    return c.json({ shares: page.rows, cursor: page.cursor, total: page.total })
-  })
+    return c.json({ shares: page.rows, cursor: page.cursor, total: page.total });
+  });
 
   /**
    * Turn a link off now.
@@ -231,28 +231,28 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * reporting success would say otherwise.
    */
   app.delete(
-    '/shares/:id',
+    "/shares/:id",
     requireAuthConfigured<Env>(rt),
     requireAccess<Env>(rt, PUBLISH),
     async (c) => {
-      const id = idParam('id', c.req.param('id'))
-      const site = rt.sites ? (requestScope(c, rt) ?? '') : undefined
+      const id = idParam("id", c.req.param("id"));
+      const site = rt.sites ? (requestScope(c, rt) ?? "") : undefined;
       if (!(await revokeShare(c.var.bindings().db, id, site))) {
-        throw new FolioError('not_found', 'Unknown or already-revoked preview link')
+        throw new FolioError("not_found", "Unknown or already-revoked preview link");
       }
-      return c.json({ revoked: true })
+      return c.json({ revoked: true });
     },
-  )
+  );
 
-  return app
+  return app;
 }
 
 /* --------------------------------------------- using a link (HTML, open) --- */
 
 /** Where a redeemed link lands with no `sites`: `route()`'s URL, or its draft. */
 function shareTarget(rt: FolioRuntime, story: StoryMeta): string | undefined {
-  const urls = rt.withUrls(story)
-  return rt.draftMode ? urls.url : urls.draftUrl
+  const urls = rt.withUrls(story);
+  return rt.draftMode ? urls.url : urls.draftUrl;
 }
 
 /**
@@ -268,25 +268,25 @@ async function siteTarget<Env>(
   siteId: string,
   story: StoryMeta,
 ): Promise<string | undefined> {
-  const registry = await rt.sites!.registry(c.env)
-  const site = registry.sites.find((s) => s.id === siteId)
-  if (!site?.preview) return undefined
-  const urls = rt.urlsFor(site)(story)
+  const registry = await rt.sites!.registry(c.env);
+  const site = registry.sites.find((s) => s.id === siteId);
+  if (!site?.preview) return undefined;
+  const urls = rt.urlsFor(site)(story);
   // The host's page renders whatever the site edits at that path, and a nearer
   // scope's fork shadows a shared page there — so the link lands on the host's
   // page only when that is this story, and on Folio's render of it by id otherwise.
   const shadowed =
     story.path !== null &&
-    (await storyByPath(c.var.bindings().db, chain(registry, site.id), story.path))?.id !== story.id
+    (await storyByPath(c.var.bindings().db, chain(registry, site.id), story.path))?.id !== story.id;
   if (rt.draftMode && !shadowed) {
-    if (!urls.url) return undefined
-    const live = new URL(urls.url)
-    return `${site.preview}${live.pathname}${live.search}`
+    if (!urls.url) return undefined;
+    const live = new URL(urls.url);
+    return `${site.preview}${live.pathname}${live.search}`;
   }
-  if (!urls.draftUrl) return undefined
-  const draft = new URL(urls.draftUrl)
-  draft.searchParams.set('_folio_id', story.id)
-  return draft.toString()
+  if (!urls.draftUrl) return undefined;
+  const draft = new URL(urls.draftUrl);
+  draft.searchParams.set("_folio_id", story.id);
+  return draft.toString();
 }
 
 /**
@@ -299,7 +299,7 @@ async function siteTarget<Env>(
  * answer for somebody who has no account.
  */
 export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * Exchange a token for a cookie and a 302 to the document's own preview URL.
@@ -321,12 +321,12 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * the lapsed page is the honest answer — the id `crypto.randomUUID` minted can
    * never be re-issued, so no future document inherits the grant.
    */
-  app.get('/share', requireAuthConfigured<Env>(rt), async (c) => {
-    const token = c.req.query('t')
+  app.get("/share", requireAuthConfigured<Env>(rt), async (c) => {
+    const token = c.req.query("t");
     // No token at all is not a link anybody was given, so it is not a link anybody
     // needs an explanation about: the plain 404 an unknown path gets.
-    if (!token) return c.notFound()
-    if (!SHARE_TOKEN.test(token)) return expiredLinkPage()
+    if (!token) return c.notFound();
+    if (!SHARE_TOKEN.test(token)) return expiredLinkPage();
 
     /**
      * **On a deployment with `sites`, a link redeems only on its own site's preview
@@ -334,14 +334,14 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * site must equal it. Anywhere else — the admin origin, another site's preview
      * origin, a live host (which never routes here) — it is a lapsed link.
      */
-    const here = c.var.site
-    if (rt.sites && here?.surface !== 'preview') return expiredLinkPage()
-    const bindings = c.var.bindings()
-    const grant = await readShareByToken(bindings.db, token, undefined, here?.id)
-    if (!grant) return expiredLinkPage()
+    const here = c.var.site;
+    if (rt.sites && here?.surface !== "preview") return expiredLinkPage();
+    const bindings = c.var.bindings();
+    const grant = await readShareByToken(bindings.db, token, undefined, here?.id);
+    if (!grant) return expiredLinkPage();
 
-    const story = await storyById(bindings.db, grant.storyId)
-    if (!story || story.path === null) return expiredLinkPage()
+    const story = await storyById(bindings.db, grant.storyId);
+    if (!story || story.path === null) return expiredLinkPage();
 
     /**
      * The host's own `route()`, with the draft flag on it. Never assembled here:
@@ -368,8 +368,8 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * destination, not an authority.
      */
     const target =
-      rt.sites && here ? await siteTarget(c, rt, here.id, story) : shareTarget(rt, story)
-    if (!target) return expiredLinkPage()
+      rt.sites && here ? await siteTarget(c, rt, here.id, story) : shareTarget(rt, story);
+    if (!target) return expiredLinkPage();
 
     /**
      * `Max-Age` is the link's remaining life, so the cookie dies with the grant
@@ -385,17 +385,17 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * The value is a *list* — see `MAX_SHARE_COOKIE_TOKENS` — so clicking a second
      * link does not unseat the first.
      */
-    const value = withShareToken(c.req.header('cookie'), token)
-    const maxAge = Math.max(1, Math.floor((grant.expiresAt - Date.now()) / 1000))
+    const value = withShareToken(c.req.header("cookie"), token);
+    const maxAge = Math.max(1, Math.floor((grant.expiresAt - Date.now()) / 1000));
     c.header(
-      'set-cookie',
-      serialiseCookie(c.req.url, shareCookieName(c.req.url), value, { maxAge, sameSite: 'Lax' }),
-    )
+      "set-cookie",
+      serialiseCookie(c.req.url, shareCookieName(c.req.url), value, { maxAge, sameSite: "Lax" }),
+    );
     // A 302 carrying a `Set-Cookie` must never be stored, and the URL it is answered
     // at carries a secret. Both reasons point the same way.
-    c.header('cache-control', NO_STORE)
-    return c.redirect(target, 302)
-  })
+    c.header("cache-control", NO_STORE);
+    return c.redirect(target, 302);
+  });
 
-  return app
+  return app;
 }

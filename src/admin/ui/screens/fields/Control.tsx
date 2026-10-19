@@ -1,21 +1,21 @@
-import type { Json } from '../../../../core/doc'
-import type { Field as FieldDef } from '../../../../core/fields'
+import type { Json } from "../../../../core/doc";
+import type { Field as FieldDef } from "../../../../core/fields";
 import {
   type CollectionField as CollectionFieldDef,
   collectionQuery,
   maxPerPageOf,
   queryKey,
-} from '../../../../core/query'
-import type { Resolution } from '../../../../core/resolve'
-import type { DocumentType, SchemaIndex } from '../../../../core/schema'
-import { Input, Select, Textarea } from '../../Field'
-import { AssetField, MultiAssetField } from './AssetField'
-import { CollectionField } from './CollectionField'
-import css from './fields.module.css'
-import { FormField } from './FormField'
-import { LinkField } from './LinkField'
-import { ReferenceField, ReferencesField } from './ReferenceField'
-import { type FieldChrome, RichTextField } from './RichTextField'
+} from "../../../../core/query";
+import type { Resolution } from "../../../../core/resolve";
+import type { DocumentType, SchemaIndex } from "../../../../core/schema";
+import { Input, Select, Textarea } from "../../Field";
+import { AssetField, MultiAssetField } from "./AssetField";
+import { CollectionField } from "./CollectionField";
+import css from "./fields.module.css";
+import { FormField } from "./FormField";
+import { LinkField } from "./LinkField";
+import { ReferenceField, ReferencesField } from "./ReferenceField";
+import { type FieldChrome, RichTextField } from "./RichTextField";
 
 /**
  * Everything a control needs that is the same for every field in the panel. The
@@ -25,33 +25,33 @@ import { type FieldChrome, RichTextField } from './RichTextField'
  */
 export interface FieldEnv {
   /** `{base}/api` — the admin's internal JSON. */
-  apiBase: string
+  apiBase: string;
   /** The bare mount, for `/asset/:key`. */
-  mount: string
-  schema: SchemaIndex
-  types: readonly DocumentType[]
+  mount: string;
+  schema: SchemaIndex;
+  types: readonly DocumentType[];
   /** What the preview is rendered with. Carries the resolved story rows for every id
    * this document points at, and the answers to its collection queries. */
-  resolution: Resolution
+  resolution: Resolution;
 }
 
 export interface ControlProps {
   /** The id `Field` generated, so the label points at a real control. */
-  id: string
+  id: string;
   /** The field's declared name. Never read from the selection — an input can issue
    * its write long after it rendered (an upload finishing is the case). */
-  name: string
-  field: FieldDef
-  value: Json
-  onChange: (value: Json) => void
+  name: string;
+  field: FieldDef;
+  value: Json;
+  onChange: (value: Json) => void;
   /** False while a past version is on the stage, or for a shared field in a
    * non-source locale. See `isEditable`. */
-  editable: boolean
-  env: FieldEnv
+  editable: boolean;
+  env: FieldEnv;
   /** What the focus overlay repeats. Richtext only. */
-  chrome: FieldChrome
-  expanded: boolean
-  onExpand: (open: boolean) => void
+  chrome: FieldChrome;
+  expanded: boolean;
+  onExpand: (open: boolean) => void;
 }
 
 /**
@@ -60,7 +60,7 @@ export interface ControlProps {
  * queries.
  */
 const collectionKey = (field: CollectionFieldDef, value: Json): string =>
-  queryKey(collectionQuery(field, value), maxPerPageOf(field))
+  queryKey(collectionQuery(field, value), maxPerPageOf(field));
 
 /**
  * One field's control, by kind.
@@ -77,26 +77,26 @@ const collectionKey = (field: CollectionFieldDef, value: Json): string =>
  * children are tree slots (`BlockRail.tsx`) and not a value.
  */
 export function Control(props: ControlProps) {
-  const { id, field, value, onChange, editable, env } = props
+  const { id, field, value, onChange, editable, env } = props;
 
   switch (field.kind) {
-    case 'textarea':
+    case "textarea":
       return (
         <Textarea
           id={id}
           rows={field.rows ?? 4}
           placeholder={field.placeholder}
-          value={String(value ?? '')}
+          value={String(value ?? "")}
           disabled={!editable}
           onChange={(e) => onChange(e.target.value)}
         />
-      )
+      );
 
-    case 'select':
+    case "select":
       return (
         <Select
           id={id}
-          value={String(value ?? '')}
+          value={String(value ?? "")}
           disabled={!editable}
           onChange={(e) => onChange(e.target.value)}
         >
@@ -106,9 +106,9 @@ export function Control(props: ControlProps) {
             </option>
           ))}
         </Select>
-      )
+      );
 
-    case 'boolean':
+    case "boolean":
       /*
        * The one control the primitives cannot be. `Input` applies
        * `Field.module.css`'s `.control` through a className the caller may not
@@ -126,9 +126,9 @@ export function Control(props: ControlProps) {
           disabled={!editable}
           onChange={(e) => onChange(e.target.checked)}
         />
-      )
+      );
 
-    case 'number':
+    case "number":
       return (
         <Input
           id={id}
@@ -139,9 +139,9 @@ export function Control(props: ControlProps) {
           disabled={!editable}
           onChange={(e) => onChange(e.target.valueAsNumber || 0)}
         />
-      )
+      );
 
-    case 'multilink':
+    case "multilink":
       return (
         <LinkField
           id={id}
@@ -155,9 +155,9 @@ export function Control(props: ControlProps) {
           editable={editable}
           onChange={onChange}
         />
-      )
+      );
 
-    case 'reference':
+    case "reference":
       return (
         <ReferenceField
           id={id}
@@ -169,9 +169,9 @@ export function Control(props: ControlProps) {
           editable={editable}
           onChange={onChange}
         />
-      )
+      );
 
-    case 'references':
+    case "references":
       return (
         <ReferencesField
           id={id}
@@ -184,9 +184,9 @@ export function Control(props: ControlProps) {
           editable={editable}
           onChange={onChange}
         />
-      )
+      );
 
-    case 'collection':
+    case "collection":
       return (
         <CollectionField
           id={id}
@@ -196,17 +196,17 @@ export function Control(props: ControlProps) {
           // looks it up — so the panel's count and the preview's list are the same
           // query. Undefined while the fetch is in flight, which is the honest state.
           {...(() => {
-            const answer = env.resolution.collections?.[collectionKey(field, value)]
-            return answer ? { answer } : {}
+            const answer = env.resolution.collections?.[collectionKey(field, value)];
+            return answer ? { answer } : {};
           })()}
           schema={env.schema}
           types={env.types}
           editable={editable}
           onChange={onChange}
         />
-      )
+      );
 
-    case 'richtext':
+    case "richtext":
       return (
         <RichTextField
           value={value}
@@ -220,9 +220,9 @@ export function Control(props: ControlProps) {
           expanded={props.expanded}
           onExpand={props.onExpand}
         />
-      )
+      );
 
-    case 'asset':
+    case "asset":
       return (
         <AssetField
           id={id}
@@ -233,9 +233,9 @@ export function Control(props: ControlProps) {
           editable={editable}
           onChange={onChange}
         />
-      )
+      );
 
-    case 'form':
+    case "form":
       return (
         <FormField
           id={id}
@@ -245,9 +245,9 @@ export function Control(props: ControlProps) {
           editable={editable}
           onChange={onChange}
         />
-      )
+      );
 
-    case 'multiasset':
+    case "multiasset":
       return (
         <MultiAssetField
           id={id}
@@ -259,7 +259,7 @@ export function Control(props: ControlProps) {
           editable={editable}
           onChange={onChange}
         />
-      )
+      );
 
     default:
       // `text`, and `blocks` — which cannot reach here. Kept as the default rather
@@ -271,11 +271,11 @@ export function Control(props: ControlProps) {
         <Input
           id={id}
           type="text"
-          placeholder={field.kind === 'text' ? field.placeholder : undefined}
-          value={String(value ?? '')}
+          placeholder={field.kind === "text" ? field.placeholder : undefined}
+          value={String(value ?? "")}
           disabled={!editable}
           onChange={(e) => onChange(e.target.value)}
         />
-      )
+      );
   }
 }

@@ -1,12 +1,12 @@
-import type { ReactNode } from 'react'
-import { canManageAccess, type Me } from '../../me'
-import type { Manifest } from '../../../core/schema'
-import { Badge, type BadgeTone } from '../Badge'
-import { EmptyState } from '../EmptyState'
-import { ListHeader } from '../List'
-import { type Column, Table } from '../Table'
-import { href } from '../route'
-import css from './Settings.module.css'
+import type { ReactNode } from "react";
+import { canManageAccess, type Me } from "../../me";
+import type { Manifest } from "../../../core/schema";
+import { Badge, type BadgeTone } from "../Badge";
+import { EmptyState } from "../EmptyState";
+import { ListHeader } from "../List";
+import { type Column, Table } from "../Table";
+import { href } from "../route";
+import css from "./Settings.module.css";
 import {
   type BlockCard,
   type Fact,
@@ -25,24 +25,24 @@ import {
   shownIn,
   type SlotRow,
   type TypeRow,
-} from './settings-model'
-import { useSettings } from './useSettings'
+} from "./settings-model";
+import { useSettings } from "./useSettings";
 
 interface Props {
   /** Null while it is still loading. The shell fetches it once per load, so this
    * screen never fetches: a second read of an immutable payload would be a second
    * thing to keep in step. */
-  manifest: Manifest | null
-  me: Me
+  manifest: Manifest | null;
+  me: Me;
   /** For any link to another screen. */
-  mount: string
-  query: Readonly<Record<string, string>>
+  mount: string;
+  query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
-  onQuery: (next: Record<string, string | undefined>) => void
+  onQuery: (next: Record<string, string | undefined>) => void;
 }
 
 /** Five placeholder blocks. Named rather than indexed, matching Documents'. */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5"];
 
 /**
  * What this site is configured as — `docs/ui-architecture.md`'s port phase 5, and
@@ -72,8 +72,8 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5']
  *    screen has to design against, and `filterBlocks` is the answer.
  */
 export function Settings(props: Props) {
-  const { manifest, me, mount, onQuery } = props
-  const url = parseSettingsUrl(props.query)
+  const { manifest, me, mount, onQuery } = props;
+  const url = parseSettingsUrl(props.query);
   /*
    * Two routes feed this screen, and the split is a security boundary rather than
    * a convenience: `manifest` is `GET {base}/api/schema`, which is ungated and
@@ -82,7 +82,7 @@ export function Settings(props: Props) {
    * identified. `server/app.ts` states the rule; that block briefly lived on the
    * manifest and this is the shape of taking it back off.
    */
-  const data = useSettings(manifest, me.policy, url)
+  const data = useSettings(manifest, me.policy, url);
 
   /*
    * Wrapped, to cancel the row gutter `ListHeader` carries — see `.head` in the
@@ -105,7 +105,7 @@ export function Settings(props: Props) {
         }
       />
     </div>
-  )
+  );
 
   /*
    * The one sentence that makes the whole screen legible, and it names *where*
@@ -120,7 +120,7 @@ export function Settings(props: Props) {
       props and the rendered HTML from drifting — a settings form would be a second source of truth
       for the one thing that must have exactly one.
     </p>
-  )
+  );
 
   if (!data.view) {
     return (
@@ -133,10 +133,10 @@ export function Settings(props: Props) {
           ))}
         </div>
       </div>
-    )
+    );
   }
 
-  const view = data.view
+  const view = data.view;
 
   return (
     <div className={css.screen}>
@@ -177,7 +177,7 @@ export function Settings(props: Props) {
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ---------------------------------------------------------------- scaffold --- */
@@ -204,9 +204,9 @@ function SectionBlock({
   count,
   body,
 }: {
-  section: Section
-  count: string
-  body: ReactNode
+  section: Section;
+  count: string;
+  body: ReactNode;
 }) {
   return (
     <section className={css.section} id={section.anchor} aria-labelledby={`${section.anchor}-h`}>
@@ -218,39 +218,39 @@ function SectionBlock({
       </div>
       {body}
     </section>
-  )
+  );
 }
 
 function countText(view: SettingsView, id: SectionId, q: string): string {
-  const total = view.totals[id]
-  const shown = shownIn(view, id)
-  return q.trim() && shown !== total ? `${shown} of ${total}` : String(total)
+  const total = view.totals[id];
+  const shown = shownIn(view, id);
+  return q.trim() && shown !== total ? `${shown} of ${total}` : String(total);
 }
 
 interface Ctx {
-  view: SettingsView
-  data: ReturnType<typeof useSettings>
-  me: Me
-  mount: string
-  onQuery: (next: Record<string, string | undefined>) => void
+  view: SettingsView;
+  data: ReturnType<typeof useSettings>;
+  me: Me;
+  mount: string;
+  onQuery: (next: Record<string, string | undefined>) => void;
 }
 
 function body(id: SectionId, ctx: Ctx): ReactNode {
   switch (id) {
-    case 'types':
-      return <Types view={ctx.view} onQuery={ctx.onQuery} />
-    case 'blocks':
-      return <Blocks view={ctx.view} data={ctx.data} />
-    case 'globals':
-      return <Globals view={ctx.view} mount={ctx.mount} />
-    case 'locales':
-      return <Locales view={ctx.view} />
-    case 'signin':
-      return <SignIn view={ctx.view} me={ctx.me} mount={ctx.mount} />
-    case 'hooks':
-      return <Hooks view={ctx.view} />
-    case 'caching':
-      return <Facts label="Caching" rows={ctx.view.cache} />
+    case "types":
+      return <Types view={ctx.view} onQuery={ctx.onQuery} />;
+    case "blocks":
+      return <Blocks view={ctx.view} data={ctx.data} />;
+    case "globals":
+      return <Globals view={ctx.view} mount={ctx.mount} />;
+    case "locales":
+      return <Locales view={ctx.view} />;
+    case "signin":
+      return <SignIn view={ctx.view} me={ctx.me} mount={ctx.mount} />;
+    case "hooks":
+      return <Hooks view={ctx.view} />;
+    case "caching":
+      return <Facts label="Caching" rows={ctx.view.cache} />;
   }
 }
 
@@ -264,7 +264,7 @@ function body(id: SectionId, ctx: Ctx): ReactNode {
  * config key is the closest thing to an action this screen is allowed to offer.
  */
 function Nothing({ title, children }: { title: string; children: ReactNode }) {
-  return <EmptyState title={title} body={children} />
+  return <EmptyState title={title} body={children} />;
 }
 
 /* ----------------------------------------------------------- document types --- */
@@ -273,14 +273,14 @@ function Types({
   view,
   onQuery,
 }: {
-  view: SettingsView
-  onQuery: (next: Record<string, string | undefined>) => void
+  view: SettingsView;
+  onQuery: (next: Record<string, string | undefined>) => void;
 }) {
   const columns: Column<TypeRow>[] = [
     {
-      key: 'type',
-      label: 'Type',
-      width: '22%',
+      key: "type",
+      label: "Type",
+      width: "22%",
       /*
        * `.stack`, not a bare `.pair`: the label, then the name and its badges on a
        * declared second line. This is the one first column that shares its row with
@@ -305,15 +305,15 @@ function Types({
       ),
     },
     {
-      key: 'kind',
-      label: 'Kind',
-      width: '9%',
+      key: "kind",
+      label: "Kind",
+      width: "9%",
       cell: (row) => <Badge tone={kindTone(row.kind)}>{row.kind}</Badge>,
     },
     {
-      key: 'root',
-      label: 'Root block',
-      width: '13%',
+      key: "root",
+      label: "Root block",
+      width: "13%",
       /*
        * Filters to that block, which is the second route into eighty-seven of
        * them: "which block is behind this type, and what does it declare" is a
@@ -338,9 +338,9 @@ function Types({
       ),
     },
     {
-      key: 'title',
-      label: 'Title from',
-      width: '11%',
+      key: "title",
+      label: "Title from",
+      width: "11%",
       cell: (row) =>
         row.titleField ? (
           <span className={css.name}>
@@ -350,7 +350,7 @@ function Types({
                 className={css.hint}
                 title="Not declared. `titleFieldOf` derived it: a `title` field on the root block, then its `summary` field."
               >
-                {' '}
+                {" "}
                 derived
               </span>
             ) : null}
@@ -365,15 +365,15 @@ function Types({
         ),
     },
     {
-      key: 'where',
-      label: 'Where it can live',
-      width: '17%',
+      key: "where",
+      label: "Where it can live",
+      width: "17%",
       cell: (row) => <span className={css.clause}>{row.where}</span>,
     },
     {
-      key: 'top',
-      label: 'Top level',
-      width: '9%',
+      key: "top",
+      label: "Top level",
+      width: "9%",
       /*
        * The refusal an editor actually meets, given its own column: an Insight
        * that will not be created at the root of the tree is `under`, and the
@@ -395,18 +395,18 @@ function Types({
         ),
     },
     {
-      key: 'group',
-      label: 'Sidebar group',
-      width: '10%',
+      key: "group",
+      label: "Sidebar group",
+      width: "10%",
       cell: (row) => row.group || <span className={css.blank}>—</span>,
     },
     {
-      key: 'preview',
-      label: 'Previewed on',
-      width: '9%',
+      key: "preview",
+      label: "Previewed on",
+      width: "9%",
       cell: (row) => row.preview || <span className={css.blank}>—</span>,
     },
-  ]
+  ];
 
   return (
     <Table
@@ -420,14 +420,14 @@ function Types({
         </Nothing>
       }
     />
-  )
+  );
 }
 
-function kindTone(kind: TypeRow['kind']): BadgeTone {
+function kindTone(kind: TypeRow["kind"]): BadgeTone {
   // `page` is the routed one and the only kind with a URL, which is the single
   // most consequential fact in the row; the other two are facts rather than
   // states, which is what `neutral` means here.
-  return kind === 'page' ? 'accent' : 'neutral'
+  return kind === "page" ? "accent" : "neutral";
 }
 
 /* -------------------------------------------------------------- block types --- */
@@ -456,7 +456,7 @@ function Blocks({ view, data }: { view: SettingsView; data: ReturnType<typeof us
       <Nothing title="No block types match">
         A site's blocks are the <code>blocks</code> array passed to <code>createFolio</code>.
       </Nothing>
-    )
+    );
   }
 
   return (
@@ -472,15 +472,15 @@ function Blocks({ view, data }: { view: SettingsView; data: ReturnType<typeof us
             <span className={css.pairLabel}>{card.label}</span>
             <span className={css.name}>{card.name}</span>
             <span className={css.cardMeta}>
-              {plural(card.fields.length, 'field')} · {plural(card.slots.length, 'slot')} ·{' '}
-              {plural(card.presets.length, 'preset')}
+              {plural(card.fields.length, "field")} · {plural(card.slots.length, "slot")} ·{" "}
+              {plural(card.presets.length, "preset")}
             </span>
             {card.rootFor.length > 0 ? (
               <Badge
                 tone="accent"
                 title="A document type's root block. `indexed` fields only project into the collection index here."
               >
-                root for {card.rootFor.join(', ')}
+                root for {card.rootFor.join(", ")}
               </Badge>
             ) : null}
             {card.presetsOnly ? (
@@ -505,15 +505,15 @@ function Blocks({ view, data }: { view: SettingsView; data: ReturnType<typeof us
         </details>
       ))}
     </div>
-  )
+  );
 }
 
 function Fields({ card }: { card: BlockCard }) {
   const columns: Column<FieldRow>[] = [
     {
-      key: 'field',
-      label: 'Field',
-      width: '40%',
+      key: "field",
+      label: "Field",
+      width: "40%",
       /* `help` is a second line by declaration, not by flex wrapping — see `.help`
        * in the stylesheet for the two tables that disagreed about it. */
       cell: (row) => (
@@ -527,22 +527,22 @@ function Fields({ card }: { card: BlockCard }) {
       ),
     },
     {
-      key: 'kind',
-      label: 'Kind',
-      width: '10%',
+      key: "kind",
+      label: "Kind",
+      width: "10%",
       cell: (row) => <span className={css.name}>{row.kind}</span>,
     },
-    { key: 'flags', label: 'Flags', width: '14%', cell: (row) => <Flags row={row} /> },
+    { key: "flags", label: "Flags", width: "14%", cell: (row) => <Flags row={row} /> },
     {
-      key: 'detail',
-      label: 'Constraints',
-      width: '15%',
+      key: "detail",
+      label: "Constraints",
+      width: "15%",
       cell: (row) => row.detail || <span className={css.blank}>—</span>,
     },
     {
-      key: 'default',
-      label: 'Default',
-      width: '10%',
+      key: "default",
+      label: "Default",
+      width: "10%",
       cell: (row) =>
         row.fieldDefault ? (
           <span className={css.name}>{row.fieldDefault}</span>
@@ -551,12 +551,12 @@ function Fields({ card }: { card: BlockCard }) {
         ),
     },
     {
-      key: 'showIf',
-      label: 'Shown when',
-      width: '11%',
+      key: "showIf",
+      label: "Shown when",
+      width: "11%",
       cell: (row) => row.showIf || <span className={css.blank}>always</span>,
     },
-  ]
+  ];
   return (
     <>
       <h3 className={css.subHeading}>Fields</h3>
@@ -568,7 +568,7 @@ function Fields({ card }: { card: BlockCard }) {
         empty={<p className={css.subNote}>This block declares no value fields.</p>}
       />
     </>
-  )
+  );
 }
 
 /**
@@ -628,15 +628,15 @@ function Flags({ row }: { row: FieldRow }) {
         <span className={css.blank}>—</span>
       ) : null}
     </span>
-  )
+  );
 }
 
 function Slots({ card }: { card: BlockCard }) {
   const columns: Column<SlotRow>[] = [
     {
-      key: 'slot',
-      label: 'Slot',
-      width: '30%',
+      key: "slot",
+      label: "Slot",
+      width: "30%",
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -645,15 +645,15 @@ function Slots({ card }: { card: BlockCard }) {
       ),
     },
     {
-      key: 'allow',
-      label: 'Allows',
+      key: "allow",
+      label: "Allows",
       // The widest thing in this table by a distance: a permissive slot lists
       // fourteen block names, where the slot's own label and name are two words.
-      width: '56%',
-      cell: (row) => <span className={css.name}>{row.allow.join(', ')}</span>,
+      width: "56%",
+      cell: (row) => <span className={css.name}>{row.allow.join(", ")}</span>,
     },
-    { key: 'max', label: 'Max children', width: '14%', numeric: true, cell: (row) => row.max },
-  ]
+    { key: "max", label: "Max children", width: "14%", numeric: true, cell: (row) => row.max },
+  ];
   return (
     <>
       <h3 className={css.subHeading}>Slots</h3>
@@ -664,20 +664,20 @@ function Slots({ card }: { card: BlockCard }) {
         rowKey={(row) => row.name}
       />
     </>
-  )
+  );
 }
 
 function Presets({ card }: { card: BlockCard }) {
   const columns: Column<PresetRow>[] = [
     {
-      key: 'preset',
-      label: 'Preset',
-      width: '40%',
+      key: "preset",
+      label: "Preset",
+      width: "40%",
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
           <span className={css.name}>{row.name}</span>
-          {row.name === 'default' ? (
+          {row.name === "default" ? (
             <Badge
               tone="accent"
               title="A preset named `default` on a root block is a document type's starting content."
@@ -689,28 +689,28 @@ function Presets({ card }: { card: BlockCard }) {
       ),
     },
     {
-      key: 'sets',
-      label: 'Sets',
-      width: '40%',
+      key: "sets",
+      label: "Sets",
+      width: "40%",
       cell: (row) =>
         row.sets.length ? (
-          <span className={css.name}>{row.sets.join(', ')}</span>
+          <span className={css.name}>{row.sets.join(", ")}</span>
         ) : (
           <span className={css.blank}>—</span>
         ),
     },
     {
-      key: 'children',
-      label: 'Plants',
-      width: '20%',
+      key: "children",
+      label: "Plants",
+      width: "20%",
       cell: (row) =>
         row.children.length ? (
-          <span className={css.name}>{row.children.join(', ')}</span>
+          <span className={css.name}>{row.children.join(", ")}</span>
         ) : (
           <span className={css.blank}>—</span>
         ),
     },
-  ]
+  ];
   return (
     <>
       <h3 className={css.subHeading}>Presets</h3>
@@ -721,11 +721,11 @@ function Presets({ card }: { card: BlockCard }) {
         rowKey={(row) => row.name}
       />
     </>
-  )
+  );
 }
 
 function plural(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? '' : 's'}`
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 /* ------------------------------------------------------------------ globals --- */
@@ -733,9 +733,9 @@ function plural(n: number, noun: string): string {
 function Globals({ view, mount }: { view: SettingsView; mount: string }) {
   const columns: Column<GlobalRow>[] = [
     {
-      key: 'global',
-      label: 'Global',
-      width: '44%',
+      key: "global",
+      label: "Global",
+      width: "44%",
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -744,13 +744,13 @@ function Globals({ view, mount }: { view: SettingsView; mount: string }) {
       ),
     },
     {
-      key: 'root',
-      label: 'Root block',
-      width: '28%',
+      key: "root",
+      label: "Root block",
+      width: "28%",
       cell: (row) => <span className={css.name}>{row.root}</span>,
     },
-    { key: 'preview', label: 'Previewed on', width: '28%', cell: (row) => row.preview },
-  ]
+    { key: "preview", label: "Previewed on", width: "28%", cell: (row) => row.preview },
+  ];
   return (
     <>
       <p className={css.subNote}>
@@ -769,20 +769,20 @@ function Globals({ view, mount }: { view: SettingsView; mount: string }) {
          * a singleton straight to its editor.
          */
         actions={(row) => (
-          <a className={css.crossLink} href={href({ name: 'documents', type: row.name }, mount)}>
+          <a className={css.crossLink} href={href({ name: "documents", type: row.name }, mount)}>
             Open
           </a>
         )}
         empty={
           <Nothing title="No globals declared">
-            A global is a <code>singleton</code> type named in <code>createFolio</code>'s{' '}
+            A global is a <code>singleton</code> type named in <code>createFolio</code>'s{" "}
             <code>globals</code>. It is an explicit list rather than every singleton, so the read
             set of a page render stays obvious.
           </Nothing>
         }
       />
     </>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ locales --- */
@@ -790,9 +790,9 @@ function Globals({ view, mount }: { view: SettingsView; mount: string }) {
 function Locales({ view }: { view: SettingsView }) {
   const columns: Column<LocaleRow>[] = [
     {
-      key: 'code',
-      label: 'Code',
-      width: '14%',
+      key: "code",
+      label: "Code",
+      width: "14%",
       cell: (row) => (
         <span className={css.pair}>
           <Badge mono>{row.code}</Badge>
@@ -801,9 +801,9 @@ function Locales({ view }: { view: SettingsView }) {
       ),
     },
     {
-      key: 'role',
-      label: 'Role',
-      width: '16%',
+      key: "role",
+      label: "Role",
+      width: "16%",
       cell: (row) =>
         row.source ? (
           <Badge
@@ -817,9 +817,9 @@ function Locales({ view }: { view: SettingsView }) {
         ),
     },
     {
-      key: 'fallback',
-      label: 'Declared fallback',
-      width: '22%',
+      key: "fallback",
+      label: "Declared fallback",
+      width: "22%",
       cell: (row) =>
         row.fallback ? (
           <span className={css.name}>{row.fallback}</span>
@@ -828,12 +828,12 @@ function Locales({ view }: { view: SettingsView }) {
         ),
     },
     {
-      key: 'order',
-      label: 'An untranslated field reads',
-      width: '48%',
-      cell: (row) => <span className={css.name}>{row.readOrder.join(' → ')}</span>,
+      key: "order",
+      label: "An untranslated field reads",
+      width: "48%",
+      cell: (row) => <span className={css.name}>{row.readOrder.join(" → ")}</span>,
     },
-  ]
+  ];
   return (
     <Table
       label="Locales"
@@ -848,7 +848,7 @@ function Locales({ view }: { view: SettingsView }) {
         </Nothing>
       }
     />
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ sign-in --- */
@@ -856,9 +856,9 @@ function Locales({ view }: { view: SettingsView }) {
 function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string }) {
   const columns: Column<ProviderRow>[] = [
     {
-      key: 'provider',
-      label: 'Provider',
-      width: '18%',
+      key: "provider",
+      label: "Provider",
+      width: "18%",
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -867,33 +867,33 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
       ),
     },
     {
-      key: 'flow',
-      label: 'Flow',
-      width: '14%',
+      key: "flow",
+      label: "Flow",
+      width: "14%",
       cell: (row) => <span className={css.clause}>{row.flow}</span>,
     },
     {
-      key: 'unknown',
-      label: 'An email with no account',
-      width: '26%',
+      key: "unknown",
+      label: "An email with no account",
+      width: "26%",
       cell: (row) => <span className={css.clause}>{row.unknownEmail}</span>,
     },
     // Where to go to change somebody's role, which is the fact an editor needs:
     // never the mapping itself, because a `RoleMapper` is a host function
     // (`server/auth/config.ts`, and the spec's decision 5).
     {
-      key: 'roles',
-      label: 'Roles',
-      width: '20%',
+      key: "roles",
+      label: "Roles",
+      width: "20%",
       cell: (row) => <span className={css.clause}>{row.roles}</span>,
     },
     {
-      key: 'domains',
-      label: 'Enforced domains',
-      width: '22%',
+      key: "domains",
+      label: "Enforced domains",
+      width: "22%",
       cell: (row) => <span className={css.clause}>{row.domains}</span>,
     },
-  ]
+  ];
 
   return (
     <>
@@ -908,7 +908,7 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
         and it is a single line of config away from not being one.
       */}
       <p className={css.subNote}>
-        {me.mode === 'open' ? (
+        {me.mode === "open" ? (
           <>
             <Badge tone="danger">open</Badge> This deployment declares <code>auth: 'open'</code>.
             Anyone who reaches the editor may edit and publish, and there are no accounts at all.
@@ -934,7 +934,7 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
          * is the whole point of the block living there.
          */
         empty={
-          me.mode === 'open' ? (
+          me.mode === "open" ? (
             <Nothing title="No providers to list">
               Under <code>auth: 'open'</code> there is no sign-in flow. A deployment that wants one
               names providers in <code>createFolio</code>'s <code>auth</code> key.
@@ -960,15 +960,15 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
       */}
       {canManageAccess(me) ? (
         <p className={css.subNote}>
-          Who may sign in, and with which role, is{' '}
-          <a className={css.crossLink} href={href({ name: 'access' }, mount)}>
+          Who may sign in, and with which role, is{" "}
+          <a className={css.crossLink} href={href({ name: "access" }, mount)}>
             Access
-          </a>{' '}
+          </a>{" "}
           — that list is content, not configuration, so it is editable and this is not.
         </p>
       ) : null}
     </>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------- hooks --- */
@@ -976,15 +976,15 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
 function Hooks({ view }: { view: SettingsView }) {
   const columns: Column<HookRow>[] = [
     {
-      key: 'event',
-      label: 'Event',
-      width: '25%',
+      key: "event",
+      label: "Event",
+      width: "25%",
       cell: (row) => <span className={css.name}>{row.event}</span>,
     },
     {
-      key: 'awaited',
-      label: 'Awaited',
-      width: '75%',
+      key: "awaited",
+      label: "Awaited",
+      width: "75%",
       cell: (row) =>
         row.awaited ? (
           <Badge
@@ -997,7 +997,7 @@ function Hooks({ view }: { view: SettingsView }) {
           <Badge title="Runs after the response, on `waitUntil`.">after the response</Badge>
         ),
     },
-  ]
+  ];
   return (
     <>
       <p className={css.subNote}>
@@ -1011,13 +1011,13 @@ function Hooks({ view }: { view: SettingsView }) {
         rowKey={(row) => row.event}
         empty={
           <Nothing title="No publish hooks declared">
-            Nothing runs after a write beyond Folio's own cache purge. A host adds handlers in{' '}
+            Nothing runs after a write beyond Folio's own cache purge. A host adds handlers in{" "}
             <code>createFolio</code>'s <code>hooks</code> key.
           </Nothing>
         }
       />
     </>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------- facts --- */
@@ -1033,32 +1033,32 @@ function Facts({
   rows,
   heading,
 }: {
-  label: string
-  rows: readonly Fact[]
+  label: string;
+  rows: readonly Fact[];
   /** Rendered when this table sits *beneath* another one in the same section, so
    * a reader can tell where the providers stop and the policy starts. Omitted
    * when the section's own `h3` already names it. */
-  heading?: string
+  heading?: string;
 }) {
   const columns: Column<Fact>[] = [
-    { key: 'label', label: 'Setting', width: '22%', cell: (row) => row.label },
+    { key: "label", label: "Setting", width: "22%", cell: (row) => row.label },
     {
-      key: 'value',
-      label: 'Value',
-      width: '18%',
+      key: "value",
+      label: "Value",
+      width: "18%",
       cell: (row) => <span className={css.name}>{row.value}</span>,
     },
     {
-      key: 'why',
-      label: 'Why',
-      width: '60%',
+      key: "why",
+      label: "Why",
+      width: "60%",
       cell: (row) => <span className={css.why}>{row.why}</span>,
     },
-  ]
+  ];
   return (
     <>
       {heading ? <h3 className={css.subHeading}>{heading}</h3> : null}
       <Table label={label} columns={columns} rows={rows} rowKey={(row) => row.label} />
     </>
-  )
+  );
 }

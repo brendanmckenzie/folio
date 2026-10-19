@@ -6,18 +6,18 @@
  * URL space. `handle()` recognises it, and hands anything that turns out not to
  * be a story straight back to the host (see index.tsx).
  */
-import type { ReactElement } from 'react'
-import { renderToReadableStream } from 'react-dom/server.edge'
-import { NO_STORE } from '../core/cache-tags'
-import { wrapPreview } from '../core/render-wrap'
-import type { Registry as SiteRegistry } from '../core/sites'
-import type { StoryMeta } from '../core/story'
-import { FolioDoc, type RenderMode, renderGlobalNode } from '../preview/Render'
-import { computeBlocksDigest } from '../core/registry-digest'
-import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
-import { PROTOCOL_VERSION } from '../core/protocol'
-import type { BrandRuntime, FolioRuntime, SiteRender } from './runtime'
-import type { ReadBindings, PreviewMode } from './types'
+import type { ReactElement } from "react";
+import { renderToReadableStream } from "react-dom/server.edge";
+import { NO_STORE } from "../core/cache-tags";
+import { wrapPreview } from "../core/render-wrap";
+import type { Registry as SiteRegistry } from "../core/sites";
+import type { StoryMeta } from "../core/story";
+import { FolioDoc, type RenderMode, renderGlobalNode } from "../preview/Render";
+import { computeBlocksDigest } from "../core/registry-digest";
+import { Bootstrap, ReactRefreshPreamble, Shell } from "./Document";
+import { PROTOCOL_VERSION } from "../core/protocol";
+import type { BrandRuntime, FolioRuntime, SiteRender } from "./runtime";
+import type { ReadBindings, PreviewMode } from "./types";
 
 /*
  * `adminPage` was here — the old single-screen editor's HTML, bootstrapping
@@ -35,7 +35,7 @@ import type { ReadBindings, PreviewMode } from './types'
  * like is a CSS module in `admin/ui/`; this is the one rule that has to reach the
  * `body`, which no scoped class can. `shellPage` explains why it is inline.
  */
-const ADMIN_STYLE = `body.folio-admin { margin: 0 }`
+const ADMIN_STYLE = `body.folio-admin { margin: 0 }`;
 
 /**
  * The rebuilt admin's shell, for any screen under its mount.
@@ -51,7 +51,7 @@ const ADMIN_STYLE = `body.folio-admin { margin: 0 }`
  * in the URL where it belongs.
  */
 export function shellPage(rt: FolioRuntime): Promise<Response> {
-  const { entries, stylesheets } = rt.page('admin')
+  const { entries, stylesheets } = rt.page("admin");
   return html(
     <Shell
       title="Folio"
@@ -124,7 +124,7 @@ export function shellPage(rt: FolioRuntime): Promise<Response> {
       <div id="folio-admin" />
     </Shell>,
     entries,
-  )
+  );
 }
 
 /**
@@ -177,10 +177,10 @@ export async function previewPage(
   bindings: ReadBindings,
   story: StoryMeta,
   opts: {
-    as?: string
-    bare?: boolean
-    locale?: string
-    mode?: PreviewMode
+    as?: string;
+    bare?: boolean;
+    locale?: string;
+    mode?: PreviewMode;
     /**
      * The site this preview renders on, on a deployment with `sites`
      * (`../../docs/specs/foundation/multi-site.md` decision 13): every read the
@@ -189,37 +189,37 @@ export async function previewPage(
      * an empty chain — which a branded bare preview of a group's layer uses,
      * because a branded resolve refuses to default to `default`'s chain.
      */
-    site?: SiteRender | null
+    site?: SiteRender | null;
     /**
      * `sites.admin`, the one origin the preview may post to and hear from
      * (decision 13, "every surface"), written into the bootstrap for
      * `preview/mount.tsx`. Absent, the preview talks to its own origin, as it
      * always has.
      */
-    admin?: string
+    admin?: string;
     /**
      * "Alpha overrides this page": the name of the nearer scope that shadows the
      * story being previewed at its path (a `_folio_id` preview of a page the site
      * has forked). Drawn above the page, outside anything that hydrates.
      */
-    overriddenBy?: string
+    overriddenBy?: string;
     /**
      * The brand this preview renders as (`multi-brand.md` decisions 9 and 10): its
      * registry, schema, globals, wrap and preview bundle, and `data-folio-brand`
      * on the shell. Required, so every caller names it: a request's is
      * `c.var.brand`, `handle()`'s is the gated site's, and there is no default.
      */
-    brand: BrandRuntime
+    brand: BrandRuntime;
     /**
      * The registry snapshot the caller holds, for the draft's seed when `story` is
      * a layer on a deployment with `brands` (`BrandRuntime.seedFor`).
      */
-    registry?: SiteRegistry
+    registry?: SiteRegistry;
   },
 ): Promise<Response> {
-  const draft = opts.mode === 'draft'
-  const { brand } = opts
-  const doc = await brand.draftFor(bindings, story, opts.registry)
+  const draft = opts.mode === "draft";
+  const { brand } = opts;
+  const doc = await brand.draftFor(bindings, story, opts.registry);
   // `story` is what lets the narrowed resolution reach this page's ancestors (a
   // breadcrumb still has to resolve) and what lets a collection listing this very
   // document show its **draft** title rather than its published one
@@ -229,15 +229,15 @@ export async function previewPage(
     locale: opts?.locale,
     story,
     ...(opts.site !== undefined ? { site: opts.site } : {}),
-  })
-  const { entries, stylesheets } = brand.page('preview')
+  });
+  const { entries, stylesheets } = brand.page("preview");
 
-  const editingName = opts?.as
-  const editingDoc = editingName ? resolution.globals?.[editingName] : undefined
+  const editingName = opts?.as;
+  const editingDoc = editingName ? resolution.globals?.[editingName] : undefined;
   const editing =
     editingName && editingDoc
       ? { global: editingName, mount: `[data-folio-global="${editingName}"]` }
-      : undefined
+      : undefined;
 
   /**
    * The page's own document, and the one line in this file where the split
@@ -253,7 +253,7 @@ export async function previewPage(
    * because swapping in a global's draft is an editing act and a draft page has
    * no editor. So it is `mark` throughout.
    */
-  const pageMode: RenderMode = draft ? 'mark' : editing ? 'off' : 'edit'
+  const pageMode: RenderMode = draft ? "mark" : editing ? "off" : "edit";
 
   // Every configured global, in declared order, above the page itself: Folio's
   // own preview shell knows nothing of the host's real layout (checkpoint 2),
@@ -266,8 +266,8 @@ export async function previewPage(
   const contextGlobals = opts?.bare
     ? null
     : brand.globals.map((name) =>
-        renderGlobalNode(brand.registry, resolution, name, { mode: draft ? 'mark' : 'edit' }),
-      )
+        renderGlobalNode(brand.registry, resolution, name, { mode: draft ? "mark" : "edit" }),
+      );
 
   return html(
     <Shell
@@ -276,7 +276,7 @@ export async function previewPage(
       // A brand's global stylesheet is scoped under this (decision 10). Only on a
       // deployment with `brands`, so a single-brand preview's markup is unchanged.
       brand={brand.brand?.id}
-      bodyClass={draft ? undefined : 'folio-editing'}
+      bodyClass={draft ? undefined : "folio-editing"}
       // The one piece of chrome Folio's own preview shell can get right about a
       // locale. A host's real page sets its own.
       lang={resolution.locale?.code}
@@ -303,7 +303,7 @@ export async function previewPage(
     >
       {opts?.overriddenBy ? (
         <p role="note" style={OVERRIDE_BANNER}>
-          {`${opts.overriddenBy} overrides this page. This is the page it overrides, not what ${opts.site?.site.name ?? 'this site'} serves here.`}
+          {`${opts.overriddenBy} overrides this page. This is the page it overrides, not what ${opts.site?.site.name ?? "this site"} serves here.`}
         </p>
       ) : null}
       {contextGlobals}
@@ -330,7 +330,7 @@ export async function previewPage(
         )}
       </div>
       {opts?.bare ? (
-        <p style={{ padding: '1em', font: '13px system-ui', color: '#666' }}>
+        <p style={{ padding: "1em", font: "13px system-ui", color: "#666" }}>
           No host page is configured to preview “{story.title}” in context (no `previewPath` on its
           document type) — shown on its own.
         </p>
@@ -342,19 +342,19 @@ export async function previewPage(
     // calls it never to load. No entry, no module, no bridge — and a draft page is
     // a page, so it wants no hydration in the first place.
     draft ? [] : entries,
-  )
+  );
 }
 
 /** The "overrides this page" banner: inline, like every other style on Folio's
  * own pages, and outside `#folio-root` so hydration never sees it. */
 const OVERRIDE_BANNER = {
   margin: 0,
-  padding: '8px 12px',
-  font: '13px/1.4 system-ui, sans-serif',
-  background: '#fff7e0',
-  borderBottom: '1px solid #f0d890',
-  color: '#5c4400',
-} as const
+  padding: "8px 12px",
+  font: "13px/1.4 system-ui, sans-serif",
+  background: "#fff7e0",
+  borderBottom: "1px solid #f0d890",
+  color: "#5c4400",
+} as const;
 
 /* -------------------------------------------------------------- the handoff --- */
 
@@ -372,7 +372,7 @@ const GRANT_BLOCKED_SCRIPT = `(function () {
     { source: 'folio-preview', v: Number(el.getAttribute('data-v')), type: 'grant-blocked' },
     el.getAttribute('data-admin')
   )
-})()`
+})()`;
 
 /**
  * What `{base}/site/enter?check=1` answers when the grant cookie it set one
@@ -408,7 +408,7 @@ export function grantBlockedPage(admin: string): Promise<Response> {
       <script dangerouslySetInnerHTML={{ __html: GRANT_BLOCKED_SCRIPT }} />
     </Shell>,
     [],
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ login --- */
@@ -433,7 +433,7 @@ const LOGIN_STYLE = `
     font-size: 13px; background: #eef6ff; border: 1px solid #cfe4fb; color: #14477d; }
   .folio-login__notice--bad { background: #fff0f0; border-color: #f6c9c9; color: #8a1f1f; }
   .folio-login__rule { margin: 18px 0 0; border: 0; border-top: 1px solid #eee; }
-`
+`;
 
 /**
  * The whole of the passkey login flow's client side
@@ -574,7 +574,7 @@ const LOGIN_PASSKEY_SCRIPT = `(function () {
     if (controller) controller.abort()
     arm('optional')
   })
-})()`
+})()`;
 
 /**
  * `sha256-<base64 digest>` of a piece of inline script text, for a host's own
@@ -583,10 +583,10 @@ const LOGIN_PASSKEY_SCRIPT = `(function () {
  * `{base}/login` puts in `script-src` to allow `LOGIN_PASSKEY_SCRIPT`.
  */
 async function scriptHash(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  let binary = ''
-  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte)
-  return `sha256-${btoa(binary)}`
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  let binary = "";
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return `sha256-${btoa(binary)}`;
 }
 
 /**
@@ -601,15 +601,15 @@ async function scriptHash(text: string): Promise<string> {
  * runtime loads it (workerd in every place this ships; `crypto.subtle` needs
  * no `nodejs_compat`). Nothing here is per-request.
  */
-export const LOGIN_PASSKEY_SCRIPT_HASH = await scriptHash(LOGIN_PASSKEY_SCRIPT)
+export const LOGIN_PASSKEY_SCRIPT_HASH = await scriptHash(LOGIN_PASSKEY_SCRIPT);
 
 export interface LoginPageOptions {
   /** Where to send the browser once signed in. Already screened same-origin. */
-  next: string
+  next: string;
   /** Shown in a blue banner: "check your email". */
-  sent?: string | null
+  sent?: string | null;
   /** Shown in a red banner: a refused or expired link. */
-  error?: string | null
+  error?: string | null;
   /**
    * `?signedout=1`: the page a sign-out lands on.
    *
@@ -622,7 +622,7 @@ export interface LoginPageOptions {
    * the route behind it is the only other place trusted identity resolves
    * (`../../docs/specs/foundation/auth-providers.md` decision 4).
    */
-  signedOut?: boolean
+  signedOut?: boolean;
 }
 
 /**
@@ -650,15 +650,15 @@ export interface LoginPageOptions {
  * dead end that resolves to nothing and bounces back with a refusal.
  */
 export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Response> {
-  const mail = rt.auth.mode === 'session' ? rt.auth.mail : null
-  const redirects = rt.auth.mode === 'session' ? rt.auth.redirects : []
-  const trusted = opts.signedOut && rt.auth.mode === 'session' ? rt.auth.trusted : []
+  const mail = rt.auth.mode === "session" ? rt.auth.mail : null;
+  const redirects = rt.auth.mode === "session" ? rt.auth.redirects : [];
+  const trusted = opts.signedOut && rt.auth.mode === "session" ? rt.auth.trusted : [];
   // Decision 1: opt-in per deployment. `null` here is what makes the whole of
   // the button, the `autocomplete` change and the script disappear together —
   // a host that never listed `passkeys()` ships exactly today's page, byte for
   // byte, and no script at all.
-  const passkey = rt.auth.mode === 'session' ? rt.auth.passkey : null
-  const next = opts.next
+  const passkey = rt.auth.mode === "session" ? rt.auth.passkey : null;
+  const next = opts.next;
 
   return html(
     <Shell
@@ -691,7 +691,7 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
               // field's own autofill, before anybody has typed anything
               // (decision 4). Inert without the script that arms conditional
               // UI, which is exactly the browser's job to ignore.
-              autoComplete={passkey ? 'username webauthn' : 'email'}
+              autoComplete={passkey ? "username webauthn" : "email"}
               required
               placeholder="you@example.com"
             />
@@ -755,7 +755,7 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
     // No client entry: that is the point. The inline script above is not one —
     // it ships only when a host lists `passkeys()`, and it never bundles.
     [],
-  )
+  );
 }
 
 /* ------------------------------------------------------- a lapsed share --- */
@@ -770,7 +770,7 @@ const LAPSED_STYLE = `
   .folio-lapsed__card h1 { font-size: 17px; margin: 0 0 10px; }
   .folio-lapsed__card p { margin: 0 0 10px; color: #555; font-size: 14px; }
   .folio-lapsed__card p:last-child { margin-bottom: 0; }
-`
+`;
 
 /**
  * What `GET {base}/share?t=…` answers for a link that does not work.
@@ -818,7 +818,7 @@ export function expiredLinkPage(): Promise<Response> {
     // No client entry: there is nothing here to hydrate.
     [],
     404,
-  )
+  );
 }
 
 /**
@@ -839,12 +839,12 @@ export function expiredLinkPage(): Promise<Response> {
  * twice.
  */
 async function html(node: ReactElement, bootstrapModules: string[], status = 200) {
-  const stream = await renderToReadableStream(node, { bootstrapModules })
+  const stream = await renderToReadableStream(node, { bootstrapModules });
   return new Response(stream, {
     status,
     headers: {
-      'content-type': 'text/html; charset=utf-8',
-      'cache-control': NO_STORE,
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": NO_STORE,
     },
-  })
+  });
 }

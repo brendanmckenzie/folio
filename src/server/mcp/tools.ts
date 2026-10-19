@@ -36,11 +36,11 @@ import {
   READ,
   READ_DRAFT,
   SCOPE_ADMIN,
-} from '../auth/roles'
-import { FolioError } from '../errors'
-import { MAX_DIMENSION, MIN_DIMENSION } from './shot'
+} from "../auth/roles";
+import { FolioError } from "../errors";
+import { MAX_DIMENSION, MIN_DIMENSION } from "./shot";
 
-type JsonType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null'
+type JsonType = "string" | "number" | "integer" | "boolean" | "object" | "array" | "null";
 
 /** As much JSON Schema as an `inputSchema` needs, and no more. */
 export interface JsonSchema {
@@ -49,51 +49,51 @@ export interface JsonSchema {
    * body field read through `v.nullish(ID)` takes `null` as a value, and a
    * client that validates arguments against this schema has to be told so.
    */
-  type?: JsonType | readonly JsonType[]
-  description?: string
-  enum?: readonly string[]
-  items?: JsonSchema
-  properties?: Readonly<Record<string, JsonSchema>>
-  required?: readonly string[]
-  additionalProperties?: boolean
+  type?: JsonType | readonly JsonType[];
+  description?: string;
+  enum?: readonly string[];
+  items?: JsonSchema;
+  properties?: Readonly<Record<string, JsonSchema>>;
+  required?: readonly string[];
+  additionalProperties?: boolean;
 }
 
-export type ToolMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+export type ToolMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface McpTool {
   /** What a client calls. Snake case, verb first, as every MCP server spells it. */
-  name: string
-  description: string
+  name: string;
+  description: string;
   /** MCP's own name for the JSON Schema of a tool's arguments. */
-  inputSchema: JsonSchema
+  inputSchema: JsonSchema;
   /**
    * Absent for exactly one row: `preview_document`, which has no v1 route
    * behind it at all (decisions 5, 5a). Every other row carries both.
    */
-  method?: ToolMethod
+  method?: ToolMethod;
   /** The path under `{base}/api/v1`. Every `:name` is filled from that argument. */
-  path?: string
+  path?: string;
   /** Arguments that travel as query parameters. An array argument repeats the key. */
-  query?: readonly string[]
+  query?: readonly string[];
   /**
    * Boolean arguments whose route spells "on" as `1` rather than `true`.
    * `search_documents`' `count` alone — `GET /search` reads `count === '1'`, and
    * a tool should not make a model remember that.
    */
-  flags?: readonly string[]
+  flags?: readonly string[];
   /**
    * How the remaining arguments become the request body. Absent sends none.
    * `base64` is `upload_asset` alone, whose route reads raw bytes off the body
    * (`routes/api/index.ts`) — JSON-RPC cannot carry bytes, so the `data`
    * argument is base64 and is decoded here.
    */
-  body?: 'json' | 'base64'
+  body?: "json" | "base64";
   /**
    * What `tools/list` filters on — **the same `Access` the route declares**, so
    * a token is filtered by scope and a session cookie by role with no special
    * case (decision 6, `auth/roles.ts`'s `allows`).
    */
-  need: Access
+  need: Access;
   /**
    * Set where the dispatched route cannot be the one to refuse this call —
    * because there is no route (`preview_document`, which has none at all), or
@@ -102,47 +102,47 @@ export interface McpTool {
    * way the MCP layer has to make the check itself, via `ensureAccess`, before
    * doing anything else.
    */
-  narrowed?: true
+  narrowed?: true;
   /**
    * Names from the site's own manifest to append to the description at list
    * time — a bounded list of strings, not their fields (decision 7), because
    * that is dynamic per session at zero cost and saves the agent a round trip
    * to learn what a document may contain. Phase 5 step 4 owns growing this.
    */
-  manifest?: 'types' | 'blocks'
+  manifest?: "types" | "blocks";
 }
 
-const ID: JsonSchema = { type: 'string', description: 'The document id.' }
+const ID: JsonSchema = { type: "string", description: "The document id." };
 
 /** The nested document shape `core/nested.ts` validates. Its fields come from `get_schema`. */
 const CONTENT: JsonSchema = {
-  type: 'object',
+  type: "object",
   description:
     "The document in Folio's nested shape: `{ type, fields }`, where a `blocks` field holds an array of the same shape. Call get_schema for the fields each block declares. A payload that does not fit is refused with the path and reason.",
-}
+};
 
 export const MCP_TOOLS: readonly McpTool[] = [
   /* --------------------------------------------------------------- reads --- */
   {
-    name: 'get_schema',
+    name: "get_schema",
     description:
-      'The site manifest: every document type, every block and the fields it declares, and the configured locales. Read this before writing content.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    method: 'GET',
-    path: '/schema',
+      "The site manifest: every document type, every block and the fields it declares, and the configured locales. Read this before writing content.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    method: "GET",
+    path: "/schema",
     need: READ,
   },
   {
-    name: 'search_documents',
+    name: "search_documents",
     description:
       'Find documents by title, slug or path, including drafts that have never been published. This is how "the pricing page" becomes an id. Keyset-paged: pass the previous answer\'s `cursor` for the next page.',
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        q: { type: 'string', description: 'Substring of the title, slug or path.' },
-        type: { type: 'string', description: 'A declared document type name.' },
+        q: { type: "string", description: "Substring of the title, slug or path." },
+        type: { type: "string", description: "A declared document type name." },
         state: {
-          type: 'string',
+          type: "string",
           // Exactly `StoryState`'s four names, which the route screens with a
           // picklist (`validate.ts`'s `STORY_STATE`). `live` rather than
           // `published` is the trap here: an advertised `published` would be the
@@ -150,102 +150,102 @@ export const MCP_TOOLS: readonly McpTool[] = [
           // an `enum` in an input schema is a second copy of the route's
           // validation, which is the fork decision 2 exists to prevent, so
           // `tools.test.ts` pins this list against the picklist itself.
-          enum: ['draft', 'unpublished', 'live', 'changed'],
+          enum: ["draft", "unpublished", "live", "changed"],
           description:
-            'Lifecycle state: `draft` (never published), `live` (published, no newer draft), `changed` (published with unpublished edits), `unpublished` (taken down).',
+            "Lifecycle state: `draft` (never published), `live` (published, no newer draft), `changed` (published with unpublished edits), `unpublished` (taken down).",
         },
         parentId: {
-          type: 'string',
-          description: 'Children of this document. Empty string means the top level.',
+          type: "string",
+          description: "Children of this document. Empty string means the top level.",
         },
         routed: {
-          type: 'boolean',
-          description: 'true for pages (documents with a URL), false for records.',
+          type: "boolean",
+          description: "true for pages (documents with a URL), false for records.",
         },
-        limit: { type: 'integer', description: 'Rows per page, up to 100. Default 20.' },
-        cursor: { type: 'string', description: "The previous answer's `cursor`." },
-        count: { type: 'boolean', description: 'Include a `total` for the whole result set.' },
+        limit: { type: "integer", description: "Rows per page, up to 100. Default 20." },
+        cursor: { type: "string", description: "The previous answer's `cursor`." },
+        count: { type: "boolean", description: "Include a `total` for the whole result set." },
       },
       additionalProperties: false,
     },
-    method: 'GET',
-    path: '/search',
-    query: ['q', 'type', 'state', 'parentId', 'routed', 'limit', 'cursor'],
-    flags: ['count'],
+    method: "GET",
+    path: "/search",
+    query: ["q", "type", "state", "parentId", "routed", "limit", "cursor"],
+    flags: ["count"],
     need: READ,
-    manifest: 'types',
+    manifest: "types",
   },
   {
-    name: 'query_documents',
+    name: "query_documents",
     description:
-      'Query *published* content by indexed field: the primitive behind a news list or a product grid. Page-numbered. Drafts are invisible here — use search_documents for those.',
+      "Query *published* content by indexed field: the primitive behind a news list or a product grid. Page-numbered. Drafts are invisible here — use search_documents for those.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        type: { type: 'string', description: 'A declared document type name.' },
+        type: { type: "string", description: "A declared document type name." },
         parent: {
-          type: 'string',
-          description: 'Children of this document id. Empty string means the top level.',
+          type: "string",
+          description: "Children of this document id. Empty string means the top level.",
         },
-        locale: { type: 'string', description: 'Read every field in this locale.' },
+        locale: { type: "string", description: "Read every field in this locale." },
         where: {
-          type: 'array',
-          items: { type: 'string' },
+          type: "array",
+          items: { type: "string" },
           description:
-            'Filters, each `field:op:value` — e.g. `price:lt:100`. Only a field the root block declares `indexed` may be named; anything else is refused naming the field.',
+            "Filters, each `field:op:value` — e.g. `price:lt:100`. Only a field the root block declares `indexed` may be named; anything else is refused naming the field.",
         },
-        order: { type: 'string', description: '`field` or `field:asc|desc`.' },
+        order: { type: "string", description: "`field` or `field:asc|desc`." },
         search: {
-          type: 'string',
-          description: 'Full-text `search` ranks by relevance and returns a `snippet` per item.',
+          type: "string",
+          description: "Full-text `search` ranks by relevance and returns a `snippet` per item.",
         },
-        page: { type: 'integer', description: '1-based page number.' },
-        perPage: { type: 'integer', description: 'Rows per page.' },
+        page: { type: "integer", description: "1-based page number." },
+        perPage: { type: "integer", description: "Rows per page." },
       },
       additionalProperties: false,
     },
-    method: 'GET',
-    path: '/documents',
-    query: ['type', 'parent', 'locale', 'where', 'order', 'search', 'page', 'perPage'],
+    method: "GET",
+    path: "/documents",
+    query: ["type", "parent", "locale", "where", "order", "search", "page", "perPage"],
     need: READ,
-    manifest: 'types',
+    manifest: "types",
   },
   {
-    name: 'get_document',
+    name: "get_document",
     description:
       "One document's content in the nested shape. `status: draft` reads the live draft — what an editor is looking at — and needs the content:read:draft scope; without it the published snapshot is returned.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
         id: ID,
-        status: { type: 'string', enum: ['published', 'draft'], description: 'Default published.' },
+        status: { type: "string", enum: ["published", "draft"], description: "Default published." },
         locale: {
-          type: 'string',
+          type: "string",
           description:
-            'Read every field in this locale and drop the translations. Omit to get the authoring shape, which is the one that can be written back.',
+            "Read every field in this locale and drop the translations. Omit to get the authoring shape, which is the one that can be written back.",
         },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'GET',
-    path: '/documents/:id',
-    query: ['status', 'locale'],
+    method: "GET",
+    path: "/documents/:id",
+    query: ["status", "locale"],
     need: READ,
   },
   {
-    name: 'list_versions',
+    name: "list_versions",
     description:
       "A document's version history, newest first: every publish and every named checkpoint, with who made it. A version id from here is what restore_version takes.",
     inputSchema: {
-      type: 'object',
-      properties: { id: ID, perPage: { type: 'integer', description: 'Up to 200. Default 50.' } },
-      required: ['id'],
+      type: "object",
+      properties: { id: ID, perPage: { type: "integer", description: "Up to 200. Default 50." } },
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'GET',
-    path: '/documents/:id/versions',
-    query: ['perPage'],
+    method: "GET",
+    path: "/documents/:id/versions",
+    query: ["perPage"],
     need: READ,
   },
   /**
@@ -263,41 +263,41 @@ export const MCP_TOOLS: readonly McpTool[] = [
    * `search_documents`' `state` enum against `STORY_STATE`.
    */
   {
-    name: 'preview_document',
+    name: "preview_document",
     description:
       "Screenshot the draft as a page would look — no editor chrome, no dead links — so a layout, a responsive break, or a missing image can be checked rather than inferred from markup. Clip to one block with `blok`. Without a `browser` binding configured (always the case against a local dev server, since Cloudflare's browser cannot reach localhost) this answers the draft's URL and rendered HTML instead, and says so.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
         id: ID,
         viewport: {
-          type: 'object',
+          type: "object",
           description:
-            'Pixel size of the browser window. Default 1440×900. Pass a mobile size to check a responsive break.',
+            "Pixel size of the browser window. Default 1440×900. Pass a mobile size to check a responsive break.",
           properties: {
             width: {
-              type: 'integer',
+              type: "integer",
               description: `${MIN_DIMENSION}-${MAX_DIMENSION}. Default 1440.`,
             },
             height: {
-              type: 'integer',
+              type: "integer",
               description: `${MIN_DIMENSION}-${MAX_DIMENSION}. Default 900.`,
             },
           },
           additionalProperties: false,
         },
         fullPage: {
-          type: 'boolean',
+          type: "boolean",
           description:
-            'Capture the whole scroll height instead of just the viewport. Default false — a long page can be over 10,000px tall, and a full-page image of that downscales into something unreadable. Ignored when `blok` is given.',
+            "Capture the whole scroll height instead of just the viewport. Default false — a long page can be over 10,000px tall, and a full-page image of that downscales into something unreadable. Ignored when `blok` is given.",
         },
         blok: {
-          type: 'string',
+          type: "string",
           description:
             "Clip to one block by uid, from get_document's content. A uid not present in the draft answers a message naming it; one that is present but renders no host element (a block whose render returns a component) falls back to the viewport and says so.",
         },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
     need: READ_DRAFT,
@@ -306,175 +306,175 @@ export const MCP_TOOLS: readonly McpTool[] = [
 
   /* -------------------------------------------------------------- writes --- */
   {
-    name: 'create_document',
+    name: "create_document",
     description:
-      'Create a document. A slug is derived from the title unless one is given; `parentId` places it in the page tree. Creating the same title twice under one parent is refused as a conflict rather than making two pages.',
+      "Create a document. A slug is derived from the title unless one is given; `parentId` places it in the page tree. Creating the same title twice under one parent is refused as a conflict rather than making two pages.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        title: { type: 'string', description: 'The document title.' },
-        slug: { type: 'string', description: 'URL segment. Derived from the title if absent.' },
+        title: { type: "string", description: "The document title." },
+        slug: { type: "string", description: "URL segment. Derived from the title if absent." },
         parentId: {
           // `['string', 'null']`, not `'string'`: the route reads this one out of
           // a JSON body through `v.nullish(ID)`, so `null` is the real value for
           // the top level rather than a way of describing its absence. A client
           // that validates arguments against this schema would otherwise reject
           // the correct value before it was ever sent.
-          type: ['string', 'null'],
-          description: 'Parent document id, or null for the top level.',
+          type: ["string", "null"],
+          description: "Parent document id, or null for the top level.",
         },
-        type: { type: 'string', description: 'A declared document type name.' },
+        type: { type: "string", description: "A declared document type name." },
         content: CONTENT,
       },
-      required: ['title'],
+      required: ["title"],
       additionalProperties: false,
     },
-    method: 'POST',
-    path: '/documents',
-    body: 'json',
+    method: "POST",
+    path: "/documents",
+    body: "json",
     need: CREATE,
-    manifest: 'types',
+    manifest: "types",
   },
   {
-    name: 'write_content',
+    name: "write_content",
     description:
       "Write a document's content. `merge` (the default) leaves fields the payload does not mention alone, so a partial payload is safe; `replace` discards anything it was not told about. The write appears live in any open editor, lands in the activity trail under this token's name, and is undoable there.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
         id: ID,
         content: CONTENT,
-        mode: { type: 'string', enum: ['merge', 'replace'], description: 'Default merge.' },
+        mode: { type: "string", enum: ["merge", "replace"], description: "Default merge." },
       },
-      required: ['id', 'content'],
+      required: ["id", "content"],
       additionalProperties: false,
     },
-    method: 'PUT',
-    path: '/documents/:id/content',
-    body: 'json',
+    method: "PUT",
+    path: "/documents/:id/content",
+    body: "json",
     need: EDIT,
-    manifest: 'blocks',
+    manifest: "blocks",
   },
   {
-    name: 'patch_fields',
+    name: "patch_fields",
     description:
       "Set named fields and nothing else — no structure is touched, so no block can be reordered or removed by accident. `fields` names the document's own root block; `bloks` names any other by uid. This is the tool for a copy change.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
         id: ID,
         fields: {
-          type: 'object',
+          type: "object",
           description: "Field name to value, on the document's root block.",
         },
         bloks: {
-          type: 'array',
+          type: "array",
           items: {
-            type: 'object',
-            properties: { uid: { type: 'string' }, fields: { type: 'object' } },
-            required: ['uid', 'fields'],
+            type: "object",
+            properties: { uid: { type: "string" }, fields: { type: "object" } },
+            required: ["uid", "fields"],
           },
-          description: 'Per-block writes, addressed by the uid get_document reports.',
+          description: "Per-block writes, addressed by the uid get_document reports.",
         },
         locale: {
-          type: 'string',
-          description: 'Write every field in this locale instead of the source one.',
+          type: "string",
+          description: "Write every field in this locale instead of the source one.",
         },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'PATCH',
-    path: '/documents/:id/fields',
-    body: 'json',
+    method: "PATCH",
+    path: "/documents/:id/fields",
+    body: "json",
     need: EDIT,
   },
   {
-    name: 'move_document',
+    name: "move_document",
     description:
       "A document's title, slug, parent and position in the tree — the URL and the structure, not the content. Moving or renaming a live page changes what the site serves, so this needs more than editing does.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
         id: ID,
-        title: { type: 'string' },
-        slug: { type: 'string' },
+        title: { type: "string" },
+        slug: { type: "string" },
         // Nullable for the same reason as `create_document`'s: a JSON body field
         // whose route reads it through `v.nullish(ID)`.
         parentId: {
-          type: ['string', 'null'],
-          description: 'New parent id, or null for the top level.',
+          type: ["string", "null"],
+          description: "New parent id, or null for the top level.",
         },
-        index: { type: 'integer', description: 'Position among its siblings, from 0.' },
+        index: { type: "integer", description: "Position among its siblings, from 0." },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'PATCH',
-    path: '/documents/:id',
-    body: 'json',
+    method: "PATCH",
+    path: "/documents/:id",
+    body: "json",
     need: MANAGE,
   },
   {
-    name: 'duplicate_document',
+    name: "duplicate_document",
     description:
       'Copy a document and its content. The copy is a draft; an absent title becomes "<title> (copy)" and an absent parent is the source\'s own. Position it afterwards with move_document.',
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
         id: ID,
-        title: { type: 'string' },
-        parentId: { type: 'string', description: "Defaults to the source's parent." },
+        title: { type: "string" },
+        parentId: { type: "string", description: "Defaults to the source's parent." },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'POST',
-    path: '/documents/:id/duplicate',
-    body: 'json',
+    method: "POST",
+    path: "/documents/:id/duplicate",
+    body: "json",
     need: CREATE,
   },
   {
-    name: 'restore_version',
+    name: "restore_version",
     description:
-      'Restore a version of a document: its content is diffed against the live draft and committed, so it is one undo step in the editor rather than an overwrite. A version stored before a schema migration is migrated on read, so no stale field key comes back.',
+      "Restore a version of a document: its content is diffed against the live draft and committed, so it is one undo step in the editor rather than an overwrite. A version stored before a schema migration is migrated on read, so no stale field key comes back.",
     inputSchema: {
-      type: 'object',
-      properties: { id: ID, versionId: { type: 'string', description: 'From list_versions.' } },
-      required: ['id', 'versionId'],
+      type: "object",
+      properties: { id: ID, versionId: { type: "string", description: "From list_versions." } },
+      required: ["id", "versionId"],
       additionalProperties: false,
     },
-    method: 'POST',
-    path: '/documents/:id/restore',
-    body: 'json',
+    method: "POST",
+    path: "/documents/:id/restore",
+    body: "json",
     need: EDIT,
   },
   {
-    name: 'publish_document',
+    name: "publish_document",
     description:
-      'Publish the draft: the document becomes what the site serves, and a version is recorded. Publishing an unchanged draft is harmless.',
+      "Publish the draft: the document becomes what the site serves, and a version is recorded. Publishing an unchanged draft is harmless.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: { id: ID },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'POST',
-    path: '/documents/:id/publish',
+    method: "POST",
+    path: "/documents/:id/publish",
     need: PUBLISH,
   },
   {
-    name: 'unpublish_document',
+    name: "unpublish_document",
     description:
-      'Take a document down. The draft and its history survive; the page stops being served. Unpublishing something already down does nothing.',
+      "Take a document down. The draft and its history survive; the page stops being served. Unpublishing something already down does nothing.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: { id: ID },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'POST',
-    path: '/documents/:id/unpublish',
+    method: "POST",
+    path: "/documents/:id/unpublish",
     need: PUBLISH,
   },
   {
@@ -496,51 +496,51 @@ export const MCP_TOOLS: readonly McpTool[] = [
      * absent from `tools/list` that is called by name anyway is refused by the
      * route's own `forbidden`, which is the whole point of decision 2.
      */
-    name: 'delete_document',
+    name: "delete_document",
     description:
-      'Delete a document and its descendants, their versions and their index rows. A redirect is left behind for each deleted path unless `redirect` is false. This cannot be undone by another tool call.',
+      "Delete a document and its descendants, their versions and their index rows. A redirect is left behind for each deleted path unless `redirect` is false. This cannot be undone by another tool call.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
         id: ID,
         redirect: {
-          type: 'boolean',
-          description: 'Leave a redirect for each deleted path. Default true.',
+          type: "boolean",
+          description: "Leave a redirect for each deleted path. Default true.",
         },
       },
-      required: ['id'],
+      required: ["id"],
       additionalProperties: false,
     },
-    method: 'DELETE',
-    path: '/documents/:id',
-    query: ['redirect'],
+    method: "DELETE",
+    path: "/documents/:id",
+    query: ["redirect"],
     need: SCOPE_ADMIN,
     narrowed: true,
   },
   {
-    name: 'upload_asset',
+    name: "upload_asset",
     description:
-      'Upload an image or file to the media library and get back the value an `asset` field takes. Bytes are base64 in `data`, because JSON-RPC cannot carry them any other way.',
+      "Upload an image or file to the media library and get back the value an `asset` field takes. Bytes are base64 in `data`, because JSON-RPC cannot carry them any other way.",
     inputSchema: {
-      type: 'object',
+      type: "object",
       properties: {
-        filename: { type: 'string', description: 'Original filename, including its extension.' },
-        data: { type: 'string', description: 'The file bytes, base64-encoded.' },
+        filename: { type: "string", description: "Original filename, including its extension." },
+        data: { type: "string", description: "The file bytes, base64-encoded." },
       },
-      required: ['filename', 'data'],
+      required: ["filename", "data"],
       additionalProperties: false,
     },
-    method: 'POST',
-    path: '/assets',
-    query: ['filename'],
-    body: 'base64',
+    method: "POST",
+    path: "/assets",
+    query: ["filename"],
+    body: "base64",
     need: ASSETS,
   },
-]
+];
 
 /** A tool by name, over the **whole** table rather than a filtered list. */
 export function toolByName(name: string): McpTool | undefined {
-  return MCP_TOOLS.find((tool) => tool.name === name)
+  return MCP_TOOLS.find((tool) => tool.name === name);
 }
 
 /**
@@ -552,7 +552,7 @@ export function toolByName(name: string): McpTool | undefined {
  * gate that reads the mode, so this stays a pure function of the actor.
  */
 export function toolsFor(actor: Actor | null): readonly McpTool[] {
-  return MCP_TOOLS.filter((tool) => allows(actor, tool.need))
+  return MCP_TOOLS.filter((tool) => allows(actor, tool.need));
 }
 
 /**
@@ -567,12 +567,12 @@ export function toolsFor(actor: Actor | null): readonly McpTool[] {
  */
 export function fillPath(path: string, args: Readonly<Record<string, unknown>>): string {
   return path.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_match, key: string) => {
-    const value = args[key]
-    if (typeof value !== 'string' && typeof value !== 'number') {
-      throw new FolioError('bad_request', `${key} is required`)
+    const value = args[key];
+    if (typeof value !== "string" && typeof value !== "number") {
+      throw new FolioError("bad_request", `${key} is required`);
     }
-    return encodeURIComponent(String(value))
-  })
+    return encodeURIComponent(String(value));
+  });
 }
 
 /**
@@ -584,7 +584,7 @@ export function fillPath(path: string, args: Readonly<Record<string, unknown>>):
  * defensively rather than asserting.
  */
 export function nonBodyKeys(tool: McpTool): Set<string> {
-  const keys = new Set<string>([...(tool.query ?? []), ...(tool.flags ?? [])])
-  for (const match of (tool.path ?? '').matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) keys.add(match[1]!)
-  return keys
+  const keys = new Set<string>([...(tool.query ?? []), ...(tool.flags ?? [])]);
+  for (const match of (tool.path ?? "").matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) keys.add(match[1]!);
+  return keys;
 }

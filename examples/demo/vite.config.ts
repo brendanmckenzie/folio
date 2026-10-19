@@ -1,7 +1,7 @@
-import { cloudflare } from '@cloudflare/vite-plugin'
-import react from '@vitejs/plugin-react'
-import { folio } from 'folio/vite'
-import { defineConfig } from 'vite'
+import { cloudflare } from "@cloudflare/vite-plugin";
+import react from "@vitejs/plugin-react";
+import { folio } from "folio/vite";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   // Fixed because the scripts in `scripts/` drive a live server on this port.
@@ -11,7 +11,7 @@ export default defineConfig({
     react(),
     // Generates the preview entry from this project's blocks and adds the
     // library's prebuilt admin to the client build.
-    folio({ blocks: './src/blocks/index.ts' }),
-    cloudflare({ viteEnvironment: { name: 'ssr' } }),
+    folio({ blocks: "./src/blocks/index.ts" }),
+    cloudflare({ viteEnvironment: { name: "ssr" } }),
   ],
-})
+});

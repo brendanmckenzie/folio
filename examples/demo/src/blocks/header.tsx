@@ -1,4 +1,4 @@
-import { blocks, defineBlock, text } from 'folio/core'
+import { blocks, defineBlock, text } from "folio/core";
 
 /**
  * Root block for the `header` **singleton**
@@ -13,16 +13,16 @@ import { blocks, defineBlock, text } from 'folio/core'
  * `/?_folio=preview&as=header`.
  */
 export const headerRoot = defineBlock({
-  name: 'headerRoot',
-  label: 'Header',
+  name: "headerRoot",
+  label: "Header",
   fields: {
-    logoText: text({ label: 'Logo text', default: 'Folio demo', translatable: true }),
-    nav: blocks({ label: 'Navigation', allow: ['button'], max: 6 }),
+    logoText: text({ label: "Logo text", default: "Folio demo", translatable: true }),
+    nav: blocks({ label: "Navigation", allow: ["button"], max: 6 }),
   },
   render: ({ logoText, nav }) => (
     <header className="site-header">
-      <span className="site-header__logo">{logoText || 'Folio demo'}</span>
+      <span className="site-header__logo">{logoText || "Folio demo"}</span>
       <nav className="site-header__nav">{nav}</nav>
     </header>
   ),
-})
+});

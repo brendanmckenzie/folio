@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Doc } from '../../core/doc'
-import { type DocumentType, singletonId } from '../../core/schema'
-import { layerId } from '../../core/sites'
-import { scopeOfApiBase } from '../ui/route'
+import { useCallback, useEffect, useState } from "react";
+import type { Doc } from "../../core/doc";
+import { type DocumentType, singletonId } from "../../core/schema";
+import { layerId } from "../../core/sites";
+import { scopeOfApiBase } from "../ui/route";
 
 /**
  * The configured globals (`FolioConfig.globals`, `../../../docs/specs/content-
@@ -22,11 +22,11 @@ export function globalTypes(
 ): DocumentType[] {
   return globals
     .map((name) => types.find((t) => t.name === name))
-    .filter((t): t is DocumentType => Boolean(t))
+    .filter((t): t is DocumentType => Boolean(t));
 }
 
 export interface GlobalDocs {
-  docs: Readonly<Record<string, Doc>>
+  docs: Readonly<Record<string, Doc>>;
   /**
    * Re-fetch every configured global.
    *
@@ -35,7 +35,7 @@ export interface GlobalDocs {
    * of its document is stale. Still not per keystroke — an event, not a
    * subscription.
    */
-  reload: () => void
+  reload: () => void;
 }
 
 /**
@@ -54,46 +54,46 @@ export function useGlobalDocs(
   types: readonly DocumentType[],
   globals: readonly string[],
 ): GlobalDocs {
-  const [docs, setDocs] = useState<Record<string, Doc>>({})
+  const [docs, setDocs] = useState<Record<string, Doc>>({});
   /** Bumped to re-run the fetch below. A counter rather than a second copy of the
    * fetch, so there is one code path whether it runs on mount or on an event. */
-  const [nonce, setNonce] = useState(0)
-  const key = globals.join(',')
+  const [nonce, setNonce] = useState(0);
+  const key = globals.join(",");
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `nonce` is deliberate — it is not read in the body, and bumping it is the whole mechanism for re-running this fetch on a `global.changed` event
   useEffect(() => {
     // On a deployment with `sites` (an `apiBase` under `~<scope>`) a global is the
     // scope's layer, and a clicked block is traced to the layer being edited.
-    const scope = scopeOfApiBase(apiBase)
-    const wanted = globalTypes(types, key ? key.split(',') : [])
-    if (wanted.length === 0) return
-    let live = true
+    const scope = scopeOfApiBase(apiBase);
+    const wanted = globalTypes(types, key ? key.split(",") : []);
+    if (wanted.length === 0) return;
+    let live = true;
 
     void Promise.all(
       wanted.map(async (type) => {
         try {
           const res = await fetch(
             `${apiBase}/story/${encodeURIComponent(scope ? layerId(type.name, scope) : singletonId(type))}/document`,
-          )
-          if (!res.ok) return null
-          const body = (await res.json().catch(() => null)) as { doc?: Doc } | null
-          return body?.doc ? ([type.name, body.doc] as const) : null
+          );
+          if (!res.ok) return null;
+          const body = (await res.json().catch(() => null)) as { doc?: Doc } | null;
+          return body?.doc ? ([type.name, body.doc] as const) : null;
         } catch {
-          return null
+          return null;
         }
       }),
     ).then((results) => {
-      if (!live) return
-      const found = results.filter((r): r is readonly [string, Doc] => r !== null)
-      if (found.length) setDocs((prev) => ({ ...prev, ...Object.fromEntries(found) }))
-    })
+      if (!live) return;
+      const found = results.filter((r): r is readonly [string, Doc] => r !== null);
+      if (found.length) setDocs((prev) => ({ ...prev, ...Object.fromEntries(found) }));
+    });
 
     return () => {
-      live = false
-    }
-  }, [apiBase, key, types, nonce])
+      live = false;
+    };
+  }, [apiBase, key, types, nonce]);
 
-  const reload = useCallback(() => setNonce((n) => n + 1), [])
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
 
-  return { docs, reload }
+  return { docs, reload };
 }

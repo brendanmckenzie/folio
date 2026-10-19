@@ -1,6 +1,6 @@
-import { applyD1Migrations, env } from 'cloudflare:test'
-import { beforeAll } from 'vitest'
-import { compareMigrationFilenames, splitSqlStatements } from './sql-split'
+import { applyD1Migrations, env } from "cloudflare:test";
+import { beforeAll } from "vitest";
+import { compareMigrationFilenames, splitSqlStatements } from "./sql-split";
 
 /**
  * The same directory `wrangler d1 migrations apply` reads for examples/demo
@@ -29,16 +29,16 @@ import { compareMigrationFilenames, splitSqlStatements } from './sql-split'
  * BEGIN/END-aware, and orders on the numeric migration prefix, not the
  * filename string).
  */
-const modules = import.meta.glob('../../migrations/*.sql', {
+const modules = import.meta.glob("../../migrations/*.sql", {
   eager: true,
-  query: '?raw',
-  import: 'default',
-}) as Record<string, string>
+  query: "?raw",
+  import: "default",
+}) as Record<string, string>;
 
 const migrations = Object.entries(modules)
-  .map(([path, sql]) => ({ name: path.split('/').at(-1) ?? path, sql }))
+  .map(([path, sql]) => ({ name: path.split("/").at(-1) ?? path, sql }))
   .sort((a, b) => compareMigrationFilenames(a.name, b.name))
-  .map(({ name, sql }) => ({ name, queries: splitSqlStatements(sql) }))
+  .map(({ name, sql }) => ({ name, queries: splitSqlStatements(sql) }));
 
 /**
  * Runs once per test file. The pool's isolated storage undoes writes made by
@@ -49,5 +49,5 @@ const migrations = Object.entries(modules)
  * stories.test.ts's `resetStories`).
  */
 beforeAll(async () => {
-  await applyD1Migrations(env.DB, migrations)
-})
+  await applyD1Migrations(env.DB, migrations);
+});

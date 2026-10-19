@@ -1,7 +1,7 @@
-import { renderToStaticMarkup } from 'react-dom/server'
-import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
-import { wrapPreview } from '../../../src/core/render-wrap'
+import { renderToStaticMarkup } from "react-dom/server";
+import { useState } from "react";
+import { describe, expect, it } from "vitest";
+import { wrapPreview } from "../../../src/core/render-wrap";
 
 /**
  * The host's preview wrapper is a **component**, and this is the test that says
@@ -20,24 +20,26 @@ import { wrapPreview } from '../../../src/core/render-wrap'
  * because a data router must be built once and held rather than rebuilt on every
  * keystroke.
  */
-describe('wrapPreview', () => {
-  it('renders the tree unwrapped when there is no wrapper', () => {
-    expect(renderToStaticMarkup(<>{wrapPreview(undefined, <p>hi</p>)}</>)).toBe('<p>hi</p>')
-  })
+describe("wrapPreview", () => {
+  it("renders the tree unwrapped when there is no wrapper", () => {
+    expect(renderToStaticMarkup(<>{wrapPreview(undefined, <p>hi</p>)}</>)).toBe("<p>hi</p>");
+  });
 
-  it('wraps the tree', () => {
-    const wrap = ({ children }: { children: React.ReactNode }) => <main>{children}</main>
-    expect(renderToStaticMarkup(<>{wrapPreview(wrap, <p>hi</p>)}</>)).toBe('<main><p>hi</p></main>')
-  })
+  it("wraps the tree", () => {
+    const wrap = ({ children }: { children: React.ReactNode }) => <main>{children}</main>;
+    expect(renderToStaticMarkup(<>{wrapPreview(wrap, <p>hi</p>)}</>)).toBe(
+      "<main><p>hi</p></main>",
+    );
+  });
 
   /** The whole point. A wrapper holding a router, a theme or a store has state. */
-  it('lets the wrapper use hooks', () => {
+  it("lets the wrapper use hooks", () => {
     function Wrap({ children }: { children: React.ReactNode }) {
-      const [id] = useState('held')
-      return <div data-wrap={id}>{children}</div>
+      const [id] = useState("held");
+      return <div data-wrap={id}>{children}</div>;
     }
     expect(renderToStaticMarkup(<>{wrapPreview(Wrap, <p>hi</p>)}</>)).toBe(
       '<div data-wrap="held"><p>hi</p></div>',
-    )
-  })
-})
+    );
+  });
+});

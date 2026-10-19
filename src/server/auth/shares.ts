@@ -37,20 +37,20 @@
  * asked about and answers yes or no; it cannot be asked "which documents does
  * this link cover" because the question has one answer by construction.
  */
-import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
-import { FolioError } from '../errors'
-import { type Keyset, keysetWhere, orderBy, whereOf } from '../keyset'
-import { hashToken, mintId, mintSecret } from './secrets'
-import type { FolioDb } from '../db'
+import { clampLimit, decodeCursor, type Page, paginate } from "../../core/pagination";
+import { FolioError } from "../errors";
+import { type Keyset, keysetWhere, orderBy, whereOf } from "../keyset";
+import { hashToken, mintId, mintSecret } from "./secrets";
+import type { FolioDb } from "../db";
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * How long a link lasts when the editor does not say. A week: a client review is
  * a week's business, and the default has to be the answer for somebody who never
  * thinks about it.
  */
-export const DEFAULT_SHARE_DAYS = 7
+export const DEFAULT_SHARE_DAYS = 7;
 
 /**
  * The ceiling. Ninety days, and unlike `TokenCreateBody.expiresInDays`' ten years
@@ -59,14 +59,14 @@ export const DEFAULT_SHARE_DAYS = 7
  * feature is an unpublished page reachable by a URL in a two-year-old email
  * thread. Renewing is one click; a decade is not a review cycle.
  */
-export const MAX_SHARE_DAYS = 90
+export const MAX_SHARE_DAYS = 90;
 
 /**
  * `(created_at, id)` newest first — what `shares_created` indexes and what
  * `api_tokens`, `assets` and `versions` all page by. The link you just made is
  * the one you are looking for.
  */
-const NEWEST_FIRST: Keyset = { columns: ['created_at', 'id'], direction: 'desc' }
+const NEWEST_FIRST: Keyset = { columns: ["created_at", "id"], direction: "desc" };
 
 /**
  * One share, as a list route answers it. **Carries no token and no hash** — the
@@ -74,43 +74,43 @@ const NEWEST_FIRST: Keyset = { columns: ['created_at', 'id'], direction: 'desc' 
  * this file.
  */
 export interface ShareRow {
-  id: string
+  id: string;
   /** The one document this link shows. */
-  storyId: string
+  storyId: string;
   /** `users.id`, `token:<name>`, or null. */
-  createdBy: string | null
+  createdBy: string | null;
   /**
    * The creator's display name (`users.name`, the same one presence and history
    * show), for the admin's share list. Null for a `token:<name>` creator, a creator
    * whose account was deleted, and the row `createShare` hands back (the minter is
    * the caller, who already knows their own name).
    */
-  createdByName: string | null
-  createdAt: number
-  expiresAt: number
-  revokedAt: number | null
-  lastViewedAt: number | null
+  createdByName: string | null;
+  createdAt: number;
+  expiresAt: number;
+  revokedAt: number | null;
+  lastViewedAt: number | null;
   /** How many times the document has been rendered through this link. */
-  views: number
-  note: string | null
+  views: number;
+  note: string | null;
 }
 
 interface RawShare {
-  id: string
-  story_id: string
-  created_by: string | null
+  id: string;
+  story_id: string;
+  created_by: string | null;
   /** Only selected by `listShares`. */
-  created_by_name?: string | null
-  created_at: number
-  expires_at: number
-  revoked_at: number | null
-  last_viewed_at: number | null
-  views: number
-  note: string | null
+  created_by_name?: string | null;
+  created_at: number;
+  expires_at: number;
+  revoked_at: number | null;
+  last_viewed_at: number | null;
+  views: number;
+  note: string | null;
 }
 
 const COLUMNS = `id, story_id, created_by, created_at, expires_at,
-                 revoked_at, last_viewed_at, views, note`
+                 revoked_at, last_viewed_at, views, note`;
 
 function toShare(row: RawShare): ShareRow {
   return {
@@ -124,7 +124,7 @@ function toShare(row: RawShare): ShareRow {
     lastViewedAt: row.last_viewed_at,
     views: row.views,
     note: row.note,
-  }
+  };
 }
 
 /**
@@ -133,19 +133,19 @@ function toShare(row: RawShare): ShareRow {
  */
 export interface ShareGrant {
   /** `shares.id`. The row, never the secret. */
-  id: string
+  id: string;
   /** The one document. */
-  storyId: string
-  expiresAt: number
+  storyId: string;
+  expiresAt: number;
 }
 
 export interface MintedShare {
-  row: ShareRow
+  row: ShareRow;
   /**
    * The token, in the clear. `POST {base}/api/story/:id/share` is the only
    * response that ever carries it, and it is never recoverable afterwards.
    */
-  token: string
+  token: string;
 }
 
 /**
@@ -159,17 +159,17 @@ export interface MintedShare {
  * is the one a programmatic caller hits.
  */
 export function shareExpiry(days: number | undefined, now = Date.now()): number {
-  const requested = days ?? DEFAULT_SHARE_DAYS
+  const requested = days ?? DEFAULT_SHARE_DAYS;
   if (!Number.isFinite(requested) || requested < 1) {
-    throw new FolioError('bad_request', 'A preview link must last at least a day.')
+    throw new FolioError("bad_request", "A preview link must last at least a day.");
   }
   if (requested > MAX_SHARE_DAYS) {
     throw new FolioError(
-      'bad_request',
+      "bad_request",
       `A preview link cannot last more than ${MAX_SHARE_DAYS} days. Make a new one when it runs out.`,
-    )
+    );
   }
-  return now + requested * DAY_MS
+  return now + requested * DAY_MS;
 }
 
 /**
@@ -184,18 +184,18 @@ export function shareExpiry(days: number | undefined, now = Date.now()): number 
 export async function createShare(
   db: FolioDb,
   input: {
-    storyId: string
-    expiresAt: number
-    createdBy?: string | null
-    note?: string | null
+    storyId: string;
+    expiresAt: number;
+    createdBy?: string | null;
+    note?: string | null;
     /** The render site (`shares.site_id`); absent is `default`, a deployment with
      * no `sites`. */
-    site?: string
+    site?: string;
   },
 ): Promise<MintedShare> {
-  const token = mintSecret()
+  const token = mintSecret();
   const row: ShareRow = {
-    id: mintId('shr'),
+    id: mintId("shr"),
     storyId: input.storyId,
     createdBy: input.createdBy ?? null,
     createdByName: null,
@@ -205,7 +205,7 @@ export async function createShare(
     lastViewedAt: null,
     views: 0,
     note: input.note?.trim() ? input.note.trim() : null,
-  }
+  };
   await db
     .prepare(
       `insert into shares
@@ -220,28 +220,28 @@ export async function createShare(
       row.createdAt,
       row.expiresAt,
       row.note,
-      input.site ?? 'default',
+      input.site ?? "default",
     )
-    .run()
-  return { row, token }
+    .run();
+  return { row, token };
 }
 
 /** `live` is not revoked and not yet expired; `lapsed` is everything else. A
  * projection of two columns and the clock, never a stored value — see
  * `migrations/0004_shares.sql`. */
-export type ShareState = 'live' | 'lapsed'
+export type ShareState = "live" | "lapsed";
 
 export interface ListSharesOptions {
-  limit?: number
-  cursor?: string
+  limit?: number;
+  cursor?: string;
   /** One document's links — the editor's own read, off a document's own screen. */
-  storyId?: string
-  state?: ShareState
+  storyId?: string;
+  state?: ShareState;
   /** Adds `total` for the same filter (`../../../docs/specs/foundation/pagination.md`
    * decision 5). */
-  count?: boolean
+  count?: boolean;
   /** For the `state` comparison. Injectable so a test can age a row rather than sleep. */
-  now?: number
+  now?: number;
   /**
    * Only the links on documents this scope owns (`multi-site.md`'s route table:
    * `/shares` is "scope's own rows"). By the story's scope rather than
@@ -249,11 +249,11 @@ export interface ListSharesOptions {
    * the shared scope's to list and revoke. Absent is every link, which is a
    * deployment with no `sites`.
    */
-  site?: string
+  site?: string;
 }
 
 /** A share's document is in `site`: the fence a share inherits from its story. */
-const IN_SITE = 'story_id in (select id from stories where site_id = ?)'
+const IN_SITE = "story_id in (select id from stories where site_id = ?)";
 
 /**
  * Links, newest first, paged.
@@ -268,29 +268,29 @@ export async function listShares(
   db: FolioDb,
   opts: ListSharesOptions = {},
 ): Promise<Page<ShareRow>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
-  const now = opts.now ?? Date.now()
+  const limit = clampLimit(opts.limit, 50, 200);
+  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null);
+  const now = opts.now ?? Date.now();
 
   // `narrow` is the filter and `narrow` alone is what the count counts: a
   // `count(*)` carrying the cursor clause would answer "how many are left" where
   // a header reads `n of N`. The split every other paged reader here makes.
-  const narrow: string[] = []
-  const narrowBinds: unknown[] = []
+  const narrow: string[] = [];
+  const narrowBinds: unknown[] = [];
   if (opts.storyId) {
-    narrow.push('story_id = ?')
-    narrowBinds.push(opts.storyId)
+    narrow.push("story_id = ?");
+    narrowBinds.push(opts.storyId);
   }
   if (opts.site !== undefined) {
-    narrow.push(IN_SITE)
-    narrowBinds.push(opts.site)
+    narrow.push(IN_SITE);
+    narrowBinds.push(opts.site);
   }
-  if (opts.state === 'live') {
-    narrow.push('revoked_at is null and expires_at > ?')
-    narrowBinds.push(now)
-  } else if (opts.state === 'lapsed') {
-    narrow.push('(revoked_at is not null or expires_at <= ?)')
-    narrowBinds.push(now)
+  if (opts.state === "live") {
+    narrow.push("revoked_at is null and expires_at > ?");
+    narrowBinds.push(now);
+  } else if (opts.state === "lapsed") {
+    narrow.push("(revoked_at is not null or expires_at <= ?)");
+    narrowBinds.push(now);
   }
 
   const [rows, total] = await Promise.all([
@@ -309,12 +309,12 @@ export async function listShares(
           .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
-  ])
+  ]);
 
   // Keyed component for component with `NEWEST_FIRST` — the correspondence
   // `paginate` cannot check for its caller.
-  const page = paginate(rows.results.map(toShare), limit, (row) => [row.createdAt, row.id])
-  return total ? { ...page, total: total.n } : page
+  const page = paginate(rows.results.map(toShare), limit, (row) => [row.createdAt, row.id]);
+  return total ? { ...page, total: total.n } : page;
 }
 
 /**
@@ -332,15 +332,15 @@ export async function revokeShare(
 ): Promise<boolean> {
   const result = await (site === undefined
     ? db
-        .prepare('update shares set revoked_at = ? where id = ? and revoked_at is null')
+        .prepare("update shares set revoked_at = ? where id = ? and revoked_at is null")
         .bind(Date.now(), id)
     : db
         .prepare(
           `update shares set revoked_at = ? where id = ? and revoked_at is null and ${IN_SITE}`,
         )
         .bind(Date.now(), id, site)
-  ).run()
-  return (result.meta.changes ?? 0) > 0
+  ).run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 /**
@@ -364,15 +364,15 @@ export async function readShareByToken(
   /** The gated site, on a deployment with `sites`: a link redeems only there. */
   site?: string,
 ): Promise<ShareGrant | null> {
-  const onSite = site === undefined ? '' : ' and site_id = ?'
+  const onSite = site === undefined ? "" : " and site_id = ?";
   const row = await db
     .prepare(
       `select id, story_id, expires_at from shares
         where token_hash = ? and revoked_at is null and expires_at > ?${onSite}`,
     )
     .bind(await hashToken(presented), now, ...(site === undefined ? [] : [site]))
-    .first<{ id: string; story_id: string; expires_at: number }>()
-  return row ? { id: row.id, storyId: row.story_id, expiresAt: row.expires_at } : null
+    .first<{ id: string; story_id: string; expires_at: number }>();
+  return row ? { id: row.id, storyId: row.story_id, expiresAt: row.expires_at } : null;
 }
 
 /**
@@ -403,21 +403,21 @@ export async function claimShare(
   /** The gated site, on a deployment with `sites`: a link covers its story there only. */
   site?: string,
 ): Promise<ShareGrant | null> {
-  if (presented.length === 0) return null
-  const hashes = await Promise.all(presented.map(hashToken))
-  const holes = hashes.map(() => '?').join(', ')
-  const onSite = site === undefined ? '' : ' and site_id = ?'
-  const where = `token_hash in (${holes}) and story_id = ? and revoked_at is null and expires_at > ?${onSite}`
-  const binds = [...hashes, storyId, now, ...(site === undefined ? [] : [site])]
+  if (presented.length === 0) return null;
+  const hashes = await Promise.all(presented.map(hashToken));
+  const holes = hashes.map(() => "?").join(", ");
+  const onSite = site === undefined ? "" : " and site_id = ?";
+  const where = `token_hash in (${holes}) and story_id = ? and revoked_at is null and expires_at > ?${onSite}`;
+  const binds = [...hashes, storyId, now, ...(site === undefined ? [] : [site])];
 
   const [read] = await db.batch<{ id: string; story_id: string; expires_at: number }>([
     db.prepare(`select id, story_id, expires_at from shares where ${where}`).bind(...binds),
     db
       .prepare(`update shares set views = views + 1, last_viewed_at = ? where ${where}`)
       .bind(now, ...binds),
-  ])
-  const row = read?.results?.[0]
-  return row ? { id: row.id, storyId: row.story_id, expiresAt: row.expires_at } : null
+  ]);
+  const row = read?.results?.[0];
+  return row ? { id: row.id, storyId: row.story_id, expiresAt: row.expires_at } : null;
 }
 
 /**
@@ -436,17 +436,17 @@ export async function sharedStoriesAt(
   path: string,
   now = Date.now(),
 ): Promise<string[]> {
-  if (presented.length === 0) return []
-  const hashes = await Promise.all(presented.map(hashToken))
+  if (presented.length === 0) return [];
+  const hashes = await Promise.all(presented.map(hashToken));
   const { results } = await db
     .prepare(
       `select sh.story_id from shares sh join stories st on st.id = sh.story_id
-        where sh.token_hash in (${hashes.map(() => '?').join(', ')})
+        where sh.token_hash in (${hashes.map(() => "?").join(", ")})
           and sh.site_id = ? and sh.revoked_at is null and sh.expires_at > ? and st.path = ?`,
     )
     .bind(...hashes, site, now, path)
-    .all<{ story_id: string }>()
-  return results.map((row) => row.story_id)
+    .all<{ story_id: string }>();
+  return results.map((row) => row.story_id);
 }
 
 /**
@@ -460,14 +460,14 @@ export async function deleteLapsedShares(
   db: FolioDb,
   opts: { now?: number; keepDays?: number } = {},
 ): Promise<number> {
-  const now = opts.now ?? Date.now()
-  const cutoff = now - (opts.keepDays ?? 30) * DAY_MS
+  const now = opts.now ?? Date.now();
+  const cutoff = now - (opts.keepDays ?? 30) * DAY_MS;
   const result = await db
     .prepare(
       `delete from shares
         where (expires_at <= ? or revoked_at is not null) and created_at <= ?`,
     )
     .bind(now, cutoff)
-    .run()
-  return result.meta.changes ?? 0
+    .run();
+  return result.meta.changes ?? 0;
 }

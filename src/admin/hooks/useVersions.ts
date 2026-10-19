@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { diff, summariseDiff } from '../../core/diff'
-import type { Doc } from '../../core/doc'
-import type { Page } from '../../core/pagination'
-import { type ActivityEntry, MAX_TX_MUTATIONS } from '../../core/protocol'
-import type { VersionMeta } from '../../server/versions'
-import { afterWrite, expectJson, expectOk, send } from '../api'
-import type { StoryStore } from '../store'
-import type { Notify } from './useNotice'
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { diff, summariseDiff } from "../../core/diff";
+import type { Doc } from "../../core/doc";
+import type { Page } from "../../core/pagination";
+import { type ActivityEntry, MAX_TX_MUTATIONS } from "../../core/protocol";
+import type { VersionMeta } from "../../server/versions";
+import { afterWrite, expectJson, expectOk, send } from "../api";
+import type { StoryStore } from "../store";
+import type { Notify } from "./useNotice";
 
 /**
  * What the preview iframe is showing. The editor has exactly two modes and this
@@ -14,19 +14,19 @@ import type { Notify } from './useNotice'
  * past version is on screen — the store-to-iframe seam, undo, the inspector,
  * publish — reads it from here rather than keeping its own guard.
  */
-export type PreviewMode = 'live' | 'viewing'
+export type PreviewMode = "live" | "viewing";
 
 export interface PreviewSource {
-  mode: PreviewMode
+  mode: PreviewMode;
   /**
    * The version's document while `mode` is 'viewing', null while live. The
    * document and not just a flag, so an iframe reload mid-preview can be
    * re-seeded with the version rather than with the live draft.
    */
-  doc: Doc | null
+  doc: Doc | null;
 }
 
-const LIVE: PreviewSource = { mode: 'live', doc: null }
+const LIVE: PreviewSource = { mode: "live", doc: null };
 
 /* ------------------------------------------------------------------ paging --- */
 
@@ -50,28 +50,28 @@ const LIVE: PreviewSource = { mode: 'live', doc: null }
  * same control for a tree level, for a structural reason rather than a temporal one.
  */
 export interface Trail<T> {
-  rows: readonly T[]
+  rows: readonly T[];
   /** Null when the list is fully loaded. */
-  cursor: string | null
+  cursor: string | null;
   /**
    * No page has landed yet, or one is in flight. Initially true, which is what a
    * skeleton wants: an empty list that has not been asked for yet must not draw as
    * an empty list that has.
    */
-  loading: boolean
+  loading: boolean;
   /** A failed read, so a reader can say so instead of looking empty. */
-  error?: string
+  error?: string;
   /** Appends the next page. A no-op on the last page and while one is in flight. */
-  more: () => Promise<void>
+  more: () => Promise<void>;
   /** Back to page one, discarding the tail. */
-  reload: () => Promise<void>
+  reload: () => Promise<void>;
 }
 
 interface TrailState<T> {
-  rows: T[]
-  cursor: string | null
-  loading: boolean
-  error?: string
+  rows: T[];
+  cursor: string | null;
+  loading: boolean;
+  error?: string;
 }
 
 /**
@@ -90,19 +90,19 @@ export function appendRows<T>(
   incoming: readonly T[],
   keyOf: (row: T) => string | number,
 ): T[] {
-  const seen = new Set(held.map(keyOf))
-  const out = [...held]
+  const seen = new Set(held.map(keyOf));
+  const out = [...held];
   for (const row of incoming) {
-    const key = keyOf(row)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(row)
+    const key = keyOf(row);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(row);
   }
-  return out
+  return out;
 }
 
-const versionKey = (row: VersionMeta) => row.id
-const activityKey = (row: ActivityEntry) => row.syncId
+const versionKey = (row: VersionMeta) => row.id;
+const activityKey = (row: ActivityEntry) => row.syncId;
 
 /**
  * One paged, appending list over a `Page<T>` route.
@@ -114,26 +114,26 @@ const activityKey = (row: ActivityEntry) => row.syncId
  * reads it.
  */
 function useTrail<T>(url: string, keyOf: (row: T) => string | number, auto: boolean) {
-  const [state, setState] = useState<TrailState<T>>({ rows: [], cursor: null, loading: true })
-  const live = useRef(true)
+  const [state, setState] = useState<TrailState<T>>({ rows: [], cursor: null, loading: true });
+  const live = useRef(true);
   // Set on the way in as well as cleared on the way out: StrictMode mounts, cleans
   // up and mounts again, so a flag that was only ever cleared would leave the second
   // mount permanently unable to apply a response. `StoryStore.connect` and
   // `spaceStore` both carry a note about the same double mount.
   useEffect(() => {
-    live.current = true
+    live.current = true;
     return () => {
-      live.current = false
-    }
-  }, [])
+      live.current = false;
+    };
+  }, []);
 
   const read = useCallback(
     async (from: string | null) => {
-      setState((prev) => ({ ...prev, loading: true, error: undefined }))
+      setState((prev) => ({ ...prev, loading: true, error: undefined }));
       try {
-        const res = await fetch(from === null ? url : `${url}?cursor=${encodeURIComponent(from)}`)
-        const page = await expectJson<Page<T>>(res)
-        if (!live.current) return
+        const res = await fetch(from === null ? url : `${url}?cursor=${encodeURIComponent(from)}`);
+        const page = await expectJson<Page<T>>(res);
+        if (!live.current) return;
         setState((prev) => ({
           // `from === null` is a reload and replaces; a cursor appends. The held rows
           // come from `prev` rather than from the closure, so two reads in flight
@@ -141,25 +141,25 @@ function useTrail<T>(url: string, keyOf: (row: T) => string | number, auto: bool
           rows: from === null ? page.rows : appendRows(prev.rows, page.rows, keyOf),
           cursor: page.cursor,
           loading: false,
-        }))
+        }));
       } catch (e) {
         if (live.current) {
-          setState((prev) => ({ ...prev, loading: false, error: (e as Error).message }))
+          setState((prev) => ({ ...prev, loading: false, error: (e as Error).message }));
         }
       }
     },
     [keyOf, url],
-  )
+  );
 
   useEffect(() => {
-    if (auto) void read(null)
-  }, [auto, read])
+    if (auto) void read(null);
+  }, [auto, read]);
 
-  const reload = useCallback(() => read(null), [read])
+  const reload = useCallback(() => read(null), [read]);
   const more = useCallback(
     () => (state.cursor === null || state.loading ? Promise.resolve() : read(state.cursor)),
     [read, state.cursor, state.loading],
-  )
+  );
 
   const trail = useMemo<Trail<T>>(
     () => ({
@@ -171,22 +171,22 @@ function useTrail<T>(url: string, keyOf: (row: T) => string | number, auto: bool
       reload,
     }),
     [more, reload, state],
-  )
+  );
 
-  return { rows: state.rows, reload, trail }
+  return { rows: state.rows, reload, trail };
 }
 
 /* ---------------------------------------------------------------- versions --- */
 
 export interface VersionsList {
-  versions: VersionMeta[]
-  reload: () => Promise<void>
+  versions: VersionMeta[];
+  reload: () => Promise<void>;
   /**
    * The same rows, plus the cursor and the control over it. One state read two
    * ways rather than two states: `versions` is the shape `usePublishedDoc` and the
    * old `Editor.tsx` already read, and `trail` is what a paging consumer needs.
    */
-  trail: Trail<VersionMeta>
+  trail: Trail<VersionMeta>;
 }
 
 /**
@@ -209,25 +209,25 @@ export function useVersionsList(apiBase: string, storyId: string): VersionsList 
     `${apiBase}/story/${encodeURIComponent(storyId)}/versions`,
     versionKey,
     true,
-  )
-  return { versions: rows, reload, trail }
+  );
+  return { versions: rows, reload, trail };
 }
 
 export interface Versions {
-  versions: VersionMeta[]
-  activity: ActivityEntry[]
+  versions: VersionMeta[];
+  activity: ActivityEntry[];
   /** A version request is in flight; the History controls stay disabled. */
-  busy: boolean
-  source: PreviewSource
+  busy: boolean;
+  source: PreviewSource;
   /** The version on screen, for the banner and the list's highlight. */
-  viewing: { version: VersionMeta; doc: Doc } | null
+  viewing: { version: VersionMeta; doc: Doc } | null;
   /** How the live draft differs from the version being viewed. */
-  delta: ReturnType<typeof summariseDiff> | null
-  reload: () => Promise<void>
-  checkpoint: (label: string) => Promise<void>
-  view: (version: VersionMeta) => Promise<void>
-  exit: () => void
-  restore: (version: VersionMeta, preloaded?: Doc) => Promise<void>
+  delta: ReturnType<typeof summariseDiff> | null;
+  reload: () => Promise<void>;
+  checkpoint: (label: string) => Promise<void>;
+  view: (version: VersionMeta) => Promise<void>;
+  exit: () => void;
+  restore: (version: VersionMeta, preloaded?: Doc) => Promise<void>;
   /**
    * The same rows as `activity`, plus the cursor and the control over it — the
    * activity half of what `VersionsList.trail` is for the versions half.
@@ -236,22 +236,22 @@ export interface Versions {
    * transaction, so a story anybody has worked in for an afternoon has more than
    * one page of it.
    */
-  activityTrail: Trail<ActivityEntry>
+  activityTrail: Trail<ActivityEntry>;
 }
 
 interface Options {
-  store: StoryStore
-  apiBase: string
-  storyId: string
+  store: StoryStore;
+  apiBase: string;
+  storyId: string;
   /** The live draft, for the delta against the version being viewed. */
-  liveDoc: Doc | null
-  notify: Notify
+  liveDoc: Doc | null;
+  notify: Notify;
   /** True while the History rail is open: the activity trail loads when it is. */
-  active: boolean
+  active: boolean;
   /** The version list `useVersionsList` already loaded, for the History rail
    * and the viewing/restore machinery below. */
-  versions: VersionMeta[]
-  reloadVersions: () => Promise<void>
+  versions: VersionMeta[];
+  reloadVersions: () => Promise<void>;
 }
 
 /**
@@ -272,8 +272,8 @@ export function useVersions({
   versions,
   reloadVersions,
 }: Options): Versions {
-  const [busy, setBusy] = useState(false)
-  const [viewing, setViewing] = useState<{ version: VersionMeta; doc: Doc } | null>(null)
+  const [busy, setBusy] = useState(false);
+  const [viewing, setViewing] = useState<{ version: VersionMeta; doc: Doc } | null>(null);
 
   /**
    * `Page<ActivityEntry>`, matching the versions route beside it — the two used to
@@ -287,7 +287,7 @@ export function useVersions({
     `${apiBase}/story/${encodeURIComponent(storyId)}/activity`,
     activityKey,
     active,
-  )
+  );
 
   /**
    * Both lists, back to page one. Every write in this hook goes through it, which is
@@ -295,69 +295,69 @@ export function useVersions({
    * beside the button that made it.
    */
   const reload = useCallback(async () => {
-    await Promise.all([reloadVersions(), activityTrail.reload()])
-  }, [activityTrail, reloadVersions])
+    await Promise.all([reloadVersions(), activityTrail.reload()]);
+  }, [activityTrail, reloadVersions]);
 
   // The version half only: the activity half is `active`-driven above. Kept so that
   // opening History still refreshes the version list, which is what it has always
   // done — a peer may have published since the editor loaded.
   useEffect(() => {
-    if (active) void reloadVersions()
-  }, [active, reloadVersions])
+    if (active) void reloadVersions();
+  }, [active, reloadVersions]);
 
   const checkpoint = useCallback(
     async (label: string) => {
-      setBusy(true)
+      setBusy(true);
       try {
         await expectOk(
-          await send(`${apiBase}/story/${encodeURIComponent(storyId)}/versions`, 'POST', {
+          await send(`${apiBase}/story/${encodeURIComponent(storyId)}/versions`, "POST", {
             label,
             actor: store.name,
           }),
-        )
+        );
         // Through `afterWrite`: the checkpoint is written, so a failed re-read
         // of the lists is not the checkpoint failing (see admin/api.ts).
-        await afterWrite(reload())
+        await afterWrite(reload());
       } catch (e) {
-        notify((e as Error).message)
+        notify((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [apiBase, notify, reload, store.name, storyId],
-  )
+  );
 
   const fetchDoc = useCallback(
     async (version: VersionMeta): Promise<Doc | null> => {
-      const res = await fetch(`${apiBase}/versions/${encodeURIComponent(version.id)}`)
+      const res = await fetch(`${apiBase}/versions/${encodeURIComponent(version.id)}`);
       if (!res.ok) {
-        notify('Could not load that version.')
-        return null
+        notify("Could not load that version.");
+        return null;
       }
-      return ((await res.json()) as { doc: Doc }).doc
+      return ((await res.json()) as { doc: Doc }).doc;
     },
     [apiBase, notify],
-  )
+  );
 
   const view = useCallback(
     async (version: VersionMeta) => {
-      setBusy(true)
+      setBusy(true);
       try {
-        const doc = await fetchDoc(version)
-        if (!doc) return
-        setViewing({ version, doc })
-        store.select(null)
+        const doc = await fetchDoc(version);
+        if (!doc) return;
+        setViewing({ version, doc });
+        store.select(null);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [fetchDoc, store],
-  )
+  );
 
   const exit = useCallback(() => {
-    setViewing(null)
-    store.select(store.getSnapshot().doc?.root ?? null)
-  }, [store])
+    setViewing(null);
+    store.select(store.getSnapshot().doc?.root ?? null);
+  }, [store]);
 
   /**
    * Restore does not overwrite the document. It diffs the live document against
@@ -366,16 +366,16 @@ export function useVersions({
    */
   const restore = useCallback(
     async (version: VersionMeta, preloaded?: Doc) => {
-      const live = store.getSnapshot().doc
-      if (!live) return
-      setBusy(true)
+      const live = store.getSnapshot().doc;
+      if (!live) return;
+      setBusy(true);
       try {
-        const target = preloaded ?? (await fetchDoc(version))
-        if (!target) return
-        const mutations = diff(live, target)
+        const target = preloaded ?? (await fetchDoc(version));
+        if (!target) return;
+        const mutations = diff(live, target);
         if (mutations.length === 0) {
-          notify('Already identical to that version.')
-          return
+          notify("Already identical to that version.");
+          return;
         }
         // A restore is one transaction so it lands and undoes as a single step;
         // that means it is also one shot at the wire caps, with no chunking to
@@ -387,17 +387,17 @@ export function useVersions({
           notify(
             `This restore touches ${mutations.length} things at once, over the ` +
               `${MAX_TX_MUTATIONS} the sync engine allows in one step. Try restoring a ` +
-              'version with a smaller difference from the live page.',
-          )
-          return
+              "version with a smaller difference from the live page.",
+          );
+          return;
         }
         // Leave preview first so the live document flows to the iframe again.
-        setViewing(null)
+        setViewing(null);
         if (!store.tx(mutations)) {
-          notify('That restore could not be sent: it is too large to sync. Nothing changed.')
-          return
+          notify("That restore could not be sent: it is too large to sync. Nothing changed.");
+          return;
         }
-        const s = summariseDiff(mutations)
+        const s = summariseDiff(mutations);
         notify(
           `Restored: ${[
             s.edited && `${s.edited} edited`,
@@ -406,34 +406,34 @@ export function useVersions({
             s.moved && `${s.moved} moved`,
           ]
             .filter(Boolean)
-            .join(', ')}. Cmd+Z to undo.`,
-        )
+            .join(", ")}. Cmd+Z to undo.`,
+        );
         // The transaction has landed and synced, and the notice above says so.
         // A failed refresh must not replace it with a fetch error about a
         // restore that did happen.
-        await afterWrite(reload())
+        await afterWrite(reload());
       } catch (e) {
-        notify((e as Error).message)
+        notify((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [fetchDoc, notify, reload, store],
-  )
+  );
 
   const source = useMemo<PreviewSource>(
-    () => (viewing ? { mode: 'viewing', doc: viewing.doc } : LIVE),
+    () => (viewing ? { mode: "viewing", doc: viewing.doc } : LIVE),
     [viewing],
-  )
+  );
 
   const delta = useMemo(() => {
-    if (!viewing || !liveDoc) return null
+    if (!viewing || !liveDoc) return null;
     try {
-      return summariseDiff(diff(liveDoc, viewing.doc))
+      return summariseDiff(diff(liveDoc, viewing.doc));
     } catch {
-      return null
+      return null;
     }
-  }, [liveDoc, viewing])
+  }, [liveDoc, viewing]);
 
   return {
     versions,
@@ -448,5 +448,5 @@ export function useVersions({
     exit,
     restore,
     activityTrail: activityTrail.trail,
-  }
+  };
 }

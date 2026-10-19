@@ -17,12 +17,12 @@
  * that *can* be tested is a function in this file, and the one line that cannot
  * be is `server/cache-purge.ts`'s platform call.
  */
-import type { Resolution } from './resolve'
-import { SHARED_SCOPE } from './sites'
+import type { Resolution } from "./resolve";
+import { SHARED_SCOPE } from "./sites";
 
 /** Always present, so a page over the tag budget is still reachable by the two
  * whole-site triggers (decision 8). Nothing purges it by name. */
-export const SITE_TAG = 'site'
+export const SITE_TAG = "site";
 
 /**
  * A collection query with no `type` filter lists **every** type
@@ -32,20 +32,20 @@ export const SITE_TAG = 'site'
  * every publish purges it alongside the document's own type. One extra tag per
  * purge call; nothing else changes.
  */
-export const ANY_TYPE_TAG = 'type:*'
+export const ANY_TYPE_TAG = "type:*";
 
 /**
  * Workers Cache's own limits: 1000 tags per response and a 16 KB `Cache-Tag`
  * header. A page over either is coarsened rather than truncated (decision 8).
  */
-export const MAX_CACHE_TAGS = 1000
-export const MAX_CACHE_TAG_BYTES = 16 * 1024
+export const MAX_CACHE_TAGS = 1000;
+export const MAX_CACHE_TAG_BYTES = 16 * 1024;
 
 /** A week. See `cacheHeaders` for why the edge TTL is long and the browser's is 0. */
-export const DEFAULT_S_MAXAGE = 604_800
+export const DEFAULT_S_MAXAGE = 604_800;
 
 /** What Folio puts on its own preview response (decision 7). */
-export const NO_STORE = 'private, no-store'
+export const NO_STORE = "private, no-store";
 
 /**
  * `Cache-Tag` is a comma-separated header, so a tag may contain neither a comma
@@ -58,15 +58,15 @@ export const NO_STORE = 'private, no-store'
  * same three functions, so the render side and the purge side cannot spell a
  * name differently.
  */
-const encode = (value: string) => encodeURIComponent(value)
+const encode = (value: string) => encodeURIComponent(value);
 
-export const storyTag = (id: string) => `story:${encode(id)}`
-export const globalTag = (name: string) => `global:${encode(name)}`
-export const typeTag = (name: string) => `type:${encode(name)}`
+export const storyTag = (id: string) => `story:${encode(id)}`;
+export const globalTag = (name: string) => `global:${encode(name)}`;
+export const typeTag = (name: string) => `type:${encode(name)}`;
 /** `resolution.forms`'s key is a `forms.id`, not a story id — a structural form
  * save purges this one tag with no lookup at all
  * (`../../docs/specs/content-model/forms.md` architecture decision 8). */
-export const formTag = (id: string) => `form:${encode(id)}`
+export const formTag = (id: string) => `form:${encode(id)}`;
 
 /**
  * The scoped vocabulary, emitted only when the render carries `resolution.site`
@@ -77,19 +77,19 @@ export const formTag = (id: string) => `form:${encode(id)}`
  * `shared` is the bottom of every chain and its layer keeps the unscoped
  * `global:<name>`, so the first layer of a global is spelled as it always was.
  */
-export const siteTag = (id: string) => `site:${encode(id)}`
+export const siteTag = (id: string) => `site:${encode(id)}`;
 export const scopedGlobalTag = (name: string, scope: string) =>
-  scope === SHARED_SCOPE ? globalTag(name) : `${globalTag(name)}@${encode(scope)}`
-export const scopedTypeTag = (name: string, scope: string) => `${typeTag(name)}@${encode(scope)}`
-export const scopedAnyTypeTag = (scope: string) => `${ANY_TYPE_TAG}@${encode(scope)}`
+  scope === SHARED_SCOPE ? globalTag(name) : `${globalTag(name)}@${encode(scope)}`;
+export const scopedTypeTag = (name: string, scope: string) => `${typeTag(name)}@${encode(scope)}`;
+export const scopedAnyTypeTag = (scope: string) => `${ANY_TYPE_TAG}@${encode(scope)}`;
 /** The page at `path` as `site` serves it, whichever scope owns the row. */
-export const pathTag = (site: string, path: string) => `path:${encode(site)}:${encode(path)}`
+export const pathTag = (site: string, path: string) => `path:${encode(site)}:${encode(path)}`;
 
 /** The cache-tag set for a rendered page, and whether it had to be coarsened. */
 export interface CacheTags {
-  tags: string[]
+  tags: string[];
   /** True when the dependency set exceeded the tag budget; `tags` is coarse. */
-  degraded: boolean
+  degraded: boolean;
 }
 
 export interface CacheTagOptions {
@@ -105,7 +105,7 @@ export interface CacheTagOptions {
    * cached for a week with no purge path, which is decision 2's dangerous
    * half-configured state; a type error is cheaper than that.
    */
-  story: string | null
+  story: string | null;
 }
 
 /**
@@ -117,9 +117,9 @@ export interface CacheTagOptions {
  * refuse. It is a data shape, not an extension point.
  */
 export type CacheHeaders = {
-  'cache-control': string
-  'cache-tag': string
-}
+  "cache-control": string;
+  "cache-tag": string;
+};
 
 export interface CacheHeaderOptions extends CacheTagOptions {
   /**
@@ -127,7 +127,7 @@ export interface CacheHeaderOptions extends CacheTagOptions {
    * The edge's `s-maxage` is deliberately not overridable: a host that wants a
    * short edge TTL wants a different design, not a parameter.
    */
-  maxAge?: number
+  maxAge?: number;
 }
 
 /**
@@ -140,27 +140,27 @@ export interface CacheHeaderOptions extends CacheTagOptions {
  * neither the document nor the schema and stays pure.
  */
 function collectionTypes(keys: readonly string[]): { types: string[]; any: boolean } {
-  const types = new Set<string>()
-  let any = false
+  const types = new Set<string>();
+  let any = false;
   for (const key of keys) {
-    let parsed: unknown
+    let parsed: unknown;
     try {
-      parsed = JSON.parse(key)
+      parsed = JSON.parse(key);
     } catch {
       // A key this function cannot read is a key some future shape wrote. The
       // safe reading is "this page lists something", not "this page lists
       // nothing" — silently narrowing is what decision 2 exists to prevent.
-      any = true
-      continue
+      any = true;
+      continue;
     }
-    const named = Array.isArray(parsed) ? parsed[0] : undefined
-    if (!Array.isArray(named) || named.length === 0 || !named.every((t) => typeof t === 'string')) {
-      any = true
-      continue
+    const named = Array.isArray(parsed) ? parsed[0] : undefined;
+    if (!Array.isArray(named) || named.length === 0 || !named.every((t) => typeof t === "string")) {
+      any = true;
+      continue;
     }
-    for (const t of named as string[]) types.add(t)
+    for (const t of named as string[]) types.add(t);
   }
-  return { types: [...types], any }
+  return { types: [...types], any };
 }
 
 /**
@@ -202,36 +202,36 @@ function collectionTypes(keys: readonly string[]): { types: string[]; any: boole
  * renders is readable.
  */
 export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheTags {
-  const site = resolution.site
-  const pathTags = site && resolution.path !== undefined ? [pathTag(site.id, resolution.path)] : []
-  const tags = new Set<string>([site ? siteTag(site.id) : SITE_TAG, ...pathTags])
-  if (opts.story) tags.add(storyTag(opts.story))
+  const site = resolution.site;
+  const pathTags = site && resolution.path !== undefined ? [pathTag(site.id, resolution.path)] : [];
+  const tags = new Set<string>([site ? siteTag(site.id) : SITE_TAG, ...pathTags]);
+  if (opts.story) tags.add(storyTag(opts.story));
   // Ancestors are in here too, which is what covers a breadcrumb: rename a
   // section and every page under it is purged, with no edge ever recorded.
-  for (const id of Object.keys(resolution.stories)) tags.add(storyTag(id))
+  for (const id of Object.keys(resolution.stories)) tags.add(storyTag(id));
   if (site) {
     // Every configured global, not only those this page rendered: the page may
     // not use the header today, but the layer tag has to be there on the day it
     // does and the cache has not been purged since.
-    const layered = new Set([...site.layered, ...Object.keys(resolution.globals ?? {})])
+    const layered = new Set([...site.layered, ...Object.keys(resolution.globals ?? {})]);
     for (const name of layered) {
-      for (const scope of site.chain) tags.add(scopedGlobalTag(name, scope))
-      tags.add(globalTag(name))
+      for (const scope of site.chain) tags.add(scopedGlobalTag(name, scope));
+      tags.add(globalTag(name));
     }
   } else {
-    for (const name of Object.keys(resolution.globals ?? {})) tags.add(globalTag(name))
+    for (const name of Object.keys(resolution.globals ?? {})) tags.add(globalTag(name));
   }
-  for (const id of Object.keys(resolution.forms ?? {})) tags.add(formTag(id))
+  for (const id of Object.keys(resolution.forms ?? {})) tags.add(formTag(id));
 
-  const collections = collectionTypes(Object.keys(resolution.collections ?? {}))
+  const collections = collectionTypes(Object.keys(resolution.collections ?? {}));
   if (site) {
     for (const scope of site.chain) {
-      for (const type of collections.types) tags.add(scopedTypeTag(type, scope))
-      if (collections.any) tags.add(scopedAnyTypeTag(scope))
+      for (const type of collections.types) tags.add(scopedTypeTag(type, scope));
+      if (collections.any) tags.add(scopedAnyTypeTag(scope));
     }
   } else {
-    for (const type of collections.types) tags.add(typeTag(type))
-    if (collections.any) tags.add(ANY_TYPE_TAG)
+    for (const type of collections.types) tags.add(typeTag(type));
+    if (collections.any) tags.add(ANY_TYPE_TAG);
   }
   // The *members* as well as the type. `type:` covers membership changing —
   // something published, unpublished or deleted — but an index page also
@@ -242,13 +242,13 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
   // lists until its own TTL ran out. Bounded by `MAX_PER_PAGE`, well inside the
   // tag budget.
   for (const answer of Object.values(resolution.collections ?? {})) {
-    for (const item of answer.items) tags.add(storyTag(item.id))
+    for (const item of answer.items) tags.add(storyTag(item.id));
   }
 
-  const all = [...tags].sort()
+  const all = [...tags].sort();
   // Every tag is ASCII after `encode`, so a character is a byte. `+ 1` per tag
   // for the separators, one fewer than the count.
-  const bytes = all.reduce((n, tag) => n + tag.length + 1, -1)
+  const bytes = all.reduce((n, tag) => n + tag.length + 1, -1);
   if (all.length > MAX_CACHE_TAGS || bytes > MAX_CACHE_TAG_BYTES) {
     // Truncating would leave the page un-purgeable by whichever ids fell off
     // the end, and un-purgeable *silently*. Coarsening keeps the page reachable
@@ -261,9 +261,9 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
         ...(opts.story ? [storyTag(opts.story)] : []),
       ],
       degraded: true,
-    }
+    };
   }
-  return { tags: all, degraded: false }
+  return { tags: all, degraded: false };
 }
 
 /**
@@ -291,13 +291,13 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
  */
 export function cacheHeaders(resolution: Resolution, opts: CacheHeaderOptions): CacheHeaders {
   return {
-    'cache-control': cacheControl(opts.maxAge),
-    'cache-tag': cacheTags(resolution, opts).tags.join(','),
-  }
+    "cache-control": cacheControl(opts.maxAge),
+    "cache-tag": cacheTags(resolution, opts).tags.join(","),
+  };
 }
 
 /** The `Cache-Control` half on its own, for a host assembling headers itself. */
 export function cacheControl(maxAge = 0): string {
-  const browser = Number.isFinite(maxAge) && maxAge > 0 ? Math.trunc(maxAge) : 0
-  return `public, max-age=${browser}, s-maxage=${DEFAULT_S_MAXAGE}, must-revalidate`
+  const browser = Number.isFinite(maxAge) && maxAge > 0 ? Math.trunc(maxAge) : 0;
+  return `public, max-age=${browser}, s-maxage=${DEFAULT_S_MAXAGE}, must-revalidate`;
 }

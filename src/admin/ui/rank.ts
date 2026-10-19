@@ -11,14 +11,14 @@
 
 /** A scored match, with the spans of `text` that matched, for highlighting. */
 export interface Match {
-  score: number
-  spans: readonly [number, number][]
+  score: number;
+  spans: readonly [number, number][];
 }
 
 /** Characters after which a position counts as the start of a word. Includes
  * `/`, `.`, `_` and `-` because the things being searched here are paths, slugs
  * and block ids as often as they are prose. */
-const BOUNDARY = /[\s/._\-:]/
+const BOUNDARY = /[\s/._\-:]/;
 
 /**
  * Scores `query` against `text`, or returns null when it does not match at all.
@@ -33,60 +33,60 @@ const BOUNDARY = /[\s/._\-:]/
  * shows its whole action list in declaration order rather than nothing.
  */
 export function matchText(text: string, query: string): Match | null {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return { score: 0, spans: [] }
+  const needle = query.trim().toLowerCase();
+  if (!needle) return { score: 0, spans: [] };
 
-  const hay = text.toLowerCase()
-  const at = hay.indexOf(needle)
+  const hay = text.toLowerCase();
+  const at = hay.indexOf(needle);
   if (at >= 0) {
-    const boundary = at === 0 || BOUNDARY.test(hay[at - 1] ?? '')
+    const boundary = at === 0 || BOUNDARY.test(hay[at - 1] ?? "");
     // Earliness breaks ties between two substring hits; the word-start bonus
     // outweighs it, so "settings" beats "Site settings" for the query "set"
     // only when neither is at a boundary.
-    const score = 1000 + (boundary ? 400 : 0) + (at === 0 ? 200 : 0) - Math.min(at, 100)
-    return { score, spans: [[at, at + needle.length]] }
+    const score = 1000 + (boundary ? 400 : 0) + (at === 0 ? 200 : 0) - Math.min(at, 100);
+    return { score, spans: [[at, at + needle.length]] };
   }
 
-  const spans: [number, number][] = []
-  let cursor = 0
-  let score = 0
-  let run = 0
+  const spans: [number, number][] = [];
+  let cursor = 0;
+  let score = 0;
+  let run = 0;
   for (const ch of needle) {
-    const found = hay.indexOf(ch, cursor)
-    if (found < 0) return null
-    const boundary = found === 0 || BOUNDARY.test(hay[found - 1] ?? '')
+    const found = hay.indexOf(ch, cursor);
+    if (found < 0) return null;
+    const boundary = found === 0 || BOUNDARY.test(hay[found - 1] ?? "");
     if (found === cursor && spans.length > 0) {
-      run += 1
-      score += 8 + run * 4
+      run += 1;
+      score += 8 + run * 4;
       // Extend the previous span rather than opening a new one, so a contiguous
       // run highlights as one range.
-      const last = spans[spans.length - 1]
-      if (last) last[1] = found + 1
+      const last = spans[spans.length - 1];
+      if (last) last[1] = found + 1;
     } else {
-      run = 0
-      score += boundary ? 10 : 3
+      run = 0;
+      score += boundary ? 10 : 3;
       // A gap costs, but a bounded amount: a late match in a long path should
       // still beat no match.
-      score -= Math.min(found - cursor, 20) * 0.25
-      spans.push([found, found + 1])
+      score -= Math.min(found - cursor, 20) * 0.25;
+      spans.push([found, found + 1]);
     }
-    cursor = found + 1
+    cursor = found + 1;
   }
   // Shorter labels win at equal evidence: matching 3 of 7 characters is a
   // stronger signal than matching 3 of 70.
-  return { score: score + 40 / Math.max(text.length, 1), spans }
+  return { score: score + 40 / Math.max(text.length, 1), spans };
 }
 
 /** Anything the palette can rank: a label, plus optional hidden search terms. */
 export interface Rankable {
-  label: string
+  label: string;
   /** Searched but never highlighted — a path, a type name, an alias. */
-  keywords?: string
+  keywords?: string;
 }
 
 export interface Ranked<T> {
-  item: T
-  match: Match
+  item: T;
+  match: Match;
 }
 
 /**
@@ -97,13 +97,13 @@ export interface Ranked<T> {
  * declared while the query is empty and while scores tie.
  */
 export function rank<T extends Rankable>(query: string, items: readonly T[]): Ranked<T>[] {
-  const scored: (Ranked<T> & { index: number })[] = []
+  const scored: (Ranked<T> & { index: number })[] = [];
   for (const [index, item] of items.entries()) {
-    const label = matchText(item.label, query)
+    const label = matchText(item.label, query);
     // Keywords are scored at a discount so a label match always outranks a
     // keyword match, which is what keeps "Assets" above a page that happens to
     // live at /assets.
-    const keyword = item.keywords ? matchText(item.keywords, query) : null
+    const keyword = item.keywords ? matchText(item.keywords, query) : null;
     const best =
       label && keyword
         ? label.score >= keyword.score * 0.6
@@ -113,11 +113,11 @@ export function rank<T extends Rankable>(query: string, items: readonly T[]): Ra
           ? label
           : keyword
             ? { score: keyword.score * 0.6, spans: [] }
-            : null
-    if (best) scored.push({ item, match: best, index })
+            : null;
+    if (best) scored.push({ item, match: best, index });
   }
-  scored.sort((a, b) => b.match.score - a.match.score || a.index - b.index)
-  return scored.map(({ item, match }) => ({ item, match }))
+  scored.sort((a, b) => b.match.score - a.match.score || a.index - b.index);
+  return scored.map(({ item, match }) => ({ item, match }));
 }
 
 /**
@@ -125,15 +125,15 @@ export function rank<T extends Rankable>(query: string, items: readonly T[]): Ra
  * Returns `[{ text, hit }]` so a component maps it straight to spans.
  */
 export function highlight(text: string, spans: readonly [number, number][]) {
-  const parts: { text: string; hit: boolean }[] = []
-  let at = 0
+  const parts: { text: string; hit: boolean }[] = [];
+  let at = 0;
   for (const [from, to] of spans) {
-    if (from > at) parts.push({ text: text.slice(at, from), hit: false })
-    parts.push({ text: text.slice(from, to), hit: true })
-    at = to
+    if (from > at) parts.push({ text: text.slice(at, from), hit: false });
+    parts.push({ text: text.slice(from, to), hit: true });
+    at = to;
   }
-  if (at < text.length) parts.push({ text: text.slice(at), hit: false })
-  return parts
+  if (at < text.length) parts.push({ text: text.slice(at), hit: false });
+  return parts;
 }
 
 /**
@@ -146,21 +146,21 @@ export function highlight(text: string, spans: readonly [number, number][]) {
  * ArrowDown lands on the first row rather than the second.
  */
 export function nextIndex(key: string, current: number, count: number): number | null {
-  if (count === 0) return null
+  if (count === 0) return null;
   switch (key) {
-    case 'ArrowDown':
-      return current < 0 ? 0 : (current + 1) % count
-    case 'ArrowUp':
-      return current <= 0 ? count - 1 : current - 1
-    case 'Home':
-      return 0
-    case 'End':
-      return count - 1
-    case 'PageDown':
-      return Math.min(count - 1, (current < 0 ? 0 : current) + 10)
-    case 'PageUp':
-      return Math.max(0, (current < 0 ? 0 : current) - 10)
+    case "ArrowDown":
+      return current < 0 ? 0 : (current + 1) % count;
+    case "ArrowUp":
+      return current <= 0 ? count - 1 : current - 1;
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
+    case "PageDown":
+      return Math.min(count - 1, (current < 0 ? 0 : current) + 10);
+    case "PageUp":
+      return Math.max(0, (current < 0 ? 0 : current) - 10);
     default:
-      return null
+      return null;
   }
 }

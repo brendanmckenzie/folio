@@ -1,13 +1,13 @@
-import { useCallback, useId, useState } from 'react'
-import { canManageContent, type Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { Field, Input, Select } from '../Field'
-import { ListHeader } from '../List'
-import { type Column, Table } from '../Table'
-import css from './Redirects.module.css'
+import { useCallback, useId, useState } from "react";
+import { canManageContent, type Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { Field, Input, Select } from "../Field";
+import { ListHeader } from "../List";
+import { type Column, Table } from "../Table";
+import css from "./Redirects.module.css";
 import {
   BLANK_DRAFT,
   createdLabel,
@@ -30,12 +30,12 @@ import {
   STATUSES,
   statusLabel,
   targetLabel,
-} from './redirects-model'
-import { messageOf } from './useContent'
-import { useRedirects } from './useRedirects'
+} from "./redirects-model";
+import { messageOf } from "./useContent";
+import { useRedirects } from "./useRedirects";
 
 interface Props {
-  apiBase: string
+  apiBase: string;
   /**
    * Who is signed in, for the role gates below. Adding and deleting a redirect
    * are both `MANAGE` (publisher) — `redirects.md`'s own reasoning is that a
@@ -43,18 +43,18 @@ interface Props {
    * for a weaker role rather than refused after the click
    * (`../../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7).
    */
-  me: Me
-  query: Readonly<Record<string, string>>
+  me: Me;
+  query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
-  onQuery: (next: Record<string, string | undefined>) => void
-  onNotice: (message: string) => void
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onNotice: (message: string) => void;
 }
 
 /** Six placeholder rows, named rather than indexed — matching Content's and
  * Documents'. Skeletons and not a spinner, because `--row-h` is fixed and a known
  * row height means the shape of the answer can be shown before the answer
  * (`ui-architecture.md`, Cross-cutting). */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6"];
 
 /**
  * The redirect table as a screen — `docs/ui-architecture.md`'s port phase 5, and
@@ -85,74 +85,74 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  * to a path the search box already jumps to.
  */
 export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
-  const mayManage = canManageContent(me)
-  const url = parseRedirectsUrl(query)
-  const data = useRedirects(apiBase, url)
+  const mayManage = canManageContent(me);
+  const url = parseRedirectsUrl(query);
+  const data = useRedirects(apiBase, url);
 
-  const [creating, setCreating] = useState(false)
-  const [deleting, setDeleting] = useState<RedirectRow | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState<RedirectRow | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const go = useCallback((next: RedirectsUrl) => onQuery(redirectsQuery(next)), [onQuery])
+  const go = useCallback((next: RedirectsUrl) => onQuery(redirectsQuery(next)), [onQuery]);
 
   const create = useCallback(
     async (draft: RedirectDraft) => {
-      setBusy(true)
+      setBusy(true);
       try {
         const res = await fetch(`${apiBase}/redirects`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          method: "POST",
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({
             from: draft.from.trim(),
             to: draft.to.trim(),
             status: draft.status,
           }),
-        })
-        if (!res.ok) throw new Error(await messageOf(res))
-        setCreating(false)
-        onNotice(`${pathLabel(draft.from.trim())} now redirects`)
-        data.reload()
+        });
+        if (!res.ok) throw new Error(await messageOf(res));
+        setCreating(false);
+        onNotice(`${pathLabel(draft.from.trim())} now redirects`);
+        data.reload();
       } catch (e) {
         // Left open, deliberately: the two refusals that matter here — a live page
         // at `from`, and a target that redirects back — are things the person can
         // fix by editing what they typed, and closing the dialog would throw the
         // rest of the form away to show a toast about one field.
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [apiBase, data, onNotice],
-  )
+  );
 
   const remove = useCallback(
     async (row: RedirectRow) => {
-      setBusy(true)
+      setBusy(true);
       try {
         const res = await fetch(`${apiBase}/redirects/${deletePath(row.from)}`, {
-          method: 'DELETE',
-        })
-        if (!res.ok) throw new Error(await messageOf(res))
-        onNotice(`${pathLabel(row.from)} no longer redirects`)
-        data.reload()
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error(await messageOf(res));
+        onNotice(`${pathLabel(row.from)} no longer redirects`);
+        data.reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [apiBase, data, onNotice],
-  )
+  );
 
   const columns: Column<RedirectRow>[] = [
     {
-      key: 'from',
-      label: 'From',
+      key: "from",
+      label: "From",
       cell: (row) => <code className={css.path}>{pathLabel(row.from)}</code>,
     },
     {
-      key: 'to',
-      label: 'To',
+      key: "to",
+      label: "To",
       cell: (row) => (
         <code
           className={css.path}
@@ -166,8 +166,8 @@ export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
       ),
     },
     {
-      key: 'status',
-      label: 'Status',
+      key: "status",
+      label: "Status",
       // Not `numeric`, even though it is a number. `Table`'s numeric column is
       // right-aligned, which is right for a trailing column of sizes or counts and
       // wrong for a three-digit code in the middle of five columns — it would sit
@@ -180,19 +180,19 @@ export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
       ),
     },
     {
-      key: 'source',
-      label: 'Source',
+      key: "source",
+      label: "Source",
       // Neutral for both, which is the state palette rather than an omission: a
       // hue means one state to act on, and where a row came from is a fact about
       // the row. The word and its title carry the difference.
       cell: (row) => <Badge title={sourceHint(row.source)}>{sourceLabel(row.source)}</Badge>,
     },
     {
-      key: 'created',
-      label: 'Created',
+      key: "created",
+      label: "Created",
       cell: (row) => <span className={css.stamp}>{createdLabel(row)}</span>,
     },
-  ]
+  ];
 
   if (data.page.error && data.page.rows.length === 0) {
     return (
@@ -207,11 +207,11 @@ export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
           }
         />
       </div>
-    )
+    );
   }
 
-  const firstLoad = data.page.loading && data.page.rows.length === 0
-  const narrowed = isNarrowed(url)
+  const firstLoad = data.page.loading && data.page.rows.length === 0;
+  const narrowed = isNarrowed(url);
 
   return (
     <div className={css.screen}>
@@ -245,7 +245,7 @@ export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
             <button
               key={source.value}
               type="button"
-              className={`${css.chip} ${url.source === source.value ? css.chipOn : ''}`}
+              className={`${css.chip} ${url.source === source.value ? css.chipOn : ""}`}
               aria-pressed={url.source === source.value}
               onClick={() => go({ ...url, source: source.value })}
             >
@@ -297,11 +297,11 @@ export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
             : {})}
           empty={
             <EmptyState
-              title={narrowed ? 'Nothing matches' : 'No redirects yet'}
+              title={narrowed ? "Nothing matches" : "No redirects yet"}
               body={
                 narrowed
-                  ? 'Try a different source, or clear the search.'
-                  : 'Renaming, moving or deleting a page writes one of these automatically, so this fills itself over time. Add one by hand for a URL that never existed here — a print campaign, or a page from an older site.'
+                  ? "Try a different source, or clear the search."
+                  : "Renaming, moving or deleting a page writes one of these automatically, so this fills itself over time. Add one by hand for a URL that never existed here — a print campaign, or a page from an older site."
               }
               /*
                 No action for somebody who may not add one, and deliberately no
@@ -315,7 +315,7 @@ export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
               */
               action={
                 narrowed ? (
-                  <Button size="sm" onClick={() => go({ source: 'all', q: '' })}>
+                  <Button size="sm" onClick={() => go({ source: "all", q: "" })}>
                     Clear filters
                   </Button>
                 ) : mayManage ? (
@@ -368,14 +368,14 @@ export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
           row={deleting}
           onClose={() => setDeleting(null)}
           onConfirm={() => {
-            const row = deleting
-            setDeleting(null)
-            void remove(row)
+            const row = deleting;
+            setDeleting(null);
+            void remove(row);
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ create --- */
@@ -402,24 +402,24 @@ function NewRedirectDialog({
   onClose,
   onSubmit,
 }: {
-  busy: boolean
-  onClose: () => void
-  onSubmit: (draft: RedirectDraft) => void
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (draft: RedirectDraft) => void;
 }) {
-  const [draft, setDraft] = useState<RedirectDraft>(BLANK_DRAFT)
+  const [draft, setDraft] = useState<RedirectDraft>(BLANK_DRAFT);
   /** Refusals appear on the first submit, not on the first keystroke: a `from`
    * field that says "type the path this should redirect from" before anybody has
    * typed anything is scolding, not help. */
-  const [submitted, setSubmitted] = useState(false)
-  const formId = useId()
+  const [submitted, setSubmitted] = useState(false);
+  const formId = useId();
 
-  const refusal = draftRefusal(draft)
-  const shown = submitted ? refusal : null
+  const refusal = draftRefusal(draft);
+  const shown = submitted ? refusal : null;
 
   const submit = () => {
-    setSubmitted(true)
-    if (!refusal) onSubmit(draft)
-  }
+    setSubmitted(true);
+    if (!refusal) onSubmit(draft);
+  };
 
   return (
     <Dialog
@@ -446,15 +446,15 @@ function NewRedirectDialog({
         id={formId}
         className={css.form}
         onSubmit={(e) => {
-          e.preventDefault()
-          submit()
+          e.preventDefault();
+          submit();
         }}
       >
         <Field
           label="From"
           required
           help="A path on this site, with or without a leading slash. Case and trailing slashes do not matter."
-          error={shown?.field === 'from' ? shown.message : undefined}
+          error={shown?.field === "from" ? shown.message : undefined}
         >
           {(id) => (
             <Input
@@ -471,7 +471,7 @@ function NewRedirectDialog({
           label="To"
           required
           help="A path on this site, or a full URL to send people off-site. If that path itself redirects, the browser follows both hops — Folio only refuses a target that points straight back here."
-          error={shown?.field === 'to' ? shown.message : undefined}
+          error={shown?.field === "to" ? shown.message : undefined}
         >
           {(id) => (
             <Input
@@ -506,7 +506,7 @@ function NewRedirectDialog({
         </Field>
       </form>
     </Dialog>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ delete --- */
@@ -525,9 +525,9 @@ function DeleteRedirectDialog({
   onClose,
   onConfirm,
 }: {
-  row: RedirectRow
-  onClose: () => void
-  onConfirm: () => void
+  row: RedirectRow;
+  onClose: () => void;
+  onConfirm: () => void;
 }) {
   return (
     <Dialog
@@ -551,5 +551,5 @@ function DeleteRedirectDialog({
         <code className={css.path}>{targetLabel(row.to)}</code>
       </p>
     </Dialog>
-  )
+  );
 }

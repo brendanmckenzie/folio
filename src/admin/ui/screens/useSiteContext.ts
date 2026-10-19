@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import type { Doc } from '../../../core/doc'
-import { layerId } from '../../../core/sites'
-import type { StoryMeta } from '../../../core/story'
+import { useEffect, useState } from "react";
+import type { Doc } from "../../../core/doc";
+import { layerId } from "../../../core/sites";
+import type { StoryMeta } from "../../../core/story";
 
 /**
  * What the editor asks about an open document that only a deployment with `sites`
@@ -20,71 +20,71 @@ import type { StoryMeta } from '../../../core/story'
  */
 export function useOverride(
   apiBase: string,
-  story: Pick<StoryMeta, 'id' | 'path'>,
+  story: Pick<StoryMeta, "id" | "path">,
   enabled: boolean,
-): Pick<StoryMeta, 'id'> | undefined {
-  const [row, setRow] = useState<Pick<StoryMeta, 'id'> | undefined>(undefined)
-  const { id, path } = story
+): Pick<StoryMeta, "id"> | undefined {
+  const [row, setRow] = useState<Pick<StoryMeta, "id"> | undefined>(undefined);
+  const { id, path } = story;
 
   useEffect(() => {
     if (!enabled || path === null) {
-      setRow(undefined)
-      return
+      setRow(undefined);
+      return;
     }
-    let live = true
+    let live = true;
     fetch(`${apiBase}/stories?${new URLSearchParams({ paths: path })}`)
       .then((res) => (res.ok ? (res.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
       .then(({ rows }) => {
-        if (live) setRow(rows.find((candidate) => candidate.path === path && candidate.id !== id))
+        if (live) setRow(rows.find((candidate) => candidate.path === path && candidate.id !== id));
       })
       .catch(() => {
-        if (live) setRow(undefined)
-      })
+        if (live) setRow(undefined);
+      });
     return () => {
-      live = false
-    }
-  }, [apiBase, enabled, id, path])
+      live = false;
+    };
+  }, [apiBase, enabled, id, path]);
 
-  return row
+  return row;
 }
 
 /** `GET /story/:id/fork`: where a fork came from and whether that has been published
  * since. Null for a page that is not a fork, undefined until it answers. */
 export interface ForkStatus {
-  source: StoryMeta | null
-  changed: boolean
+  source: StoryMeta | null;
+  changed: boolean;
 }
 
 export function useForkStatus(
   apiBase: string,
-  story: Pick<StoryMeta, 'id' | 'forkedFrom'>,
+  story: Pick<StoryMeta, "id" | "forkedFrom">,
   enabled: boolean,
 ): ForkStatus | null | undefined {
-  const [status, setStatus] = useState<ForkStatus | null | undefined>(undefined)
-  const { id, forkedFrom } = story
+  const [status, setStatus] = useState<ForkStatus | null | undefined>(undefined);
+  const { id, forkedFrom } = story;
 
   useEffect(() => {
     if (!enabled || !forkedFrom) {
-      setStatus(undefined)
-      return
+      setStatus(undefined);
+      return;
     }
-    let live = true
+    let live = true;
     fetch(`${apiBase}/story/${encodeURIComponent(id)}/fork`)
       .then((res) =>
         res.ok ? (res.json() as Promise<{ fork: ForkStatus | null }>) : { fork: null },
       )
       .then(({ fork }) => {
-        if (live) setStatus(fork)
+        if (live) setStatus(fork);
       })
       .catch(() => {
-        if (live) setStatus(undefined)
-      })
+        if (live) setStatus(undefined);
+      });
     return () => {
-      live = false
-    }
-  }, [apiBase, enabled, id, forkedFrom])
+      live = false;
+    };
+  }, [apiBase, enabled, id, forkedFrom]);
 
-  return status
+  return status;
 }
 
 /**
@@ -102,39 +102,39 @@ export function useLayerDocs(
   type: string | null,
   below: readonly string[],
 ): { docs: readonly (Doc | undefined)[]; loading: boolean } {
-  const [docs, setDocs] = useState<readonly (Doc | undefined)[]>([])
-  const [loading, setLoading] = useState(false)
-  const key = below.join(',')
+  const [docs, setDocs] = useState<readonly (Doc | undefined)[]>([]);
+  const [loading, setLoading] = useState(false);
+  const key = below.join(",");
 
   useEffect(() => {
-    if (type === null || key === '') {
-      setDocs([])
-      setLoading(false)
-      return
+    if (type === null || key === "") {
+      setDocs([]);
+      setLoading(false);
+      return;
     }
-    let live = true
-    setLoading(true)
+    let live = true;
+    setLoading(true);
     void Promise.all(
-      key.split(',').map(async (scope) => {
+      key.split(",").map(async (scope) => {
         try {
           const res = await fetch(
             `${apiBase}/story/${encodeURIComponent(layerId(type, scope))}/document`,
-          )
-          if (!res.ok) return undefined
-          return ((await res.json().catch(() => null)) as { doc?: Doc } | null)?.doc
+          );
+          if (!res.ok) return undefined;
+          return ((await res.json().catch(() => null)) as { doc?: Doc } | null)?.doc;
         } catch {
-          return undefined
+          return undefined;
         }
       }),
     ).then((found) => {
-      if (!live) return
-      setDocs(found)
-      setLoading(false)
-    })
+      if (!live) return;
+      setDocs(found);
+      setLoading(false);
+    });
     return () => {
-      live = false
-    }
-  }, [apiBase, type, key])
+      live = false;
+    };
+  }, [apiBase, type, key]);
 
-  return { docs, loading }
+  return { docs, loading };
 }

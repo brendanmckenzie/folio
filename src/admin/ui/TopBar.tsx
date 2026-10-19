@@ -1,20 +1,20 @@
-import type { ReactNode } from 'react'
-import { Menu, type MenuItem } from './Menu'
-import { type Crumb, href } from './route'
-import css from './TopBar.module.css'
+import type { ReactNode } from "react";
+import { Menu, type MenuItem } from "./Menu";
+import { type Crumb, href } from "./route";
+import css from "./TopBar.module.css";
 
 interface Props {
-  crumbs: readonly Crumb[]
-  mount: string
+  crumbs: readonly Crumb[];
+  mount: string;
   /** Presence avatars, and anything else that belongs to the session rather than
    * the screen. A slot rather than a prop-per-thing, because the editor is the
    * only surface that fills it and the platform screens leave it empty. */
-  presence?: ReactNode
-  onSearch: () => void
+  presence?: ReactNode;
+  onSearch: () => void;
   /** The signed-in actor's name, or null under `auth: 'open'` where there is
    * nobody to name and therefore no menu to draw. */
-  actor: string | null
-  user: readonly MenuItem[]
+  actor: string | null;
+  user: readonly MenuItem[];
 }
 
 /**
@@ -82,5 +82,5 @@ export function TopBar({ crumbs, mount, presence, onSearch, actor, user }: Props
         )}
       </div>
     </header>
-  )
+  );
 }

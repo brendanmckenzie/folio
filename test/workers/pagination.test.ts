@@ -1,8 +1,8 @@
-import { env, SELF } from 'cloudflare:test'
-import { beforeAll, describe, expect, it } from 'vitest'
-import type { Page } from '../../src/core/pagination'
-import { listTokens } from '../../src/server/auth/tokens'
-import { listUsers } from '../../src/server/auth/users'
+import { env, SELF } from "cloudflare:test";
+import { beforeAll, describe, expect, it } from "vitest";
+import type { Page } from "../../src/core/pagination";
+import { listTokens } from "../../src/server/auth/tokens";
+import { listUsers } from "../../src/server/auth/users";
 
 /**
  * Route-level paging: the boundary, the walk, and the two refusals.
@@ -17,37 +17,37 @@ import { listUsers } from '../../src/server/auth/users'
  * inserted above the cursor.
  */
 
-const ORIGIN = 'https://paging.test'
-const API = `${ORIGIN}/folio/api`
+const ORIGIN = "https://paging.test";
+const API = `${ORIGIN}/folio/api`;
 
 const json = async <T>(path: string): Promise<T> => {
-  const res = await SELF.fetch(`${API}${path}`)
-  expect([path, res.status]).toEqual([path, 200])
-  return res.json<T>()
-}
+  const res = await SELF.fetch(`${API}${path}`);
+  expect([path, res.status]).toEqual([path, 200]);
+  return res.json<T>();
+};
 
 /** Walks a cursor to exhaustion, returning every row in the order seen. */
 async function walk<T>(path: string, limit: number): Promise<T[]> {
-  const seen: T[] = []
-  let cursor: string | null = null
+  const seen: T[] = [];
+  let cursor: string | null = null;
   for (let guard = 0; guard < 50; guard++) {
-    const sep = path.includes('?') ? '&' : '?'
+    const sep = path.includes("?") ? "&" : "?";
     const q: string = cursor
       ? `${path}${sep}limit=${limit}&cursor=${encodeURIComponent(cursor)}`
-      : `${path}${sep}limit=${limit}`
-    const page = await json<Page<T>>(q)
-    expect(page.rows.length).toBeLessThanOrEqual(limit)
-    seen.push(...page.rows)
-    cursor = page.cursor
-    if (!cursor) return seen
+      : `${path}${sep}limit=${limit}`;
+    const page = await json<Page<T>>(q);
+    expect(page.rows.length).toBeLessThanOrEqual(limit);
+    seen.push(...page.rows);
+    cursor = page.cursor;
+    if (!cursor) return seen;
   }
-  throw new Error(`cursor never exhausted for ${path}`)
+  throw new Error(`cursor never exhausted for ${path}`);
 }
 
 const upload = (filename: string, byte: number, padding = 0) =>
   SELF.fetch(`${API}/assets?filename=${encodeURIComponent(filename)}`, {
-    method: 'POST',
-    headers: { 'content-type': 'image/png' },
+    method: "POST",
+    headers: { "content-type": "image/png" },
     // A minimal PNG signature so the type sniffer is satisfied, plus `padding`
     // bytes so a test can choose a row's `size` — the one sort whose natural
     // direction is descending.
@@ -63,81 +63,81 @@ const upload = (filename: string, byte: number, padding = 0) =>
       byte,
       ...Array(padding).fill(0),
     ]),
-  })
+  });
 
-describe('GET /api/assets', () => {
+describe("GET /api/assets", () => {
   beforeAll(async () => {
     for (let i = 0; i < 7; i++) {
-      const res = await upload(`paged-${i}.png`, i)
-      expect(res.status).toBe(201)
+      const res = await upload(`paged-${i}.png`, i);
+      expect(res.status).toBe(201);
     }
-  })
+  });
 
-  it('walks to exhaustion, every row exactly once', async () => {
-    const rows = await walk<{ id: string; filename: string }>('/assets', 2)
-    const ours = rows.filter((r) => r.filename.startsWith('paged-'))
-    expect(ours).toHaveLength(7)
-    expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length)
-  })
+  it("walks to exhaustion, every row exactly once", async () => {
+    const rows = await walk<{ id: string; filename: string }>("/assets", 2);
+    const ours = rows.filter((r) => r.filename.startsWith("paged-"));
+    expect(ours).toHaveLength(7);
+    expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
+  });
 
-  it('has a null cursor on the last page', async () => {
-    const page = await json<Page<unknown>>('/assets?limit=200')
-    expect(page.cursor).toBeNull()
-  })
+  it("has a null cursor on the last page", async () => {
+    const page = await json<Page<unknown>>("/assets?limit=200");
+    expect(page.cursor).toBeNull();
+  });
 
-  it('omits `total` unless asked, and counts the filter when asked', async () => {
-    const quiet = await json<Page<unknown>>('/assets?limit=2')
-    expect(quiet.total).toBeUndefined()
+  it("omits `total` unless asked, and counts the filter when asked", async () => {
+    const quiet = await json<Page<unknown>>("/assets?limit=2");
+    expect(quiet.total).toBeUndefined();
 
-    const counted = await json<Page<unknown>>('/assets?limit=2&count=1')
+    const counted = await json<Page<unknown>>("/assets?limit=2&count=1");
     // The whole filter, not the page — which is what a list header means by
     // "showing 2 of 7" and what a bulk guard would compare against.
-    expect(counted.rows).toHaveLength(2)
-    expect(counted.total).toBeGreaterThanOrEqual(7)
-  })
+    expect(counted.rows).toHaveLength(2);
+    expect(counted.total).toBeGreaterThanOrEqual(7);
+  });
 
-  it('searches the filename, which is what made asset 201 reachable at all', async () => {
-    const found = await json<Page<{ filename: string }>>('/assets?q=paged-3')
-    expect(found.rows.map((r) => r.filename)).toEqual(['paged-3.png'])
-  })
+  it("searches the filename, which is what made asset 201 reachable at all", async () => {
+    const found = await json<Page<{ filename: string }>>("/assets?q=paged-3");
+    expect(found.rows.map((r) => r.filename)).toEqual(["paged-3.png"]);
+  });
 
-  it('filters by kind on a content-type prefix', async () => {
-    const images = await json<Page<{ filename: string }>>('/assets?kind=image&limit=200')
-    expect(images.rows.length).toBeGreaterThanOrEqual(7)
-    expect(await json<Page<unknown>>('/assets?kind=video')).toMatchObject({ rows: [] })
-  })
+  it("filters by kind on a content-type prefix", async () => {
+    const images = await json<Page<{ filename: string }>>("/assets?kind=image&limit=200");
+    expect(images.rows.length).toBeGreaterThanOrEqual(7);
+    expect(await json<Page<unknown>>("/assets?kind=video")).toMatchObject({ rows: [] });
+  });
 
-  it('counts the filter, not the table', async () => {
-    const counted = await json<Page<unknown>>('/assets?q=paged-&count=1&limit=2')
-    expect(counted.total).toBe(7)
-  })
+  it("counts the filter, not the table", async () => {
+    const counted = await json<Page<unknown>>("/assets?q=paged-&count=1&limit=2");
+    expect(counted.total).toBe(7);
+  });
 
-  it('clamps a silly limit and refuses a malformed cursor', async () => {
+  it("clamps a silly limit and refuses a malformed cursor", async () => {
     // Asymmetric on purpose: a stale bookmark's `limit=5000` has an obvious right
     // answer, and "resume after ???" has none.
-    const clamped = await json<Page<unknown>>('/assets?limit=5000')
-    expect(clamped.rows.length).toBeLessThanOrEqual(200)
+    const clamped = await json<Page<unknown>>("/assets?limit=5000");
+    expect(clamped.rows.length).toBeLessThanOrEqual(200);
 
-    const bad = await SELF.fetch(`${API}/assets?cursor=nonsense`)
-    expect(bad.status).toBe(400)
-    expect((await bad.json<{ error: { code: string } }>()).error.code).toBe('bad_request')
-  })
+    const bad = await SELF.fetch(`${API}/assets?cursor=nonsense`);
+    expect(bad.status).toBe(400);
+    expect((await bad.json<{ error: { code: string } }>()).error.code).toBe("bad_request");
+  });
 
-  it('does not repeat a row when one is inserted above the cursor mid-walk', async () => {
+  it("does not repeat a row when one is inserted above the cursor mid-walk", async () => {
     // The reason keyset rather than offset. With `offset`, inserting a newer row
     // between two requests shifts everything down and page two repeats page one's
     // last row.
-    const first = await json<Page<{ id: string }>>('/assets?limit=3')
-    expect(first.cursor).not.toBeNull()
-    await upload('paged-intruder.png', 99)
+    const first = await json<Page<{ id: string }>>("/assets?limit=3");
+    expect(first.cursor).not.toBeNull();
+    await upload("paged-intruder.png", 99);
 
     const second = await json<Page<{ id: string }>>(
-      `/assets?limit=3&cursor=${encodeURIComponent(first.cursor ?? '')}`,
-    )
-    const overlap = second.rows.filter((r) => first.rows.some((f) => f.id === r.id))
-    expect(overlap).toEqual([])
-  })
-})
+      `/assets?limit=3&cursor=${encodeURIComponent(first.cursor ?? "")}`,
+    );
+    const overlap = second.rows.filter((r) => first.rows.some((f) => f.id === r.id));
+    expect(overlap).toEqual([]);
+  });
+});
 
 /**
  * The Assets screen's sort axis (`core/story.ts`'s `AssetSort`), which the library
@@ -150,100 +150,100 @@ describe('GET /api/assets', () => {
  * (`0002_asset_refs.sql` says why), so this is also the only assertion that they
  * page at all.
  */
-describe('GET /api/assets?sort=', () => {
+describe("GET /api/assets?sort=", () => {
   /** Distinct sizes and deliberately un-alphabetical filenames, so every ordering
    * below is a different sequence and none of them agrees with insertion order. */
   const fixtures = [
-    { name: 'sorted-zebra.png', padding: 300 },
-    { name: 'sorted-apple.png', padding: 100 },
-    { name: 'sorted-mango.png', padding: 200 },
-  ]
+    { name: "sorted-zebra.png", padding: 300 },
+    { name: "sorted-apple.png", padding: 100 },
+    { name: "sorted-mango.png", padding: 200 },
+  ];
 
   const ours = <T extends { filename: string }>(rows: T[]) =>
-    rows.filter((r) => r.filename.startsWith('sorted-'))
+    rows.filter((r) => r.filename.startsWith("sorted-"));
 
   beforeAll(async () => {
     for (const [i, f] of fixtures.entries()) {
-      expect((await upload(f.name, i, f.padding)).status).toBe(201)
+      expect((await upload(f.name, i, f.padding)).status).toBe(201);
     }
-  })
+  });
 
-  it('sorts by filename ascending, the way a file browser shows a folder', async () => {
-    const rows = await walk<{ filename: string }>('/assets?sort=filename', 2)
+  it("sorts by filename ascending, the way a file browser shows a folder", async () => {
+    const rows = await walk<{ filename: string }>("/assets?sort=filename", 2);
     expect(ours(rows).map((r) => r.filename)).toEqual([
-      'sorted-apple.png',
-      'sorted-mango.png',
-      'sorted-zebra.png',
-    ])
-  })
+      "sorted-apple.png",
+      "sorted-mango.png",
+      "sorted-zebra.png",
+    ]);
+  });
 
-  it('sorts by size DESCENDING, because nobody looks for the smallest file', async () => {
+  it("sorts by size DESCENDING, because nobody looks for the smallest file", async () => {
     // The one direction worth arguing about. Ascending would put a row of tiny
     // favicons on page one every time; somebody sorting a media library by size is
     // looking for whatever is making the bucket bigger than they expected.
-    const rows = await walk<{ filename: string; size: number }>('/assets?sort=size', 2)
+    const rows = await walk<{ filename: string; size: number }>("/assets?sort=size", 2);
     expect(ours(rows).map((r) => r.filename)).toEqual([
-      'sorted-zebra.png',
-      'sorted-mango.png',
-      'sorted-apple.png',
-    ])
-  })
+      "sorted-zebra.png",
+      "sorted-mango.png",
+      "sorted-apple.png",
+    ]);
+  });
 
-  it('reverses either one with `dir`, which is a column header’s second click', async () => {
-    const byName = await walk<{ filename: string }>('/assets?sort=filename&dir=desc', 2)
+  it("reverses either one with `dir`, which is a column header’s second click", async () => {
+    const byName = await walk<{ filename: string }>("/assets?sort=filename&dir=desc", 2);
     expect(ours(byName).map((r) => r.filename)).toEqual([
-      'sorted-zebra.png',
-      'sorted-mango.png',
-      'sorted-apple.png',
-    ])
+      "sorted-zebra.png",
+      "sorted-mango.png",
+      "sorted-apple.png",
+    ]);
 
-    const bySize = await walk<{ filename: string }>('/assets?sort=size&dir=asc', 2)
+    const bySize = await walk<{ filename: string }>("/assets?sort=size&dir=asc", 2);
     expect(ours(bySize).map((r) => r.filename)).toEqual([
-      'sorted-apple.png',
-      'sorted-mango.png',
-      'sorted-zebra.png',
-    ])
-  })
+      "sorted-apple.png",
+      "sorted-mango.png",
+      "sorted-zebra.png",
+    ]);
+  });
 
-  it('defaults to `created`, newest first, when no sort is named', async () => {
-    const dated = await json<Page<{ filename: string; createdAt: number }>>('/assets?limit=200')
-    const defaulted = await json<Page<{ filename: string }>>('/assets?limit=200&sort=created')
-    expect(dated.rows.map((r) => r.filename)).toEqual(defaulted.rows.map((r) => r.filename))
+  it("defaults to `created`, newest first, when no sort is named", async () => {
+    const dated = await json<Page<{ filename: string; createdAt: number }>>("/assets?limit=200");
+    const defaulted = await json<Page<{ filename: string }>>("/assets?limit=200&sort=created");
+    expect(dated.rows.map((r) => r.filename)).toEqual(defaulted.rows.map((r) => r.filename));
 
     // Non-increasing timestamps rather than a literal sequence. Every upload in this
     // file lands in the same millisecond or two, so `created_at` ties and the
     // tiebreak is `id desc` over a random uuid — an exact expected order here would
     // pass or fail on the shape of a uuid, which is the definition of a flaky test.
     // What is actually being asserted is that the ordering *is* the timestamp.
-    const stamps = dated.rows.map((r) => r.createdAt)
-    expect(stamps).toEqual([...stamps].sort((a, b) => b - a))
-    expect(ours(dated.rows)).toHaveLength(3)
-  })
+    const stamps = dated.rows.map((r) => r.createdAt);
+    expect(stamps).toEqual([...stamps].sort((a, b) => b - a));
+    expect(ours(dated.rows)).toHaveLength(3);
+  });
 
-  it('narrows the same way under a filter, so a sort and a search compose', async () => {
-    const page = await json<Page<{ filename: string }>>('/assets?q=sorted-&sort=size&count=1')
-    expect(page.total).toBe(3)
+  it("narrows the same way under a filter, so a sort and a search compose", async () => {
+    const page = await json<Page<{ filename: string }>>("/assets?q=sorted-&sort=size&count=1");
+    expect(page.total).toBe(3);
     expect(page.rows.map((r) => r.filename)).toEqual([
-      'sorted-zebra.png',
-      'sorted-mango.png',
-      'sorted-apple.png',
-    ])
-  })
+      "sorted-zebra.png",
+      "sorted-mango.png",
+      "sorted-apple.png",
+    ]);
+  });
 
-  it('refuses an unknown sort or dir rather than quietly serving the default', async () => {
+  it("refuses an unknown sort or dir rather than quietly serving the default", async () => {
     // A URL that says one thing and shows another is worse than a refusal somebody
     // can read: `?sort=bytes` is a typo or a stale link, and answering it with
     // `created` would make the screen lie about what is on it.
-    for (const query of ['sort=bytes', 'sort=SIZE', 'dir=descending']) {
-      const bad = await SELF.fetch(`${API}/assets?${query}`)
-      expect([query, bad.status]).toEqual([query, 400])
-      expect((await bad.json<{ error: { code: string } }>()).error.code).toBe('bad_request')
+    for (const query of ["sort=bytes", "sort=SIZE", "dir=descending"]) {
+      const bad = await SELF.fetch(`${API}/assets?${query}`);
+      expect([query, bad.status]).toEqual([query, 400]);
+      expect((await bad.json<{ error: { code: string } }>()).error.code).toBe("bad_request");
     }
     // An empty value is absence, not a typo — a screen that clears its sort control
     // should get the default rather than a 400.
-    expect((await SELF.fetch(`${API}/assets?sort=&dir=`)).status).toBe(200)
-  })
-})
+    expect((await SELF.fetch(`${API}/assets?sort=&dir=`)).status).toBe(200);
+  });
+});
 
 /**
  * One story row, inserted directly.
@@ -270,7 +270,7 @@ const insert = (
   )
     .bind(
       id,
-      extra.type ?? 'page',
+      extra.type ?? "page",
       parentId,
       id,
       path,
@@ -280,9 +280,9 @@ const insert = (
       extra.publishedAt ?? null,
       extra.draftSyncId ?? 0,
     )
-    .run()
+    .run();
 
-const ids = (rows: { id: string }[]) => rows.map((r) => r.id)
+const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
 
 /**
  * The tree, which is the one route with a **structural** answer rather than a
@@ -295,123 +295,123 @@ const ids = (rows: { id: string }[]) => rows.map((r) => r.id)
  * clients inserting between the same neighbours produce, which is the case a
  * one-column cursor gets wrong and no amount of realistic seeding would reach.
  */
-describe('GET /api/stories, per level', () => {
+describe("GET /api/stories, per level", () => {
   beforeAll(async () => {
-    await env.DB.prepare('delete from stories').run()
-    await insert('sty_root', null, 'a0', '')
+    await env.DB.prepare("delete from stories").run();
+    await insert("sty_root", null, "a0", "");
     // Six top-level pages, two of them sharing an `ord` — the tie.
-    await insert('sty_t1', null, 'a1', 't1')
-    await insert('sty_t2', null, 'a2', 't2')
-    await insert('sty_t3', null, 'a2', 't3')
-    await insert('sty_t4', null, 'a3', 't4', { type: 'insight' })
-    await insert('sty_t5', null, 'a4', 't5', { publishedAt: 5000 })
+    await insert("sty_t1", null, "a1", "t1");
+    await insert("sty_t2", null, "a2", "t2");
+    await insert("sty_t3", null, "a2", "t3");
+    await insert("sty_t4", null, "a3", "t4", { type: "insight" });
+    await insert("sty_t5", null, "a4", "t5", { publishedAt: 5000 });
     // Live *and* edited since the publish, which is `changed`.
-    await insert('sty_t6', null, 'a5', 't6', { publishedAt: 5000, draftSyncId: 9 })
+    await insert("sty_t6", null, "a5", "t6", { publishedAt: 5000, draftSyncId: 9 });
     // Children of t1, plus a record that must never appear in the tree.
-    await insert('sty_c1', 'sty_t1', 'a0', 't1/c1')
-    await insert('sty_c2', 'sty_t1', 'a1', 't1/c2')
-    await insert('per_ada', null, 'a0', null, { type: 'person', title: 'Ada' })
-  })
+    await insert("sty_c1", "sty_t1", "a0", "t1/c1");
+    await insert("sty_c2", "sty_t1", "a1", "t1/c2");
+    await insert("per_ada", null, "a0", null, { type: "person", title: "Ada" });
+  });
 
-  it('answers the top level with no `parentId`, and leaves records out of it', async () => {
-    const page = await json<Page<{ id: string }>>('/stories?limit=100&count=1')
+  it("answers the top level with no `parentId`, and leaves records out of it", async () => {
+    const page = await json<Page<{ id: string }>>("/stories?limit=100&count=1");
     // `per_ada` carries `parent_id = null` like every unrouted row, so without
     // `path is not null` the top level of the page tree would list every record on
     // the site.
-    expect(ids(page.rows)).not.toContain('per_ada')
-    expect(page.total).toBe(7)
-    expect(page.cursor).toBeNull()
-  })
+    expect(ids(page.rows)).not.toContain("per_ada");
+    expect(page.total).toBe(7);
+    expect(page.cursor).toBeNull();
+  });
 
-  it('answers one parent’s children, and only that parent’s', async () => {
-    const page = await json<Page<{ id: string }>>('/stories?parentId=sty_t1')
-    expect(ids(page.rows)).toEqual(['sty_c1', 'sty_c2'])
-  })
+  it("answers one parent’s children, and only that parent’s", async () => {
+    const page = await json<Page<{ id: string }>>("/stories?parentId=sty_t1");
+    expect(ids(page.rows)).toEqual(["sty_c1", "sty_c2"]);
+  });
 
-  it('treats `parentId=` as the top level, so a client needs no conditional', async () => {
-    const bare = await json<Page<{ id: string }>>('/stories?limit=100')
-    const empty = await json<Page<{ id: string }>>('/stories?parentId=&limit=100')
-    expect(ids(empty.rows)).toEqual(ids(bare.rows))
-  })
+  it("treats `parentId=` as the top level, so a client needs no conditional", async () => {
+    const bare = await json<Page<{ id: string }>>("/stories?limit=100");
+    const empty = await json<Page<{ id: string }>>("/stories?parentId=&limit=100");
+    expect(ids(empty.rows)).toEqual(ids(bare.rows));
+  });
 
-  it('walks a level to exhaustion, every row exactly once', async () => {
-    const rows = await walk<{ id: string }>('/stories', 2)
+  it("walks a level to exhaustion, every row exactly once", async () => {
+    const rows = await walk<{ id: string }>("/stories", 2);
     expect(ids(rows)).toEqual([
-      'sty_root',
-      'sty_t1',
-      'sty_t2',
-      'sty_t3',
-      'sty_t4',
-      'sty_t5',
-      'sty_t6',
-    ])
-  })
+      "sty_root",
+      "sty_t1",
+      "sty_t2",
+      "sty_t3",
+      "sty_t4",
+      "sty_t5",
+      "sty_t6",
+    ]);
+  });
 
-  it('breaks a tie on `ord` with the id, so the boundary is total', async () => {
+  it("breaks a tie on `ord` with the id, so the boundary is total", async () => {
     // `sty_t2` and `sty_t3` share `ord = 'a2'`. A cursor on the first of them must
     // resume *after* it and not skip the second — which a cursor of `ord` alone
     // cannot express, and which is why the second component is `id`.
-    const page = await json<Page<{ id: string }>>('/stories?limit=3')
-    expect(ids(page.rows)).toEqual(['sty_root', 'sty_t1', 'sty_t2'])
+    const page = await json<Page<{ id: string }>>("/stories?limit=3");
+    expect(ids(page.rows)).toEqual(["sty_root", "sty_t1", "sty_t2"]);
     const next = await json<Page<{ id: string }>>(
-      `/stories?limit=3&cursor=${encodeURIComponent(page.cursor ?? '')}`,
-    )
-    expect(ids(next.rows)).toEqual(['sty_t3', 'sty_t4', 'sty_t5'])
-  })
+      `/stories?limit=3&cursor=${encodeURIComponent(page.cursor ?? "")}`,
+    );
+    expect(ids(next.rows)).toEqual(["sty_t3", "sty_t4", "sty_t5"]);
+  });
 
-  it('reports a child count, which is what tells the tree where a twisty goes', async () => {
-    const page = await json<Page<{ id: string; childCount: number }>>('/stories?limit=100')
-    const counts = Object.fromEntries(page.rows.map((r) => [r.id, r.childCount]))
-    expect(counts.sty_t1).toBe(2)
-    expect(counts.sty_t2).toBe(0)
-  })
+  it("reports a child count, which is what tells the tree where a twisty goes", async () => {
+    const page = await json<Page<{ id: string; childCount: number }>>("/stories?limit=100");
+    const counts = Object.fromEntries(page.rows.map((r) => [r.id, r.childCount]));
+    expect(counts.sty_t1).toBe(2);
+    expect(counts.sty_t2).toBe(0);
+  });
 
-  it('answers a level whose parent has no children with an empty page, not a 404', async () => {
+  it("answers a level whose parent has no children with an empty page, not a 404", async () => {
     // The list exists, it is empty, and the screen draws an `EmptyState`.
-    const page = await json<Page<unknown>>('/stories?parentId=sty_c1')
-    expect(page).toMatchObject({ rows: [], cursor: null })
-  })
+    const page = await json<Page<unknown>>("/stories?parentId=sty_c1");
+    expect(page).toMatchObject({ rows: [], cursor: null });
+  });
 
-  it('filters by state server-side, agreeing with `draftState`', async () => {
-    const live = await json<Page<{ id: string }>>('/stories?state=live&limit=100')
-    expect(ids(live.rows)).toEqual(['sty_t5'])
-    const changed = await json<Page<{ id: string }>>('/stories?state=changed&limit=100&count=1')
-    expect(ids(changed.rows)).toEqual(['sty_t6'])
-    expect(changed.total).toBe(1)
-  })
+  it("filters by state server-side, agreeing with `draftState`", async () => {
+    const live = await json<Page<{ id: string }>>("/stories?state=live&limit=100");
+    expect(ids(live.rows)).toEqual(["sty_t5"]);
+    const changed = await json<Page<{ id: string }>>("/stories?state=changed&limit=100&count=1");
+    expect(ids(changed.rows)).toEqual(["sty_t6"]);
+    expect(changed.total).toBe(1);
+  });
 
-  it('filters by type and by substring', async () => {
-    expect(ids((await json<Page<{ id: string }>>('/stories?type=insight')).rows)).toEqual([
-      'sty_t4',
-    ])
+  it("filters by type and by substring", async () => {
+    expect(ids((await json<Page<{ id: string }>>("/stories?type=insight")).rows)).toEqual([
+      "sty_t4",
+    ]);
     // Title, slug and path, which are the three things a person types.
-    expect(ids((await json<Page<{ id: string }>>('/stories?q=t1/c')).rows)).toEqual([])
-    const flat = await json<Page<{ id: string }>>('/stories?flat=1&q=t1/c&limit=100')
-    expect(ids(flat.rows).sort()).toEqual(['sty_c1', 'sty_c2'])
-  })
+    expect(ids((await json<Page<{ id: string }>>("/stories?q=t1/c")).rows)).toEqual([]);
+    const flat = await json<Page<{ id: string }>>("/stories?flat=1&q=t1/c&limit=100");
+    expect(ids(flat.rows).sort()).toEqual(["sty_c1", "sty_c2"]);
+  });
 
-  it('omits `total` unless asked, and refuses a malformed cursor', async () => {
-    expect((await json<Page<unknown>>('/stories')).total).toBeUndefined()
-    const bad = await SELF.fetch(`${API}/stories?cursor=nonsense`)
-    expect(bad.status).toBe(400)
-    expect((await bad.json<{ error: { code: string } }>()).error.code).toBe('bad_request')
-  })
+  it("omits `total` unless asked, and refuses a malformed cursor", async () => {
+    expect((await json<Page<unknown>>("/stories")).total).toBeUndefined();
+    const bad = await SELF.fetch(`${API}/stories?cursor=nonsense`);
+    expect(bad.status).toBe(400);
+    expect((await bad.json<{ error: { code: string } }>()).error.code).toBe("bad_request");
+  });
 
-  it('refuses a state or sort it does not know, rather than quietly ignoring it', async () => {
+  it("refuses a state or sort it does not know, rather than quietly ignoring it", async () => {
     // A stale bookmark's `state=archived` must not answer a page that silently
     // means something else.
-    expect((await SELF.fetch(`${API}/stories?state=archived`)).status).toBe(400)
-    expect((await SELF.fetch(`${API}/stories?flat=1&sort=colour`)).status).toBe(400)
-  })
-})
+    expect((await SELF.fetch(`${API}/stories?state=archived`)).status).toBe(400);
+    expect((await SELF.fetch(`${API}/stories?flat=1&sort=colour`)).status).toBe(400);
+  });
+});
 
 /**
  * Flat mode's three sorts (decision 2a), and the null case that is the whole reason
  * `sort=edited` is a `coalesce`.
  */
-describe('GET /api/stories?flat=1', () => {
+describe("GET /api/stories?flat=1", () => {
   beforeAll(async () => {
-    await env.DB.prepare('delete from stories').run()
+    await env.DB.prepare("delete from stories").run();
     const insert = (
       id: string,
       path: string,
@@ -426,131 +426,131 @@ describe('GET /api/stories?flat=1', () => {
          values (?, 'page', null, ?, ?, 'a0', ?, ?, ?, 0, 0)`,
       )
         .bind(id, id, path, title, updated, draft)
-        .run()
+        .run();
 
     // The case a plain `draft_updated_at desc` gets exactly backwards: `fresh` was
     // created a moment ago and never opened, so its draft watermark is null, while
     // `ancient` was last edited years back. SQLite sorts nulls last under `desc`,
     // which would sink the newest page to the bottom of a list called "last edited".
-    await insert('sty_ancient', 'ancient', 'Ancient', 1_000_000, 1_000_000)
-    await insert('sty_fresh', 'fresh', 'Beta', 9_000_000, null)
-    await insert('sty_mid', 'mid', 'Alpha', 2_000_000, 5_000_000)
-  })
+    await insert("sty_ancient", "ancient", "Ancient", 1_000_000, 1_000_000);
+    await insert("sty_fresh", "fresh", "Beta", 9_000_000, null);
+    await insert("sty_mid", "mid", "Alpha", 2_000_000, 5_000_000);
+  });
 
-  it('sorts by last edited, with a never-opened page in its true place', async () => {
-    const page = await json<Page<{ id: string }>>('/stories?flat=1&limit=100')
-    expect(ids(page.rows)).toEqual(['sty_fresh', 'sty_mid', 'sty_ancient'])
-  })
+  it("sorts by last edited, with a never-opened page in its true place", async () => {
+    const page = await json<Page<{ id: string }>>("/stories?flat=1&limit=100");
+    expect(ids(page.rows)).toEqual(["sty_fresh", "sty_mid", "sty_ancient"]);
+  });
 
-  it('defaults to `edited`, because that is the question flat mode exists for', async () => {
-    const explicit = await json<Page<{ id: string }>>('/stories?flat=1&sort=edited&limit=100')
-    const implied = await json<Page<{ id: string }>>('/stories?flat=1&limit=100')
-    expect(ids(implied.rows)).toEqual(ids(explicit.rows))
-  })
+  it("defaults to `edited`, because that is the question flat mode exists for", async () => {
+    const explicit = await json<Page<{ id: string }>>("/stories?flat=1&sort=edited&limit=100");
+    const implied = await json<Page<{ id: string }>>("/stories?flat=1&limit=100");
+    expect(ids(implied.rows)).toEqual(ids(explicit.rows));
+  });
 
-  it('sorts by title and by path', async () => {
+  it("sorts by title and by path", async () => {
     expect(
-      ids((await json<Page<{ id: string }>>('/stories?flat=1&sort=title&limit=100')).rows),
-    ).toEqual(['sty_mid', 'sty_ancient', 'sty_fresh'])
+      ids((await json<Page<{ id: string }>>("/stories?flat=1&sort=title&limit=100")).rows),
+    ).toEqual(["sty_mid", "sty_ancient", "sty_fresh"]);
     expect(
-      ids((await json<Page<{ id: string }>>('/stories?flat=1&sort=path&limit=100')).rows),
-    ).toEqual(['sty_ancient', 'sty_fresh', 'sty_mid'])
-  })
+      ids((await json<Page<{ id: string }>>("/stories?flat=1&sort=path&limit=100")).rows),
+    ).toEqual(["sty_ancient", "sty_fresh", "sty_mid"]);
+  });
 
-  it('pages every sort to exhaustion, each row exactly once', async () => {
-    for (const sort of ['edited', 'title', 'path']) {
-      const rows = await walk<{ id: string }>(`/stories?flat=1&sort=${sort}`, 1)
-      expect([sort, ids(rows).sort()]).toEqual([sort, ['sty_ancient', 'sty_fresh', 'sty_mid']])
+  it("pages every sort to exhaustion, each row exactly once", async () => {
+    for (const sort of ["edited", "title", "path"]) {
+      const rows = await walk<{ id: string }>(`/stories?flat=1&sort=${sort}`, 1);
+      expect([sort, ids(rows).sort()]).toEqual([sort, ["sty_ancient", "sty_fresh", "sty_mid"]]);
     }
-  })
+  });
 
-  it('has no structure to disclose, so no child count', async () => {
-    const page = await json<Page<Record<string, unknown>>>('/stories?flat=1&limit=1')
-    expect(page.rows[0]).not.toHaveProperty('childCount')
-  })
-})
+  it("has no structure to disclose, so no child count", async () => {
+    const page = await json<Page<Record<string, unknown>>>("/stories?flat=1&limit=1");
+    expect(page.rows[0]).not.toHaveProperty("childCount");
+  });
+});
 
 /**
  * The batch by identity (decision 7) — what replaced the admin's whole-tree fetch.
  * Uncursored on purpose: a batch by id is not a page, and its consumer looks rows
  * up by id rather than reading them in order.
  */
-describe('GET /api/stories?ids= and ?paths=', () => {
+describe("GET /api/stories?ids= and ?paths=", () => {
   beforeAll(async () => {
-    await env.DB.prepare('delete from stories').run()
-    await insert('sty_home', null, 'a0', '', { title: 'Home' })
-    await insert('sty_about', null, 'a1', 'about', { title: 'About' })
-    await insert('sty_team', 'sty_about', 'a0', 'about/team', { title: 'Our team' })
-  })
+    await env.DB.prepare("delete from stories").run();
+    await insert("sty_home", null, "a0", "", { title: "Home" });
+    await insert("sty_about", null, "a1", "about", { title: "About" });
+    await insert("sty_team", "sty_about", "a0", "about/team", { title: "Our team" });
+  });
 
-  const found = (body: { rows: { id: string }[] }) => body.rows.map((r) => r.id).sort()
+  const found = (body: { rows: { id: string }[] }) => body.rows.map((r) => r.id).sort();
 
-  it('answers the ids it was given and nothing else', async () => {
-    expect(found(await json<{ rows: { id: string }[] }>('/stories?ids=sty_team'))).toEqual([
-      'sty_team',
-    ])
-  })
+  it("answers the ids it was given and nothing else", async () => {
+    expect(found(await json<{ rows: { id: string }[] }>("/stories?ids=sty_team"))).toEqual([
+      "sty_team",
+    ]);
+  });
 
-  it('adds the ancestor chain when asked, in one request', async () => {
+  it("adds the ancestor chain when asked, in one request", async () => {
     // The breadcrumb's whole requirement, and the reason `?ancestors=1` exists
     // rather than a second round trip: the caller cannot compute `ancestorPaths`
     // until it knows the row's own path.
     expect(
-      found(await json<{ rows: { id: string }[] }>('/stories?ids=sty_team&ancestors=1')),
-    ).toEqual(['sty_about', 'sty_home', 'sty_team'])
-  })
+      found(await json<{ rows: { id: string }[] }>("/stories?ids=sty_team&ancestors=1")),
+    ).toEqual(["sty_about", "sty_home", "sty_team"]);
+  });
 
-  it('resolves by path, which is how a global finds its preview host', async () => {
-    const body = await json<{ rows: { id: string; path: string }[] }>('/stories?paths=about')
-    expect(body.rows.map((r) => r.path)).toEqual(['about'])
-  })
+  it("resolves by path, which is how a global finds its preview host", async () => {
+    const body = await json<{ rows: { id: string; path: string }[] }>("/stories?paths=about");
+    expect(body.rows.map((r) => r.path)).toEqual(["about"]);
+  });
 
-  it('reads an empty *segment* as the root, and an empty parameter as absent', async () => {
+  it("reads an empty *segment* as the root, and an empty parameter as absent", async () => {
     // Two different things that look alike, and both matter. `''` is the root
     // story's real stored path, so `?paths=,about` legitimately means the root and
     // `/about` — which is exactly what `ancestorPaths` returns for a top-level page.
-    expect(found(await json<{ rows: { id: string }[] }>('/stories?paths=,about'))).toEqual([
-      'sty_about',
-      'sty_home',
-    ])
+    expect(found(await json<{ rows: { id: string }[] }>("/stories?paths=,about"))).toEqual([
+      "sty_about",
+      "sty_home",
+    ]);
     // A bare `?paths=` names nothing, so it is not a batch at all and the route
     // falls through to the level walk. That is what lets a client build the URL
     // without a conditional around an empty list.
-    const bare = await json<Page<{ id: string }>>('/stories?paths=&limit=100')
-    expect(bare).toHaveProperty('cursor')
-    expect(ids(bare.rows)).toEqual(['sty_home', 'sty_about'])
-  })
+    const bare = await json<Page<{ id: string }>>("/stories?paths=&limit=100");
+    expect(bare).toHaveProperty("cursor");
+    expect(ids(bare.rows)).toEqual(["sty_home", "sty_about"]);
+  });
 
-  it('is silent about an id nothing is behind, rather than 404ing the batch', async () => {
+  it("is silent about an id nothing is behind, rather than 404ing the batch", async () => {
     // A dangling link already degrades safely — `resolveReference` returns null and
     // the block renders its empty state — so one missing target must not cost the
     // caller the rows it asked for alongside it.
-    expect(found(await json<{ rows: { id: string }[] }>('/stories?ids=sty_home,sty_nope'))).toEqual(
-      ['sty_home'],
-    )
-  })
+    expect(found(await json<{ rows: { id: string }[] }>("/stories?ids=sty_home,sty_nope"))).toEqual(
+      ["sty_home"],
+    );
+  });
 
-  it('chunks past the bind limit instead of failing', async () => {
+  it("chunks past the bind limit instead of failing", async () => {
     // A document with three hundred internal links is legitimate; the chunk size is
     // D1's constraint, not the caller's.
-    const many = [...Array(250)].map((_, i) => `sty_x${i}`).join(',')
-    const body = await json<{ rows: unknown[] }>(`/stories?ids=sty_home,${many}`)
-    expect(body.rows).toHaveLength(1)
-  })
+    const many = [...Array(250)].map((_, i) => `sty_x${i}`).join(",");
+    const body = await json<{ rows: unknown[] }>(`/stories?ids=sty_home,${many}`);
+    expect(body.rows).toHaveLength(1);
+  });
 
-  it('refuses a batch larger than one request should ask for', async () => {
-    const absurd = [...Array(600)].map((_, i) => `sty_y${i}`).join(',')
-    const res = await SELF.fetch(`${API}/stories?ids=${absurd}`)
-    expect(res.status).toBe(400)
-  })
+  it("refuses a batch larger than one request should ask for", async () => {
+    const absurd = [...Array(600)].map((_, i) => `sty_y${i}`).join(",");
+    const res = await SELF.fetch(`${API}/stories?ids=${absurd}`);
+    expect(res.status).toBe(400);
+  });
 
-  it('screens each id, so a malformed one is a refusal rather than a short list', async () => {
+  it("screens each id, so a malformed one is a refusal rather than a short list", async () => {
     // Dropping it silently would leave the caller unable to tell a missing row from
     // a rejected id.
-    expect((await SELF.fetch(`${API}/stories?ids=sty_home,../etc`)).status).toBe(400)
-    expect((await SELF.fetch(`${API}/stories?paths=/about`)).status).toBe(400)
-  })
-})
+    expect((await SELF.fetch(`${API}/stories?ids=sty_home,../etc`)).status).toBe(400);
+    expect((await SELF.fetch(`${API}/stories?paths=/about`)).status).toBe(400);
+  });
+});
 
 /**
  * `users` and `tokens` are the two that were **whole-table reads with no cap at
@@ -561,12 +561,12 @@ describe('GET /api/stories?ids= and ?paths=', () => {
  * Under this worker's `auth: 'open'` the routes 404, so these exercise the
  * readers directly. `auth-http.test.ts` covers the routes under a session.
  */
-describe('listUsers and listTokens', () => {
-  it('pages users oldest first, which is roster order not feed order', async () => {
+describe("listUsers and listTokens", () => {
+  it("pages users oldest first, which is roster order not feed order", async () => {
     // The seed shape since 0011: the row without `role`, then its `*` grant.
     for (let i = 0; i < 5; i++) {
       await env.DB.batch([
-        env.DB.prepare('insert into users (id, email, name, created_at) values (?, ?, ?, ?)').bind(
+        env.DB.prepare("insert into users (id, email, name, created_at) values (?, ?, ?, ?)").bind(
           `usr_p${i}`,
           `p${i}@x.test`,
           `P${i}`,
@@ -575,47 +575,47 @@ describe('listUsers and listTokens', () => {
         env.DB.prepare(
           "insert into site_roles (user_id, scope_id, role, created_at) values (?, '*', 'editor', ?)",
         ).bind(`usr_p${i}`, 1000 + i),
-      ])
+      ]);
     }
 
-    const first = await listUsers(env.DB, { limit: 2 })
-    expect(first.rows.map((u) => u.id)).toEqual(['usr_p0', 'usr_p1'])
-    expect(first.cursor).not.toBeNull()
+    const first = await listUsers(env.DB, { limit: 2 });
+    expect(first.rows.map((u) => u.id)).toEqual(["usr_p0", "usr_p1"]);
+    expect(first.cursor).not.toBeNull();
 
-    const seen: string[] = [...first.rows.map((u) => u.id)]
-    let cursor = first.cursor
+    const seen: string[] = [...first.rows.map((u) => u.id)];
+    let cursor = first.cursor;
     while (cursor) {
-      const next = await listUsers(env.DB, { limit: 2, cursor })
-      seen.push(...next.rows.map((u) => u.id))
-      cursor = next.cursor
+      const next = await listUsers(env.DB, { limit: 2, cursor });
+      seen.push(...next.rows.map((u) => u.id));
+      cursor = next.cursor;
     }
-    expect(seen).toEqual(['usr_p0', 'usr_p1', 'usr_p2', 'usr_p3', 'usr_p4'])
+    expect(seen).toEqual(["usr_p0", "usr_p1", "usr_p2", "usr_p3", "usr_p4"]);
 
-    expect((await listUsers(env.DB, { limit: 2 })).total).toBeUndefined()
-    expect((await listUsers(env.DB, { limit: 2, count: true })).total).toBe(5)
-    expect(new Set(first.rows.map((u) => u.role))).toEqual(new Set(['editor']))
+    expect((await listUsers(env.DB, { limit: 2 })).total).toBeUndefined();
+    expect((await listUsers(env.DB, { limit: 2, count: true })).total).toBe(5);
+    expect(new Set(first.rows.map((u) => u.role))).toEqual(new Set(["editor"]));
     await env.DB.batch([
-      env.DB.prepare('delete from site_roles'),
-      env.DB.prepare('delete from users'),
-    ])
-  })
+      env.DB.prepare("delete from site_roles"),
+      env.DB.prepare("delete from users"),
+    ]);
+  });
 
-  it('pages tokens newest first, revoked ones included', async () => {
+  it("pages tokens newest first, revoked ones included", async () => {
     for (let i = 0; i < 4; i++) {
       await env.DB.prepare(
-        'insert into api_tokens (id, name, scopes, created_at, revoked_at) values (?, ?, ?, ?, ?)',
+        "insert into api_tokens (id, name, scopes, created_at, revoked_at) values (?, ?, ?, ?, ?)",
       )
         .bind(`tok_p${i}`, `t${i}`, '["admin"]', 2000 + i, i === 0 ? 3000 : null)
-        .run()
+        .run();
     }
-    const first = await listTokens(env.DB, { limit: 3 })
+    const first = await listTokens(env.DB, { limit: 3 });
     // Newest first, and the revoked one is still listed: revoking keeps the name
     // answerable, which is exactly why this list only ever grows.
-    expect(first.rows.map((t) => t.id)).toEqual(['tok_p3', 'tok_p2', 'tok_p1'])
-    const rest = await listTokens(env.DB, { limit: 3, cursor: first.cursor ?? '' })
-    expect(rest.rows.map((t) => t.id)).toEqual(['tok_p0'])
-    expect(rest.rows[0]?.revokedAt).toBe(3000)
-    expect(rest.cursor).toBeNull()
-    await env.DB.prepare('delete from api_tokens').run()
-  })
-})
+    expect(first.rows.map((t) => t.id)).toEqual(["tok_p3", "tok_p2", "tok_p1"]);
+    const rest = await listTokens(env.DB, { limit: 3, cursor: first.cursor ?? "" });
+    expect(rest.rows.map((t) => t.id)).toEqual(["tok_p0"]);
+    expect(rest.rows[0]?.revokedAt).toBe(3000);
+    expect(rest.cursor).toBeNull();
+    await env.DB.prepare("delete from api_tokens").run();
+  });
+});

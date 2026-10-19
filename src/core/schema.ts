@@ -1,8 +1,8 @@
-import { type Blok, type Doc, type Json, keyAtIndex, newUid } from './doc'
-import { defaultValue, type Field } from './fields'
-import { type LocaleConfig, type LocaleContext, fieldValue } from './locales'
-import { asRichtext, richtextToText } from './richtext'
-import { asAsset } from './values'
+import { type Blok, type Doc, type Json, keyAtIndex, newUid } from "./doc";
+import { defaultValue, type Field } from "./fields";
+import { type LocaleConfig, type LocaleContext, fieldValue } from "./locales";
+import { asRichtext, richtextToText } from "./richtext";
+import { asAsset } from "./values";
 
 /**
  * A named bundle of field values (and optionally children), the second of the
@@ -13,12 +13,12 @@ import { asAsset } from './values'
  */
 export interface BlockPreset {
   /** Unique within the block. 'default' is used for a document's starting content. */
-  name: string
-  label: string
+  name: string;
+  label: string;
   /** Partial field values, layered over the field defaults, layered over the kind defaults. */
-  data?: Record<string, Json>
+  data?: Record<string, Json>;
   /** Recursive: each names a slot, a type, and optionally another block's own preset. */
-  children?: readonly { slot: string; type: string; preset?: string }[]
+  children?: readonly { slot: string; type: string; preset?: string }[];
 }
 
 /**
@@ -27,17 +27,17 @@ export interface BlockPreset {
  * blocks over HTTP instead of at build time.
  */
 export interface BlockSchema {
-  name: string
-  label: string
+  name: string;
+  label: string;
   /** Field name whose value labels this block in the tree. */
-  summary?: string
-  fields: Record<string, Field>
-  presets?: readonly BlockPreset[]
+  summary?: string;
+  fields: Record<string, Field>;
+  presets?: readonly BlockPreset[];
   /** Hides the bare block from the add menu; only its presets are offered there. */
-  presetsOnly?: boolean
+  presetsOnly?: boolean;
 }
 
-export type SchemaIndex = Record<string, BlockSchema>
+export type SchemaIndex = Record<string, BlockSchema>;
 
 /**
  * How a document type relates to the URL namespace (`document-types.md`
@@ -52,20 +52,20 @@ export type SchemaIndex = Record<string, BlockSchema>
  * | `record`    | no       | no (both columns null)      | many     |
  * | `singleton` | no       | no                          | one      |
  */
-export type DocumentKind = 'page' | 'record' | 'singleton'
+export type DocumentKind = "page" | "record" | "singleton";
 
 export interface DocumentType {
-  name: string
-  label: string
-  kind: DocumentKind
+  name: string;
+  label: string;
+  kind: DocumentKind;
   /** Block type used as this document's root. Also where its metadata lives. */
-  root: string
+  root: string;
   /**
    * Root field holding the display title, cached into `stories.title` on
    * publish. Defaults through `titleFieldOf`: `'title'` when the root block has
    * one, then the root block's `summary` field, then nothing.
    */
-  titleField?: string
+  titleField?: string;
   /**
    * Only this type's documents may be created under — or dragged onto — a
    * document of these types. Absent means anywhere. Declaring it also means
@@ -73,9 +73,9 @@ export interface DocumentType {
    * to match. `page` kinds only: nothing else is in the tree to be under
    * anything.
    */
-  under?: readonly string[]
+  under?: readonly string[];
   /** The type a bare "New page" creates. Implicitly the first `page` type. */
-  default?: boolean
+  default?: boolean;
   /**
    * The sidebar heading this type appears under (`../../docs/ui-architecture.md`
    * decision 3). Payload's `admin.group` by another name, and schema-as-code like
@@ -87,7 +87,7 @@ export interface DocumentType {
    * the normal case: under about eight record types the sidebar is flat, and a
    * heading over four items is ceremony.
    */
-  group?: string
+  group?: string;
   /**
    * Where a `singleton` is seen in context, since it has no URL of its own to
    * preview (`../../docs/specs/content-model/globals.md`): the *path* of a
@@ -97,7 +97,7 @@ export interface DocumentType {
    * singleton alone, on the host's stylesheet, with a note that no host page
    * was configured. `singleton` kinds only.
    */
-  previewPath?: string
+  previewPath?: string;
 }
 
 /**
@@ -112,33 +112,33 @@ export interface DocumentType {
  */
 export interface ManifestHooks {
   /** Declared event names, in the order `Object.keys` gave them. */
-  declared: string[]
+  declared: string[];
   /** `FolioHooks.await` — the subset a write waits for before responding. */
-  awaited: string[]
+  awaited: string[];
 }
 
 export interface Manifest {
   /** Every declared document type, in declaration order. */
-  types: DocumentType[]
-  blocks: BlockSchema[]
+  types: DocumentType[];
+  blocks: BlockSchema[];
   /**
    * @deprecated The default page type's root block. Kept for one release, for
    * hosts and tests reading `manifest.root` from before `types` existed.
    */
-  root: string
+  root: string;
   /**
    * `FolioConfig.globals`, so the admin can draw a Globals section without a
    * second request. A subset of the declared `singleton` types — not every
    * singleton needs to be a global (`globals.md`'s resolved open question).
    */
-  globals: string[]
+  globals: string[];
   /**
    * `FolioConfig.locales` (`localisation.md`), so the admin draws its locale
    * switcher from the same request it draws the block schema from. Absent for a
    * single-locale site, which is the admin's cue that there is no switcher to
    * draw and no second inspector column to show.
    */
-  locales?: LocaleConfig
+  locales?: LocaleConfig;
   /**
    * Declared publish hooks, for the Settings screen
    * (`../../docs/ui-architecture.md` decision 6). Absent when the host
@@ -152,25 +152,25 @@ export interface Manifest {
    * `server/app.ts` states the rule this obeys, and it is worth reading before
    * adding a field to this interface.
    */
-  hooks?: ManifestHooks
+  hooks?: ManifestHooks;
   /**
    * The brand this manifest describes (`multi-brand.md` decision 12), as
    * `folio/server`'s `BrandRef`. **Present only on a deployment with `brands`**,
    * whose manifest is a brand's; absent everywhere else, so a single-brand
    * manifest is byte-identical to one from before brands.
    */
-  brand?: { id: string; label: string }
+  brand?: { id: string; label: string };
   /**
    * The brand's site-settings singleton (`FolioBrand.settings`), which is what the
    * Settings tab reads on a deployment with `brands` (decision 20). Present only
    * there, and only when the brand declares one: without `brands` the settings
    * type is deployment-wide and `/me` carries it.
    */
-  settings?: string
+  settings?: string;
 }
 
 export function indexManifest(manifest: Manifest): SchemaIndex {
-  return Object.fromEntries(manifest.blocks.map((b) => [b.name, b]))
+  return Object.fromEntries(manifest.blocks.map((b) => [b.name, b]));
 }
 
 /**
@@ -181,22 +181,22 @@ export function indexManifest(manifest: Manifest): SchemaIndex {
  * be created under. Nothing parses a story id, everything compares it, so this
  * is as valid a Durable Object name as `newStoryId`'s output.
  */
-export const SINGLETON_PREFIX = 'sng_'
+export const SINGLETON_PREFIX = "sng_";
 
 export function singletonId(type: DocumentType | string): string {
-  return `${SINGLETON_PREFIX}${typeof type === 'string' ? type : type.name}`
+  return `${SINGLETON_PREFIX}${typeof type === "string" ? type : type.name}`;
 }
 
 /** True for the one kind that lives in the page tree and owns a URL. */
 export function isRouted(type: DocumentType | undefined): boolean {
-  return type?.kind === 'page'
+  return type?.kind === "page";
 }
 
 export function typeByName(
   types: readonly DocumentType[],
   name: string | undefined,
 ): DocumentType | undefined {
-  return name === undefined ? undefined : types.find((t) => t.name === name)
+  return name === undefined ? undefined : types.find((t) => t.name === name);
 }
 
 /**
@@ -205,11 +205,11 @@ export function typeByName(
  * at least one, so this never returns undefined for a validated config.
  */
 export function defaultType(types: readonly DocumentType[]): DocumentType {
-  const marked = types.find((t) => t.default)
-  const fallback = types.find((t) => t.kind === 'page')
-  const chosen = marked ?? fallback
-  if (!chosen) throw new Error('folio: no page document type is declared')
-  return chosen
+  const marked = types.find((t) => t.default);
+  const fallback = types.find((t) => t.kind === "page");
+  const chosen = marked ?? fallback;
+  if (!chosen) throw new Error("folio: no page document type is declared");
+  return chosen;
 }
 
 /**
@@ -218,8 +218,8 @@ export function defaultType(types: readonly DocumentType[]): DocumentType {
  * as well as creation, with a refusal rather than a silent no-op.
  */
 export function canNest(type: DocumentType, parentType: DocumentType | undefined): boolean {
-  if (!type.under) return true
-  return parentType !== undefined && type.under.includes(parentType.name)
+  if (!type.under) return true;
+  return parentType !== undefined && type.under.includes(parentType.name);
 }
 
 /**
@@ -232,9 +232,9 @@ export function titleFieldOf(
   type: DocumentType | undefined,
   def: BlockSchema | undefined,
 ): string | undefined {
-  if (type?.titleField) return type.titleField
-  if (def && 'title' in def.fields) return 'title'
-  return def?.summary
+  if (type?.titleField) return type.titleField;
+  if (def && "title" in def.fields) return "title";
+  return def?.summary;
 }
 
 /**
@@ -248,17 +248,17 @@ export function titleOf(
   doc: Doc,
   type: DocumentType | undefined,
   schema: SchemaIndex,
-  fallback = 'Untitled',
+  fallback = "Untitled",
   /** Reads the title in this locale, falling back per `fieldValue`
    * (`localisation.md`). Absent is the source locale, exactly as before. */
   locale?: LocaleContext,
 ): string {
-  const root = doc.bloks[doc.root]
-  if (!root) return fallback
-  const def = schema[root.type]
-  const field = titleFieldOf(type, def)
-  if (!field) return fallback
-  return fieldText(def, field, root, locale).trim() || fallback
+  const root = doc.bloks[doc.root];
+  if (!root) return fallback;
+  const def = schema[root.type];
+  const field = titleFieldOf(type, def);
+  if (!field) return fallback;
+  return fieldText(def, field, root, locale).trim() || fallback;
 }
 
 /**
@@ -272,15 +272,15 @@ function fieldText(
   blok: Blok,
   locale?: LocaleContext,
 ): string {
-  const value = fieldValue(blok, name, locale)
-  if (value == null) return ''
+  const value = fieldValue(blok, name, locale);
+  if (value == null) return "";
   switch (def?.fields[name]?.kind) {
-    case 'richtext':
-      return richtextToText(asRichtext(value))
-    case 'asset':
-      return asAsset(value)?.filename ?? ''
+    case "richtext":
+      return richtextToText(asRichtext(value));
+    case "asset":
+      return asAsset(value)?.filename ?? "";
     default:
-      return typeof value === 'object' ? '' : String(value)
+      return typeof value === "object" ? "" : String(value);
   }
 }
 
@@ -295,8 +295,8 @@ export function summarise(
   blok: Blok | undefined,
   locale?: LocaleContext,
 ): string {
-  if (!schema?.summary || !blok) return ''
-  return fieldText(schema, schema.summary, blok, locale).slice(0, 64)
+  if (!schema?.summary || !blok) return "";
+  return fieldText(schema, schema.summary, blok, locale).slice(0, 64);
 }
 
 /**
@@ -305,14 +305,14 @@ export function summarise(
  * should throw once, before a request is served, rather than becoming a
  * runtime 500 on whichever code path reaches it first.
  */
-const TYPE_NAME = /^[A-Za-z0-9_-]+$/
+const TYPE_NAME = /^[A-Za-z0-9_-]+$/;
 
 export function validateTypes(types: readonly DocumentType[], schema: SchemaIndex): void {
-  if (types.length === 0) throw new Error('folio: `types` is empty; declare at least one')
+  if (types.length === 0) throw new Error("folio: `types` is empty; declare at least one");
 
-  const seen = new Set<string>()
+  const seen = new Set<string>();
   for (const type of types) {
-    if (!type.name) throw new Error('folio: a document type has no `name`')
+    if (!type.name) throw new Error("folio: a document type has no `name`");
     // The charset a type named in a request already has to pass (`validate.ts`'s
     // `TYPE_NAME`), so no name a host can use today is newly refused. What it buys
     // is the layer ids of multi-site (`multi-site.md` decision 7): `sng_<type>:<scope>`
@@ -321,60 +321,60 @@ export function validateTypes(types: readonly DocumentType[], schema: SchemaInde
     if (!TYPE_NAME.test(type.name)) {
       throw new Error(
         `folio: document type '${type.name}' may use only letters, digits, '_' and '-'`,
-      )
+      );
     }
-    if (seen.has(type.name)) throw new Error(`folio: duplicate document type '${type.name}'`)
-    seen.add(type.name)
+    if (seen.has(type.name)) throw new Error(`folio: duplicate document type '${type.name}'`);
+    seen.add(type.name);
 
-    const def = schema[type.root]
+    const def = schema[type.root];
     if (!def) {
       throw new Error(
         `folio: document type '${type.name}' names root block '${type.root}', which is not in the registry`,
-      )
+      );
     }
     if (type.titleField) {
-      const field = def.fields[type.titleField]
+      const field = def.fields[type.titleField];
       if (!field) {
         throw new Error(
           `folio: document type '${type.name}' names titleField '${type.titleField}', which '${type.root}' does not declare`,
-        )
+        );
       }
-      if (field.kind === 'blocks') {
+      if (field.kind === "blocks") {
         throw new Error(
           `folio: document type '${type.name}' names titleField '${type.titleField}', a blocks field`,
-        )
+        );
       }
     }
     // `under` places a document in the tree, and only a `page` is ever in it.
     // Silently ignoring it on a record would leave a config key that reads as
     // a constraint and enforces nothing.
-    if (type.under && type.kind !== 'page') {
+    if (type.under && type.kind !== "page") {
       throw new Error(
         `folio: document type '${type.name}' is kind '${type.kind}' and cannot declare 'under' — only a page lives in the tree`,
-      )
+      );
     }
   }
 
-  if (!types.some((t) => t.kind === 'page')) {
-    throw new Error("folio: at least one document type must be kind 'page'")
+  if (!types.some((t) => t.kind === "page")) {
+    throw new Error("folio: at least one document type must be kind 'page'");
   }
 
-  const defaults = types.filter((t) => t.default)
+  const defaults = types.filter((t) => t.default);
   if (defaults.length > 1) {
     throw new Error(
-      `folio: more than one default document type (${defaults.map((t) => t.name).join(', ')})`,
-    )
+      `folio: more than one default document type (${defaults.map((t) => t.name).join(", ")})`,
+    );
   }
-  if (defaults[0] && defaults[0].kind !== 'page') {
+  if (defaults[0] && defaults[0].kind !== "page") {
     throw new Error(
       `folio: default document type '${defaults[0].name}' is kind '${defaults[0].kind}'; only a page can be the default`,
-    )
+    );
   }
 
   for (const type of types) {
     for (const name of type.under ?? []) {
       if (!seen.has(name)) {
-        throw new Error(`folio: document type '${type.name}' is 'under' unknown type '${name}'`)
+        throw new Error(`folio: document type '${type.name}' is 'under' unknown type '${name}'`);
       }
     }
   }
@@ -385,7 +385,7 @@ export function validateTypes(types: readonly DocumentType[], schema: SchemaInde
     if (!grounded(type, types, [])) {
       throw new Error(
         `folio: document type '${type.name}' can never be created: its 'under' chain never reaches a type with no 'under'`,
-      )
+      );
     }
   }
 }
@@ -395,13 +395,13 @@ function grounded(
   types: readonly DocumentType[],
   path: readonly string[],
 ): boolean {
-  if (!type.under) return true
-  if (path.includes(type.name)) return false
-  const chain = [...path, type.name]
+  if (!type.under) return true;
+  if (path.includes(type.name)) return false;
+  const chain = [...path, type.name];
   return type.under.some((name) => {
-    const parent = typeByName(types, name)
-    return parent ? grounded(parent, types, chain) : false
-  })
+    const parent = typeByName(types, name);
+    return parent ? grounded(parent, types, chain) : false;
+  });
 }
 
 /**
@@ -416,12 +416,12 @@ export function validateGlobals(
   types: readonly DocumentType[],
 ): void {
   for (const name of globals ?? []) {
-    const type = typeByName(types, name)
-    if (!type) throw new Error(`folio: 'globals' names unknown document type '${name}'`)
-    if (type.kind !== 'singleton') {
+    const type = typeByName(types, name);
+    if (!type) throw new Error(`folio: 'globals' names unknown document type '${name}'`);
+    if (type.kind !== "singleton") {
       throw new Error(
         `folio: 'globals' names '${name}', which is kind '${type.kind}', not 'singleton'`,
-      )
+      );
     }
   }
 }
@@ -436,9 +436,9 @@ export function validateGlobals(
  * `parent`/`slot`/`order` arguments rather than to another entry here.
  */
 export interface SubtreeBlok {
-  key: string
-  type: string
-  data: Record<string, Json>
+  key: string;
+  type: string;
+  data: Record<string, Json>;
   /**
    * Translations to carry onto the allocated blok
    * (`localisation.md`). Absent for a recipe built from a preset — a blank block
@@ -447,9 +447,9 @@ export interface SubtreeBlok {
    * is a sibling of `data` on `Blok`, not a key inside it, so a recipe that
    * copied only `data` would drop every translation on duplicate and paste.
    */
-  i18n?: Record<string, Record<string, Json>>
-  parent: string | null
-  slot: string | null
+  i18n?: Record<string, Record<string, Json>>;
+  parent: string | null;
+  slot: string | null;
 }
 
 /**
@@ -476,26 +476,26 @@ export function allocateSubtree(
   slot: string | null,
   order: string,
 ): Blok[] {
-  const root = bloks.find((b) => b.parent === null)
-  if (!root) throw new Error('allocateSubtree: recipe has no root (an entry with parent: null)')
+  const root = bloks.find((b) => b.parent === null);
+  if (!root) throw new Error("allocateSubtree: recipe has no root (an entry with parent: null)");
 
-  const uids = new Map(bloks.map((b) => [b.key, newUid()]))
-  const childrenOfKey = new Map<string, SubtreeBlok[]>()
+  const uids = new Map(bloks.map((b) => [b.key, newUid()]));
+  const childrenOfKey = new Map<string, SubtreeBlok[]>();
   for (const b of bloks) {
-    if (b.parent === null) continue
-    const list = childrenOfKey.get(b.parent) ?? []
-    list.push(b)
-    childrenOfKey.set(b.parent, list)
+    if (b.parent === null) continue;
+    const list = childrenOfKey.get(b.parent) ?? [];
+    list.push(b);
+    childrenOfKey.set(b.parent, list);
   }
 
-  const out: Blok[] = []
+  const out: Blok[] = [];
   const place = (
     node: SubtreeBlok,
     realParent: string | null,
     realSlot: string | null,
     realOrder: string,
   ) => {
-    const uid = uids.get(node.key)!
+    const uid = uids.get(node.key)!;
     out.push({
       uid,
       type: node.type,
@@ -506,28 +506,28 @@ export function allocateSubtree(
       // Omitted rather than written as undefined, so a blank block's JSON is
       // byte-identical to what it was before locales existed.
       ...(node.i18n ? { i18n: node.i18n } : {}),
-    })
+    });
 
     // Group by slot so siblings within the same slot get sequential orders;
     // unrelated slots on the same new parent do not share a sequence.
-    const bySlot = new Map<string, SubtreeBlok[]>()
+    const bySlot = new Map<string, SubtreeBlok[]>();
     for (const child of childrenOfKey.get(node.key) ?? []) {
-      const list = bySlot.get(child.slot ?? '') ?? []
-      list.push(child)
-      bySlot.set(child.slot ?? '', list)
+      const list = bySlot.get(child.slot ?? "") ?? [];
+      list.push(child);
+      bySlot.set(child.slot ?? "", list);
     }
     for (const [childSlot, kids] of bySlot) {
-      let keys: string[] = []
+      let keys: string[] = [];
       for (const kid of kids) {
-        const kidOrder = keyAtIndex(keys, keys.length)
-        keys = [...keys, kidOrder]
-        place(kid, uid, childSlot, kidOrder)
+        const kidOrder = keyAtIndex(keys, keys.length);
+        keys = [...keys, kidOrder];
+        place(kid, uid, childSlot, kidOrder);
       }
     }
-  }
+  };
 
-  place(root, parent, slot, order)
-  return out
+  place(root, parent, slot, order);
+  return out;
 }
 
 /**
@@ -542,30 +542,30 @@ function subtreeRecipe(
   type: string,
   preset: string | undefined,
 ): SubtreeBlok[] {
-  const def = schema[type]
-  if (!def) throw new Error(`Unknown block type: ${type}`)
+  const def = schema[type];
+  if (!def) throw new Error(`Unknown block type: ${type}`);
 
-  const presetDef = preset ? def.presets?.find((p) => p.name === preset) : undefined
-  if (preset && !presetDef) throw new Error(`Unknown preset '${preset}' on block '${type}'`)
+  const presetDef = preset ? def.presets?.find((p) => p.name === preset) : undefined;
+  if (preset && !presetDef) throw new Error(`Unknown preset '${preset}' on block '${type}'`);
 
-  const data: Record<string, Json> = {}
+  const data: Record<string, Json> = {};
   for (const [name, field] of Object.entries(def.fields)) {
     // Creation only, deliberately: `field.default` is consulted here and only
     // here (plus the preset override below). `resolveValue` never learns about
     // it (decision 4) — this is one of the two call sites that comment names.
-    if (field.kind !== 'blocks') data[name] = field.default ?? defaultValue(field)
+    if (field.kind !== "blocks") data[name] = field.default ?? defaultValue(field);
   }
-  if (presetDef?.data) Object.assign(data, presetDef.data)
+  if (presetDef?.data) Object.assign(data, presetDef.data);
 
-  const key = newUid()
-  const out: SubtreeBlok[] = [{ key, type, data, parent: null, slot: null }]
+  const key = newUid();
+  const out: SubtreeBlok[] = [{ key, type, data, parent: null, slot: null }];
 
   for (const child of presetDef?.children ?? []) {
-    const [childRoot, ...rest] = subtreeRecipe(schema, child.type, child.preset)
-    out.push({ ...childRoot!, parent: key, slot: child.slot }, ...rest)
+    const [childRoot, ...rest] = subtreeRecipe(schema, child.type, child.preset);
+    out.push({ ...childRoot!, parent: key, slot: child.slot }, ...rest);
   }
 
-  return out
+  return out;
 }
 
 /**
@@ -584,7 +584,7 @@ export function blankSubtree(
   order: string,
   preset?: string,
 ): Blok[] {
-  return allocateSubtree(subtreeRecipe(schema, type, preset), parent, slot, order)
+  return allocateSubtree(subtreeRecipe(schema, type, preset), parent, slot, order);
 }
 
 /**
@@ -599,10 +599,10 @@ export function blankBlok(
   slot: string | null,
   order: string,
 ): Blok {
-  return blankSubtree(schema, type, parent, slot, order)[0]!
+  return blankSubtree(schema, type, parent, slot, order)[0]!;
 }
 
-const MAX_PRESET_DEPTH = 5
+const MAX_PRESET_DEPTH = 5;
 
 /**
  * Construction-time checks for every block's `presets`: an unknown type, an
@@ -621,10 +621,10 @@ const MAX_PRESET_DEPTH = 5
 export function validatePresets(schema: SchemaIndex): void {
   for (const def of Object.values(schema)) {
     if (def.presetsOnly && !(def.presets && def.presets.length > 0)) {
-      throw new Error(`Block '${def.name}' is presetsOnly but declares no presets`)
+      throw new Error(`Block '${def.name}' is presetsOnly but declares no presets`);
     }
     for (const preset of def.presets ?? []) {
-      validatePreset(schema, def, preset, [])
+      validatePreset(schema, def, preset, []);
     }
   }
 }
@@ -635,61 +635,63 @@ function validatePreset(
   preset: BlockPreset,
   path: readonly string[],
 ): void {
-  const here = `${def.name}/${preset.name}`
+  const here = `${def.name}/${preset.name}`;
   if (path.includes(here)) {
-    throw new Error(`Preset cycle: ${[...path, here].join(' -> ')}`)
+    throw new Error(`Preset cycle: ${[...path, here].join(" -> ")}`);
   }
-  const chain = [...path, here]
+  const chain = [...path, here];
   if (chain.length > MAX_PRESET_DEPTH) {
     throw new Error(
-      `Preset '${preset.name}' on '${def.name}' nests past depth ${MAX_PRESET_DEPTH}: ${chain.join(' -> ')}`,
-    )
+      `Preset '${preset.name}' on '${def.name}' nests past depth ${MAX_PRESET_DEPTH}: ${chain.join(" -> ")}`,
+    );
   }
 
   for (const field of Object.keys(preset.data ?? {})) {
-    const f = def.fields[field]
+    const f = def.fields[field];
     if (!f) {
-      throw new Error(`Preset '${preset.name}' on '${def.name}' sets unknown field '${field}'`)
+      throw new Error(`Preset '${preset.name}' on '${def.name}' sets unknown field '${field}'`);
     }
-    if (f.kind === 'blocks') {
+    if (f.kind === "blocks") {
       throw new Error(
         `Preset '${preset.name}' on '${def.name}' sets '${field}', a blocks field — put it in 'children' instead`,
-      )
+      );
     }
   }
 
-  const perSlot = new Map<string, number>()
+  const perSlot = new Map<string, number>();
   for (const child of preset.children ?? []) {
-    const slotField = def.fields[child.slot]
-    if (slotField?.kind !== 'blocks') {
-      throw new Error(`Preset '${preset.name}' on '${def.name}' names unknown slot '${child.slot}'`)
+    const slotField = def.fields[child.slot];
+    if (slotField?.kind !== "blocks") {
+      throw new Error(
+        `Preset '${preset.name}' on '${def.name}' names unknown slot '${child.slot}'`,
+      );
     }
-    const childDef = schema[child.type]
+    const childDef = schema[child.type];
     if (!childDef) {
       throw new Error(
         `Preset '${preset.name}' on '${def.name}' names unknown block type '${child.type}'`,
-      )
+      );
     }
     if (!slotField.allow.includes(child.type)) {
       throw new Error(
         `Preset '${preset.name}' on '${def.name}': slot '${child.slot}' does not allow '${child.type}'`,
-      )
+      );
     }
-    const count = (perSlot.get(child.slot) ?? 0) + 1
-    perSlot.set(child.slot, count)
+    const count = (perSlot.get(child.slot) ?? 0) + 1;
+    perSlot.set(child.slot, count);
     if (slotField.max !== undefined && count > slotField.max) {
       throw new Error(
         `Preset '${preset.name}' on '${def.name}': slot '${child.slot}' allows at most ${slotField.max}, the preset supplies more`,
-      )
+      );
     }
     if (child.preset) {
-      const childPreset = childDef.presets?.find((p) => p.name === child.preset)
+      const childPreset = childDef.presets?.find((p) => p.name === child.preset);
       if (!childPreset) {
         throw new Error(
           `Preset '${preset.name}' on '${def.name}' names unknown preset '${child.preset}' on '${child.type}'`,
-        )
+        );
       }
-      validatePreset(schema, childDef, childPreset, chain)
+      validatePreset(schema, childDef, childPreset, chain);
     }
   }
 }
@@ -697,9 +699,9 @@ function validatePreset(
 /** Slots (blocks-kind fields) declared by a block type. */
 export function slotsOf(
   schema: BlockSchema | undefined,
-): [string, Extract<Field, { kind: 'blocks' }>][] {
-  if (!schema) return []
+): [string, Extract<Field, { kind: "blocks" }>][] {
+  if (!schema) return [];
   return Object.entries(schema.fields).filter(
-    (entry): entry is [string, Extract<Field, { kind: 'blocks' }>] => entry[1].kind === 'blocks',
-  )
+    (entry): entry is [string, Extract<Field, { kind: "blocks" }>] => entry[1].kind === "blocks",
+  );
 }

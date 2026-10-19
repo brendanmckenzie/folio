@@ -18,24 +18,24 @@
  * have accepted. `admin/Access.tsx` already imports `server/auth/roles` for the
  * same reason.
  */
-import { isSafeHref } from '../../../core/values'
+import { isSafeHref } from "../../../core/values";
 import {
   isAbsoluteTarget,
   normalisePath,
   normaliseTarget,
   type Redirect,
-} from '../../../server/redirects'
-import { when } from './content-rows'
+} from "../../../server/redirects";
+import { when } from "./content-rows";
 
 /* -------------------------------------------------------------------- rows --- */
 
-export type RedirectSource = Redirect['source']
-export type RedirectStatus = Redirect['status']
+export type RedirectSource = Redirect["source"];
+export type RedirectStatus = Redirect["status"];
 
 /** The row `GET {base}/api/redirects` answers with, unchanged. There is no
  * projection to keep in step here: the reader already returns exactly the five
  * columns the table shows plus the `storyId` it does not. */
-export type RedirectRow = Redirect
+export type RedirectRow = Redirect;
 
 /**
  * A path as it is shown: rooted, so `services/strategy` reads as
@@ -47,7 +47,7 @@ export type RedirectRow = Redirect
  * output to be abbreviated.
  */
 export function pathLabel(path: string): string {
-  return path === '' ? '/' : `/${path}`
+  return path === "" ? "/" : `/${path}`;
 }
 
 /**
@@ -60,7 +60,7 @@ export function pathLabel(path: string): string {
  * `normaliseTarget` and `normalisePath` disagreed — which is wrong for the ordinary
  * case, since a lowercase URL with no trailing slash survives both unchanged.
  */
-export const isExternal = isAbsoluteTarget
+export const isExternal = isAbsoluteTarget;
 
 /**
  * A target as it is shown. An absolute URL stays whole — the domain is the whole
@@ -68,7 +68,7 @@ export const isExternal = isAbsoluteTarget
  * lands.
  */
 export function targetLabel(to: string): string {
-  return isExternal(to) ? to : pathLabel(to)
+  return isExternal(to) ? to : pathLabel(to);
 }
 
 /* ------------------------------------------------------------------ source --- */
@@ -96,14 +96,14 @@ export function targetLabel(to: string): string {
  * and by the sentence beside it, not by colour.
  */
 export function sourceLabel(source: RedirectSource): string {
-  return source === 'auto' ? 'Automatic' : 'By hand'
+  return source === "auto" ? "Automatic" : "By hand";
 }
 
 /** One line for the badge's `title`. The long version is `deleteWarning`. */
 export function sourceHint(source: RedirectSource): string {
-  return source === 'auto'
-    ? 'Folio wrote this when a page was renamed, moved or deleted.'
-    : 'An editor typed this. Nothing else knows about it.'
+  return source === "auto"
+    ? "Folio wrote this when a page was renamed, moved or deleted."
+    : "An editor typed this. Nothing else knows about it.";
 }
 
 /**
@@ -111,11 +111,11 @@ export function sourceHint(source: RedirectSource): string {
  * because a confirmation that says "this cannot be undone" and nothing else is
  * asking somebody to guess.
  */
-export function deleteWarning(row: Pick<RedirectRow, 'from' | 'source'>): string {
-  const path = pathLabel(row.from)
-  return row.source === 'auto'
+export function deleteWarning(row: Pick<RedirectRow, "from" | "source">): string {
+  const path = pathLabel(row.from);
+  return row.source === "auto"
     ? `Folio wrote this when a page moved away from ${path}. Remove it and ${path} goes back to answering 404 — nothing recreates it unless that page moves again.`
-    : `Nobody but an editor knows about this one, so nothing will recreate it. Remove it and ${path} goes back to answering 404.`
+    : `Nobody but an editor knows about this one, so nothing will recreate it. Remove it and ${path} goes back to answering 404.`;
 }
 
 /**
@@ -126,13 +126,13 @@ export function deleteWarning(row: Pick<RedirectRow, 'from' | 'source'>): string
 export function statusLabel(status: RedirectStatus): string {
   switch (status) {
     case 301:
-      return 'Permanent'
+      return "Permanent";
     case 302:
-      return 'Temporary'
+      return "Temporary";
     case 307:
-      return 'Temporary, and the request method is kept'
+      return "Temporary, and the request method is kept";
     case 308:
-      return 'Permanent, and the request method is kept'
+      return "Permanent, and the request method is kept";
   }
 }
 
@@ -140,35 +140,35 @@ export function statusLabel(status: RedirectStatus): string {
  * because it is the default a rename writes and the right answer for a page that
  * has genuinely moved. */
 export const STATUSES: readonly { value: RedirectStatus; label: string }[] = [
-  { value: 301, label: '301 — permanent' },
-  { value: 302, label: '302 — temporary' },
-  { value: 307, label: '307 — temporary, method kept' },
-  { value: 308, label: '308 — permanent, method kept' },
-]
+  { value: 301, label: "301 — permanent" },
+  { value: 302, label: "302 — temporary" },
+  { value: 307, label: "307 — temporary, method kept" },
+  { value: 308, label: "308 — permanent, method kept" },
+];
 
 /* --------------------------------------------------------------------- URL --- */
 
 /** The source filter's "no filter" value. A chip needs a value for "All", and
  * `undefined` cannot be one. Same shape as Documents' `StateFilter`. */
-export type SourceFilter = 'all' | RedirectSource
+export type SourceFilter = "all" | RedirectSource;
 
 export const SOURCES: readonly { value: SourceFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'auto', label: 'Automatic' },
-  { value: 'manual', label: 'By hand' },
-]
+  { value: "all", label: "All" },
+  { value: "auto", label: "Automatic" },
+  { value: "manual", label: "By hand" },
+];
 
 export interface RedirectsUrl {
-  source: SourceFilter
+  source: SourceFilter;
   /** Substring, matched against both paths server-side. */
-  q: string
+  q: string;
 }
 
 export function parseRedirectsUrl(query: Readonly<Record<string, string>>): RedirectsUrl {
   return {
-    source: isSourceFilter(query.source) ? query.source : 'all',
-    q: query.q ?? '',
-  }
+    source: isSourceFilter(query.source) ? query.source : "all",
+    q: query.q ?? "",
+  };
 }
 
 /**
@@ -178,9 +178,9 @@ export function parseRedirectsUrl(query: Readonly<Record<string, string>>): Redi
  */
 export function redirectsQuery(url: RedirectsUrl): Record<string, string | undefined> {
   return {
-    source: url.source === 'all' ? undefined : url.source,
+    source: url.source === "all" ? undefined : url.source,
     q: url.q || undefined,
-  }
+  };
 }
 
 /**
@@ -188,7 +188,7 @@ export function redirectsQuery(url: RedirectsUrl): Record<string, string | undef
  * states — offering *clear filters* under the first is offering to clear nothing.
  */
 export function isNarrowed(url: RedirectsUrl): boolean {
-  return url.source !== 'all' || url.q.trim() !== ''
+  return url.source !== "all" || url.q.trim() !== "";
 }
 
 /**
@@ -202,12 +202,12 @@ export function redirectsParams(
   url: RedirectsUrl,
   opts: { limit: number; cursor?: string | null; count?: boolean },
 ): URLSearchParams {
-  const params = new URLSearchParams({ limit: String(opts.limit) })
-  if (url.source !== 'all') params.set('source', url.source)
-  if (url.q.trim()) params.set('q', url.q.trim())
-  if (opts.count) params.set('count', '1')
-  if (opts.cursor) params.set('cursor', opts.cursor)
-  return params
+  const params = new URLSearchParams({ limit: String(opts.limit) });
+  if (url.source !== "all") params.set("source", url.source);
+  if (url.q.trim()) params.set("q", url.q.trim());
+  if (opts.count) params.set("count", "1");
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  return params;
 }
 
 /**
@@ -221,24 +221,24 @@ export function redirectsParams(
  * accident and the rest wrong for the same reason.
  */
 export function deletePath(from: string): string {
-  return from.split('/').map(encodeURIComponent).join('/')
+  return from.split("/").map(encodeURIComponent).join("/");
 }
 
 /* -------------------------------------------------------------------- form --- */
 
 export interface RedirectDraft {
-  from: string
-  to: string
-  status: RedirectStatus
+  from: string;
+  to: string;
+  status: RedirectStatus;
 }
 
-export const BLANK_DRAFT: RedirectDraft = { from: '', to: '', status: 301 }
+export const BLANK_DRAFT: RedirectDraft = { from: "", to: "", status: 301 };
 
 export interface Refusal {
   /** Which control the message belongs under, so `Field`'s `error` can carry it
    * rather than a banner naming a field the reader has to find. */
-  field: 'from' | 'to'
-  message: string
+  field: "from" | "to";
+  message: string;
 }
 
 /**
@@ -268,34 +268,34 @@ export interface Refusal {
  *    posts to find out.
  */
 export function draftRefusal(draft: RedirectDraft): Refusal | null {
-  const from = draft.from.trim()
-  const to = draft.to.trim()
+  const from = draft.from.trim();
+  const to = draft.to.trim();
 
-  if (!from) return { field: 'from', message: 'Type the path this should redirect from.' }
+  if (!from) return { field: "from", message: "Type the path this should redirect from." };
   if (isExternal(from)) {
     return {
-      field: 'from',
-      message: 'This has to be a path on this site, not a full URL — try /old-page.',
-    }
+      field: "from",
+      message: "This has to be a path on this site, not a full URL — try /old-page.",
+    };
   }
-  if (normalisePath(from) === '') {
+  if (normalisePath(from) === "") {
     return {
-      field: 'from',
-      message: 'The site root always has a page on it, so it cannot redirect.',
-    }
+      field: "from",
+      message: "The site root always has a page on it, so it cannot redirect.",
+    };
   }
 
-  if (!to) return { field: 'to', message: 'Type where it should go.' }
+  if (!to) return { field: "to", message: "Type where it should go." };
   if (!isSafeHref(to)) {
-    return { field: 'to', message: 'That target cannot be used as a link.' }
+    return { field: "to", message: "That target cannot be used as a link." };
   }
   if (normalisePath(from) === normaliseTarget(to)) {
     return {
-      field: 'to',
-      message: 'A path cannot redirect to itself; a browser would follow it forever.',
-    }
+      field: "to",
+      message: "A path cannot redirect to itself; a browser would follow it forever.",
+    };
   }
-  return null
+  return null;
 }
 
 /* ------------------------------------------------------------------ footer --- */
@@ -310,8 +310,8 @@ export function draftRefusal(draft: RedirectDraft): Refusal | null {
  * or a guess.
  */
 export function showing(shown: number, total: number | undefined): string {
-  if (total === undefined) return `${shown} shown`
-  return `${shown} of ${total} ${total === 1 ? 'redirect' : 'redirects'}`
+  if (total === undefined) return `${shown} shown`;
+  return `${shown} of ${total} ${total === 1 ? "redirect" : "redirects"}`;
 }
 
 /**
@@ -324,10 +324,10 @@ export function showing(shown: number, total: number | undefined): string {
  * alternative was a second relative-time formatter in this file, which is how two
  * lists end up disagreeing about what "3 days ago" rounds from.
  */
-export function createdLabel(row: Pick<RedirectRow, 'createdAt'>, now?: number): string {
-  return when({ updatedAt: row.createdAt, draftUpdatedAt: null }, now)
+export function createdLabel(row: Pick<RedirectRow, "createdAt">, now?: number): string {
+  return when({ updatedAt: row.createdAt, draftUpdatedAt: null }, now);
 }
 
 function isSourceFilter(raw: string | undefined): raw is SourceFilter {
-  return raw === 'all' || raw === 'auto' || raw === 'manual'
+  return raw === "all" || raw === "auto" || raw === "manual";
 }

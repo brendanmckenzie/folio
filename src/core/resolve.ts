@@ -12,11 +12,11 @@
  * alongside the document. It is refreshed when *structure* changes, which is
  * rare and already an event both sides handle.
  */
-import type { ReactNode } from 'react'
-import type { Doc, Json } from './doc'
-import { defaultValue, type Field } from './fields'
-import type { ResolvedForm } from './forms'
-import { dataOf, type LocaleContext } from './locales'
+import type { ReactNode } from "react";
+import type { Doc, Json } from "./doc";
+import { defaultValue, type Field } from "./fields";
+import type { ResolvedForm } from "./forms";
+import { dataOf, type LocaleContext } from "./locales";
 import {
   type CollectionField,
   collectionQuery,
@@ -24,10 +24,10 @@ import {
   maxPerPageOf,
   queryKey,
   type ResolvedCollection,
-} from './query'
-import type { SchemaIndex } from './schema'
-import type { SiteContext } from './sites'
-import type { StoryMeta } from './story'
+} from "./query";
+import type { SchemaIndex } from "./schema";
+import type { SiteContext } from "./sites";
+import type { StoryMeta } from "./story";
 import {
   asAsset,
   asAssets,
@@ -38,13 +38,13 @@ import {
   type AssetValue,
   type LinkKind,
   type LinkValue,
-} from './values'
+} from "./values";
 
 /** What a story id resolves to. Derived, never stored inside a document. */
 export interface StoryRef {
-  id: string
+  id: string;
   /** `''` for an unrouted document, which has no place in the URL namespace. */
-  path: string
+  path: string;
   /**
    * `''` for an unrouted document rather than `null`: this is a published type
    * host code reads, and widening `string` to `string | null` would be a
@@ -53,28 +53,28 @@ export interface StoryRef {
    * below is the field to test; `resolveLink` refuses to emit an href from a
    * ref that fails it.
    */
-  url: string
-  title: string
+  url: string;
+  title: string;
   /** The document type's name, for `reference`/`multilink` type filtering. */
-  type: string
-  routable: boolean
+  type: string;
+  routable: boolean;
 }
 
 export interface Resolution {
-  stories: Record<string, StoryRef>
+  stories: Record<string, StoryRef>;
   /**
    * Where the asset route is mounted. Held here rather than baked into stored
    * values so remounting Folio under a different base path does not invalidate
    * every asset reference in the database.
    */
-  assetBase: string
+  assetBase: string;
   /**
    * Documents pulled in by `reference` fields, keyed by story id. Populated only
    * for the ids a document actually points at, and only one level deep — the same
    * bound Storyblok's `resolve_relations` has, and what stops a story that
    * references itself from rendering forever.
    */
-  docs?: Record<string, Doc>
+  docs?: Record<string, Doc>;
   /**
    * A site's singletons — headers, footers, settings — keyed by *type name*
    * rather than story id, because a caller says `'header'` and should not have
@@ -86,7 +86,7 @@ export interface Resolution {
    * but a global rendered inside a referenced document still needs its own
    * content, so `globals` has to survive that emptying.
    */
-  globals?: Record<string, Doc>
+  globals?: Record<string, Doc>;
   /**
    * Which language this render is in (`../../../docs/specs/content-model/
    * localisation.md` architecture decision 5).
@@ -102,7 +102,7 @@ export interface Resolution {
    * the identical path it did before localisation existed, rather than a
    * fallback chain that happens to land in the same place.
    */
-  locale?: LocaleContext
+  locale?: LocaleContext;
   /**
    * Answers to the `collection` queries this document contains, keyed by
    * `queryKey` (`../../docs/specs/content-model/collections.md` decision 5).
@@ -113,7 +113,7 @@ export interface Resolution {
    * configuration cost one read between them, and the preview client re-renders
    * per keystroke against data it already holds.
    */
-  collections?: Record<string, ResolvedCollection>
+  collections?: Record<string, ResolvedCollection>;
   /**
    * Which page every collection field in this document is showing (1-based).
    *
@@ -124,7 +124,7 @@ export interface Resolution {
    * passes it to `folio.resolve`. A page with two *independently* paginated lists
    * is out of scope — `?page` is one number.
    */
-  page?: number
+  page?: number;
   /**
    * The full-text term every `searchable` `collection` field in this document
    * runs against (`../../docs/specs/content-model/full-text-search.md`
@@ -136,7 +136,7 @@ export interface Resolution {
    * entirely — `collectionQuery` drops it on the way out, the same double
    * enforcement `filterable` already has.
    */
-  search?: string
+  search?: string;
   /**
    * Compiled descriptors for the `form` fields this document contains, keyed by
    * form id (`../../docs/specs/content-model/forms.md` architecture decision 4).
@@ -147,24 +147,24 @@ export interface Resolution {
    * `{}` when the document embeds none, the same bootstrap-identical rule
    * `docs` and `globals` follow.
    */
-  forms?: Record<string, ResolvedForm>
+  forms?: Record<string, ResolvedForm>;
   /**
    * The site this render is for (`../../docs/specs/foundation/multi-site.md`
    * decision 15): its registry fields, the surface it was reached on, its chain
    * and the documents that layer. **Absent with no `sites`**, so a single-site
    * resolution is byte-identical to one from before multi-site existed.
    */
-  site?: SiteContext
+  site?: SiteContext;
   /**
    * The rendered story's path, when `resolve` was given one — what a
    * `path:<site>:<path>` tag needs. Absent with no `sites`, for the same reason.
    */
-  path?: string
+  path?: string;
 }
 
-export const DEFAULT_ASSET_BASE = '/folio/asset'
+export const DEFAULT_ASSET_BASE = "/folio/asset";
 
-export const EMPTY_RESOLUTION: Resolution = { stories: {}, assetBase: DEFAULT_ASSET_BASE }
+export const EMPTY_RESOLUTION: Resolution = { stories: {}, assetBase: DEFAULT_ASSET_BASE };
 
 /**
  * Every story gets a ref, unrouted ones included: a `reference` to a record
@@ -176,31 +176,31 @@ export function buildResolution(
   stories: readonly StoryMeta[],
   assetBase: string = DEFAULT_ASSET_BASE,
 ): Resolution {
-  const out: Record<string, StoryRef> = {}
+  const out: Record<string, StoryRef> = {};
   for (const s of stories) {
-    const routable = s.path !== null
+    const routable = s.path !== null;
     out[s.id] = {
       id: s.id,
-      path: s.path ?? '',
-      url: routable ? (s.url ?? `/${s.path}`) : '',
+      path: s.path ?? "",
+      url: routable ? (s.url ?? `/${s.path}`) : "",
       title: s.title,
       type: s.type,
       routable,
-    }
+    };
   }
-  return { stories: out, assetBase }
+  return { stories: out, assetBase };
 }
 
 /** What a `multilink` field hands to `render`. Null when nothing is set. */
 export interface ResolvedLink {
-  kind: LinkKind
-  href: string
-  target?: '_blank'
-  rel?: string
+  kind: LinkKind;
+  href: string;
+  target?: "_blank";
+  rel?: string;
   /** The link points at a story that has since been deleted. */
-  broken?: boolean
+  broken?: boolean;
   /** Title of the linked story, handy as a default label. */
-  title?: string
+  title?: string;
 }
 
 /**
@@ -213,80 +213,80 @@ export function resolveLink(
   resolution: Resolution,
   types?: readonly string[],
 ): ResolvedLink | null {
-  const link = asLink(value)
-  if (!link) return null
+  const link = asLink(value);
+  if (!link) return null;
 
   switch (link.kind) {
-    case 'story': {
-      const story = resolution.stories[link.id]
+    case "story": {
+      const story = resolution.stories[link.id];
       // A deleted story leaves the link in place rather than dropping it, so an
       // editor can see what broke instead of the link quietly vanishing.
-      if (!story) return { kind: 'story', href: '#', broken: true, ...windowing(link) }
+      if (!story) return { kind: "story", href: "#", broken: true, ...windowing(link) };
       // The same treatment for a target that has no URL to offer, or one the
       // field's own `types` does not permit: "there is no URL for this" and
       // "this URL is gone" are the same problem for an editor
       // (`document-types.md` architecture decision 5).
       if (!story.routable || (types && !types.includes(story.type))) {
-        return { kind: 'story', href: '#', broken: true, title: story.title, ...windowing(link) }
+        return { kind: "story", href: "#", broken: true, title: story.title, ...windowing(link) };
       }
       return {
-        kind: 'story',
+        kind: "story",
         href: `${story.url}${hash(link.anchor)}`,
         title: story.title,
         ...windowing(link),
-      }
+      };
     }
     // Both hrefs below come from a stored string. `asLink` already applied the
     // allow-list to `url`; re-checking here makes it true of everything this
     // function emits, whoever hands it a value.
-    case 'url':
-      return isSafeHref(link.url) ? { kind: 'url', href: link.url, ...windowing(link) } : null
-    case 'email': {
-      const query = link.subject ? `?subject=${encodeURIComponent(link.subject)}` : ''
-      return { kind: 'email', href: `mailto:${link.email}${query}` }
+    case "url":
+      return isSafeHref(link.url) ? { kind: "url", href: link.url, ...windowing(link) } : null;
+    case "email": {
+      const query = link.subject ? `?subject=${encodeURIComponent(link.subject)}` : "";
+      return { kind: "email", href: `mailto:${link.email}${query}` };
     }
-    case 'anchor':
-      return { kind: 'anchor', href: hash(link.anchor) }
-    case 'asset': {
-      const href = decorateAsset(link.asset, resolution).src
-      return isSafeHref(href) ? { kind: 'asset', href, ...windowing(link) } : null
+    case "anchor":
+      return { kind: "anchor", href: hash(link.anchor) };
+    case "asset": {
+      const href = decorateAsset(link.asset, resolution).src;
+      return isSafeHref(href) ? { kind: "asset", href, ...windowing(link) } : null;
     }
   }
 }
 
 export interface AssetTransform {
-  width?: number
-  height?: number
-  fit?: 'cover' | 'contain' | 'scale-down'
-  format?: 'webp' | 'avif' | 'jpeg' | 'png'
+  width?: number;
+  height?: number;
+  fit?: "cover" | "contain" | "scale-down";
+  format?: "webp" | "avif" | "jpeg" | "png";
   /** 1..100. */
-  quality?: number
+  quality?: number;
 }
 
 /** What an `asset` field hands to `render`. */
 export interface ResolvedAsset extends AssetValue {
   /** The original, unresized. */
-  src: string
+  src: string;
   /** `object-position` for the focal point, or `50% 50%` when none is set. */
-  objectPosition: string
-  isImage: boolean
+  objectPosition: string;
+  isImage: boolean;
   /**
    * URL for a resized variant. Assets we do not host come back untouched — Folio
    * will not proxy a third party's image.
    */
-  srcFor: (transform: AssetTransform) => string
+  srcFor: (transform: AssetTransform) => string;
 }
 
 export function resolveAsset(
   value: Json | undefined,
   resolution: Resolution,
 ): ResolvedAsset | null {
-  const asset = asAsset(value)
-  return asset ? decorateAsset(asset, resolution) : null
+  const asset = asAsset(value);
+  return asset ? decorateAsset(asset, resolution) : null;
 }
 
 export function resolveAssets(value: Json | undefined, resolution: Resolution): ResolvedAsset[] {
-  return asAssets(value).map((a) => decorateAsset(a, resolution))
+  return asAssets(value).map((a) => decorateAsset(a, resolution));
 }
 
 /**
@@ -294,35 +294,35 @@ export function resolveAssets(value: Json | undefined, resolution: Resolution): 
  * URL it is pasted into. Each path segment is encoded, `/` left alone, so the
  * route still sees the key's shape.
  */
-const encodeKey = (key: string) => key.split('/').map(encodeURIComponent).join('/')
+const encodeKey = (key: string) => key.split("/").map(encodeURIComponent).join("/");
 
 function decorateAsset(asset: AssetValue, resolution: Resolution): ResolvedAsset {
-  const src = asset.key ? `${resolution.assetBase}/${encodeKey(asset.key)}` : asset.url!
-  const focal = asset.focal
+  const src = asset.key ? `${resolution.assetBase}/${encodeKey(asset.key)}` : asset.url!;
+  const focal = asset.focal;
 
   return {
     ...asset,
     src,
     isImage: isImageAsset(asset),
-    objectPosition: focal ? `${pct(focal.x)} ${pct(focal.y)}` : '50% 50%',
+    objectPosition: focal ? `${pct(focal.x)} ${pct(focal.y)}` : "50% 50%",
     srcFor: (t) => {
-      if (!asset.key) return src
-      const p = new URLSearchParams()
-      if (t.width) p.set('w', String(Math.round(t.width)))
-      if (t.height) p.set('h', String(Math.round(t.height)))
-      if (t.fit) p.set('fit', t.fit)
-      if (t.format) p.set('f', t.format)
-      if (t.quality) p.set('q', String(Math.round(t.quality)))
+      if (!asset.key) return src;
+      const p = new URLSearchParams();
+      if (t.width) p.set("w", String(Math.round(t.width)));
+      if (t.height) p.set("h", String(Math.round(t.height)));
+      if (t.fit) p.set("fit", t.fit);
+      if (t.format) p.set("f", t.format);
+      if (t.quality) p.set("q", String(Math.round(t.quality)));
       // Cropping to a new aspect ratio has to know what to keep in frame.
-      if (focal && (t.width || t.height)) p.set('fp', `${round(focal.x)},${round(focal.y)}`)
-      const query = p.toString()
-      return query ? `${src}?${query}` : src
+      if (focal && (t.width || t.height)) p.set("fp", `${round(focal.x)},${round(focal.y)}`);
+      const query = p.toString();
+      return query ? `${src}?${query}` : src;
     },
-  }
+  };
 }
 
-const pct = (n: number) => `${Math.round(n * 1000) / 10}%`
-const round = (n: number) => Math.round(n * 1000) / 1000
+const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
+const round = (n: number) => Math.round(n * 1000) / 1000;
 
 /**
  * Story ids a document points at through `reference` and `references` fields.
@@ -333,33 +333,33 @@ const round = (n: number) => Math.round(n * 1000) / 1000
  * (`data-documents.md` decision 3).
  */
 export function referencedIds(doc: Doc, schema: SchemaIndex): string[] {
-  const out = new Set<string>()
+  const out = new Set<string>();
   for (const blok of Object.values(doc.bloks)) {
-    const fields = schema[blok.type]?.fields
-    if (!fields) continue
+    const fields = schema[blok.type]?.fields;
+    if (!fields) continue;
     for (const [name, field] of Object.entries(fields)) {
-      if (field.kind === 'reference') {
-        const id = blok.data[name]
-        if (typeof id === 'string' && id) out.add(id)
-        continue
+      if (field.kind === "reference") {
+        const id = blok.data[name];
+        if (typeof id === "string" && id) out.add(id);
+        continue;
       }
-      if (field.kind === 'references') {
-        for (const id of asStoryIds(blok.data[name])) out.add(id)
+      if (field.kind === "references") {
+        for (const id of asStoryIds(blok.data[name])) out.add(id);
       }
     }
   }
-  return [...out]
+  return [...out];
 }
 
 /** The metadata half of a resolved reference. The renderer adds the rendered content. */
 export interface ReferenceTarget {
-  id: string
-  title: string
-  path: string
-  url: string
+  id: string;
+  title: string;
+  path: string;
+  url: string;
   /** Root block data of the referenced document, for reading its fields directly. */
-  data: Record<string, Json>
-  doc: Doc
+  data: Record<string, Json>;
+  doc: Doc;
 }
 
 /**
@@ -367,7 +367,7 @@ export interface ReferenceTarget {
  * own UI from it, or drop `content` in to inline the referenced page wholesale.
  */
 export interface ResolvedReference extends ReferenceTarget {
-  content: ReactNode
+  content: ReactNode;
 }
 
 /**
@@ -381,14 +381,14 @@ export function resolveReference(
   resolution: Resolution,
   types?: readonly string[],
 ): ReferenceTarget | null {
-  if (typeof value !== 'string' || !value) return null
-  const story = resolution.stories[value]
-  const doc = resolution.docs?.[value]
+  if (typeof value !== "string" || !value) return null;
+  const story = resolution.stories[value];
+  const doc = resolution.docs?.[value];
   // Unresolvable either because the story is gone or because nothing loaded its
   // document. Both are the caller's cue to render nothing.
-  if (!story || !doc) return null
-  if (types && !types.includes(story.type)) return null
-  const root = doc.bloks[doc.root]
+  if (!story || !doc) return null;
+  if (types && !types.includes(story.type)) return null;
+  const root = doc.bloks[doc.root];
   return {
     id: value,
     title: story.title,
@@ -399,7 +399,7 @@ export function resolveReference(
     // author reading `data` directly gets the same answer `content` renders.
     data: root ? dataOf(root, resolution.locale) : {},
     doc,
-  }
+  };
 }
 
 /**
@@ -422,12 +422,12 @@ export function resolveReferences(
   resolution: Resolution,
   types?: readonly string[],
 ): ReferenceTarget[] {
-  const out: ReferenceTarget[] = []
+  const out: ReferenceTarget[] = [];
   for (const id of asStoryIds(value)) {
-    const target = resolveReference(id, resolution, types)
-    if (target) out.push(target)
+    const target = resolveReference(id, resolution, types);
+    if (target) out.push(target);
   }
-  return out
+  return out;
 }
 
 /**
@@ -446,9 +446,9 @@ export function resolveCollection(
   value: Json | undefined,
   resolution: Resolution,
 ): ResolvedCollection {
-  const q = collectionQuery(field, value, resolution.page, resolution.search)
-  const key = queryKey(q, maxPerPageOf(field))
-  return resolution.collections?.[key] ?? emptyContentPage(q.page, q.perPage)
+  const q = collectionQuery(field, value, resolution.page, resolution.search);
+  const key = queryKey(q, maxPerPageOf(field));
+  return resolution.collections?.[key] ?? emptyContentPage(q.page, q.perPage);
 }
 
 /**
@@ -467,49 +467,49 @@ export function resolveValue(
   resolution: Resolution,
 ): unknown {
   switch (field.kind) {
-    case 'multilink':
-      return resolveLink(value, resolution, field.types)
-    case 'asset':
-      return resolveAsset(value, resolution)
-    case 'multiasset':
-      return resolveAssets(value, resolution)
-    case 'reference':
-      return resolveReference(value, resolution, field.types)
-    case 'references':
-      return resolveReferences(value, resolution, field.types)
-    case 'collection':
-      return resolveCollection(field, value, resolution)
-    case 'form':
+    case "multilink":
+      return resolveLink(value, resolution, field.types);
+    case "asset":
+      return resolveAsset(value, resolution);
+    case "multiasset":
+      return resolveAssets(value, resolution);
+    case "reference":
+      return resolveReference(value, resolution, field.types);
+    case "references":
+      return resolveReferences(value, resolution, field.types);
+    case "collection":
+      return resolveCollection(field, value, resolution);
+    case "form":
       // A lookup on the resolution, like `collection` above: compiling a form
       // needs the schema, the database and the base path, none of which this
       // function has, so the work happens in `resolve()` and lands here
       // pre-computed (`forms.md` architecture decision 4).
-      return typeof value === 'string' ? (resolution.forms?.[value] ?? null) : null
-    case 'number':
+      return typeof value === "string" ? (resolution.forms?.[value] ?? null) : null;
+    case "number":
       // Deliberately `defaultValue(field)`, never `field.default`: this runs on
       // every render, and a schema edit must not retroactively change what an
       // already-published page says (`field-defaults-and-presets.md`, decision
       // 4). `field.default` is consulted only at creation, in `blankSubtree`.
-      return typeof value === 'number' ? value : defaultValue(field)
-    case 'boolean':
-      return typeof value === 'boolean' ? value : false
-    case 'richtext':
-    case 'blocks':
-      return null
-    case 'text':
-    case 'textarea':
-    case 'select':
-      return value ?? ''
+      return typeof value === "number" ? value : defaultValue(field);
+    case "boolean":
+      return typeof value === "boolean" ? value : false;
+    case "richtext":
+    case "blocks":
+      return null;
+    case "text":
+    case "textarea":
+    case "select":
+      return value ?? "";
     default: {
-      const unhandled: never = field
-      throw new Error(`Unhandled field kind: ${(unhandled as Field).kind}`)
+      const unhandled: never = field;
+      throw new Error(`Unhandled field kind: ${(unhandled as Field).kind}`);
     }
   }
 }
 
 function hash(anchor: string | undefined): string {
-  if (!anchor) return ''
-  return anchor.startsWith('#') ? anchor : `#${anchor}`
+  if (!anchor) return "";
+  return anchor.startsWith("#") ? anchor : `#${anchor}`;
 }
 
 /**
@@ -517,10 +517,10 @@ function hash(anchor: string | undefined): string {
  * without `noopener` hands the opener a live `window` reference, and that is not
  * a mistake a CMS should let a block make.
  */
-function windowing(link: LinkValue): { target?: '_blank'; rel?: string } {
-  if (!('target' in link) || link.target !== '_blank') {
-    return 'rel' in link && link.rel ? { rel: link.rel } : {}
+function windowing(link: LinkValue): { target?: "_blank"; rel?: string } {
+  if (!("target" in link) || link.target !== "_blank") {
+    return "rel" in link && link.rel ? { rel: link.rel } : {};
   }
-  const rel = ('rel' in link && link.rel) || 'noopener noreferrer'
-  return { target: '_blank', rel }
+  const rel = ("rel" in link && link.rel) || "noopener noreferrer";
+  return { target: "_blank", rel };
 }

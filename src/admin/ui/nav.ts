@@ -10,18 +10,18 @@
  * Pure and free of React on purpose, like `route.ts` and `rank.ts`: the admin's
  * tests run in Node and mount nothing (`vitest.config.ts`).
  */
-import { type DocumentType, singletonId } from '../../core/schema'
-import { layerId } from '../../core/sites'
-import { canManageAccess, canManageSites, type Me } from '../me'
+import { type DocumentType, singletonId } from "../../core/schema";
+import { layerId } from "../../core/sites";
+import { canManageAccess, canManageSites, type Me } from "../me";
 // Type-only, and it has to stay that way: `verbatimModuleSyntax` erases this
 // import entirely, so naming an icon here does not pull `icons.tsx` — or React —
 // into a module the Node tests import.
-import type { IconName } from './icons'
-import type { Screen } from './route'
+import type { IconName } from "./icons";
+import type { Screen } from "./route";
 
 export interface NavItem {
-  label: string
-  screen: Screen
+  label: string;
+  screen: Screen;
   /**
    * Which icon the item draws — a *name*, resolved to inline SVG by `icons.tsx`,
    * which is what the 48px collapsed rail shows and all it shows.
@@ -38,59 +38,61 @@ export interface NavItem {
    * every one of these a label even when it draws only the icon — and the SVG
    * itself is `aria-hidden`, so the label is the only name.
    */
-  icon: IconName
+  icon: IconName;
 }
 
 export interface NavGroup {
   /** Absent for the first group, which needs no heading over five items. */
-  label?: string
-  items: NavItem[]
+  label?: string;
+  items: NavItem[];
   /** Collapsible groups remember their state; the primary and admin groups are
    * not collapsible, because a nav you can hide the whole of is a nav you can
    * lose. */
-  collapsible?: boolean
+  collapsible?: boolean;
 }
 
 export interface NavInput {
-  types: readonly DocumentType[]
-  globals: readonly string[]
-  me: Me
+  types: readonly DocumentType[];
+  globals: readonly string[];
+  me: Me;
   /**
    * The scope being shown, on a deployment with `sites`; null on one page that has
    * none (the Sites screen) and always with no `sites`. With it, a global links to
    * *that scope's layer* (`layerId`) rather than to `sng_<type>`, which is `default`'s.
    */
-  scope?: string | null
+  scope?: string | null;
 }
 
 /**
  * The threshold from decision 3, named so the test and the comment cannot drift.
  * "About eight" in prose; eight here, and the rule is *more than* eight groups.
  */
-export const GROUP_AT = 8
+export const GROUP_AT = 8;
 
 export function nav(input: NavInput): NavGroup[] {
   // A deployment with `sites` and no scope chosen: nothing scoped can be drawn
   // (every list is a scope's own), so the nav is the registry alone — or nothing,
   // for somebody who may not manage it, whose way in is the scope switcher.
   if (input.me.sites && !input.scope) {
-    return canManageSites(input.me) ? [{ items: [sitesItem] }] : []
+    return canManageSites(input.me) ? [{ items: [sitesItem] }] : [];
   }
 
-  const groups: NavGroup[] = [{ items: primary(input.types) }]
+  const groups: NavGroup[] = [{ items: primary(input.types) }];
 
-  const singles = input.types.filter((t) => t.kind === 'singleton')
+  const singles = input.types.filter((t) => t.kind === "singleton");
   if (singles.length > 0) {
-    groups.push(globalsGroup(singles, input.globals, input.me.sites ? (input.scope ?? null) : null))
+    groups.push(
+      globalsGroup(singles, input.globals, input.me.sites ? (input.scope ?? null) : null),
+    );
   }
 
-  const records = input.types.filter((t) => t.kind === 'record')
+  const records = input.types.filter((t) => t.kind === "record");
   if (records.length > GROUP_AT || records.some((t) => t.group)) {
-    groups.push(...recordGroups(records))
+    groups.push(...recordGroups(records));
   }
 
-  groups.push({ items: administration(input.me) })
-  return groups
+  groups.push({ items: administration(input.me) });
+  return groups;
 }
 
 /**
@@ -100,13 +102,13 @@ export function nav(input: NavInput): NavGroup[] {
  * headed groups below and this list is Home, Content and Assets alone.
  */
 function primary(types: readonly DocumentType[]): NavItem[] {
-  const records = types.filter((t) => t.kind === 'record')
-  const inline = records.length > GROUP_AT || records.some((t) => t.group) ? [] : records
+  const records = types.filter((t) => t.kind === "record");
+  const inline = records.length > GROUP_AT || records.some((t) => t.group) ? [] : records;
   return [
-    { label: 'Home', icon: 'home', screen: { name: 'home' } },
-    { label: 'Content', icon: 'content', screen: { name: 'content' } },
+    { label: "Home", icon: "home", screen: { name: "home" } },
+    { label: "Content", icon: "content", screen: { name: "content" } },
     ...inline.map(itemFor),
-    { label: 'Assets', icon: 'assets', screen: { name: 'assets' } },
+    { label: "Assets", icon: "assets", screen: { name: "assets" } },
     /**
      * One entry after Assets (`docs/specs/content-model/forms.md` phase 6, and
      * decision 12: "A `Forms` nav item and three screens — list, builder,
@@ -115,8 +117,8 @@ function primary(types: readonly DocumentType[]): NavItem[] {
      * though only an editor may change it and only a publisher may read what was
      * submitted.
      */
-    { label: 'Forms', icon: 'forms', screen: { name: 'forms' } },
-  ]
+    { label: "Forms", icon: "forms", screen: { name: "forms" } },
+  ];
 }
 
 /**
@@ -126,9 +128,9 @@ function primary(types: readonly DocumentType[]): NavItem[] {
  */
 const itemFor = (type: DocumentType): NavItem => ({
   label: type.label,
-  icon: 'records',
-  screen: { name: 'documents', type: type.name },
-})
+  icon: "records",
+  screen: { name: "documents", type: type.name },
+});
 
 /**
  * One group per declared `group`, in first-appearance order — the same rule the
@@ -140,25 +142,25 @@ const itemFor = (type: DocumentType): NavItem => ({
  * last. That is the honest place for them: they are the ones nobody classified.
  */
 function recordGroups(records: readonly DocumentType[]): NavGroup[] {
-  const named = new Map<string, NavItem[]>()
-  const rest: NavItem[] = []
+  const named = new Map<string, NavItem[]>();
+  const rest: NavItem[] = [];
   for (const type of records) {
     if (!type.group) {
-      rest.push(itemFor(type))
-      continue
+      rest.push(itemFor(type));
+      continue;
     }
-    const bucket = named.get(type.group)
-    if (bucket) bucket.push(itemFor(type))
-    else named.set(type.group, [itemFor(type)])
+    const bucket = named.get(type.group);
+    if (bucket) bucket.push(itemFor(type));
+    else named.set(type.group, [itemFor(type)]);
   }
 
   const groups: NavGroup[] = [...named].map(([label, items]) => ({
     label,
     items,
     collapsible: true,
-  }))
-  if (rest.length > 0) groups.push({ label: 'Documents', items: rest, collapsible: true })
-  return groups
+  }));
+  if (rest.length > 0) groups.push({ label: "Documents", items: rest, collapsible: true });
+  return groups;
 }
 
 /**
@@ -177,30 +179,30 @@ function globalsGroup(
   globals: readonly string[],
   scope: string | null,
 ): NavGroup {
-  const declared = globals.filter((name) => singles.some((t) => t.name === name))
-  const order = [...declared, ...singles.map((t) => t.name).filter((n) => !declared.includes(n))]
-  const byName = new Map(singles.map((t) => [t.name, t]))
+  const declared = globals.filter((name) => singles.some((t) => t.name === name));
+  const order = [...declared, ...singles.map((t) => t.name).filter((n) => !declared.includes(n))];
+  const byName = new Map(singles.map((t) => [t.name, t]));
   return {
-    label: 'Globals',
+    label: "Globals",
     collapsible: true,
     items: order.flatMap((name) => {
-      const type = byName.get(name)
-      if (!type) return []
+      const type = byName.get(name);
+      if (!type) return [];
       return [
         {
           label: type.label,
           // A globe, for the group the heading calls Globals. Every singleton gets
           // it, including the ones `Manifest.globals` never declared: the
           // distinction the ordering makes is not one an icon can carry.
-          icon: 'global',
+          icon: "global",
           screen: {
-            name: 'edit' as const,
+            name: "edit" as const,
             id: scope === null ? singletonId(type) : layerId(type.name, scope),
           },
         },
-      ]
+      ];
     }),
-  }
+  };
 }
 
 /**
@@ -216,13 +218,13 @@ function globalsGroup(
  * sees in the inspector and currently cannot investigate.
  */
 /** The registry. Platform only (`canManageSites`), and a deployment with `sites`. */
-const sitesItem: NavItem = { label: 'Sites', icon: 'global', screen: { name: 'sites' } }
+const sitesItem: NavItem = { label: "Sites", icon: "global", screen: { name: "sites" } };
 
 function administration(me: Me): NavItem[] {
   return [
     ...(canManageSites(me) ? [sitesItem] : []),
-    { label: 'Model', icon: 'model', screen: { name: 'model' } },
-    { label: 'Redirects', icon: 'redirects', screen: { name: 'redirects' } },
+    { label: "Model", icon: "model", screen: { name: "model" } },
+    { label: "Redirects", icon: "redirects", screen: { name: "redirects" } },
     /**
      * Beside Redirects rather than up with Content, and it is a close call worth
      * recording. A schedule is neither a thing you edit nor a thing you configure:
@@ -236,12 +238,12 @@ function administration(me: Me): NavItem[] {
      * place for that to be enforced. Hiding the list from a viewer would hide *that
      * a page changes on Tuesday* from the person most likely to be confused by it.
      */
-    { label: 'Schedules', icon: 'schedules', screen: { name: 'schedules' } },
+    { label: "Schedules", icon: "schedules", screen: { name: "schedules" } },
     ...(canManageAccess(me)
-      ? [{ label: 'Access', icon: 'access' as const, screen: { name: 'access' as const } }]
+      ? [{ label: "Access", icon: "access" as const, screen: { name: "access" as const } }]
       : []),
-    { label: 'Settings', icon: 'settings', screen: { name: 'settings' } },
-  ]
+    { label: "Settings", icon: "settings", screen: { name: "settings" } },
+  ];
 }
 
 /**
@@ -260,31 +262,31 @@ export function activeItem(groups: readonly NavGroup[], screen: Screen, type?: s
   // same reasoning that keeps a page's editor off the nav), and `Forms` is the
   // one item that answers "where does this belong". Checked before `edit`'s own
   // early return since neither screen name is `'edit'`.
-  if (screen.name === 'form' || screen.name === 'responses') return { name: 'forms' }
-  if (screen.name !== 'edit') return screen
+  if (screen.name === "form" || screen.name === "responses") return { name: "forms" };
+  if (screen.name !== "edit") return screen;
   const match = groups
     .flatMap((g) => g.items)
-    .find((i) => i.screen.name === 'edit' && i.screen.id === screen.id)
-  if (match) return match.screen
+    .find((i) => i.screen.name === "edit" && i.screen.id === screen.id);
+  if (match) return match.screen;
   if (type) {
     const list = groups
       .flatMap((g) => g.items)
-      .find((i) => i.screen.name === 'documents' && i.screen.type === type)
-    if (list) return list.screen
+      .find((i) => i.screen.name === "documents" && i.screen.type === type);
+    if (list) return list.screen;
   }
-  return { name: 'content' }
+  return { name: "content" };
 }
 
 /* ------------------------------------------------------------ the switcher --- */
 
 export interface ScopeOption {
-  id: string
-  name: string
+  id: string;
+  name: string;
 }
 
 export interface ScopeOptionGroup {
-  label: string
-  options: ScopeOption[]
+  label: string;
+  options: ScopeOption[];
 }
 
 /**
@@ -303,35 +305,35 @@ export interface ScopeOptionGroup {
  */
 export function scopeOptionGroups(
   choices: readonly {
-    id: string
-    name: string
-    kind: 'site' | 'group' | 'shared'
-    brand?: { id: string; label: string } | null
+    id: string;
+    name: string;
+    kind: "site" | "group" | "shared";
+    brand?: { id: string; label: string } | null;
   }[],
 ): ScopeOptionGroup[] {
-  const branded = choices.filter((c) => c.brand)
-  const rest = branded.length > 0 ? choices.filter((c) => !c.brand) : choices
-  const of = (kind: 'site' | 'group' | 'shared', label: string): ScopeOptionGroup => ({
+  const branded = choices.filter((c) => c.brand);
+  const rest = branded.length > 0 ? choices.filter((c) => !c.brand) : choices;
+  const of = (kind: "site" | "group" | "shared", label: string): ScopeOptionGroup => ({
     label,
     options: rest.filter((c) => c.kind === kind).map(({ id, name }) => ({ id, name })),
-  })
-  const byBrand: ScopeOptionGroup[] = []
+  });
+  const byBrand: ScopeOptionGroup[] = [];
   for (const choice of branded) {
-    const brand = choice.brand as { id: string; label: string }
-    let group = byBrand.find((g) => g.label === brand.label)
+    const brand = choice.brand as { id: string; label: string };
+    let group = byBrand.find((g) => g.label === brand.label);
     if (!group) {
-      group = { label: brand.label, options: [] }
-      byBrand.push(group)
+      group = { label: brand.label, options: [] };
+      byBrand.push(group);
     }
-    group.options.push({ id: choice.id, name: choice.name })
+    group.options.push({ id: choice.id, name: choice.name });
   }
-  byBrand.sort((a, b) => a.label.localeCompare(b.label))
+  byBrand.sort((a, b) => a.label.localeCompare(b.label));
   for (const group of byBrand) {
     // Groups first, then sites, whatever order `/me` listed them in.
-    const kindOf = (id: string) => (branded.find((c) => c.id === id)?.kind === 'group' ? 0 : 1)
-    group.options.sort((a, b) => kindOf(a.id) - kindOf(b.id))
+    const kindOf = (id: string) => (branded.find((c) => c.id === id)?.kind === "group" ? 0 : 1);
+    group.options.sort((a, b) => kindOf(a.id) - kindOf(b.id));
   }
-  return [...byBrand, of('shared', 'Shared'), of('group', 'Groups'), of('site', 'Sites')].filter(
+  return [...byBrand, of("shared", "Shared"), of("group", "Groups"), of("site", "Sites")].filter(
     (group) => group.options.length > 0,
-  )
+  );
 }

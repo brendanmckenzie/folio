@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
 
 /**
  * The collapsed rail's centring, pinned as source text.
@@ -22,35 +22,35 @@ import { describe, expect, it } from 'vitest'
  */
 
 const css = readFileSync(
-  new URL('../../../src/admin/ui/Sidebar.module.css', import.meta.url),
-  'utf8',
-)
+  new URL("../../../src/admin/ui/Sidebar.module.css", import.meta.url),
+  "utf8",
+);
 
 /** A rule's body by selector, comments stripped. */
 function body(selector: string): string {
-  const clean = css.replace(/\/\*[\s\S]*?\*\//g, '')
-  const at = clean.indexOf(`\n${selector} {`)
-  expect(at, `no rule for \`${selector}\``).toBeGreaterThan(-1)
-  return clean.slice(at + selector.length + 3, clean.indexOf('}', at))
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const at = clean.indexOf(`\n${selector} {`);
+  expect(at, `no rule for \`${selector}\``).toBeGreaterThan(-1);
+  return clean.slice(at + selector.length + 3, clean.indexOf("}", at));
 }
 
-describe('the collapsed sidebar', () => {
-  it('sizes its rows in the collapsed state, not by centring the column', () => {
+describe("the collapsed sidebar", () => {
+  it("sizes its rows in the collapsed state, not by centring the column", () => {
     // `.group` is shared by both states. Anything that centres its children
     // there lands on the expanded rail too.
-    expect(body('.group')).not.toContain('align-items')
+    expect(body(".group")).not.toContain("align-items");
     // Nor on the sidebar itself, whose two children are full-width by their own
     // rules — it centred nothing and only made the declaration look like the
     // house style for "collapsed".
-    expect(body('.collapsed')).not.toContain('align-items')
-  })
+    expect(body(".collapsed")).not.toContain("align-items");
+  });
 
-  it('gives a collapsed row the width of the rail, less an inset', () => {
-    const rule = body('.collapsed .item')
+  it("gives a collapsed row the width of the rail, less an inset", () => {
+    const rule = body(".collapsed .item");
     // A fixed width is the defect: it cannot be centred without the parent's
     // help, and the parent cannot help without breaking the other state.
-    expect(rule).not.toMatch(/width:\s*\d/)
-    expect(rule).toContain('justify-content: center')
-    expect(rule).toContain('margin-inline')
-  })
-})
+    expect(rule).not.toMatch(/width:\s*\d/);
+    expect(rule).toContain("justify-content: center");
+    expect(rule).toContain("margin-inline");
+  });
+});

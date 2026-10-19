@@ -1,14 +1,14 @@
-import { useEffect, useRef } from 'react'
-import { isPlainFocus } from '../hooks/useClipboardShortcuts'
+import { useEffect, useRef } from "react";
+import { isPlainFocus } from "../hooks/useClipboardShortcuts";
 
 /** What `chord` needs from a keyboard event. Duck-typed so the rule is a pure
  * function testable in Node, the same trick `isPlainFocus` plays next door. */
 export interface ChordEvent {
-  key: string
-  metaKey?: boolean
-  ctrlKey?: boolean
-  shiftKey?: boolean
-  altKey?: boolean
+  key: string;
+  metaKey?: boolean;
+  ctrlKey?: boolean;
+  shiftKey?: boolean;
+  altKey?: boolean;
 }
 
 /**
@@ -25,14 +25,14 @@ export interface ChordEvent {
  * is the only thing telling redo from undo.
  */
 export function chord(e: ChordEvent): string {
-  const mod = Boolean(e.metaKey || e.ctrlKey)
-  const key = e.key.toLowerCase()
-  const parts: string[] = []
-  if (mod) parts.push('mod')
-  if (e.altKey) parts.push('alt')
-  if (e.shiftKey && (mod || key.length > 1)) parts.push('shift')
-  parts.push(key)
-  return parts.join('+')
+  const mod = Boolean(e.metaKey || e.ctrlKey);
+  const key = e.key.toLowerCase();
+  const parts: string[] = [];
+  if (mod) parts.push("mod");
+  if (e.altKey) parts.push("alt");
+  if (e.shiftKey && (mod || key.length > 1)) parts.push("shift");
+  parts.push(key);
+  return parts.join("+");
 }
 
 /**
@@ -45,9 +45,9 @@ export function chord(e: ChordEvent): string {
  * Publish deliberately has no chord at all — it is reachable as an action from
  * `⌘K`, which cannot be hit by muscle memory.
  */
-export const SAVE_NOTICE = 'Saved! (but you didn’t need to do that)'
+export const SAVE_NOTICE = "Saved! (but you didn’t need to do that)";
 
-export type Bindings = Record<string, (e: KeyboardEvent) => void>
+export type Bindings = Record<string, (e: KeyboardEvent) => void>;
 
 /**
  * One keyboard mechanism for the whole shell, driven by a map rather than by a
@@ -82,7 +82,7 @@ export type Bindings = Record<string, (e: KeyboardEvent) => void>
  * somebody who knows the map, short enough that a stray press cannot capture an
  * unrelated keystroke later.
  */
-const LEAD_MS = 1200
+const LEAD_MS = 1200;
 
 /**
  * The leader keys a binding map declares, e.g. `{'g'}` for `'g c'`.
@@ -92,61 +92,61 @@ const LEAD_MS = 1200
  * admin test mounts anything.
  */
 export function leadersOf(bindings: Bindings): Set<string> {
-  const out = new Set<string>()
+  const out = new Set<string>();
   for (const key of Object.keys(bindings)) {
-    const space = key.indexOf(' ')
-    if (space > 0) out.add(key.slice(0, space))
+    const space = key.indexOf(" ");
+    if (space > 0) out.add(key.slice(0, space));
   }
-  return out
+  return out;
 }
 
 export function useShortcuts(bindings: Bindings) {
   // Held in a ref rather than named as a dependency: a map written inline is a
   // fresh object every render, and re-subscribing a window listener per render
   // is the bug this avoids. Same shape as `useSpace`'s `onEvent`.
-  const latest = useRef(bindings)
-  latest.current = bindings
+  const latest = useRef(bindings);
+  latest.current = bindings;
 
   useEffect(() => {
     /** The armed leader, and when it expires. Null when nothing is armed. */
-    let armed: { key: string; at: number } | null = null
+    let armed: { key: string; at: number } | null = null;
 
     const onKey = (e: KeyboardEvent) => {
-      const bare = !e.metaKey && !e.ctrlKey && !e.altKey
-      const map = latest.current
-      const pressed = chord(e)
+      const bare = !e.metaKey && !e.ctrlKey && !e.altKey;
+      const map = latest.current;
+      const pressed = chord(e);
 
       // A sequence's second key. Checked before anything else, so an armed `g`
       // followed by `c` cannot also be read as the bare chord `c`.
       if (armed && bare) {
-        const expired = Date.now() - armed.at > LEAD_MS
-        const run = expired ? undefined : map[`${armed.key} ${pressed}`]
-        armed = null
+        const expired = Date.now() - armed.at > LEAD_MS;
+        const run = expired ? undefined : map[`${armed.key} ${pressed}`];
+        armed = null;
         if (run) {
-          e.preventDefault()
-          run(e)
-          return
+          e.preventDefault();
+          run(e);
+          return;
         }
         // Fall through: an unrecognised or expired second key is an ordinary
         // keypress, not a swallowed one.
       }
 
-      const run = map[pressed]
+      const run = map[pressed];
       if (run) {
-        if (bare && !isPlainFocus()) return
-        e.preventDefault()
-        run(e)
-        return
+        if (bare && !isPlainFocus()) return;
+        e.preventDefault();
+        run(e);
+        return;
       }
 
       // Arm, if this key leads a sequence and is not a binding of its own. Never
       // while focus is in a field: `g` belongs to whoever is typing.
       if (bare && isPlainFocus() && leadersOf(map).has(pressed)) {
-        armed = { key: pressed, at: Date.now() }
-        e.preventDefault()
+        armed = { key: pressed, at: Date.now() };
+        e.preventDefault();
       }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 }

@@ -1,5 +1,5 @@
-import { Dialog } from '../Dialog'
-import css from './Keys.module.css'
+import { Dialog } from "../Dialog";
+import css from "./Keys.module.css";
 
 /**
  * The keyboard map, shown by `?`.
@@ -26,62 +26,62 @@ import css from './Keys.module.css'
  * absence here is the same decision, not an omission.
  */
 interface Row {
-  keys: string
-  what: string
+  keys: string;
+  what: string;
   /** Where the binding lives, so a row cannot outlive its feature unnoticed. */
-  where: string
+  where: string;
 }
 
 export const KEYS: { group: string; rows: Row[] }[] = [
   {
-    group: 'Anywhere',
+    group: "Anywhere",
     rows: [
-      { keys: '⌘K', what: 'Search documents, screens and commands', where: 'the shell' },
-      { keys: '?', what: 'This map', where: 'the shell' },
-      { keys: '⌘S', what: 'Nothing — and says so', where: 'the shell' },
+      { keys: "⌘K", what: "Search documents, screens and commands", where: "the shell" },
+      { keys: "?", what: "This map", where: "the shell" },
+      { keys: "⌘S", what: "Nothing — and says so", where: "the shell" },
     ],
   },
   {
-    group: 'Go to',
+    group: "Go to",
     rows: [
-      { keys: 'g h', what: 'Home', where: 'the shell' },
-      { keys: 'g c', what: 'Content', where: 'the shell' },
-      { keys: 'g d', what: 'Documents — the first declared record type', where: 'the shell' },
-      { keys: 'g a', what: 'Assets', where: 'the shell' },
-      { keys: 'g m', what: 'Model', where: 'the shell' },
-      { keys: 'g r', what: 'Redirects', where: 'the shell' },
-      { keys: 'g x', what: 'Access', where: 'the shell' },
-      { keys: 'g s', what: 'Settings', where: 'the shell' },
+      { keys: "g h", what: "Home", where: "the shell" },
+      { keys: "g c", what: "Content", where: "the shell" },
+      { keys: "g d", what: "Documents — the first declared record type", where: "the shell" },
+      { keys: "g a", what: "Assets", where: "the shell" },
+      { keys: "g m", what: "Model", where: "the shell" },
+      { keys: "g r", what: "Redirects", where: "the shell" },
+      { keys: "g x", what: "Access", where: "the shell" },
+      { keys: "g s", what: "Settings", where: "the shell" },
     ],
   },
   {
-    group: 'In a list or a tree',
+    group: "In a list or a tree",
     rows: [
-      { keys: '↑ ↓', what: 'Move between rows', where: 'List' },
-      { keys: '→ ←', what: 'Expand and collapse', where: 'List' },
-      { keys: '⏎', what: 'Open the focused row', where: 'List' },
-      { keys: 'Space', what: 'Select the focused row', where: 'List' },
-      { keys: '⌥↑ ⌥↓', what: 'Reorder among siblings', where: 'Content' },
-      { keys: '⌥← ⌥→', what: 'Change depth — reparent', where: 'Content' },
+      { keys: "↑ ↓", what: "Move between rows", where: "List" },
+      { keys: "→ ←", what: "Expand and collapse", where: "List" },
+      { keys: "⏎", what: "Open the focused row", where: "List" },
+      { keys: "Space", what: "Select the focused row", where: "List" },
+      { keys: "⌥↑ ⌥↓", what: "Reorder among siblings", where: "Content" },
+      { keys: "⌥← ⌥→", what: "Change depth — reparent", where: "Content" },
     ],
   },
   {
-    group: 'In the editor',
+    group: "In the editor",
     rows: [
-      { keys: '⌘\\', what: 'Collapse the rail', where: 'the editor' },
-      { keys: '⌘.', what: 'Collapse the inspector', where: 'the editor' },
-      { keys: '⌘H', what: 'History', where: 'the editor' },
-      { keys: '⌘⇧A', what: 'Add a block', where: 'the editor' },
-      { keys: '⌘⏎', what: 'Focus mode for the field being edited', where: 'the editor' },
-      { keys: '⌘Z  ⇧⌘Z', what: 'Undo and redo', where: 'the editor' },
-      { keys: '⌘C  ⌘V', what: 'Copy and paste a block', where: 'the editor' },
+      { keys: "⌘\\", what: "Collapse the rail", where: "the editor" },
+      { keys: "⌘.", what: "Collapse the inspector", where: "the editor" },
+      { keys: "⌘H", what: "History", where: "the editor" },
+      { keys: "⌘⇧A", what: "Add a block", where: "the editor" },
+      { keys: "⌘⏎", what: "Focus mode for the field being edited", where: "the editor" },
+      { keys: "⌘Z  ⇧⌘Z", what: "Undo and redo", where: "the editor" },
+      { keys: "⌘C  ⌘V", what: "Copy and paste a block", where: "the editor" },
     ],
   },
   {
-    group: 'Anywhere there is an overlay',
-    rows: [{ keys: 'Esc', what: 'Dismiss the topmost one', where: 'Dialog, Palette' }],
+    group: "Anywhere there is an overlay",
+    rows: [{ keys: "Esc", what: "Dismiss the topmost one", where: "Dialog, Palette" }],
   },
-]
+];
 
 export function Keys({ onClose }: { onClose: () => void }) {
   return (
@@ -113,5 +113,5 @@ export function Keys({ onClose }: { onClose: () => void }) {
         ))}
       </div>
     </Dialog>
-  )
+  );
 }

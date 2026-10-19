@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { indexManifest, type Manifest } from '../../../core/schema'
-import type { AuthPolicy } from '../../../server/auth/config'
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { indexManifest, type Manifest } from "../../../core/schema";
+import type { AuthPolicy } from "../../../server/auth/config";
 import {
   openCards,
   type Section,
@@ -8,7 +8,7 @@ import {
   type SettingsView,
   settingsView,
   visibleSections,
-} from './settings-model'
+} from "./settings-model";
 
 /**
  * The Settings screen's state, which is unusual for this admin in that **none of
@@ -27,13 +27,13 @@ import {
  */
 export interface SettingsData {
   /** Null while the manifest is still loading. */
-  view: SettingsView | null
+  view: SettingsView | null;
   /** The sections to draw, in order, given the filter. */
-  sections: Section[]
+  sections: Section[];
   /** Whether a block card is expanded, by name. */
-  isOpen: (name: string) => boolean
+  isOpen: (name: string) => boolean;
   /** A `<details>` reporting its new state. */
-  setOpen: (name: string, open: boolean) => void
+  setOpen: (name: string, open: boolean) => void;
 }
 
 /**
@@ -51,7 +51,7 @@ export function useSettings(
   const view = useMemo(
     () => (manifest ? settingsView(manifest, indexManifest(manifest), policy, url.q) : null),
     [manifest, policy, url.q],
-  )
+  );
 
   /**
    * Cards the reader opened or closed by hand, overriding what the filter decided.
@@ -61,21 +61,24 @@ export function useSettings(
    * across a new query means the next query's answer arrives with one of its hits
    * already hidden, for a reason nothing on screen explains.
    */
-  const [overrides, setOverrides] = useState<Record<string, boolean>>({})
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   // biome-ignore lint/correctness/useExhaustiveDependencies: `url.q` is the trigger, not a value the body reads — it only clears. Naming it is the point
   useEffect(() => {
-    setOverrides({})
-  }, [url.q])
+    setOverrides({});
+  }, [url.q]);
 
-  const open = useMemo(() => openCards(view?.blocks ?? [], url.q), [view?.blocks, url.q])
+  const open = useMemo(() => openCards(view?.blocks ?? [], url.q), [view?.blocks, url.q]);
 
-  const isOpen = useCallback((name: string) => overrides[name] ?? open.has(name), [overrides, open])
+  const isOpen = useCallback(
+    (name: string) => overrides[name] ?? open.has(name),
+    [overrides, open],
+  );
 
   const setOpen = useCallback((name: string, open: boolean) => {
-    setOverrides((prev) => ({ ...prev, [name]: open }))
-  }, [])
+    setOverrides((prev) => ({ ...prev, [name]: open }));
+  }, []);
 
-  const sections = useMemo(() => (view ? visibleSections(view, url.q) : []), [view, url.q])
+  const sections = useMemo(() => (view ? visibleSections(view, url.q) : []), [view, url.q]);
 
-  return { view, sections, isOpen, setOpen }
+  return { view, sections, isOpen, setOpen };
 }

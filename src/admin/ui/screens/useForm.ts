@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Form, FormUsage, UpdateFormInput } from '../../../server/forms'
-import { messageOf } from './useContent'
+import { useCallback, useEffect, useState } from "react";
+import type { Form, FormUsage, UpdateFormInput } from "../../../server/forms";
+import { messageOf } from "./useContent";
 
 /**
  * The builder's data: one form, its usage (for the rename warning and the
@@ -14,21 +14,21 @@ import { messageOf } from './useContent'
 
 export type SaveResult =
   | { ok: true; form: Form }
-  | { ok: false; conflict: boolean; message: string }
+  | { ok: false; conflict: boolean; message: string };
 
 export interface FormDetail {
-  form: Form | null
-  usage: FormUsage | null
-  loading: boolean
-  error?: string
+  form: Form | null;
+  usage: FormUsage | null;
+  loading: boolean;
+  error?: string;
   /** `GET {base}/api/forms/:id` answered 404 — a stale link, or a form deleted
    *  in another tab. Distinct from `error`: this is not a request that failed,
    *  it is one that succeeded in saying there is nothing here. */
-  notFound: boolean
+  notFound: boolean;
   /** Re-read both the form and its usage — what a 409 conflict does on its
    *  own, and what a delete dialog wants after a cancelled delete leaves the
    *  count possibly stale. */
-  reload: () => void
+  reload: () => void;
   /**
    * Saves a patch against the loaded form's own `updatedAt` — the caller never
    * supplies `expectedUpdatedAt` itself, which is what makes forgetting the
@@ -39,68 +39,68 @@ export interface FormDetail {
    * `message` and let the reloaded `form` replace whatever the caller was
    * editing — "the builder reloads and says so", the edge case's own words.
    */
-  save: (patch: Omit<UpdateFormInput, 'expectedUpdatedAt'>) => Promise<SaveResult>
+  save: (patch: Omit<UpdateFormInput, "expectedUpdatedAt">) => Promise<SaveResult>;
 }
 
 export function useForm(apiBase: string, id: string): FormDetail {
-  const [form, setForm] = useState<Form | null>(null)
-  const [usage, setUsage] = useState<FormUsage | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | undefined>(undefined)
-  const [notFound, setNotFound] = useState(false)
+  const [form, setForm] = useState<Form | null>(null);
+  const [usage, setUsage] = useState<FormUsage | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [notFound, setNotFound] = useState(false);
 
   const load = useCallback(async () => {
-    setLoading(true)
-    setError(undefined)
+    setLoading(true);
+    setError(undefined);
     try {
       const [formRes, usageRes] = await Promise.all([
         fetch(`${apiBase}/forms/${encodeURIComponent(id)}`),
         fetch(`${apiBase}/forms/${encodeURIComponent(id)}/usage`),
-      ])
+      ]);
       if (formRes.status === 404) {
-        setNotFound(true)
-        setForm(null)
-        setUsage(null)
-        return
+        setNotFound(true);
+        setForm(null);
+        setUsage(null);
+        return;
       }
-      setNotFound(false)
-      if (!formRes.ok) throw new Error(await messageOf(formRes))
-      setForm((await formRes.json()) as Form)
+      setNotFound(false);
+      if (!formRes.ok) throw new Error(await messageOf(formRes));
+      setForm((await formRes.json()) as Form);
       // The usage read is advisory (the rename warning, the delete dialog's
       // counts) — its own failure must not stop the builder from opening,
       // `AssetDeleteDialog.tsx`'s rule applied one level up.
-      setUsage(usageRes.ok ? ((await usageRes.json()) as FormUsage) : null)
+      setUsage(usageRes.ok ? ((await usageRes.json()) as FormUsage) : null);
     } catch (e) {
-      setError((e as Error).message)
+      setError((e as Error).message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
-  }, [apiBase, id])
+  }, [apiBase, id]);
 
   useEffect(() => {
-    void load()
-  }, [load])
+    void load();
+  }, [load]);
 
   const save = useCallback(
-    async (patch: Omit<UpdateFormInput, 'expectedUpdatedAt'>): Promise<SaveResult> => {
-      if (!form) return { ok: false, conflict: false, message: 'The form has not loaded yet.' }
+    async (patch: Omit<UpdateFormInput, "expectedUpdatedAt">): Promise<SaveResult> => {
+      if (!form) return { ok: false, conflict: false, message: "The form has not loaded yet." };
       const res = await fetch(`${apiBase}/forms/${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...patch, expectedUpdatedAt: form.updatedAt }),
-      })
+      });
       if (res.status === 409) {
-        const message = await messageOf(res)
-        await load()
-        return { ok: false, conflict: true, message }
+        const message = await messageOf(res);
+        await load();
+        return { ok: false, conflict: true, message };
       }
-      if (!res.ok) return { ok: false, conflict: false, message: await messageOf(res) }
-      const next = (await res.json()) as Form
-      setForm(next)
-      return { ok: true, form: next }
+      if (!res.ok) return { ok: false, conflict: false, message: await messageOf(res) };
+      const next = (await res.json()) as Form;
+      setForm(next);
+      return { ok: true, form: next };
     },
     [apiBase, id, form, load],
-  )
+  );
 
-  return { form, usage, loading, error, notFound, reload: load, save }
+  return { form, usage, loading, error, notFound, reload: load, save };
 }

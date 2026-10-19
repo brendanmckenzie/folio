@@ -1,22 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import css from './Palette.module.css'
-import { highlight, nextIndex, rank, type Rankable } from './rank'
-import { scoped } from './scope'
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import css from "./Palette.module.css";
+import { highlight, nextIndex, rank, type Rankable } from "./rank";
+import { scoped } from "./scope";
 
 export interface PaletteAction extends Rankable {
-  id: string
+  id: string;
   /** The heading it appears under. Grouping is by first appearance, so the
    * declaration order of the action list decides the order of the groups. */
-  group: string
+  group: string;
   /** Right-aligned: a path for a document, a shortcut for a command. */
-  hint?: string
-  run: () => void
+  hint?: string;
+  run: () => void;
 }
 
 interface Props {
-  actions: readonly PaletteAction[]
-  onClose: () => void
+  actions: readonly PaletteAction[];
+  onClose: () => void;
   /**
    * What has been typed, reported as it changes, for a caller that answers part of
    * the list from the server.
@@ -27,7 +27,7 @@ interface Props {
    * the component that already owns the input. It still ranks whatever it is given:
    * this reports, it does not delegate.
    */
-  onQuery?: (query: string) => void
+  onQuery?: (query: string) => void;
 }
 
 /**
@@ -43,39 +43,39 @@ interface Props {
  * whole test suite works that way and this rebuild keeps it that way.
  */
 export function Palette({ actions, onClose, onQuery }: Props) {
-  const [query, setQuery] = useState('')
-  const [active, setActive] = useState(0)
-  const listRef = useRef<HTMLDivElement>(null)
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
-  const results = useMemo(() => rank(query, actions), [actions, query])
+  const results = useMemo(() => rank(query, actions), [actions, query]);
 
   // Clamped rather than reset: typing a character that shortens the list should
   // leave the selection on something, and resetting to 0 on every keystroke
   // fights anyone arrowing down while still typing.
-  const index = Math.min(active, Math.max(results.length - 1, 0))
+  const index = Math.min(active, Math.max(results.length - 1, 0));
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: index is the trigger, not a value the body reads — the DOM is queried for whichever row now carries data-active
   useEffect(() => {
-    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: 'nearest' })
-  }, [index])
+    listRef.current?.querySelector('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [index]);
 
   const run = (i: number) => {
-    const hit = results[i]
-    if (!hit) return
-    onClose()
-    hit.item.run()
-  }
+    const hit = results[i];
+    if (!hit) return;
+    onClose();
+    hit.item.run();
+  };
 
   // Groups in first-appearance order, so the action list's own ordering carries
   // through instead of being sorted alphabetically behind the author's back.
   const groups: {
-    name: string
-    rows: { at: number; action: PaletteAction; spans: readonly [number, number][] }[]
-  }[] = []
+    name: string;
+    rows: { at: number; action: PaletteAction; spans: readonly [number, number][] }[];
+  }[] = [];
   for (const [at, { item, match }] of results.entries()) {
-    const group = groups.find((g) => g.name === item.group) ?? { name: item.group, rows: [] }
-    if (!groups.includes(group)) groups.push(group)
-    group.rows.push({ at, action: item, spans: match.spans })
+    const group = groups.find((g) => g.name === item.group) ?? { name: item.group, rows: [] };
+    if (!groups.includes(group)) groups.push(group);
+    group.rows.push({ at, action: item, spans: match.spans });
   }
 
   return createPortal(
@@ -101,24 +101,24 @@ export function Palette({ actions, onClose, onQuery }: Props) {
           aria-label="Search pages, documents and commands"
           value={query}
           onChange={(e) => {
-            setQuery(e.target.value)
-            setActive(0)
-            onQuery?.(e.target.value)
+            setQuery(e.target.value);
+            setActive(0);
+            onQuery?.(e.target.value);
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') {
-              onClose()
-              return
+            if (e.key === "Escape") {
+              onClose();
+              return;
             }
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              run(index)
-              return
+            if (e.key === "Enter") {
+              e.preventDefault();
+              run(index);
+              return;
             }
-            const next = nextIndex(e.key, index, results.length)
+            const next = nextIndex(e.key, index, results.length);
             if (next !== null) {
-              e.preventDefault()
-              setActive(next)
+              e.preventDefault();
+              setActive(next);
             }
           }}
         />
@@ -134,7 +134,7 @@ export function Palette({ actions, onClose, onQuery }: Props) {
                     key={action.id}
                     type="button"
                     data-active={at === index}
-                    className={`${css.row} ${at === index ? css.rowActive : ''}`}
+                    className={`${css.row} ${at === index ? css.rowActive : ""}`}
                     onMouseMove={() => setActive(at)}
                     onClick={() => run(at)}
                   >
@@ -156,7 +156,7 @@ export function Palette({ actions, onClose, onQuery }: Props) {
       </div>
     </div>,
     document.body,
-  )
+  );
 }
 
 /*

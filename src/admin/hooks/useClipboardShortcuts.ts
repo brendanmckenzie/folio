@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import type { Blocks } from './useBlocks'
+import { useEffect } from "react";
+import type { Blocks } from "./useBlocks";
 
 /**
  * `Cmd`/`Ctrl+C` and the browser's own `paste` event, mirroring
@@ -15,36 +15,36 @@ import type { Blocks } from './useBlocks'
  * no `clipboard-read` permission at all.
  */
 export function useClipboardShortcuts(
-  blocks: Pick<Blocks, 'copy' | 'paste'>,
+  blocks: Pick<Blocks, "copy" | "paste">,
   selection: string | null,
   enabled: boolean,
 ) {
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'c') return
-      if (!isPlainFocus()) return
-      if (!selection) return
-      e.preventDefault()
-      void blocks.copy(selection)
-    }
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "c") return;
+      if (!isPlainFocus()) return;
+      if (!selection) return;
+      e.preventDefault();
+      void blocks.copy(selection);
+    };
 
     const onPaste = (e: ClipboardEvent) => {
-      if (!isPlainFocus()) return
-      const text = e.clipboardData?.getData('text/plain')
-      if (!text) return
-      e.preventDefault()
-      blocks.paste(text)
-    }
+      if (!isPlainFocus()) return;
+      const text = e.clipboardData?.getData("text/plain");
+      if (!text) return;
+      e.preventDefault();
+      blocks.paste(text);
+    };
 
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('paste', onPaste)
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("paste", onPaste);
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('paste', onPaste)
-    }
-  }, [blocks, enabled, selection])
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, [blocks, enabled, selection]);
 }
 
 /** The shape this needs from `document.activeElement` — duck-typed rather
@@ -52,13 +52,13 @@ export function useClipboardShortcuts(
  * DOM and unreliable across the preview iframe's own window. Pure and
  * exported so the rule is tested directly. */
 interface FocusedLike {
-  tagName?: string
-  isContentEditable?: boolean
+  tagName?: string;
+  isContentEditable?: boolean;
 }
 
 export function isPlainFocus(active: FocusedLike | null = document.activeElement): boolean {
-  if (!active) return true
-  if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') return false
-  if (active.isContentEditable) return false
-  return true
+  if (!active) return true;
+  if (active.tagName === "INPUT" || active.tagName === "TEXTAREA") return false;
+  if (active.isContentEditable) return false;
+  return true;
 }

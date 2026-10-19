@@ -36,8 +36,8 @@
  * portal today (`Dialog`, `Palette`, `FocusMode`, `HistoryPanel`) and each one
  * puts this on its own outermost node.
  */
-export const UI_SCOPE = 'folio-ui'
+export const UI_SCOPE = "folio-ui";
 
 /** `UI_SCOPE` joined with a component's own classes, skipping the falsy ones. */
 export const scoped = (...classes: (string | false | undefined)[]): string =>
-  [UI_SCOPE, ...classes].filter(Boolean).join(' ')
+  [UI_SCOPE, ...classes].filter(Boolean).join(" ");

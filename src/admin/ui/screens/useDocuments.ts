@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import { type DocumentRow, type DocumentsUrl, documentsParams } from './documents-model'
-import { messageOf } from './useContent'
+import { useCallback, useEffect, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import { type DocumentRow, type DocumentsUrl, documentsParams } from "./documents-model";
+import { messageOf } from "./useContent";
 
 /**
  * The Documents screen's data: one page of one type's records.
@@ -16,7 +16,7 @@ import { messageOf } from './useContent'
  * `DataTable.tsx`'s page and it was chosen for a client-side pager over data
  * already transferred; fifty is right when the next page is a request, because it
  * is roughly two screens and makes paging the exception rather than the rhythm. */
-const PAGE = 50
+const PAGE = 50;
 
 /**
  * How long a search box waits before it is a request.
@@ -31,28 +31,28 @@ const PAGE = 50
  *
  * The same 150ms as the palette's search and the editor's debounced draft write.
  */
-const DEBOUNCE_MS = 150
+const DEBOUNCE_MS = 150;
 
 export interface DocumentsData {
-  page: Page<DocumentRow> & { loading: boolean; error?: string }
+  page: Page<DocumentRow> & { loading: boolean; error?: string };
   /** Cursors already visited, so *previous* is a pop rather than a reverse query.
    * Keyset paging only goes forwards; a client-side stack is what makes next /
    * previous work without the route learning a second direction. */
-  canGoBack: boolean
-  nextPage: () => void
-  prevPage: () => void
+  canGoBack: boolean;
+  nextPage: () => void;
+  prevPage: () => void;
   /** Re-read the current page, after a write. */
-  reload: () => void
+  reload: () => void;
 }
 
 export function useDocuments(apiBase: string, type: string, url: DocumentsUrl): DocumentsData {
-  const [page, setPage] = useState<DocumentsData['page']>({
+  const [page, setPage] = useState<DocumentsData["page"]>({
     rows: [],
     cursor: null,
     loading: true,
-  })
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [history, setHistory] = useState<readonly (string | null)[]>([])
+  });
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [history, setHistory] = useState<readonly (string | null)[]>([]);
 
   /**
    * The query the *request* uses, which trails what is in the box by `DEBOUNCE_MS`.
@@ -62,28 +62,28 @@ export function useDocuments(apiBase: string, type: string, url: DocumentsUrl): 
    * a time, and it is the only one of the four where the intermediate states are
    * not states anybody asked to see.
    */
-  const q = useDebounced(url.q)
-  const settled = { ...url, q }
+  const q = useDebounced(url.q);
+  const settled = { ...url, q };
 
   // Serialised, because a fresh object every render would restart the effect
   // below. The string is also exactly what goes on the wire, so there is no second
   // representation to keep in step.
-  const params = documentsParams(settled, type, { limit: PAGE, cursor, count: true }).toString()
+  const params = documentsParams(settled, type, { limit: PAGE, cursor, count: true }).toString();
 
   const fetchPage = useCallback(async () => {
-    setPage((prev) => ({ ...prev, loading: true }))
+    setPage((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`${apiBase}/documents?${params}`)
-      if (!res.ok) throw new Error(await messageOf(res))
-      setPage({ ...((await res.json()) as Page<DocumentRow>), loading: false })
+      const res = await fetch(`${apiBase}/documents?${params}`);
+      if (!res.ok) throw new Error(await messageOf(res));
+      setPage({ ...((await res.json()) as Page<DocumentRow>), loading: false });
     } catch (e) {
-      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message })
+      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message });
     }
-  }, [apiBase, params])
+  }, [apiBase, params]);
 
   useEffect(() => {
-    void fetchPage()
-  }, [fetchPage])
+    void fetchPage();
+  }, [fetchPage]);
 
   /**
    * A filter, a sort or a direction change invalidates the cursor stack: each is a
@@ -95,28 +95,28 @@ export function useDocuments(apiBase: string, type: string, url: DocumentsUrl): 
    * it rather than listing `sort`, `dir`, `state` and `q` separately is what keeps a
    * fifth filter from being added without a reset.
    */
-  const identity = documentsParams(settled, type, { limit: PAGE, count: true }).toString()
+  const identity = documentsParams(settled, type, { limit: PAGE, count: true }).toString();
   // biome-ignore lint/correctness/useExhaustiveDependencies: `identity` is the trigger, not a value the body reads — it only clears. Naming it is the point; reading it to satisfy the rule would misstate what this depends on
   useEffect(() => {
-    setCursor(null)
-    setHistory([])
-  }, [identity])
+    setCursor(null);
+    setHistory([]);
+  }, [identity]);
 
   const nextPage = useCallback(() => {
-    if (!page.cursor) return
-    setHistory((prev) => [...prev, cursor])
-    setCursor(page.cursor)
-  }, [page.cursor, cursor])
+    if (!page.cursor) return;
+    setHistory((prev) => [...prev, cursor]);
+    setCursor(page.cursor);
+  }, [page.cursor, cursor]);
 
   const prevPage = useCallback(() => {
     setHistory((prev) => {
-      if (prev.length === 0) return prev
-      setCursor(prev[prev.length - 1] ?? null)
-      return prev.slice(0, -1)
-    })
-  }, [])
+      if (prev.length === 0) return prev;
+      setCursor(prev[prev.length - 1] ?? null);
+      return prev.slice(0, -1);
+    });
+  }, []);
 
-  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage }
+  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage };
 }
 
 /**
@@ -128,10 +128,10 @@ export function useDocuments(apiBase: string, type: string, url: DocumentsUrl): 
  * a shared hook with one user is a directory entry, not a decision.
  */
 function useDebounced(value: string): string {
-  const [settled, setSettled] = useState(value)
+  const [settled, setSettled] = useState(value);
   useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-  }, [value])
-  return settled
+    const timer = setTimeout(() => setSettled(value), DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [value]);
+  return settled;
 }

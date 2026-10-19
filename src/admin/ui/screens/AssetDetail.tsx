@@ -1,10 +1,10 @@
-import type { ReactNode } from 'react'
-import { useEffect, useId, useRef, useState } from 'react'
-import type { StoryMeta } from '../../../core/story'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Field, Input, Select, Textarea } from '../Field'
-import { href } from '../route'
+import type { ReactNode } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import type { StoryMeta } from "../../../core/story";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Field, Input, Select, Textarea } from "../Field";
+import { href } from "../route";
 import {
   addedAgo,
   addedOn,
@@ -17,20 +17,20 @@ import {
   originalUrl,
   thumbUrl,
   typeLabel,
-} from './assets-model'
-import css from './Assets.module.css'
-import { messageOf } from './useContent'
-import { useDescribe } from './useDescribe'
-import { useFolders } from './useFolders'
-import { useTags } from './useTags'
+} from "./assets-model";
+import css from "./Assets.module.css";
+import { messageOf } from "./useContent";
+import { useDescribe } from "./useDescribe";
+import { useFolders } from "./useFolders";
+import { useTags } from "./useTags";
 
 /** The transform width the preview asks for. See `AssetBrowser`'s note on why the
  * set of widths is deliberately tiny. */
-const PREVIEW_WIDTH = 640
+const PREVIEW_WIDTH = 640;
 
 /** Enough to recognise what breaks, few enough that the panel does not become a
  * list. The count above it is exact either way. */
-const USAGE_SHOWN = 8
+const USAGE_SHOWN = 8;
 
 /** What `GET {base}/api/assets/:id/usage` answers — the same shape
  * `{base}/api/documents/:id/usage` does, one field narrower. `server/assets.ts`'s
@@ -38,21 +38,21 @@ const USAGE_SHOWN = 8
  * column would be the same word on every row and `links`/`references` would both be
  * zero. */
 interface Usage {
-  published: Pick<StoryMeta, 'id' | 'title' | 'path'>[]
+  published: Pick<StoryMeta, "id" | "title" | "path">[];
   /** Distinct published documents — what "used on N published pages" counts. */
-  total: number
+  total: number;
 }
 
 export interface AssetDetailProps {
-  apiBase: string
-  mount: string
-  row: AssetRow
-  onClose: () => void
-  onDelete: () => void
+  apiBase: string;
+  mount: string;
+  row: AssetRow;
+  onClose: () => void;
+  onDelete: () => void;
   /** The row after a successful `PATCH`, so the list and the screen's cache stop
    * showing the alt text somebody just replaced. */
-  onChanged: (row: AssetRow) => void
-  onNotice: (message: string) => void
+  onChanged: (row: AssetRow) => void;
+  onNotice: (message: string) => void;
   /**
    * Whether this person may write to the library — `ASSETS` (editor+), the same
    * gate `AssetBrowser` takes and for the same reason (issue #7). False withdraws
@@ -73,7 +73,7 @@ export interface AssetDetailProps {
    * forgot it would offer five writes. Symmetry is a weaker argument than failing
    * closed.
    */
-  mayWrite: boolean
+  mayWrite: boolean;
 }
 
 /**
@@ -106,8 +106,8 @@ export function AssetDetail({
   onNotice,
   mayWrite,
 }: AssetDetailProps) {
-  const titleId = useId()
-  const panel = useRef<HTMLElement>(null)
+  const titleId = useId();
+  const panel = useRef<HTMLElement>(null);
 
   /**
    * Brought into view when the selection changes.
@@ -123,8 +123,8 @@ export function AssetDetail({
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: `row.id` is the trigger, not a value the body reads — the effect exists precisely to fire when the subject changes. Reading it to satisfy the rule would misstate what this depends on
   useEffect(() => {
-    panel.current?.scrollIntoView({ block: 'nearest' })
-  }, [row.id])
+    panel.current?.scrollIntoView({ block: "nearest" });
+  }, [row.id]);
 
   return (
     <aside ref={panel} className={css.panel} aria-labelledby={titleId}>
@@ -228,7 +228,7 @@ export function AssetDetail({
         ) : null}
       </div>
     </aside>
-  )
+  );
 }
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -237,7 +237,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
       <dt className={css.factLabel}>{label}</dt>
       <dd className={css.factValue}>{children}</dd>
     </>
-  )
+  );
 }
 
 /**
@@ -261,22 +261,22 @@ function ReadOnlyMeta({ apiBase, row }: { apiBase: string; row: AssetRow }) {
   // The same hook `FolderEditor` uses, for the same one fact: `row.folderId` is an
   // id and the panel wants the name. `row.tags` needs no fetch — the list route
   // carries them, which is why `AssetRow` widens the server's row with them.
-  const folders = useFolders(apiBase)
+  const folders = useFolders(apiBase);
   return (
     <dl className={css.facts}>
       <Fact label="Alt text">{row.alt || row.altAuto || EMPTY}</Fact>
       <Fact label="Description">{row.description || row.descriptionAuto || EMPTY}</Fact>
       <Fact label="Folder">{folderNameFor(row.folderId, folders)}</Fact>
       <Fact label="Tags">
-        {row.tags.length === 0 ? EMPTY : row.tags.map((tag) => tag.name).join(', ')}
+        {row.tags.length === 0 ? EMPTY : row.tags.map((tag) => tag.name).join(", ")}
       </Fact>
     </dl>
-  )
+  );
 }
 
 /** An em dash for a value that is genuinely absent, which is what the asset table's
  * own empty cells render — the same distinction, in the same feature. */
-const EMPTY = '—'
+const EMPTY = "—";
 
 /* ---------------------------------------------------------------- alt text --- */
 
@@ -300,13 +300,13 @@ function AltText({
   onChanged,
   onNotice,
 }: {
-  apiBase: string
-  row: AssetRow
-  onChanged: (row: AssetRow) => void
-  onNotice: (message: string) => void
+  apiBase: string;
+  row: AssetRow;
+  onChanged: (row: AssetRow) => void;
+  onNotice: (message: string) => void;
 }) {
-  const [draft, setDraft] = useState(row.alt)
-  const [saving, setSaving] = useState(false)
+  const [draft, setDraft] = useState(row.alt);
+  const [saving, setSaving] = useState(false);
   /**
    * The value most recently written, rather than a `saved` boolean — and the
    * difference is the whole reason the note works.
@@ -317,7 +317,7 @@ function AltText({
    * than a frame, every time. Holding the *value* means the note survives its own row
    * coming back, and stops the moment somebody types something else.
    */
-  const [savedValue, setSavedValue] = useState<string | null>(null)
+  const [savedValue, setSavedValue] = useState<string | null>(null);
 
   /**
    * A different asset is a different value.
@@ -335,36 +335,36 @@ function AltText({
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above — `row.id` is the trigger and `row.alt` is deliberately excluded, because the row returning from this component's own PATCH must not reset the field it was typed into
   useEffect(() => {
-    setDraft(row.alt)
-    setSavedValue(null)
-  }, [row.id])
+    setDraft(row.alt);
+    setSavedValue(null);
+  }, [row.id]);
 
   const commit = async () => {
-    if (draft === row.alt) return
-    setSaving(true)
+    if (draft === row.alt) return;
+    setSaving(true);
     try {
       const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ alt: draft }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      const next = (await res.json()) as AssetRow
-      onChanged(next)
-      setSavedValue(next.alt)
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      const next = (await res.json()) as AssetRow;
+      onChanged(next);
+      setSavedValue(next.alt);
     } catch (e) {
       // Reported *and* left in the box: throwing away what somebody typed because
       // the request failed is the one response worse than the failure.
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   return (
     <Field
       label="Alt text"
-      note={saving ? 'Saving…' : savedValue !== null && savedValue === draft ? 'Saved' : undefined}
+      note={saving ? "Saving…" : savedValue !== null && savedValue === draft ? "Saved" : undefined}
       help="The file's default. A block copies it in when the image is placed and can then say something else, because alt text depends on what the image is being used to say."
     >
       {(id) => (
@@ -380,14 +380,14 @@ function AltText({
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => void commit()}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') void commit()
+              if (e.key === "Enter") void commit();
             }}
           />
           <MachineText value={row.altAuto} human={row.alt} />
         </>
       )}
     </Field>
-  )
+  );
 }
 
 /**
@@ -404,16 +404,16 @@ function AltText({
  * *is* what a block copies in, and the moment somebody types, it stops being.
  */
 function MachineText({ value, human }: { value: string; human: string }) {
-  if (!value) return null
+  if (!value) return null;
   return (
     <p className={css.machine}>
       <span className={css.machineTag}>Written by the describe function</span>
       <span className={css.machineValue}>{value}</span>
       <span className={css.machineNote}>
-        {human ? 'Your text above is used instead.' : 'Used until you type something above.'}
+        {human ? "Your text above is used instead." : "Used until you type something above."}
       </span>
     </p>
-  )
+  );
 }
 
 /* ---------------------------------------------------------------- describe --- */
@@ -442,38 +442,38 @@ function DescribeAction({
   onChanged,
   onNotice,
 }: {
-  apiBase: string
-  row: AssetRow
-  onChanged: (row: AssetRow) => void
-  onNotice: (message: string) => void
+  apiBase: string;
+  row: AssetRow;
+  onChanged: (row: AssetRow) => void;
+  onNotice: (message: string) => void;
 }) {
-  const describe = useDescribe(apiBase)
-  const [busy, setBusy] = useState(false)
+  const describe = useDescribe(apiBase);
+  const [busy, setBusy] = useState(false);
 
-  if (!describe.configured) return null
+  if (!describe.configured) return null;
 
   const run = async () => {
-    setBusy(true)
+    setBusy(true);
     try {
       const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}/describe`, {
-        method: 'POST',
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
       const body = (await res.json()) as {
-        asset: AssetRow
-        skipped: boolean
-        tagged: string[]
-        tagsIgnored: number
-        error: string | null
-      }
-      onChanged(body.asset)
-      onNotice(describeSummary(body))
+        asset: AssetRow;
+        skipped: boolean;
+        tagged: string[];
+        tagsIgnored: number;
+        error: string | null;
+      };
+      onChanged(body.asset);
+      onNotice(describeSummary(body));
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
-  }
+  };
 
   return (
     <section className={css.describe}>
@@ -484,7 +484,7 @@ function DescribeAction({
       </p>
       <div className={css.describeRow}>
         <Button size="sm" disabled={busy} reason="Working…" onClick={() => void run()}>
-          {row.describedAt === null ? 'Describe' : 'Describe again'}
+          {row.describedAt === null ? "Describe" : "Describe again"}
         </Button>
         {row.describeError ? (
           <span className={css.warn}>Last attempt failed: {row.describeError}</span>
@@ -495,26 +495,26 @@ function DescribeAction({
         )}
       </div>
     </section>
-  )
+  );
 }
 
 /** One sentence for a finished single describe — the same shape the run panel's
  * summary takes, one file wide. A drop is named rather than swallowed: a host
  * whose prompt keeps proposing a tag nobody created finds out here first. */
 function describeSummary(outcome: {
-  skipped: boolean
-  tagged: string[]
-  tagsIgnored: number
-  error: string | null
+  skipped: boolean;
+  tagged: string[];
+  tagsIgnored: number;
+  error: string | null;
 }): string {
-  if (outcome.error) return `Could not describe this file: ${outcome.error}`
-  if (outcome.skipped) return 'Nothing to describe: this file is not an image.'
-  const tagged = outcome.tagged.length === 0 ? '' : ` Tagged ${outcome.tagged.join(', ')}.`
+  if (outcome.error) return `Could not describe this file: ${outcome.error}`;
+  if (outcome.skipped) return "Nothing to describe: this file is not an image.";
+  const tagged = outcome.tagged.length === 0 ? "" : ` Tagged ${outcome.tagged.join(", ")}.`;
   const ignored =
     outcome.tagsIgnored === 0
-      ? ''
-      : ` ${outcome.tagsIgnored} suggested ${outcome.tagsIgnored === 1 ? 'tag' : 'tags'} did not exist and ${outcome.tagsIgnored === 1 ? 'was' : 'were'} ignored.`
-  return `Described.${tagged}${ignored}`
+      ? ""
+      : ` ${outcome.tagsIgnored} suggested ${outcome.tagsIgnored === 1 ? "tag" : "tags"} did not exist and ${outcome.tagsIgnored === 1 ? "was" : "were"} ignored.`;
+  return `Described.${tagged}${ignored}`;
 }
 
 /* ---------------------------------------------------------------- description --- */
@@ -536,45 +536,45 @@ function DescriptionEditor({
   onChanged,
   onNotice,
 }: {
-  apiBase: string
-  row: AssetRow
-  onChanged: (row: AssetRow) => void
-  onNotice: (message: string) => void
+  apiBase: string;
+  row: AssetRow;
+  onChanged: (row: AssetRow) => void;
+  onNotice: (message: string) => void;
 }) {
-  const [draft, setDraft] = useState(row.description)
-  const [saving, setSaving] = useState(false)
-  const [savedValue, setSavedValue] = useState<string | null>(null)
+  const [draft, setDraft] = useState(row.description);
+  const [saving, setSaving] = useState(false);
+  const [savedValue, setSavedValue] = useState<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `row.id` is the trigger and `row.description` is deliberately excluded — see `AltText`'s identical note, which this mirrors field for field
   useEffect(() => {
-    setDraft(row.description)
-    setSavedValue(null)
-  }, [row.id])
+    setDraft(row.description);
+    setSavedValue(null);
+  }, [row.id]);
 
   const commit = async () => {
-    if (draft === row.description) return
-    setSaving(true)
+    if (draft === row.description) return;
+    setSaving(true);
     try {
       const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ description: draft }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      const next = (await res.json()) as AssetRow
-      onChanged(next)
-      setSavedValue(next.description)
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      const next = (await res.json()) as AssetRow;
+      onChanged(next);
+      setSavedValue(next.description);
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   return (
     <Field
       label="Description"
-      note={saving ? 'Saving…' : savedValue !== null && savedValue === draft ? 'Saved' : undefined}
+      note={saving ? "Saving…" : savedValue !== null && savedValue === draft ? "Saved" : undefined}
       help="What the file is, longer than alt text and part of what the search box scans."
     >
       {(id) => (
@@ -591,7 +591,7 @@ function DescriptionEditor({
         </>
       )}
     </Field>
-  )
+  );
 }
 
 /* ---------------------------------------------------------------------- folder --- */
@@ -613,31 +613,31 @@ function FolderEditor({
   onChanged,
   onNotice,
 }: {
-  apiBase: string
-  row: AssetRow
-  onChanged: (row: AssetRow) => void
-  onNotice: (message: string) => void
+  apiBase: string;
+  row: AssetRow;
+  onChanged: (row: AssetRow) => void;
+  onNotice: (message: string) => void;
 }) {
-  const folders = useFolders(apiBase)
-  const [saving, setSaving] = useState(false)
+  const folders = useFolders(apiBase);
+  const [saving, setSaving] = useState(false);
 
   const commit = async (folderId: string | null) => {
-    if (folderId === row.folderId) return
-    setSaving(true)
+    if (folderId === row.folderId) return;
+    setSaving(true);
     try {
       const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ folderId }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      onChanged((await res.json()) as AssetRow)
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      onChanged((await res.json()) as AssetRow);
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   return (
     <Field
@@ -647,7 +647,7 @@ function FolderEditor({
       {(id) => (
         <Select
           id={id}
-          value={row.folderId ?? ''}
+          value={row.folderId ?? ""}
           disabled={saving || folders.loading}
           onChange={(e) => void commit(e.target.value || null)}
         >
@@ -660,7 +660,7 @@ function FolderEditor({
         </Select>
       )}
     </Field>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------------ tags --- */
@@ -690,49 +690,49 @@ function TagsEditor({
   onChanged,
   onNotice,
 }: {
-  apiBase: string
-  row: AssetRow
-  onChanged: (row: AssetRow) => void
-  onNotice: (message: string) => void
+  apiBase: string;
+  row: AssetRow;
+  onChanged: (row: AssetRow) => void;
+  onNotice: (message: string) => void;
 }) {
-  const vocabulary = useTags(apiBase)
-  const [draft, setDraft] = useState('')
-  const [saving, setSaving] = useState(false)
-  const listId = useId()
+  const vocabulary = useTags(apiBase);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const listId = useId();
 
   const patch = async (tagIds: readonly string[]) => {
-    setSaving(true)
+    setSaving(true);
     try {
       const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ tags: tagIds }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      onChanged((await res.json()) as AssetRow)
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      onChanged((await res.json()) as AssetRow);
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const add = async (name: string) => {
-    const trimmed = name.trim()
-    if (!trimmed) return
+    const trimmed = name.trim();
+    if (!trimmed) return;
     try {
-      const tag = await vocabulary.ensure(trimmed)
-      setDraft('')
-      if (row.tags.some((t) => t.id === tag.id)) return
-      await patch([...row.tags.map((t) => t.id), tag.id])
+      const tag = await vocabulary.ensure(trimmed);
+      setDraft("");
+      if (row.tags.some((t) => t.id === tag.id)) return;
+      await patch([...row.tags.map((t) => t.id), tag.id]);
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     }
-  }
+  };
 
   const remove = (id: string) => {
-    void patch(row.tags.filter((t) => t.id !== id).map((t) => t.id))
-  }
+    void patch(row.tags.filter((t) => t.id !== id).map((t) => t.id));
+  };
 
   return (
     <Field
@@ -769,9 +769,9 @@ function TagsEditor({
             disabled={saving}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key !== 'Enter') return
-              e.preventDefault()
-              void add(draft)
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              void add(draft);
             }}
           />
           <datalist id={listId}>
@@ -784,7 +784,7 @@ function TagsEditor({
         </div>
       )}
     </Field>
-  )
+  );
 }
 
 /* --------------------------------------------------------------- where used --- */
@@ -798,7 +798,7 @@ function TagsEditor({
  * names the limit rather than letting "used nowhere" be read as "safe to delete".
  */
 function Uses({ apiBase, mount, row }: { apiBase: string; mount: string; row: AssetRow }) {
-  const usage = useUsage(apiBase, row.id)
+  const usage = useUsage(apiBase, row.id);
 
   return (
     <section className={css.uses}>
@@ -812,8 +812,8 @@ function Uses({ apiBase, mount, row }: { apiBase: string; mount: string; row: As
       ) : (
         <>
           <p className={css.note}>
-            Used on <b>{usage.data.total}</b> published{' '}
-            {usage.data.total === 1 ? 'document' : 'documents'}.
+            Used on <b>{usage.data.total}</b> published{" "}
+            {usage.data.total === 1 ? "document" : "documents"}.
           </p>
           <ul className={css.usageList}>
             {usage.data.published.slice(0, USAGE_SHOWN).map((ref) => (
@@ -824,11 +824,11 @@ function Uses({ apiBase, mount, row }: { apiBase: string; mount: string; row: As
                   second tab, which is exactly what somebody auditing "what breaks if
                   I delete this" wants to do.
                 */}
-                <a className={css.usageLink} href={href({ name: 'edit', id: ref.id }, mount)}>
-                  {ref.title || 'Untitled'}
+                <a className={css.usageLink} href={href({ name: "edit", id: ref.id }, mount)}>
+                  {ref.title || "Untitled"}
                 </a>
                 <code className={css.usagePath}>
-                  {ref.path === null ? 'not routed' : ref.path === '' ? '/' : `/${ref.path}`}
+                  {ref.path === null ? "not routed" : ref.path === "" ? "/" : `/${ref.path}`}
                 </code>
               </li>
             ))}
@@ -839,34 +839,34 @@ function Uses({ apiBase, mount, row }: { apiBase: string; mount: string; row: As
         </>
       )}
     </section>
-  )
+  );
 }
 
 /** The usage read, refetched when the subject changes. Its own hook so both the
  * panel and the delete dialog ask the same question the same way. */
 export function useUsage(apiBase: string, id: string) {
-  const [data, setData] = useState<Usage | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [data, setData] = useState<Usage | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let live = true
-    setData(null)
-    setError(null)
+    let live = true;
+    setData(null);
+    setError(null);
     fetch(`${apiBase}/assets/${encodeURIComponent(id)}/usage`)
       .then(async (res) => {
-        if (!res.ok) throw new Error(await messageOf(res))
-        return (await res.json()) as Usage
+        if (!res.ok) throw new Error(await messageOf(res));
+        return (await res.json()) as Usage;
       })
       .then((body) => {
-        if (live) setData(body)
+        if (live) setData(body);
       })
       .catch((e: Error) => {
-        if (live) setError(e.message)
-      })
+        if (live) setError(e.message);
+      });
     return () => {
-      live = false
-    }
-  }, [apiBase, id])
+      live = false;
+    };
+  }, [apiBase, id]);
 
-  return { data, error }
+  return { data, error };
 }

@@ -27,10 +27,10 @@
  * missing". The empty list is the honest answer, and it is the only thing an
  * uncredentialed caller learns here.
  */
-import type { Context, Hono } from 'hono'
-import { Hono as HonoApp } from 'hono'
-import type { Actor } from '../auth/roles'
-import { type ErrorEnvelope, FolioError } from '../errors'
+import type { Context, Hono } from "hono";
+import { Hono as HonoApp } from "hono";
+import type { Actor } from "../auth/roles";
+import { type ErrorEnvelope, FolioError } from "../errors";
 import {
   handleRpc,
   INVALID_PARAMS,
@@ -39,8 +39,8 @@ import {
   type RpcResult,
   rpcCodeFor,
   SUPPORTED_VERSIONS,
-} from '../mcp/rpc'
-import { previewDocument, type PreviewDocumentContext } from '../mcp/shot'
+} from "../mcp/rpc";
+import { previewDocument, type PreviewDocumentContext } from "../mcp/shot";
 import {
   fillPath,
   MCP_TOOLS,
@@ -49,13 +49,13 @@ import {
   type ToolMethod,
   toolByName,
   toolsFor,
-} from '../mcp/tools'
-import { ensureAccess, inFence } from '../middleware'
-import type { BrandRuntime, FolioRuntime } from '../runtime'
-import { SCOPE_HEADER } from '../sites'
-import type { FolioEnv } from '../types'
-import { brandOf, draftOf } from './stories'
-import { API_VERSION } from './api'
+} from "../mcp/tools";
+import { ensureAccess, inFence } from "../middleware";
+import type { BrandRuntime, FolioRuntime } from "../runtime";
+import { SCOPE_HEADER } from "../sites";
+import type { FolioEnv } from "../types";
+import { brandOf, draftOf } from "./stories";
+import { API_VERSION } from "./api";
 
 /**
  * A tool row that names a v1 route — every row but `preview_document`
@@ -63,21 +63,21 @@ import { API_VERSION } from './api'
  * against one of these; `hasRoute` is how `tools/call` tells the two apart
  * without asserting.
  */
-type RoutedTool = McpTool & { method: ToolMethod; path: string }
+type RoutedTool = McpTool & { method: ToolMethod; path: string };
 
 function hasRoute(tool: McpTool): tool is RoutedTool {
-  return tool.path !== undefined
+  return tool.path !== undefined;
 }
 
 /** `version` tracks the package's, which is pre-release and says so. */
-const SERVER_INFO = { name: 'folio', version: '0.0.0' } as const
+const SERVER_INFO = { name: "folio", version: "0.0.0" } as const;
 
 /**
  * `DiscoverResult._meta`'s key for the server's own identity. Self-reported and
  * unverified by the protocol, which is why the spec tells clients not to make
  * behavioural or security decisions from it — it is for display and logs.
  */
-const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo'
+const META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
 
 /**
  * `instructions` is the one place a server can address the model in prose rather
@@ -87,10 +87,10 @@ const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo'
  * deployment with `sites` a scoped session gains a fourth (`instructionsFor`).
  */
 const INSTRUCTIONS = [
-  'Folio is a block-based CMS. Documents are trees of typed blocks; call get_schema first to learn the site’s block and field shapes before writing.',
-  'The tools offered are already filtered to what this credential may do, so anything listed is permitted and nothing else exists to try.',
-  'Writes go through the same log a human editor’s keystrokes do: an edit appears live in any open editor, is attributed to this token in the activity trail, and is undoable. Publishing is a separate, explicit step.',
-]
+  "Folio is a block-based CMS. Documents are trees of typed blocks; call get_schema first to learn the site’s block and field shapes before writing.",
+  "The tools offered are already filtered to what this credential may do, so anything listed is permitted and nothing else exists to try.",
+  "Writes go through the same log a human editor’s keystrokes do: an edit appears live in any open editor, is attributed to this token in the activity trail, and is undoable. Publishing is a separate, explicit step.",
+];
 
 export function mcpRoutes<Env>(
   rt: FolioRuntime,
@@ -102,7 +102,7 @@ export function mcpRoutes<Env>(
    */
   app: Hono<FolioEnv<Env>>,
 ): Hono<FolioEnv<Env>> {
-  const routes = new HonoApp<FolioEnv<Env>>()
+  const routes = new HonoApp<FolioEnv<Env>>();
 
   /* ------------------------------------------------------------ dispatch --- */
 
@@ -159,20 +159,20 @@ export function mcpRoutes<Env>(
    * from the other.
    */
   const credentialHeaders = (c: Context<FolioEnv<Env>>): Record<string, string> => {
-    const headers: Record<string, string> = {}
-    const authorization = c.req.header('authorization')
-    if (authorization) headers.authorization = authorization
-    const cookie = c.req.header('cookie')
-    if (cookie) headers.cookie = cookie
-    return headers
-  }
+    const headers: Record<string, string> = {};
+    const authorization = c.req.header("authorization");
+    if (authorization) headers.authorization = authorization;
+    const cookie = c.req.header("cookie");
+    if (cookie) headers.cookie = cookie;
+    return headers;
+  };
 
   const dispatch = async (
     c: Context<FolioEnv<Env>>,
     tool: RoutedTool,
     args: Record<string, unknown>,
   ): Promise<Response> => {
-    const url = new URL(`${rt.base}/api/${API_VERSION}${fillPath(tool.path, args)}`, c.req.url)
+    const url = new URL(`${rt.base}/api/${API_VERSION}${fillPath(tool.path, args)}`, c.req.url);
 
     /**
      * **"A tool cannot reach further than the API does" (decision 2), stated
@@ -195,22 +195,22 @@ export function mcpRoutes<Env>(
      * encoding that keeps it that way.
      */
     if (!url.pathname.startsWith(`${rt.base}/api/${API_VERSION}/`)) {
-      throw new FolioError('bad_request', 'A tool argument may not change the path it addresses')
+      throw new FolioError("bad_request", "A tool argument may not change the path it addresses");
     }
 
     for (const key of tool.query ?? []) {
-      const value = args[key]
-      if (value === undefined || value === null) continue
+      const value = args[key];
+      if (value === undefined || value === null) continue;
       // An array repeats the key, which is how `?where=` and `?type=` are spelled.
       for (const one of Array.isArray(value) ? value : [value]) {
-        url.searchParams.append(key, String(one))
+        url.searchParams.append(key, String(one));
       }
     }
     for (const key of tool.flags ?? []) {
-      if (args[key] === true) url.searchParams.set(key, '1')
+      if (args[key] === true) url.searchParams.set(key, "1");
     }
 
-    const headers = new Headers(credentialHeaders(c))
+    const headers = new Headers(credentialHeaders(c));
     /**
      * **The scope, from this request's own `c.var.scope`** (`multi-site.md`
      * decision 11): the `~<scope>` segment `handle()` stripped, or the token's
@@ -220,49 +220,49 @@ export function mcpRoutes<Env>(
      * sub-request's `withScope` reads it as if `handle()` had set it. With no
      * `sites` there is no scope and nothing is set.
      */
-    if (c.var.scope !== null) headers.set(SCOPE_HEADER, c.var.scope)
+    if (c.var.scope !== null) headers.set(SCOPE_HEADER, c.var.scope);
 
-    let body: BodyInit | undefined
-    if (tool.body === 'json') {
-      const skip = nonBodyKeys(tool)
-      const payload: Record<string, unknown> = {}
+    let body: BodyInit | undefined;
+    if (tool.body === "json") {
+      const skip = nonBodyKeys(tool);
+      const payload: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(args)) {
-        if (!skip.has(key)) payload[key] = value
+        if (!skip.has(key)) payload[key] = value;
       }
-      headers.set('content-type', 'application/json')
-      body = JSON.stringify(payload)
-    } else if (tool.body === 'base64') {
-      body = decodeBase64(args.data)
+      headers.set("content-type", "application/json");
+      body = JSON.stringify(payload);
+    } else if (tool.body === "base64") {
+      body = decodeBase64(args.data);
     }
 
     return app.fetch(
       new Request(url, { method: tool.method, headers, body }),
       c.env,
       c.executionCtx,
-    )
-  }
+    );
+  };
 
   /** The v1 route's answer as MCP tool content, or its envelope as a JSON-RPC error. */
   const resultOf = async (res: Response): Promise<RpcResult> => {
-    const text = await res.text()
-    if (res.ok) return { content: [{ type: 'text', text }] }
+    const text = await res.text();
+    if (res.ok) return { content: [{ type: "text", text }] };
 
     // Every v1 failure is `errors.ts`'s one envelope, and its message is written
     // to be acted on, so it travels verbatim. A non-JSON body here would mean a
     // platform failure rather than a route's refusal, so the status is all there
     // is to report.
-    let envelope: ErrorEnvelope | undefined
+    let envelope: ErrorEnvelope | undefined;
     try {
-      envelope = JSON.parse(text) as ErrorEnvelope
+      envelope = JSON.parse(text) as ErrorEnvelope;
     } catch {
-      envelope = undefined
+      envelope = undefined;
     }
-    const error = envelope?.error
+    const error = envelope?.error;
     throw new RpcFault(
       rpcCodeFor(error?.code),
       error?.message ?? `That route answered ${res.status}.`,
-    )
-  }
+    );
+  };
 
   /* ------------------------------------------------------------- methods --- */
 
@@ -284,7 +284,7 @@ export function mcpRoutes<Env>(
    * is not the place to invent some.
    */
   const offered = (actor: Actor | null): readonly McpTool[] =>
-    rt.auth.mode !== 'session' ? MCP_TOOLS : toolsFor(actor)
+    rt.auth.mode !== "session" ? MCP_TOOLS : toolsFor(actor);
 
   /**
    * The description a client sees: the row's own, plus the site's declared type
@@ -297,17 +297,17 @@ export function mcpRoutes<Env>(
     // The scope's brand's names only (`multi-brand.md` decision 12). With none, a
     // branded deployment asked with no scope, the row's own description: naming the
     // types of a brand nobody named would advertise the wrong ones.
-    if (brand === null) return tool.description
-    if (tool.manifest === 'types') {
-      const names = brand.types.map((type) => type.name).join(', ')
-      return `${tool.description} Declared document types: ${names}.`
+    if (brand === null) return tool.description;
+    if (tool.manifest === "types") {
+      const names = brand.types.map((type) => type.name).join(", ");
+      return `${tool.description} Declared document types: ${names}.`;
     }
-    if (tool.manifest === 'blocks') {
-      const names = Object.keys(brand.schema).join(', ')
-      return `${tool.description} Declared blocks: ${names}.`
+    if (tool.manifest === "blocks") {
+      const names = Object.keys(brand.schema).join(", ");
+      return `${tool.description} Declared blocks: ${names}.`;
     }
-    return tool.description
-  }
+    return tool.description;
+  };
 
   /**
    * The one non-route tool's own context: the request's own URL — so a
@@ -319,7 +319,7 @@ export function mcpRoutes<Env>(
   const previewContext = (c: Context<FolioEnv<Env>>): PreviewDocumentContext => ({
     origin: c.req.url,
     headers: credentialHeaders(c),
-    visible: (story) => inFence(c, rt, story, 'read'),
+    visible: (story) => inFence(c, rt, story, "read"),
     brand: brandOf(c),
     draft: draftOf(c, rt),
     // With `sites`, the tool forwards no credential and mints a grant instead
@@ -333,7 +333,7 @@ export function mcpRoutes<Env>(
           },
         }
       : {}),
-  })
+  });
 
   /**
    * **The cache hints, as the smallest promise the schema allows.** Both fields
@@ -351,7 +351,7 @@ export function mcpRoutes<Env>(
    * capability that depends on who is asking. Both are one small object to
    * recompute, so a longer lifetime buys nothing.
    */
-  const UNCACHED = { ttlMs: 0, cacheScope: 'private' } as const
+  const UNCACHED = { ttlMs: 0, cacheScope: "private" } as const;
 
   /**
    * The instructions, plus one sentence on a session scoped to a site or group
@@ -361,22 +361,22 @@ export function mcpRoutes<Env>(
    * already read to resolve the scope.
    */
   const instructionsFor = async (c: Context<FolioEnv<Env>>): Promise<string> => {
-    const scope = c.var.scope
-    if (!rt.sites || scope === null) return INSTRUCTIONS.join(' ')
-    const registry = await rt.sites.registry(c.env)
-    const site = registry.sites.find((s) => s.id === scope)
-    const group = site ? undefined : registry.groups.find((g) => g.id === scope)
-    const noun = site ? 'site' : group ? 'group' : 'scope'
-    const name = (site ?? group)?.name ?? 'Shared'
-    const brand = c.var.brand?.brand
-    const named = `This session is scoped to ${noun} '${name}' (\`${scope}\`)`
+    const scope = c.var.scope;
+    if (!rt.sites || scope === null) return INSTRUCTIONS.join(" ");
+    const registry = await rt.sites.registry(c.env);
+    const site = registry.sites.find((s) => s.id === scope);
+    const group = site ? undefined : registry.groups.find((g) => g.id === scope);
+    const noun = site ? "site" : group ? "group" : "scope";
+    const name = (site ?? group)?.name ?? "Shared";
+    const brand = c.var.brand?.brand;
+    const named = `This session is scoped to ${noun} '${name}' (\`${scope}\`)`;
     return [
       ...INSTRUCTIONS,
       brand
         ? `${named} of brand '${brand.label}'; documents, types and blocks of other brands are not visible, and get_schema describes this brand only.`
         : `${named}.`,
-    ].join(' ')
-  }
+    ].join(" ");
+  };
 
   const methodsFor = (c: Context<FolioEnv<Env>>): Record<string, RpcMethod> => ({
     /**
@@ -397,7 +397,7 @@ export function mcpRoutes<Env>(
      *
      * **`ttlMs: 0` and `cacheScope: 'private'`: see `UNCACHED`.**
      */
-    'server/discover': async () => ({
+    "server/discover": async () => ({
       ...UNCACHED,
       supportedVersions: SUPPORTED_VERSIONS,
       capabilities: { tools: {} },
@@ -420,7 +420,7 @@ export function mcpRoutes<Env>(
     ping: () => ({}),
 
     /** Varies by credential, which is the case `private` exists for; see `UNCACHED`. */
-    'tools/list': () => ({
+    "tools/list": () => ({
       ...UNCACHED,
       tools: offered(c.var.actor).map((tool) => ({
         name: tool.name,
@@ -440,33 +440,33 @@ export function mcpRoutes<Env>(
      * refusing at all — both are `narrowed`, and `ensureAccess` below is the
      * only gate either one gets (see `narrowed` in `../mcp/tools.ts`).
      */
-    'tools/call': async (params) => {
-      const name = params.name
-      if (typeof name !== 'string') {
-        throw new RpcFault(INVALID_PARAMS, '"name" must name a tool.')
+    "tools/call": async (params) => {
+      const name = params.name;
+      if (typeof name !== "string") {
+        throw new RpcFault(INVALID_PARAMS, '"name" must name a tool.');
       }
-      const tool = toolByName(name)
-      if (!tool) throw new RpcFault(INVALID_PARAMS, `No such tool: '${name}'.`)
+      const tool = toolByName(name);
+      if (!tool) throw new RpcFault(INVALID_PARAMS, `No such tool: '${name}'.`);
 
       const args =
-        typeof params.arguments === 'object' &&
+        typeof params.arguments === "object" &&
         params.arguments !== null &&
         !Array.isArray(params.arguments)
           ? (params.arguments as Record<string, unknown>)
-          : {}
+          : {};
 
-      if (tool.narrowed) ensureAccess(rt, c.var.actor, tool.need)
+      if (tool.narrowed) ensureAccess(rt, c.var.actor, tool.need);
 
       // `preview_document` alone has no v1 route to dispatch to (decisions 5,
       // 5a) — `ensureAccess` above is already its only gate, and it runs
       // before this branch so that ordering holds whichever way it goes.
       if (!hasRoute(tool)) {
-        return previewDocument(rt, c.var.bindings(), previewContext(c), args)
+        return previewDocument(rt, c.var.bindings(), previewContext(c), args);
       }
 
-      return resultOf(await dispatch(c, tool, args))
+      return resultOf(await dispatch(c, tool, args));
     },
-  })
+  });
 
   /* -------------------------------------------------------------- routes --- */
 
@@ -478,18 +478,18 @@ export function mcpRoutes<Env>(
    * a `404` served by something that is not an MCP endpoint at all. `rpc.ts` owns
    * that mapping because it owns which error was raised.
    */
-  routes.post('/mcp', async (c) => {
+  routes.post("/mcp", async (c) => {
     const { status, response } = await handleRpc(
       await c.req.text(),
       methodsFor(c),
       (name) => c.req.header(name),
       rt.logger,
-    )
+    );
     // A notification has no response, and 202 is what Streamable HTTP says to
     // answer when there is nothing to send back.
-    if (!response) return c.body(null, 202)
-    return c.json(response, status as 200)
-  })
+    if (!response) return c.body(null, 202);
+    return c.json(response, status as 200);
+  });
 
   /**
    * **`2026-07-28` removed the GET stream and protocol-level sessions from
@@ -502,15 +502,15 @@ export function mcpRoutes<Env>(
    */
   const noStream = (c: Context<FolioEnv<Env>>) =>
     c.text(
-      'This endpoint speaks JSON-RPC over POST. MCP revision 2026-07-28 removed the GET stream and protocol-level sessions, so there is nothing to GET and no session to delete.',
+      "This endpoint speaks JSON-RPC over POST. MCP revision 2026-07-28 removed the GET stream and protocol-level sessions, so there is nothing to GET and no session to delete.",
       405,
-      { allow: 'POST' },
-    )
+      { allow: "POST" },
+    );
 
-  routes.get('/mcp', noStream)
-  routes.delete('/mcp', noStream)
+  routes.get("/mcp", noStream);
+  routes.delete("/mcp", noStream);
 
-  return routes
+  return routes;
 }
 
 /**
@@ -521,17 +521,17 @@ export function mcpRoutes<Env>(
  * `BodyInit`, and casting to make it one would be hiding the same question.
  */
 function decodeBase64(value: unknown): ArrayBuffer {
-  if (typeof value !== 'string') {
-    throw new RpcFault(INVALID_PARAMS, 'data must be a base64 string')
+  if (typeof value !== "string") {
+    throw new RpcFault(INVALID_PARAMS, "data must be a base64 string");
   }
-  let binary: string
+  let binary: string;
   try {
-    binary = atob(value)
+    binary = atob(value);
   } catch {
-    throw new RpcFault(INVALID_PARAMS, 'data is not valid base64')
+    throw new RpcFault(INVALID_PARAMS, "data is not valid base64");
   }
-  const buffer = new ArrayBuffer(binary.length)
-  const bytes = new Uint8Array(buffer)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return buffer
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return buffer;
 }

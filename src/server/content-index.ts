@@ -19,23 +19,23 @@
  * upsert would have to work that out. Two statements per table, always, whatever
  * changed.
  */
-import type { Doc } from '../core/doc'
-import { indexRowsFor, type IndexRow } from '../core/index-projection'
-import type { LocaleConfig } from '../core/locales'
-import { outboundRefs, type OutboundRef } from '../core/refs'
-import type { DocumentType, SchemaIndex } from '../core/schema'
-import { type SearchRow, searchRowsFor } from '../core/search-projection'
-import { bindChunks, type FolioDb } from './db'
+import type { Doc } from "../core/doc";
+import { indexRowsFor, type IndexRow } from "../core/index-projection";
+import type { LocaleConfig } from "../core/locales";
+import { outboundRefs, type OutboundRef } from "../core/refs";
+import type { DocumentType, SchemaIndex } from "../core/schema";
+import { type SearchRow, searchRowsFor } from "../core/search-projection";
+import { bindChunks, type FolioDb } from "./db";
 
 /** What one document projects to. Computed by `contentProjection`, written by `indexStatements`. */
 export interface ContentProjection {
-  index: IndexRow[]
-  refs: OutboundRef[]
+  index: IndexRow[];
+  refs: OutboundRef[];
   /** One `content_text` row per locale that has any prose (`full-text-search.md` decision 3). */
-  search: SearchRow[]
+  search: SearchRow[];
 }
 
-export const EMPTY_PROJECTION: ContentProjection = { index: [], refs: [], search: [] }
+export const EMPTY_PROJECTION: ContentProjection = { index: [], refs: [], search: [] };
 
 /**
  * The projection for one document, from the pure core walks. The one place the
@@ -52,7 +52,7 @@ export function contentProjection(
     index: indexRowsFor(doc, type, schema, locales),
     refs: outboundRefs(doc, schema, storyId),
     search: searchRowsFor(doc, type, schema, locales),
-  }
+  };
 }
 
 /**
@@ -80,12 +80,12 @@ export function contentProjection(
  * comments quote it as the bound on a document's outbound edges
  * (`assets.ts`, `documentUsage`).
  */
-const MAX_ROWS = 400
+const MAX_ROWS = 400;
 
 /** Bound parameters per row of each multi-row insert below, for `bindChunks`. */
-const INDEX_BINDS = 5
-const REFS_BINDS = 3
-const SEARCH_BINDS = 4
+const INDEX_BINDS = 5;
+const REFS_BINDS = 3;
+const SEARCH_BINDS = 4;
 
 /**
  * The index, ref and full-text rows for one story, replacing whatever is there.
@@ -112,12 +112,12 @@ export function indexStatements(
   projection: ContentProjection,
 ): D1PreparedStatement[] {
   const out: D1PreparedStatement[] = [
-    db.prepare('delete from content_index where story_id = ?').bind(storyId),
-    db.prepare('delete from content_refs where from_story = ?').bind(storyId),
-  ]
+    db.prepare("delete from content_index where story_id = ?").bind(storyId),
+    db.prepare("delete from content_refs where from_story = ?").bind(storyId),
+  ];
 
   for (const chunk of bindChunks(projection.index.slice(0, MAX_ROWS), INDEX_BINDS)) {
-    const values = chunk.map(() => '(?, ?, ?, ?, ?)').join(', ')
+    const values = chunk.map(() => "(?, ?, ?, ?, ?)").join(", ");
     out.push(
       db
         .prepare(
@@ -125,7 +125,7 @@ export function indexStatements(
            values ${values}`,
         )
         .bind(...chunk.flatMap((r) => [storyId, r.locale, r.field, r.text, r.num])),
-    )
+    );
   }
 
   // `or ignore`, not a plain insert: the same target can legitimately appear
@@ -141,12 +141,12 @@ export function indexStatements(
   // published, and that has to be as true of "which pages use this photograph"
   // as it is of "which pages reference this record".
   for (const chunk of bindChunks(projection.refs.slice(0, MAX_ROWS), REFS_BINDS)) {
-    const values = chunk.map(() => '(?, ?, ?)').join(', ')
+    const values = chunk.map(() => "(?, ?, ?)").join(", ");
     out.push(
       db
         .prepare(`insert or ignore into content_refs (from_story, to_id, kind) values ${values}`)
         .bind(...chunk.flatMap((r) => [storyId, r.to, r.kind])),
-    )
+    );
   }
 
   // The full-text pair, appended after the two tables above (decision 1). Four
@@ -173,20 +173,20 @@ export function indexStatements(
          select 'delete', id, title, body from content_text where story_id = ?`,
       )
       .bind(storyId),
-    db.prepare('delete from content_text where story_id = ?').bind(storyId),
-  )
+    db.prepare("delete from content_text where story_id = ?").bind(storyId),
+  );
 
   // Four binds a row against `db.ts`'s ninety-parameter budget is twenty-two rows
   // a statement, and `MAX_SEARCH_ROWS` is twenty-four — so a site with enough
   // declared locales chunks here exactly as the two tables above do, into
   // statements that join this same array and therefore the same transaction.
   for (const chunk of bindChunks(projection.search, SEARCH_BINDS)) {
-    const values = chunk.map(() => '(?, ?, ?, ?)').join(', ')
+    const values = chunk.map(() => "(?, ?, ?, ?)").join(", ");
     out.push(
       db
         .prepare(`insert into content_text (story_id, locale, title, body) values ${values}`)
         .bind(...chunk.flatMap((r) => [storyId, r.locale, r.title, r.body])),
-    )
+    );
   }
 
   // Last, and after **every** insert chunk: this is the statement that indexes
@@ -207,10 +207,10 @@ export function indexStatements(
            select id, title, body from content_text where story_id = ?`,
         )
         .bind(storyId),
-    )
+    );
   }
 
-  return out
+  return out;
 }
 
 /**
@@ -255,9 +255,9 @@ export function indexStatements(
  * `in ()` — not valid SQL — unreachable.
  */
 export function clearIndexStatements(db: FolioDb, ids: readonly string[]): D1PreparedStatement[] {
-  const out: D1PreparedStatement[] = []
+  const out: D1PreparedStatement[] = [];
   for (const chunk of bindChunks(ids, 1)) {
-    const placeholders = chunk.map(() => '?').join(', ')
+    const placeholders = chunk.map(() => "?").join(", ");
     out.push(
       db.prepare(`delete from content_index where story_id in (${placeholders})`).bind(...chunk),
       db.prepare(`delete from content_refs where from_story in (${placeholders})`).bind(...chunk),
@@ -271,9 +271,9 @@ export function clearIndexStatements(db: FolioDb, ids: readonly string[]): D1Pre
         )
         .bind(...chunk),
       db.prepare(`delete from content_text where story_id in (${placeholders})`).bind(...chunk),
-    )
+    );
   }
-  return out
+  return out;
 }
 
 /**
@@ -309,9 +309,9 @@ export function clearInboundRefStatements(
   targets: readonly string[],
 ): D1PreparedStatement[] {
   return bindChunks(targets, 1).map((chunk) => {
-    const placeholders = chunk.map(() => '?').join(', ')
-    return db.prepare(`delete from content_refs where to_id in (${placeholders})`).bind(...chunk)
-  })
+    const placeholders = chunk.map(() => "?").join(", ");
+    return db.prepare(`delete from content_refs where to_id in (${placeholders})`).bind(...chunk);
+  });
 }
 
 /**
@@ -328,12 +328,12 @@ export async function countReferencesTo(
   id: string,
 ): Promise<{ total: number; links: number; references: number }> {
   const { results } = await db
-    .prepare('select kind, count(*) as n from content_refs where to_id = ? group by kind')
+    .prepare("select kind, count(*) as n from content_refs where to_id = ? group by kind")
     .bind(id)
-    .all<{ kind: string; n: number }>()
-  const links = results.find((r) => r.kind === 'link')?.n ?? 0
-  const references = results.find((r) => r.kind === 'reference')?.n ?? 0
-  return { total: links + references, links, references }
+    .all<{ kind: string; n: number }>();
+  const links = results.find((r) => r.kind === "link")?.n ?? 0;
+  const references = results.find((r) => r.kind === "reference")?.n ?? 0;
+  return { total: links + references, links, references };
 }
 
 /**
@@ -347,12 +347,12 @@ export async function countReferencesTo(
  * wrong for everything else.
  */
 export interface IndexedValue {
-  text: string
-  num: number | null
+  text: string;
+  num: number | null;
 }
 
 /** Indexed values keyed by story id, then by field name. */
-export type IndexedValues = Record<string, Record<string, IndexedValue>>
+export type IndexedValues = Record<string, Record<string, IndexedValue>>;
 
 /**
  * The indexed values for a set of documents, for the admin's Data list view
@@ -376,22 +376,22 @@ export async function indexedValuesFor(
   db: FolioDb,
   ids: readonly string[],
 ): Promise<IndexedValues> {
-  if (ids.length === 0) return {}
-  const placeholders = ids.map(() => '?').join(', ')
+  if (ids.length === 0) return {};
+  const placeholders = ids.map(() => "?").join(", ");
   const { results } = await db
     .prepare(
       `select story_id as storyId, field, text_value as text, num_value as num
        from content_index where locale = '' and story_id in (${placeholders})`,
     )
     .bind(...ids)
-    .all<{ storyId: string; field: string; text: string | null; num: number | null }>()
+    .all<{ storyId: string; field: string; text: string | null; num: number | null }>();
 
-  const out: IndexedValues = {}
+  const out: IndexedValues = {};
   for (const row of results) {
-    out[row.storyId] ??= {}
-    out[row.storyId]![row.field] = { text: row.text ?? '', num: row.num ?? null }
+    out[row.storyId] ??= {};
+    out[row.storyId]![row.field] = { text: row.text ?? "", num: row.num ?? null };
   }
-  return out
+  return out;
 }
 
 /** The distinct documents pointing at `id`, for a warning that names them. */
@@ -402,8 +402,8 @@ export async function referencesTo(
   const { results } = await db
     .prepare('select from_story as "from", kind from content_refs where to_id = ? order by "from"')
     .bind(id)
-    .all<{ from: string; kind: string }>()
-  return results
+    .all<{ from: string; kind: string }>();
+  return results;
 }
 
 /**
@@ -432,7 +432,7 @@ export async function assetReferences(db: FolioDb, key: string): Promise<string[
       `select from_story as "from" from content_refs
        where to_id = ? and kind = ? order by "from"`,
     )
-    .bind(key, 'asset')
-    .all<{ from: string }>()
-  return results.map((row) => row.from)
+    .bind(key, "asset")
+    .all<{ from: string }>();
+  return results.map((row) => row.from);
 }

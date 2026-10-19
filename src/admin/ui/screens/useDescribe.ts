@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 
 /**
  * Whether this deployment describes anything, and what a run of it will cost
@@ -27,45 +27,45 @@ import { useEffect, useState } from 'react'
 export interface DescribeConfig {
   /** Whether the host configured `describe`. **False until the read lands**, so
    * a control is never drawn on an optimistic guess. */
-  configured: boolean
+  configured: boolean;
   /** Whether a new upload is described in the background. Reported so the run
    * panel can say why the backlog is empty on a fresh library. */
-  onUpload: boolean
+  onUpload: boolean;
   /** Whether the Images binding is bound. Without it the *original* bytes are
    * described rather than a 512px WebP: it works, and it costs more, and the run
    * panel says so once. */
-  images: boolean
+  images: boolean;
   /** Rows per call of a run — the server's own default, so the panel's progress
    * arithmetic and the server's batching cannot drift. */
-  batch: number
+  batch: number;
 }
 
-const ABSENT: DescribeConfig = { configured: false, onUpload: false, images: false, batch: 10 }
+const ABSENT: DescribeConfig = { configured: false, onUpload: false, images: false, batch: 10 };
 
 export function useDescribe(apiBase: string): DescribeConfig {
-  const [config, setConfig] = useState<DescribeConfig>(ABSENT)
+  const [config, setConfig] = useState<DescribeConfig>(ABSENT);
 
   useEffect(() => {
-    let live = true
+    let live = true;
     fetch(`${apiBase}/assets/describe`)
       .then(async (res) => (res.ok ? ((await res.json()) as Partial<DescribeConfig>) : null))
       .then((body) => {
-        if (!live || !body?.configured) return
+        if (!live || !body?.configured) return;
         setConfig({
           configured: true,
           onUpload: body.onUpload === true,
           images: body.images === true,
-          batch: typeof body.batch === 'number' ? body.batch : ABSENT.batch,
-        })
+          batch: typeof body.batch === "number" ? body.batch : ABSENT.batch,
+        });
       })
       .catch(() => {
         // Deliberately silent — see the header. The screen is the one it was
         // before this feature existed.
-      })
+      });
     return () => {
-      live = false
-    }
-  }, [apiBase])
+      live = false;
+    };
+  }, [apiBase]);
 
-  return config
+  return config;
 }

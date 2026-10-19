@@ -7,22 +7,22 @@
  * here is about not offering an affordance the server will refuse, never about
  * enforcement. The reject path has to be correct even when this is wrong.
  */
-import type { AuthPolicy } from '../server/auth/config'
-import type { MePreview, MeScope, MeSites } from '../server/auth/me-sites'
-import { atLeast, type Role, type Scope } from '../server/auth/roles'
-import type { BrandRef } from '../server/types'
+import type { AuthPolicy } from "../server/auth/config";
+import type { MePreview, MeScope, MeSites } from "../server/auth/me-sites";
+import { atLeast, type Role, type Scope } from "../server/auth/roles";
+import type { BrandRef } from "../server/types";
 
-export type { MePreview, MeScope, MeSites }
+export type { MePreview, MeScope, MeSites };
 
 export interface MeUser {
-  kind: 'user'
-  id: string
-  name: string
-  colour: string
-  role: Role
+  kind: "user";
+  id: string;
+  name: string;
+  colour: string;
+  role: Role;
   /** The caller's own address. Present for a session actor; the account screen
    * shows it so an editor can see which address they are signed in as. */
-  email?: string
+  email?: string;
   /**
    * Which identity provider set this person's role, or null when Folio did.
    *
@@ -32,20 +32,20 @@ export interface MeUser {
    * changed" failure this codebase refuses (`foundation/auth-providers.md`
    * checkpoint 2).
    */
-  roleFrom?: string | null
+  roleFrom?: string | null;
 }
 
 export interface MeToken {
-  kind: 'token'
-  id: string
-  name: string
-  scopes: Scope[]
+  kind: "token";
+  id: string;
+  name: string;
+  scopes: Scope[];
 }
 
 export interface Me {
   /** `'open'` is a deployment with no accounts at all. */
-  mode: 'open' | 'session'
-  actor: MeUser | MeToken | null
+  mode: "open" | "session";
+  actor: MeUser | MeToken | null;
   /**
    * Where "sign in" goes.
    *
@@ -55,7 +55,7 @@ export interface Me {
    * that. This comment said the opposite until a screen tried to tell a real `open`
    * response from the optimistic default by looking here, which works by accident.
    */
-  loginUrl: string
+  loginUrl: string;
   /**
    * This browser's session, as opposed to this person.
    *
@@ -70,7 +70,7 @@ export interface Me {
    * `../../docs/specs/foundation/passkeys.md`'s account screen, which lists a
    * person's browsers and says how each of them got in.
    */
-  session?: { provider: string }
+  session?: { provider: string };
   /**
    * The sign-in providers and session policy, for the Settings screen
    * (`../../docs/ui-architecture.md` decision 6). Absent under `auth: 'open'`,
@@ -87,7 +87,7 @@ export interface Me {
    * the answer to "what is this site configured as", which is a different question
    * from "what may I do".
    */
-  policy?: AuthPolicy
+  policy?: AuthPolicy;
   /**
    * Whether this person may enrol a passkey, and why not when they may not.
    *
@@ -101,7 +101,7 @@ export interface Me {
    * "absent, not disabled" rule for a permission the person cannot change.
    * `../../docs/specs/foundation/passkeys.md` decision 6.
    */
-  passkeys?: { allowed: boolean; reason?: string }
+  passkeys?: { allowed: boolean; reason?: string };
   /**
    * Whether the host declared the `SPACE` binding, and therefore whether the
    * shell opens the space channel (`../../docs/specs/editing/live-collaboration.md`).
@@ -123,7 +123,7 @@ export interface Me {
    * role — a viewer already gets the story socket, and seeing who else is here
    * is not an editing capability.
    */
-  space?: boolean
+  space?: boolean;
   /**
    * The scopes the caller reaches, the sites they may preview, and whether they are
    * the platform — **present only on a deployment with `sites`**
@@ -134,14 +134,14 @@ export interface Me {
    * With it, `actor.role` is the caller's `*` grant and says nothing about any one
    * site: the predicates below read the role on `scope` instead.
    */
-  sites?: MeSites
+  sites?: MeSites;
   /**
    * The scope the admin is showing, set by `atScope` and never by the server. On a
    * multi-site deployment it decides which role every predicate below reads; absent
    * there means "no scope chosen", which grants nothing scoped (the Sites screen is
    * the one page that has none).
    */
-  scope?: string | null
+  scope?: string | null;
 }
 
 /**
@@ -153,9 +153,9 @@ export interface Me {
  * makes the editor flicker into life read-only on every load, which reads as a
  * bug on the one deployment shape where permissions do not exist.
  */
-export const OPEN: Me = { mode: 'open', actor: null, loginUrl: '' }
+export const OPEN: Me = { mode: "open", actor: null, loginUrl: "" };
 
-const asUser = (me: Me): MeUser | null => (me.actor?.kind === 'user' ? me.actor : null)
+const asUser = (me: Me): MeUser | null => (me.actor?.kind === "user" ? me.actor : null);
 
 /**
  * The role every content predicate below reads: the caller's own with no `sites`,
@@ -164,20 +164,20 @@ const asUser = (me: Me): MeUser | null => (me.actor?.kind === 'user' ? me.actor 
  * picked**, so a screen never asks `role === 'admin'` itself.
  */
 function roleOf(me: Me): Role | null {
-  const user = asUser(me)
-  if (!user) return null
-  if (!me.sites) return user.role
-  return me.sites.scopes.find((scope) => scope.id === me.scope)?.role ?? null
+  const user = asUser(me);
+  if (!user) return null;
+  if (!me.sites) return user.role;
+  return me.sites.scopes.find((scope) => scope.id === me.scope)?.role ?? null;
 }
 
 const atLeastRole = (me: Me, min: Role): boolean => {
-  const role = roleOf(me)
-  return role !== null && atLeast(role, min)
-}
+  const role = roleOf(me);
+  return role !== null && atLeast(role, min);
+};
 
 /** Whether this deployment has `sites`. */
 export function isMultiSite(me: Me): boolean {
-  return me.sites !== undefined
+  return me.sites !== undefined;
 }
 
 /**
@@ -185,7 +185,7 @@ export function isMultiSite(me: Me): boolean {
  * deployment is handed back the object it gave in.
  */
 export function atScope(me: Me, scope: string | null): Me {
-  return me.sites ? { ...me, scope } : me
+  return me.sites ? { ...me, scope } : me;
 }
 
 /**
@@ -195,13 +195,13 @@ export function atScope(me: Me, scope: string | null): Me {
  * socket gives them the same answer. With no `sites` this is `canEdit`.
  */
 export function canEditIn(me: Me, owner: string | undefined): boolean {
-  return canEdit(owner === undefined ? me : atScope(me, owner))
+  return canEdit(owner === undefined ? me : atScope(me, owner));
 }
 
 /** The scopes to offer in a switcher, in the order the server gave them. Empty with
  * no `sites`, which is what keeps the switcher out of a single-site admin. */
 export function scopeChoices(me: Me): readonly MeScope[] {
-  return me.sites?.scopes ?? []
+  return me.sites?.scopes ?? [];
 }
 
 /**
@@ -210,36 +210,36 @@ export function scopeChoices(me: Me): readonly MeScope[] {
  * (`multi-brand.md` decision 20).
  */
 export function brandsOf(me: Me): readonly BrandRef[] {
-  return me.sites?.brands ?? []
+  return me.sites?.brands ?? [];
 }
 
 /** Whether the scope switcher exists at all. */
 export function showsScopeSwitcher(me: Me): boolean {
-  return scopeChoices(me).length > 0
+  return scopeChoices(me).length > 0;
 }
 
 /** A scope's display name, or its id when the caller does not reach it. */
 export function scopeName(me: Me, id: string): string {
   return (
-    me.sites?.scopes.find((scope) => scope.id === id)?.name ?? (id === 'shared' ? 'Shared' : id)
-  )
+    me.sites?.scopes.find((scope) => scope.id === id)?.name ?? (id === "shared" ? "Shared" : id)
+  );
 }
 
 /** The scope `{base}` sends a caller to: their first site, else group, else shared. */
 export function firstScope(me: Me): string | null {
-  const choices = scopeChoices(me)
+  const choices = scopeChoices(me);
   return (
     (
-      choices.find((s) => s.kind === 'site') ??
-      choices.find((s) => s.kind === 'group') ??
+      choices.find((s) => s.kind === "site") ??
+      choices.find((s) => s.kind === "group") ??
       choices[0]
     )?.id ?? null
-  )
+  );
 }
 
 /** The sites they may preview, for the editor's "preview in" picker. */
 export function previewSites(me: Me): readonly MePreview[] {
-  return me.sites?.previewable ?? []
+  return me.sites?.previewable ?? [];
 }
 
 /**
@@ -249,7 +249,7 @@ export function previewSites(me: Me): readonly MePreview[] {
  * picks a site from `/me`'s `previewable`").
  */
 export function previewChoices(me: Me, owner: string): readonly MePreview[] {
-  return previewSites(me).filter((site) => site.chain.includes(owner))
+  return previewSites(me).filter((site) => site.chain.includes(owner));
 }
 
 /**
@@ -258,23 +258,23 @@ export function previewChoices(me: Me, owner: string): readonly MePreview[] {
  * (`multi-site.md`'s edge cases). Absent, not disabled, with no `sites`.
  */
 export function canManageSites(me: Me): boolean {
-  if (!me.sites) return false
-  if (me.mode === 'open') return true
-  return asUser(me) !== null && me.sites.platform
+  if (!me.sites) return false;
+  if (me.mode === "open") return true;
+  return asUser(me) !== null && me.sites.platform;
 }
 
 /** May they change a document's contents? */
 export function canEdit(me: Me): boolean {
-  if (me.mode === 'open') return true
+  if (me.mode === "open") return true;
   // A token is not a person with a cursor; it never drives the admin, and the
   // socket refuses it outright (4004).
-  return atLeastRole(me, 'editor')
+  return atLeastRole(me, "editor");
 }
 
 /** May they publish, unpublish or checkpoint? */
 export function canPublish(me: Me): boolean {
-  if (me.mode === 'open') return true
-  return atLeastRole(me, 'publisher')
+  if (me.mode === "open") return true;
+  return atLeastRole(me, "publisher");
 }
 
 /**
@@ -284,7 +284,7 @@ export function canPublish(me: Me): boolean {
  * (`platform/draft-sharing.md`'s "No admin UI" note).
  */
 export function canShare(me: Me): boolean {
-  return canPublish(me)
+  return canPublish(me);
 }
 
 /**
@@ -295,12 +295,12 @@ export function canShare(me: Me): boolean {
  * Changing or removing an existing URL is `canManageContent`.
  */
 export function canCreateContent(me: Me): boolean {
-  return canEdit(me)
+  return canEdit(me);
 }
 
 /** May they delete, move or rename a document, or add a redirect? */
 export function canManageContent(me: Me): boolean {
-  return canPublish(me)
+  return canPublish(me);
 }
 
 /**
@@ -317,7 +317,7 @@ export function canManageContent(me: Me): boolean {
  * `canAdmin`.
  */
 export function canManageAssets(me: Me): boolean {
-  return canEdit(me)
+  return canEdit(me);
 }
 
 /**
@@ -331,7 +331,7 @@ export function canManageAssets(me: Me): boolean {
  * thereby somebody who may read the enquiries.
  */
 export function canReadResponses(me: Me): boolean {
-  return canPublish(me)
+  return canPublish(me);
 }
 
 /**
@@ -340,11 +340,11 @@ export function canReadResponses(me: Me): boolean {
  * be offering a broken screen.
  */
 export function canManageAccess(me: Me): boolean {
-  const user = asUser(me)
-  if (me.mode !== 'session' || user === null) return false
+  const user = asUser(me);
+  if (me.mode !== "session" || user === null) return false;
   // Users and tokens are the platform tier with `sites` (`ADMIN`): a site's own
   // admin manages neither.
-  return me.sites ? me.sites.platform : user.role === 'admin'
+  return me.sites ? me.sites.platform : user.role === "admin";
 }
 
 /**
@@ -366,12 +366,12 @@ export function canManageAccess(me: Me): boolean {
  * and a deployment with no accounts reaches all of them.
  */
 export function canAdmin(me: Me): boolean {
-  if (me.mode === 'open') return true
-  const user = asUser(me)
-  if (user === null) return false
+  if (me.mode === "open") return true;
+  const user = asUser(me);
+  if (user === null) return false;
   // `ADMIN` is the platform tier with `sites`: the describe run is theirs and no
   // site admin's. A form's delete is `SCOPE_ADMIN` and is `canDeleteForms`.
-  return me.sites ? me.sites.platform : atLeast(user.role, 'admin')
+  return me.sites ? me.sites.platform : atLeast(user.role, "admin");
 }
 
 /**
@@ -385,16 +385,16 @@ export function canAdmin(me: Me): boolean {
  * `auth: 'open'`, not a surface that stops existing without accounts.
  */
 export function canDeleteForms(me: Me): boolean {
-  if (me.mode === 'open') return true
+  if (me.mode === "open") return true;
   // `SCOPE_ADMIN`: admin on the form's own scope, not the platform.
-  return atLeastRole(me, 'admin')
+  return atLeastRole(me, "admin");
 }
 
 /** The label for the user menu, or null when there is nobody to name. */
 export function actorLabel(me: Me): string | null {
-  if (me.actor?.kind === 'user') return me.actor.name
-  if (me.actor?.kind === 'token') return `token:${me.actor.name}`
-  return null
+  if (me.actor?.kind === "user") return me.actor.name;
+  if (me.actor?.kind === "token") return `token:${me.actor.name}`;
+  return null;
 }
 
 /** The reason an affordance is disabled, for a `title`, or undefined when it is
@@ -402,22 +402,22 @@ export function actorLabel(me: Me): string | null {
  * most annoying possible version of a permissions system. */
 export function whyNot(
   me: Me,
-  need: 'edit' | 'create' | 'publish' | 'share' | 'manage',
+  need: "edit" | "create" | "publish" | "share" | "manage",
 ): string | undefined {
-  const user = asUser(me)
-  if (me.mode === 'open') return undefined
-  if (!user) return 'Sign in to make changes'
-  const role = roleOf(me) ?? user.role
+  const user = asUser(me);
+  if (me.mode === "open") return undefined;
+  if (!user) return "Sign in to make changes";
+  const role = roleOf(me) ?? user.role;
   // 'create' rides on canEdit: an editor may start a document even though they
   // may not move or delete one, so a refusal here means read-only, not "cannot
   // publish".
-  const allowed = need === 'edit' || need === 'create' ? canEdit(me) : canPublish(me)
-  if (allowed) return undefined
-  if (need === 'edit' || need === 'create') return `Your role (${role}) is read-only`
+  const allowed = need === "edit" || need === "create" ? canEdit(me) : canPublish(me);
+  if (allowed) return undefined;
+  if (need === "edit" || need === "create") return `Your role (${role}) is read-only`;
   // A share is `PUBLISH`'s, and the route answers 403 with this very wording.
-  return need === 'publish' || need === 'share'
+  return need === "publish" || need === "share"
     ? `Your role (${role}) may not publish`
-    : `Your role (${role}) may not move or delete documents`
+    : `Your role (${role}) may not move or delete documents`;
 }
 
 /**
@@ -427,16 +427,16 @@ export function whyNot(
  */
 export async function fetchMe(apiBase: string, base: string): Promise<Me> {
   try {
-    const res = await fetch(`${apiBase}/me`)
+    const res = await fetch(`${apiBase}/me`);
     if (res.status === 401) {
       // `base`, not `apiBase`: the sign-in flow is HTML on the bare mount, and a
       // 401 is the one path that has to build this URL itself rather than reading
       // the `loginUrl` a 200 carries.
-      return { mode: 'session', actor: null, loginUrl: `${base}/login` }
+      return { mode: "session", actor: null, loginUrl: `${base}/login` };
     }
-    if (!res.ok) return OPEN
-    return (await res.json()) as Me
+    if (!res.ok) return OPEN;
+    return (await res.json()) as Me;
   } catch {
-    return OPEN
+    return OPEN;
   }
 }

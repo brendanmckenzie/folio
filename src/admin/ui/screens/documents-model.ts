@@ -16,10 +16,10 @@
  * (`GET {base}/api/documents`). That is the shape of this port: half the file was
  * doing work a route should have been doing.
  */
-import type { IndexedValue } from '../../../server/content-index'
-import { indexedFields } from '../../../core/index-projection'
-import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import type { DocumentSort, StoryFilter, StoryMeta, StoryState } from '../../../core/story'
+import type { IndexedValue } from "../../../server/content-index";
+import { indexedFields } from "../../../core/index-projection";
+import type { DocumentType, SchemaIndex } from "../../../core/schema";
+import type { DocumentSort, StoryFilter, StoryMeta, StoryState } from "../../../core/story";
 
 /* -------------------------------------------------------------------- rows --- */
 
@@ -33,23 +33,23 @@ import type { DocumentSort, StoryFilter, StoryMeta, StoryState } from '../../../
  * nothing has to be zipped.
  */
 export interface DocumentRow extends StoryMeta {
-  indexed: Record<string, IndexedValue>
+  indexed: Record<string, IndexedValue>;
 }
 
 /* ----------------------------------------------------------------- columns --- */
 
-export type ColumnKind = 'title' | 'field' | 'state' | 'updated'
+export type ColumnKind = "title" | "field" | "state" | "updated";
 
 export interface DocumentColumn {
   /** Unique, and what a sortable header reports back. */
-  key: string
-  label: string
-  kind: ColumnKind
+  key: string;
+  label: string;
+  kind: ColumnKind;
   /** Set for `kind: 'field'`: the `indexed` field this column reads. */
-  field?: string
+  field?: string;
   /** The ordering this header asks the route for, or absent when the column
    * cannot be sorted. See `SORTABLE`. */
-  sort?: DocumentSort
+  sort?: DocumentSort;
 }
 
 /**
@@ -74,9 +74,9 @@ export interface DocumentColumn {
  * looks broken.
  */
 const SORTABLE: Partial<Record<ColumnKind, DocumentSort>> = {
-  title: 'title',
-  updated: 'edited',
-}
+  title: "title",
+  updated: "edited",
+};
 
 /**
  * The columns for one type: its title, then its root block's `indexed` fields, then
@@ -93,20 +93,20 @@ export function documentColumns(
   labelOf: (field: string, fallback: string) => string = (_f, fallback) => fallback,
 ): DocumentColumn[] {
   const columns: DocumentColumn[] = [
-    column('title', type.titleField ? labelOf(type.titleField, 'Title') : 'Title', 'title'),
-  ]
+    column("title", type.titleField ? labelOf(type.titleField, "Title") : "Title", "title"),
+  ];
   for (const [name, field] of indexedFields(schema, type.root)) {
-    if (name === type.titleField) continue
-    columns.push({ ...column(`f:${name}`, field.label ?? name, 'field'), field: name })
+    if (name === type.titleField) continue;
+    columns.push({ ...column(`f:${name}`, field.label ?? name, "field"), field: name });
   }
-  columns.push(column('state', 'Status', 'state'))
-  columns.push(column('updated', 'Last edited', 'updated'))
-  return columns
+  columns.push(column("state", "Status", "state"));
+  columns.push(column("updated", "Last edited", "updated"));
+  return columns;
 }
 
 function column(key: string, label: string, kind: ColumnKind): DocumentColumn {
-  const sort = SORTABLE[kind]
-  return { key, label, kind, ...(sort ? { sort } : {}) }
+  const sort = SORTABLE[kind];
+  return { key, label, kind, ...(sort ? { sort } : {}) };
 }
 
 /**
@@ -120,9 +120,9 @@ function column(key: string, label: string, kind: ColumnKind): DocumentColumn {
  * values…"). A per-row explanation beats a standing apology.
  */
 export function cellText(row: DocumentRow, column: DocumentColumn): string {
-  if (column.kind === 'title') return row.title
-  if (column.kind === 'field') return row.indexed[column.field ?? '']?.text ?? ''
-  return ''
+  if (column.kind === "title") return row.title;
+  if (column.kind === "field") return row.indexed[column.field ?? ""]?.text ?? "";
+  return "";
 }
 
 /**
@@ -134,32 +134,32 @@ export function cellText(row: DocumentRow, column: DocumentColumn): string {
  * a different claim from Content's badge, which only tells you there is something
  * to publish.
  */
-export function isStale(row: Pick<DocumentRow, 'state'>): boolean {
-  return row.state === 'changed'
+export function isStale(row: Pick<DocumentRow, "state">): boolean {
+  return row.state === "changed";
 }
 
 /* --------------------------------------------------------------------- URL --- */
 
 /** The state filter's "no filter" value. A chip needs a value for "All", and
  * `undefined` cannot be one. Same shape as Content's. */
-export type StateFilter = 'all' | StoryState
+export type StateFilter = "all" | StoryState;
 
 export interface DocumentsUrl {
-  sort: DocumentSort
+  sort: DocumentSort;
   /** Absent means the sort's own natural direction — `title` ascending, `edited`
    * newest first. Only present once somebody has clicked a header twice. */
-  dir: 'asc' | 'desc' | undefined
-  state: StateFilter
-  q: string
+  dir: "asc" | "desc" | undefined;
+  state: StateFilter;
+  q: string;
 }
 
 export function parseDocumentsUrl(query: Readonly<Record<string, string>>): DocumentsUrl {
   return {
-    sort: isDocumentSort(query.sort) ? query.sort : 'title',
-    dir: query.dir === 'asc' || query.dir === 'desc' ? query.dir : undefined,
-    state: isStateFilter(query.state) ? query.state : 'all',
-    q: query.q ?? '',
-  }
+    sort: isDocumentSort(query.sort) ? query.sort : "title",
+    dir: query.dir === "asc" || query.dir === "desc" ? query.dir : undefined,
+    state: isStateFilter(query.state) ? query.state : "all",
+    q: query.q ?? "",
+  };
 }
 
 /**
@@ -169,11 +169,11 @@ export function parseDocumentsUrl(query: Readonly<Record<string, string>>): Docu
  */
 export function documentsQuery(url: DocumentsUrl): Record<string, string | undefined> {
   return {
-    sort: url.sort === 'title' ? undefined : url.sort,
+    sort: url.sort === "title" ? undefined : url.sort,
     dir: url.dir === naturalDir(url.sort) ? undefined : url.dir,
-    state: url.state === 'all' ? undefined : url.state,
+    state: url.state === "all" ? undefined : url.state,
     q: url.q || undefined,
-  }
+  };
 }
 
 /**
@@ -184,13 +184,13 @@ export function documentsQuery(url: DocumentsUrl): Record<string, string | undef
  * it), so this is stated in two places on purpose and they have to agree: the URL
  * is written here and read there.
  */
-export function naturalDir(sort: DocumentSort): 'asc' | 'desc' {
-  return sort === 'edited' ? 'desc' : 'asc'
+export function naturalDir(sort: DocumentSort): "asc" | "desc" {
+  return sort === "edited" ? "desc" : "asc";
 }
 
 /** The direction in force, resolving the absent case. */
-export function dirOf(url: DocumentsUrl): 'asc' | 'desc' {
-  return url.dir ?? naturalDir(url.sort)
+export function dirOf(url: DocumentsUrl): "asc" | "desc" {
+  return url.dir ?? naturalDir(url.sort);
 }
 
 /**
@@ -203,8 +203,8 @@ export function dirOf(url: DocumentsUrl): 'asc' | 'desc' {
  * and which reads as a bug rather than a preserved preference.
  */
 export function withSort(url: DocumentsUrl, sort: DocumentSort): DocumentsUrl {
-  if (url.sort !== sort) return { ...url, sort, dir: naturalDir(sort) }
-  return { ...url, dir: dirOf(url) === 'asc' ? 'desc' : 'asc' }
+  if (url.sort !== sort) return { ...url, sort, dir: naturalDir(sort) };
+  return { ...url, dir: dirOf(url) === "asc" ? "desc" : "asc" };
 }
 
 /**
@@ -214,9 +214,9 @@ export function withSort(url: DocumentsUrl, sort: DocumentSort): DocumentsUrl {
  */
 export function filterOf(url: DocumentsUrl): StoryFilter {
   return {
-    ...(url.state === 'all' ? {} : { state: url.state }),
+    ...(url.state === "all" ? {} : { state: url.state }),
     ...(url.q.trim() ? { q: url.q.trim() } : {}),
-  }
+  };
 }
 
 /**
@@ -224,7 +224,7 @@ export function filterOf(url: DocumentsUrl): StoryFilter {
  * states — offering *clear filters* under the first is offering to clear nothing.
  */
 export function isNarrowed(filter: StoryFilter): boolean {
-  return Boolean(filter.state || filter.q)
+  return Boolean(filter.state || filter.q);
 }
 
 /**
@@ -239,26 +239,26 @@ export function documentsParams(
   type: string,
   opts: { limit: number; cursor?: string | null; count?: boolean },
 ): URLSearchParams {
-  const filter = filterOf(url)
+  const filter = filterOf(url);
   const params = new URLSearchParams({
     type,
     sort: url.sort,
     dir: dirOf(url),
     limit: String(opts.limit),
-  })
-  if (filter.state) params.set('state', filter.state)
-  if (filter.q) params.set('q', filter.q)
-  if (opts.count) params.set('count', '1')
-  if (opts.cursor) params.set('cursor', opts.cursor)
-  return params
+  });
+  if (filter.state) params.set("state", filter.state);
+  if (filter.q) params.set("q", filter.q);
+  if (opts.count) params.set("count", "1");
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  return params;
 }
 
 function isDocumentSort(raw: string | undefined): raw is DocumentSort {
-  return raw === 'ord' || raw === 'title' || raw === 'edited'
+  return raw === "ord" || raw === "title" || raw === "edited";
 }
 
 function isStateFilter(raw: string | undefined): raw is StateFilter {
   return (
-    raw === 'all' || raw === 'draft' || raw === 'live' || raw === 'changed' || raw === 'unpublished'
-  )
+    raw === "all" || raw === "draft" || raw === "live" || raw === "changed" || raw === "unpublished"
+  );
 }

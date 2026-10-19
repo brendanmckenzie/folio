@@ -35,8 +35,8 @@
  * preview origin's v1 routes and draft mode's switch) and `handle()`'s host
  * confinement (a preview origin answers no admin route at all).
  */
-import { ALL_SCOPES, chain, type Registry } from '../../core/sites'
-import type { FolioDb } from '../db'
+import { ALL_SCOPES, chain, type Registry } from "../../core/sites";
+import type { FolioDb } from "../db";
 import {
   atLeast,
   type GrantActor,
@@ -45,19 +45,19 @@ import {
   ROLES,
   SCOPES,
   tokenScopesOn,
-} from './roles'
-import { hashToken, mintId, mintSecret } from './secrets'
+} from "./roles";
+import { hashToken, mintId, mintSecret } from "./secrets";
 
 /** How long a code lives between `site/start` and `site/enter`: one redirect. */
-export const GRANT_CODE_TTL_MS = 60_000
+export const GRANT_CODE_TTL_MS = 60_000;
 
 /** The longest a session's grant lives once redeemed: a day, or the session's own
  * expiry if that is sooner. */
-export const GRANT_TTL_MS = 24 * 60 * 60 * 1000
+export const GRANT_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** A token grant, and any grant MCP's `preview_document` mints, lives five minutes
  * once redeemed: one screenshot's worth. */
-export const TOKEN_GRANT_TTL_MS = 5 * 60 * 1000
+export const TOKEN_GRANT_TTL_MS = 5 * 60 * 1000;
 
 /**
  * The id prefix of a **short** grant — five minutes whatever holds it, the one a
@@ -66,28 +66,28 @@ export const TOKEN_GRANT_TTL_MS = 5 * 60 * 1000
  * than a column because the consume statement is the only reader and `0011` is
  * landed: `sgs_` short, `sgr_` a session's ordinary day-long grant.
  */
-const SHORT_PREFIX = 'sgs'
+const SHORT_PREFIX = "sgs";
 
 /** A code or a grant token, as `mintSecret()` produces it. Screened before either
  * reaches `hashToken` or a D1 bind. */
-export const GRANT_SECRET = /^[0-9a-f]{64}$/
+export const GRANT_SECRET = /^[0-9a-f]{64}$/;
 
 /** The roles that give `READ_DRAFT`: every one, today. Derived rather than written
  * out, so a weaker role added later is not silently a previewer. */
-const DRAFT_ROLES: readonly string[] = ROLES.filter((r) => atLeast(r, READ_DRAFT.role))
+const DRAFT_ROLES: readonly string[] = ROLES.filter((r) => atLeast(r, READ_DRAFT.role));
 
 /** The token scopes that imply `content:read:draft`, by `hasScope`'s own table. */
-const DRAFT_SCOPES: readonly string[] = SCOPES.filter((s) => hasScope([s], READ_DRAFT.scope))
+const DRAFT_SCOPES: readonly string[] = SCOPES.filter((s) => hasScope([s], READ_DRAFT.scope));
 
-const holes = (n: number) => Array.from({ length: n }, () => '?').join(', ')
+const holes = (n: number) => Array.from({ length: n }, () => "?").join(", ");
 
 /* ------------------------------------------------------------------ mint --- */
 
 export interface MintedCode {
   /** The code in the clear: it goes into one redirect URL and nowhere else. */
-  code: string
-  id: string
-  expiresAt: number
+  code: string;
+  id: string;
+  expiresAt: number;
 }
 
 /**
@@ -102,9 +102,9 @@ export async function mintGrantCode(
   now = Date.now(),
   opts: { short?: boolean } = {},
 ): Promise<MintedCode> {
-  const code = mintSecret()
-  const id = mintId(opts.short || 'tokenId' in holder ? SHORT_PREFIX : 'sgr')
-  const expiresAt = now + GRANT_CODE_TTL_MS
+  const code = mintSecret();
+  const id = mintId(opts.short || "tokenId" in holder ? SHORT_PREFIX : "sgr");
+  const expiresAt = now + GRANT_CODE_TTL_MS;
   await db
     .prepare(
       `insert into site_grants (id, session_id, token_id, site_id, code_hash, created_at, expires_at)
@@ -112,23 +112,23 @@ export async function mintGrantCode(
     )
     .bind(
       id,
-      'sessionId' in holder ? holder.sessionId : null,
-      'tokenId' in holder ? holder.tokenId : null,
+      "sessionId" in holder ? holder.sessionId : null,
+      "tokenId" in holder ? holder.tokenId : null,
       site,
       await hashToken(code),
       now,
       expiresAt,
     )
-    .run()
-  return { code, id, expiresAt }
+    .run();
+  return { code, id, expiresAt };
 }
 
 /* --------------------------------------------------------------- consume --- */
 
 export interface RedeemedGrant {
   /** The grant token in the clear: the cookie's value. Only its hash is stored. */
-  token: string
-  expiresAt: number
+  token: string;
+  expiresAt: number;
 }
 
 /**
@@ -148,9 +148,9 @@ export async function consumeGrantCode(
   site: string,
   now = Date.now(),
 ): Promise<RedeemedGrant | null> {
-  if (!GRANT_SECRET.test(code)) return null
-  const token = mintSecret()
-  const day = now + GRANT_TTL_MS
+  if (!GRANT_SECRET.test(code)) return null;
+  const token = mintSecret();
+  const day = now + GRANT_TTL_MS;
   const row = await db
     .prepare(
       `update site_grants
@@ -170,8 +170,8 @@ export async function consumeGrantCode(
       site,
       now,
     )
-    .first<{ session_id: string | null; token_id: string | null; expires_at: number }>()
-  return row ? { token, expiresAt: row.expires_at } : null
+    .first<{ session_id: string | null; token_id: string | null; expires_at: number }>();
+  return row ? { token, expiresAt: row.expires_at } : null;
 }
 
 /* ------------------------------------------------------------------ read --- */
@@ -184,7 +184,7 @@ export async function consumeGrantCode(
 function reachingBindings(registry: Registry, site: string): string[] {
   return chain(registry, site).filter(
     (binding) => tokenScopesOn([READ_DRAFT.scope], binding, registry, site) !== null,
-  )
+  );
 }
 
 /**
@@ -203,9 +203,9 @@ export async function readGrant(
   site: { id: string; registry: Registry },
   now = Date.now(),
 ): Promise<GrantActor | null> {
-  if (!GRANT_SECRET.test(presented)) return null
-  const scopes = [ALL_SCOPES, ...chain(site.registry, site.id)]
-  const bindings = reachingBindings(site.registry, site.id)
+  if (!GRANT_SECRET.test(presented)) return null;
+  const scopes = [ALL_SCOPES, ...chain(site.registry, site.id)];
+  const bindings = reachingBindings(site.registry, site.id);
   const row = await db
     .prepare(
       `select g.id, g.session_id, g.token_id, g.expires_at, s.user_id,
@@ -235,27 +235,27 @@ export async function readGrant(
       ...scopes,
       ...DRAFT_ROLES,
       // An empty `in ()` is a syntax error; a binding no scope id can equal stands in.
-      ...(bindings.length ? bindings : ['']),
+      ...(bindings.length ? bindings : [""]),
       ...DRAFT_SCOPES,
     )
     .first<{
-      id: string
-      session_id: string | null
-      token_id: string | null
-      expires_at: number
-      user_id: string | null
-      name: string | null
-    }>()
-  if (!row) return null
+      id: string;
+      session_id: string | null;
+      token_id: string | null;
+      expires_at: number;
+      user_id: string | null;
+      name: string | null;
+    }>();
+  if (!row) return null;
   return {
-    kind: 'grant',
+    kind: "grant",
     id: row.id,
     userId: row.user_id,
     tokenId: row.token_id,
-    name: row.name ?? 'Preview',
+    name: row.name ?? "Preview",
     site: site.id,
     expiresAt: row.expires_at,
-  }
+  };
 }
 
 /* --------------------------------------------------- deleting with sessions --- */
@@ -266,7 +266,7 @@ export async function readGrant(
  * the table stays small; `readGrant`'s join is what keeps it correct either way.
  */
 export function sessionGrantsDelete(db: FolioDb, sessionId: string): D1PreparedStatement {
-  return db.prepare('delete from site_grants where session_id = ?').bind(sessionId)
+  return db.prepare("delete from site_grants where session_id = ?").bind(sessionId);
 }
 
 /** Every grant held by any session of `userId` — ahead of `delete from sessions
@@ -274,9 +274,9 @@ export function sessionGrantsDelete(db: FolioDb, sessionId: string): D1PreparedS
 export function userGrantsDelete(db: FolioDb, userId: string): D1PreparedStatement {
   return db
     .prepare(
-      'delete from site_grants where session_id in (select id from sessions where user_id = ?)',
+      "delete from site_grants where session_id in (select id from sessions where user_id = ?)",
     )
-    .bind(userId)
+    .bind(userId);
 }
 
 /** The grants of every session `userId` holds except `keepId`. */
@@ -290,16 +290,16 @@ export function otherGrantsDelete(
       `delete from site_grants
         where session_id in (select id from sessions where user_id = ? and id != ?)`,
     )
-    .bind(userId, keepId)
+    .bind(userId, keepId);
 }
 
 /** The grants of every session past its expiry, ahead of the sweep's own delete. */
 export function expiredSessionGrantsDelete(db: FolioDb, now: number): D1PreparedStatement {
   return db
     .prepare(
-      'delete from site_grants where session_id in (select id from sessions where expires_at <= ?)',
+      "delete from site_grants where session_id in (select id from sessions where expires_at <= ?)",
     )
-    .bind(now)
+    .bind(now);
 }
 
 /* ----------------------------------------------------------------- sweep --- */
@@ -320,6 +320,6 @@ export async function sweepGrants(db: FolioDb, now = Date.now()): Promise<number
                and token_id not in (select id from api_tokens where revoked_at is null))`,
     )
     .bind(now)
-    .run()
-  return result.meta.changes ?? 0
+    .run();
+  return result.meta.changes ?? 0;
 }

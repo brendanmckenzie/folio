@@ -1,14 +1,14 @@
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { href } from '../route'
-import type { AssetRow } from './assets-model'
-import { useUsage } from './AssetDetail'
-import css from './Assets.module.css'
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { href } from "../route";
+import type { AssetRow } from "./assets-model";
+import { useUsage } from "./AssetDetail";
+import css from "./Assets.module.css";
 
 /** Enough to recognise the problem, few enough that the dialog does not scroll into
  * a list. The count above it is the exact number either way — the same rule
  * `DeleteDialog.tsx` follows for a document. */
-const USAGE_SHOWN = 5
+const USAGE_SHOWN = 5;
 
 /**
  * The confirmation before deleting a file, and **it warns and proceeds** — the same
@@ -34,13 +34,13 @@ export function AssetDeleteDialog({
   onClose,
   onConfirm,
 }: {
-  apiBase: string
-  mount: string
-  row: AssetRow
-  onClose: () => void
-  onConfirm: () => void
+  apiBase: string;
+  mount: string;
+  row: AssetRow;
+  onClose: () => void;
+  onConfirm: () => void;
 }) {
-  const usage = useUsage(apiBase, row.id)
+  const usage = useUsage(apiBase, row.id);
 
   return (
     <Dialog
@@ -74,20 +74,20 @@ export function AssetDeleteDialog({
       ) : (
         <>
           <p className={css.dialogNote}>
-            Used on <b>{usage.data.total}</b> published{' '}
-            {usage.data.total === 1 ? 'document' : 'documents'}, which will show a missing image:
+            Used on <b>{usage.data.total}</b> published{" "}
+            {usage.data.total === 1 ? "document" : "documents"}, which will show a missing image:
           </p>
           <ul className={css.usageList}>
             {usage.data.published.slice(0, USAGE_SHOWN).map((ref) => (
               <li key={ref.id}>
-                <a className={css.usageLink} href={href({ name: 'edit', id: ref.id }, mount)}>
-                  {ref.title || 'Untitled'}
+                <a className={css.usageLink} href={href({ name: "edit", id: ref.id }, mount)}>
+                  {ref.title || "Untitled"}
                 </a>
                 {/* The path, because it is what tells two same-titled pages apart. A
                     record using an asset has none and says so rather than rendering an
                     empty code span. */}
                 <code className={css.usagePath}>
-                  {ref.path === null ? 'not routed' : ref.path === '' ? '/' : `/${ref.path}`}
+                  {ref.path === null ? "not routed" : ref.path === "" ? "/" : `/${ref.path}`}
                 </code>
               </li>
             ))}
@@ -98,5 +98,5 @@ export function AssetDeleteDialog({
         </>
       )}
     </Dialog>
-  )
+  );
 }

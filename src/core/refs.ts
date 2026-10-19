@@ -31,11 +31,11 @@
  * an edge `content_refs` must record, because a cache tag cannot answer "which
  * published documents render this form" and a reverse index over that table can.
  */
-import type { Blok, Doc, Json } from './doc'
-import type { Field } from './fields'
-import type { SchemaIndex } from './schema'
-import { asRichtext, type RichtextNode } from './richtext'
-import { asAsset, asAssets, asLink, asStoryIds, type LinkValue } from './values'
+import type { Blok, Doc, Json } from "./doc";
+import type { Field } from "./fields";
+import type { SchemaIndex } from "./schema";
+import { asRichtext, type RichtextNode } from "./richtext";
+import { asAsset, asAssets, asLink, asStoryIds, type LinkValue } from "./values";
 
 /**
  * An outbound edge of a document, as `content_refs` stores it.
@@ -49,8 +49,8 @@ import { asAsset, asAssets, asLink, asStoryIds, type LinkValue } from './values'
  * `kind` says it holds either way — no DDL was needed to add it.
  */
 export interface OutboundRef {
-  to: string
-  kind: 'link' | 'reference' | 'asset' | 'form'
+  to: string;
+  kind: "link" | "reference" | "asset" | "form";
 }
 
 /**
@@ -63,14 +63,14 @@ export interface OutboundRef {
  * story map.
  */
 function storedValues(blok: Blok, name: string): Json[] {
-  const out: Json[] = []
-  const source = blok.data[name]
-  if (source !== undefined && source !== null) out.push(source)
+  const out: Json[] = [];
+  const source = blok.data[name];
+  if (source !== undefined && source !== null) out.push(source);
   for (const map of Object.values(blok.i18n ?? {})) {
-    const value = map[name]
-    if (value !== undefined && value !== null) out.push(value)
+    const value = map[name];
+    if (value !== undefined && value !== null) out.push(value);
   }
-  return out
+  return out;
 }
 
 /**
@@ -82,21 +82,21 @@ function storedValues(blok: Blok, name: string): Json[] {
  */
 function richtextLinks(value: Json, visit: (link: LinkValue) => void): void {
   const walk = (nodes: readonly RichtextNode[] | undefined): void => {
-    if (!Array.isArray(nodes)) return
+    if (!Array.isArray(nodes)) return;
     for (const node of nodes) {
-      if (!node || typeof node !== 'object') continue
+      if (!node || typeof node !== "object") continue;
       for (const mark of Array.isArray(node.marks) ? node.marks : []) {
-        if (!mark || typeof mark !== 'object' || mark.type !== 'link') continue
+        if (!mark || typeof mark !== "object" || mark.type !== "link") continue;
         // `attrs.href` is the imported/TipTap shape and carries no story id.
         // `attrs.link` is the Folio-native one, and is the whole reason this
         // walk exists.
-        const link = asLink(mark.attrs?.link)
-        if (link) visit(link)
+        const link = asLink(mark.attrs?.link);
+        if (link) visit(link);
       }
-      walk(node.content)
+      walk(node.content);
     }
-  }
-  walk(asRichtext(value)?.content)
+  };
+  walk(asRichtext(value)?.content);
 }
 
 /**
@@ -108,28 +108,28 @@ function richtextLinks(value: Json, visit: (link: LinkValue) => void): void {
  * are ids `resolve()` has to load or the render is wrong.
  */
 export function linkedIds(doc: Doc, schema: SchemaIndex): string[] {
-  const out = new Set<string>()
+  const out = new Set<string>();
   for (const blok of Object.values(doc.bloks)) {
-    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields
-    if (!fields) continue
+    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields;
+    if (!fields) continue;
     for (const [name, field] of Object.entries(fields)) {
-      if (field.kind === 'multilink') {
+      if (field.kind === "multilink") {
         for (const value of storedValues(blok, name)) {
-          const link = asLink(value)
-          if (link?.kind === 'story') out.add(link.id)
+          const link = asLink(value);
+          if (link?.kind === "story") out.add(link.id);
         }
-        continue
+        continue;
       }
-      if (field.kind === 'richtext') {
+      if (field.kind === "richtext") {
         for (const value of storedValues(blok, name)) {
           richtextLinks(value, (link) => {
-            if (link.kind === 'story') out.add(link.id)
-          })
+            if (link.kind === "story") out.add(link.id);
+          });
         }
       }
     }
   }
-  return [...out]
+  return [...out];
 }
 
 /**
@@ -148,25 +148,25 @@ export function linkedIds(doc: Doc, schema: SchemaIndex): string[] {
  * deleting one of them warns about every page whose hand-picked list names it.
  */
 export function referencedIdsAllLocales(doc: Doc, schema: SchemaIndex): string[] {
-  const out = new Set<string>()
+  const out = new Set<string>();
   for (const blok of Object.values(doc.bloks)) {
-    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields
-    if (!fields) continue
+    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields;
+    if (!fields) continue;
     for (const [name, field] of Object.entries(fields)) {
-      if (field.kind === 'reference') {
+      if (field.kind === "reference") {
         for (const value of storedValues(blok, name)) {
-          if (typeof value === 'string' && value) out.add(value)
+          if (typeof value === "string" && value) out.add(value);
         }
-        continue
+        continue;
       }
-      if (field.kind === 'references') {
+      if (field.kind === "references") {
         for (const value of storedValues(blok, name)) {
-          for (const id of asStoryIds(value)) out.add(id)
+          for (const id of asStoryIds(value)) out.add(id);
         }
       }
     }
   }
-  return [...out]
+  return [...out];
 }
 
 /**
@@ -189,43 +189,43 @@ export function referencedIdsAllLocales(doc: Doc, schema: SchemaIndex): string[]
  * be about and nothing a delete could break here.
  */
 export function assetKeys(doc: Doc, schema: SchemaIndex): string[] {
-  const out = new Set<string>()
+  const out = new Set<string>();
   const add = (asset: { key?: string } | null): void => {
-    if (asset?.key) out.add(asset.key)
-  }
+    if (asset?.key) out.add(asset.key);
+  };
 
   for (const blok of Object.values(doc.bloks)) {
-    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields
-    if (!fields) continue
+    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields;
+    if (!fields) continue;
     for (const [name, field] of Object.entries(fields)) {
       switch (field.kind) {
-        case 'asset':
-          for (const value of storedValues(blok, name)) add(asAsset(value))
-          break
-        case 'multiasset':
+        case "asset":
+          for (const value of storedValues(blok, name)) add(asAsset(value));
+          break;
+        case "multiasset":
           for (const value of storedValues(blok, name)) {
-            for (const asset of asAssets(value)) add(asset)
+            for (const asset of asAssets(value)) add(asset);
           }
-          break
-        case 'multilink':
+          break;
+        case "multilink":
           for (const value of storedValues(blok, name)) {
-            const link = asLink(value)
-            if (link?.kind === 'asset') add(link.asset)
+            const link = asLink(value);
+            if (link?.kind === "asset") add(link.asset);
           }
-          break
-        case 'richtext':
+          break;
+        case "richtext":
           for (const value of storedValues(blok, name)) {
             richtextLinks(value, (link) => {
-              if (link.kind === 'asset') add(link.asset)
-            })
+              if (link.kind === "asset") add(link.asset);
+            });
           }
-          break
+          break;
         default:
-          break
+          break;
       }
     }
   }
-  return [...out]
+  return [...out];
 }
 
 /**
@@ -237,18 +237,18 @@ export function assetKeys(doc: Doc, schema: SchemaIndex): string[] {
  * level up.
  */
 export function formIds(doc: Doc, schema: SchemaIndex): string[] {
-  const out = new Set<string>()
+  const out = new Set<string>();
   for (const blok of Object.values(doc.bloks)) {
-    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields
-    if (!fields) continue
+    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields;
+    if (!fields) continue;
     for (const [name, field] of Object.entries(fields)) {
-      if (field.kind !== 'form') continue
+      if (field.kind !== "form") continue;
       for (const value of storedValues(blok, name)) {
-        if (typeof value === 'string' && value) out.add(value)
+        if (typeof value === "string" && value) out.add(value);
       }
     }
   }
-  return [...out]
+  return [...out];
 }
 
 /**
@@ -277,14 +277,14 @@ export function formIds(doc: Doc, schema: SchemaIndex): string[] {
  * from different namespaces.
  */
 export function outboundRefs(doc: Doc, schema: SchemaIndex, from: string): OutboundRef[] {
-  const out: OutboundRef[] = []
+  const out: OutboundRef[] = [];
   for (const to of linkedIds(doc, schema)) {
-    if (to !== from) out.push({ to, kind: 'link' })
+    if (to !== from) out.push({ to, kind: "link" });
   }
   for (const to of referencedIdsAllLocales(doc, schema)) {
-    if (to !== from) out.push({ to, kind: 'reference' })
+    if (to !== from) out.push({ to, kind: "reference" });
   }
-  for (const to of assetKeys(doc, schema)) out.push({ to, kind: 'asset' })
-  for (const to of formIds(doc, schema)) out.push({ to, kind: 'form' })
-  return out
+  for (const to of assetKeys(doc, schema)) out.push({ to, kind: "asset" });
+  for (const to of formIds(doc, schema)) out.push({ to, kind: "form" });
+  return out;
 }

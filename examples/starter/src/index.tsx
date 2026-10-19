@@ -1,8 +1,8 @@
-import { dataOf, type Doc, type Resolution } from 'folio/core'
-import { createFolio, magicLink, Shell } from 'folio/server'
-import type { ReactElement } from 'react'
-import { renderToReadableStream } from 'react-dom/server.edge'
-import { blocks } from './blocks'
+import { dataOf, type Doc, type Resolution } from "folio/core";
+import { createFolio, magicLink, Shell } from "folio/server";
+import type { ReactElement } from "react";
+import { renderToReadableStream } from "react-dom/server.edge";
+import { blocks } from "./blocks";
 
 /**
  * Two Durable Object classes, re-exported so wrangler can find them.
@@ -13,16 +13,16 @@ import { blocks } from './blocks'
  * and broadcasting structural events. It is declared with `new_classes` rather
  * than `new_sqlite_classes` in wrangler.jsonc for exactly that reason.
  */
-export { SpaceDO, StoryDO } from 'folio/server'
+export { SpaceDO, StoryDO } from "folio/server";
 
 /** Defined by the Vite plugin. Pass it straight through as `assets` below. */
 declare const __FOLIO_ASSETS__: {
-  admin: string
-  preview: string
-  devClient?: string
-  adminCss?: string[]
-  previewCss?: string[]
-}
+  admin: string;
+  preview: string;
+  devClient?: string;
+  adminCss?: string[];
+  previewCss?: string[];
+};
 
 /**
  * Local development only: the sign-in link this Worker "sent".
@@ -32,7 +32,7 @@ declare const __FOLIO_ASSETS__: {
  * no mailbox, and the route that reads it refuses anything but localhost.
  * Delete both once you have real mail.
  */
-let lastSignInUrl: string | null = null
+let lastSignInUrl: string | null = null;
 
 const folio = createFolio<Env>({
   blocks,
@@ -44,7 +44,7 @@ const folio = createFolio<Env>({
    * `kind: 'page'` is the whole routing story — a page lives in the tree and
    * derives its URL from it. There is no routing rule to configure.
    */
-  types: [{ name: 'page', label: 'Page', kind: 'page', root: 'page' }],
+  types: [{ name: "page", label: "Page", kind: "page", root: "page" }],
 
   bindings: (env) => ({
     db: env.DB,
@@ -74,8 +74,8 @@ const folio = createFolio<Env>({
     providers: [
       magicLink({
         send: (_env, { email, url }) => {
-          console.log(`\nfolio: sign-in link for ${email}\n  ${url}\n`)
-          lastSignInUrl = url
+          console.log(`\nfolio: sign-in link for ${email}\n  ${url}\n`);
+          lastSignInUrl = url;
         },
       }),
     ],
@@ -88,10 +88,10 @@ const folio = createFolio<Env>({
    * preview iframe at the right page. Whatever it returns must be on the same
    * origin the admin is served from.
    */
-  route: (path) => (path ? `/${path}` : '/'),
+  route: (path) => (path ? `/${path}` : "/"),
 
   // Your site stylesheet, so the editor's preview looks like the site.
-  previewCss: ['/site.css'],
+  previewCss: ["/site.css"],
   assets: __FOLIO_ASSETS__,
 
   /**
@@ -109,50 +109,50 @@ const folio = createFolio<Env>({
    * own dependency set, which is knowledge a host cannot reconstruct.
    */
   hooks: {
-    published: ({ story }) => console.log(`folio: published ${story.path || '/'}`),
-    unpublished: ({ story }) => console.log(`folio: unpublished ${story.path || '/'}`),
+    published: ({ story }) => console.log(`folio: published ${story.path || "/"}`),
+    unpublished: ({ story }) => console.log(`folio: unpublished ${story.path || "/"}`),
   },
-})
+});
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext) {
-    const url = new URL(req.url)
+    const url = new URL(req.url);
 
     // --- your own routes, which always win ------------------------------
-    if (url.pathname === '/health') {
-      return Response.json({ ok: true })
+    if (url.pathname === "/health") {
+      return Response.json({ ok: true });
     }
 
     // Local development only: a stand-in for a mailbox, so `curl` can do what a
     // person would do with their inbox. Not a Folio route, and not a pattern to
     // copy into a real deployment — delete it with the `send` above.
-    if (url.pathname === '/dev/last-signin') {
-      if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-        return new Response('Not found', { status: 404 })
+    if (url.pathname === "/dev/last-signin") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
       }
-      return Response.json({ url: lastSignInUrl })
+      return Response.json({ url: lastSignInUrl });
     }
 
-    if (url.pathname === '/sitemap.xml') {
-      const stories = await folio.stories(env)
+    if (url.pathname === "/sitemap.xml") {
+      const stories = await folio.stories(env);
       return new Response(
         `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${stories
-          .filter((s) => s.state === 'live' || s.state === 'changed')
-          .map((s) => `<url><loc>${url.origin}${s.url ?? '/'}</loc></url>`)
-          .join('')}</urlset>`,
-        { headers: { 'content-type': 'application/xml' } },
-      )
+          .filter((s) => s.state === "live" || s.state === "changed")
+          .map((s) => `<url><loc>${url.origin}${s.url ?? "/"}</loc></url>`)
+          .join("")}</urlset>`,
+        { headers: { "content-type": "application/xml" } },
+      );
     }
 
     // --- Folio: the editor, its API, and preview renders -----------------
     // Returns null for anything it does not own, so it can never swallow one of
     // your paths and needs no blocklist. Put your own routes before it only if
     // they could collide with `/folio/*`.
-    const handled = await folio.handle(req, env, ctx)
-    if (handled) return handled
+    const handled = await folio.handle(req, env, ctx);
+    if (handled) return handled;
 
     // --- published pages -------------------------------------------------
-    return renderPage(req, env, url)
+    return renderPage(req, env, url);
   },
 
   /**
@@ -163,20 +163,20 @@ export default {
     // Loop on `continueFrom`, never on `report.remaining` — a schedule that
     // failed transiently in this sweep is still due, so that loop spins. The
     // batch guard bounds one tick; whatever is left is still due next minute.
-    let cursor: string | null = null
-    let batches = 0
+    let cursor: string | null = null;
+    let batches = 0;
     do {
-      const report = await folio.runSchedules(env, { continueFrom: cursor })
-      cursor = report.continueFrom
-    } while (cursor !== null && ++batches < 20)
+      const report = await folio.runSchedules(env, { continueFrom: cursor });
+      cursor = report.continueFrom;
+    } while (cursor !== null && ++batches < 20);
 
     // Expired sessions, consumed sign-in challenges, and auth_events past their
     // 90-day retention. Nothing breaks when this is never wired up — the
     // failure mode is unbounded growth rather than an outage, which is exactly
     // why it is easy to forget.
-    await folio.sweepAuth(env)
+    await folio.sweepAuth(env);
   },
-}
+};
 
 /**
  * The published page.
@@ -198,8 +198,8 @@ async function renderPage(req: Request, env: Env, url: URL) {
    * session: right for a cron, wrong for a page. Pass the `Request` — it is
    * what makes draft mode work at all.
    */
-  const reader = folio.reader(env, req)
-  const path = url.pathname.replace(/^\/+|\/+$/g, '')
+  const reader = folio.reader(env, req);
+  const path = url.pathname.replace(/^\/+|\/+$/g, "");
 
   /**
    * One call for the whole page: the draft-or-published document, the story row
@@ -211,40 +211,43 @@ async function renderPage(req: Request, env: Env, url: URL) {
    * page answered with `Cache-Control` and no `Cache-Tag` is cached for a week
    * with no way to purge it.
    */
-  const asked = Number(url.searchParams.get('page') ?? '1')
+  const asked = Number(url.searchParams.get("page") ?? "1");
   const page = await reader.page(path, {
     page: Number.isFinite(asked) && asked >= 1 ? Math.trunc(asked) : 1,
-  })
+  });
 
   if (!page) {
     // One round trip for the whole 404 branch: the redirect lookup and the
     // published state together, so a page taken down on purpose answers 410
     // rather than being guessed at.
-    const miss = await reader.miss(path)
-    if (miss.kind === 'redirect') {
-      const location = new URL(miss.to, url.origin)
-      location.search = url.search
-      return Response.redirect(location.toString(), miss.status)
+    const miss = await reader.miss(path);
+    if (miss.kind === "redirect") {
+      const location = new URL(miss.to, url.origin);
+      location.search = url.search;
+      return Response.redirect(location.toString(), miss.status);
     }
-    return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
+    return new Response("Not found", { status: miss.kind === "gone" ? 410 : 404 });
   }
 
-  return html(<Page doc={page.doc} resolution={page.resolution} draft={page.draft} />, page.headers)
+  return html(
+    <Page doc={page.doc} resolution={page.resolution} draft={page.draft} />,
+    page.headers,
+  );
 }
 
 function Page({ doc, resolution, draft }: { doc: Doc; resolution: Resolution; draft: boolean }) {
-  const root = doc.bloks[doc.root]
+  const root = doc.bloks[doc.root];
   // `dataOf` rather than `.data`: metadata is read straight off the root block
   // rather than through `render`, so reading it in the active locale is this
   // page's job. Reading `blok.data[name]` directly silently ignores
   // translations, which is why it is never the right call.
-  const meta = root ? dataOf(root, resolution.locale) : {}
-  const title = String(meta.title ?? 'Untitled')
+  const meta = root ? dataOf(root, resolution.locale) : {};
+  const title = String(meta.title ?? "Untitled");
 
   return (
     <Shell
       title={title}
-      stylesheets={['/site.css']}
+      stylesheets={["/site.css"]}
       head={
         <>
           {meta.description ? <meta name="description" content={String(meta.description)} /> : null}
@@ -260,11 +263,11 @@ function Page({ doc, resolution, draft }: { doc: Doc; resolution: Resolution; dr
       {draft ? <div className="draft-banner">Draft preview — not published</div> : null}
       {folio.render(doc, { resolution })}
     </Shell>
-  )
+  );
 }
 
 async function html(node: ReactElement, headers: Record<string, string> = {}) {
   return new Response(await renderToReadableStream(node), {
-    headers: { 'content-type': 'text/html; charset=utf-8', ...headers },
-  })
+    headers: { "content-type": "text/html; charset=utf-8", ...headers },
+  });
 }

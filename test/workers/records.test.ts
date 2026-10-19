@@ -1,11 +1,11 @@
-import { createExecutionContext, env } from 'cloudflare:test'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { defineBlock, defineRecord, reference, references, richtext, text } from '../../src/core'
-import type { Doc, Json } from '../../src/core/doc'
-import type { Field } from '../../src/core/fields'
-import type { DocumentType } from '../../src/core/schema'
-import { createFolio } from '../../src/server'
-import type { FolioBindings } from '../../src/server'
+import { createExecutionContext, env } from "cloudflare:test";
+import { beforeAll, describe, expect, it } from "vitest";
+import { defineBlock, defineRecord, reference, references, richtext, text } from "../../src/core";
+import type { Doc, Json } from "../../src/core/doc";
+import type { Field } from "../../src/core/fields";
+import type { DocumentType } from "../../src/core/schema";
+import { createFolio } from "../../src/server";
+import type { FolioBindings } from "../../src/server";
 
 /**
  * Data documents against real D1 and the real `0006` / `0010` migrations
@@ -23,24 +23,24 @@ import type { FolioBindings } from '../../src/server'
 
 /** A record WITH a renderer: `{person.content}` gets a card. */
 const personRecord = defineRecord({
-  name: 'recPerson',
-  label: 'Person',
-  summary: 'fullName',
+  name: "recPerson",
+  label: "Person",
+  summary: "fullName",
   fields: {
     fullName: text({ indexed: true }),
     role: text({ indexed: true, translatable: true }),
     bio: richtext({ translatable: true }),
   },
   render: ({ fullName }) => fullName,
-})
+});
 
 /** A record with NO renderer at all — the shape checkpoint 1 exists for. */
 const officeRecord = defineRecord({
-  name: 'recOffice',
-  label: 'Office',
-  summary: 'city',
+  name: "recOffice",
+  label: "Office",
+  summary: "city",
   fields: { city: text({ indexed: true }), phone: text() },
-})
+});
 
 /**
  * How many `indexed` fields the wide record declares, and how many link marks the
@@ -54,8 +54,8 @@ const officeRecord = defineRecord({
  * above their threshold rather than far above it: the point is that the first size
  * that used to fail now works, not that some enormous number does.
  */
-const WIDE_FIELDS = 24
-const MANY_LINKS = 34
+const WIDE_FIELDS = 24;
+const MANY_LINKS = 34;
 
 /**
  * A record declaring more `indexed` fields than one D1 statement can bind values
@@ -64,75 +64,78 @@ const MANY_LINKS = 34
  */
 const wideFields: Record<string, Field> = Object.fromEntries(
   Array.from({ length: WIDE_FIELDS }, (_, i) => [`f${i}`, text({ indexed: true })]),
-)
+);
 
 const wideRecord = defineRecord({
-  name: 'recWide',
-  label: 'Wide',
-  summary: 'f0',
+  name: "recWide",
+  label: "Wide",
+  summary: "f0",
   fields: wideFields,
-})
+});
 
 const pageRoot = defineBlock({
-  name: 'recPage',
-  label: 'Page',
-  summary: 'title',
+  name: "recPage",
+  label: "Page",
+  summary: "title",
   fields: {
     title: text(),
-    lead: reference({ types: ['recPersonType'] }),
-    team: references({ types: ['recPersonType'], max: 6 }),
-    office: reference({ types: ['recOfficeType'] }),
+    lead: reference({ types: ["recPersonType"] }),
+    team: references({ types: ["recPersonType"], max: 6 }),
+    office: reference({ types: ["recOfficeType"] }),
   },
   render: () => null,
-})
+});
 
 const types: DocumentType[] = [
-  { name: 'recPageType', label: 'Page', kind: 'page', root: 'recPage', default: true },
+  { name: "recPageType", label: "Page", kind: "page", root: "recPage", default: true },
   {
-    name: 'recPersonType',
-    label: 'Person',
-    kind: 'record',
-    root: 'recPerson',
-    titleField: 'fullName',
+    name: "recPersonType",
+    label: "Person",
+    kind: "record",
+    root: "recPerson",
+    titleField: "fullName",
   },
-  { name: 'recOfficeType', label: 'Office', kind: 'record', root: 'recOffice', titleField: 'city' },
-  { name: 'recWideType', label: 'Wide', kind: 'record', root: 'recWide', titleField: 'f0' },
-]
+  { name: "recOfficeType", label: "Office", kind: "record", root: "recOffice", titleField: "city" },
+  { name: "recWideType", label: "Wide", kind: "record", root: "recWide", titleField: "f0" },
+];
 
 const bindings = (e: Cloudflare.Env): FolioBindings => ({
   db: e.DB,
   story: e.STORY,
   media: e.MEDIA,
   images: e.IMAGES,
-})
+});
 
 const folio = createFolio<Cloudflare.Env>({
   blocks: [personRecord, officeRecord, wideRecord, pageRoot],
   types,
   bindings,
-  basePath: '/folio',
-  auth: 'open',
-  route: (p) => (p ? `/${p}` : '/'),
-})
+  basePath: "/folio",
+  auth: "open",
+  route: (p) => (p ? `/${p}` : "/"),
+});
 
-const ORIGIN = 'https://example.com'
+const ORIGIN = "https://example.com";
 const get = (path: string) =>
-  folio.handle(new Request(`${ORIGIN}${path}`), env, createExecutionContext())
+  folio.handle(new Request(`${ORIGIN}${path}`), env, createExecutionContext());
 const send = (path: string, method: string, body?: unknown) =>
   folio.handle(
     new Request(`${ORIGIN}${path}`, {
       method,
-      headers: { 'content-type': 'application/json' },
+      headers: { "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }),
     env,
     createExecutionContext(),
-  )
+  );
 
 /* ------------------------------------------------------------- fixtures --- */
 
 function one(uid: string, type: string, data: Record<string, Json>): Doc {
-  return { root: uid, bloks: { [uid]: { uid, type, parent: null, slot: null, order: 'a0', data } } }
+  return {
+    root: uid,
+    bloks: { [uid]: { uid, type, parent: null, slot: null, order: "a0", data } },
+  };
 }
 
 async function insertRow(
@@ -147,15 +150,15 @@ async function insertRow(
     .bind(
       id,
       opts.type,
-      opts.path === null ? id : (opts.path.split('/').pop() ?? ''),
+      opts.path === null ? id : (opts.path.split("/").pop() ?? ""),
       opts.path,
-      opts.ord ?? 'a0',
+      opts.ord ?? "a0",
       opts.title,
       Date.now(),
       JSON.stringify(opts.doc),
       Date.now(),
     )
-    .run()
+    .run();
 }
 
 /**
@@ -166,83 +169,83 @@ async function insertRow(
  * the three tables cannot fall out of step.
  */
 const searchRows = async (id: string): Promise<number> => {
-  const row = await env.DB.prepare('select count(*) as n from content_text where story_id = ?')
+  const row = await env.DB.prepare("select count(*) as n from content_text where story_id = ?")
     .bind(id)
-    .first<{ n: number }>()
-  return row?.n ?? 0
-}
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+};
 
-const ADA = 'rec_ada'
-const GRACE = 'rec_grace'
-const SYDNEY = 'rec_syd'
+const ADA = "rec_ada";
+const GRACE = "rec_grace";
+const SYDNEY = "rec_syd";
 
 beforeAll(async () => {
   await insertRow(ADA, {
-    type: 'recPersonType',
+    type: "recPersonType",
     path: null,
-    title: 'Ada Lovelace',
-    doc: one('a', 'recPerson', { fullName: 'Ada Lovelace', role: 'Analyst' }),
-  })
+    title: "Ada Lovelace",
+    doc: one("a", "recPerson", { fullName: "Ada Lovelace", role: "Analyst" }),
+  });
   await insertRow(GRACE, {
-    type: 'recPersonType',
+    type: "recPersonType",
     path: null,
-    title: 'Grace Hopper',
-    ord: 'a1',
-    doc: one('g', 'recPerson', { fullName: 'Grace Hopper', role: 'Rear Admiral' }),
-  })
+    title: "Grace Hopper",
+    ord: "a1",
+    doc: one("g", "recPerson", { fullName: "Grace Hopper", role: "Rear Admiral" }),
+  });
   await insertRow(SYDNEY, {
-    type: 'recOfficeType',
+    type: "recOfficeType",
     path: null,
-    title: 'Sydney',
-    doc: one('s', 'recOffice', { city: 'Sydney', phone: '000' }),
-  })
+    title: "Sydney",
+    doc: one("s", "recOffice", { city: "Sydney", phone: "000" }),
+  });
 
   // Four published pages naming the office, plus one naming both people through
   // a hand-picked list. Inserted directly and then reindexed, which is how an
   // existing site's `content_refs` comes to exist at all.
   for (let i = 0; i < 4; i++) {
     await insertRow(`rec_p${i}`, {
-      type: 'recPageType',
+      type: "recPageType",
       path: `recpage${i}`,
       title: `Page ${i}`,
-      doc: one(`p${i}`, 'recPage', { title: `Page ${i}`, office: SYDNEY }),
-    })
+      doc: one(`p${i}`, "recPage", { title: `Page ${i}`, office: SYDNEY }),
+    });
   }
-  await insertRow('rec_team', {
-    type: 'recPageType',
-    path: 'recteam',
-    title: 'Leadership',
-    doc: one('t', 'recPage', { title: 'Leadership', team: [GRACE, ADA], lead: ADA }),
-  })
+  await insertRow("rec_team", {
+    type: "recPageType",
+    path: "recteam",
+    title: "Leadership",
+    doc: one("t", "recPage", { title: "Leadership", team: [GRACE, ADA], lead: ADA }),
+  });
 
-  const report = await folio.reindex(env, { batch: 200 })
-  expect(report.documents).toBeGreaterThan(0)
-})
+  const report = await folio.reindex(env, { batch: 200 });
+  expect(report.documents).toBeGreaterThan(0);
+});
 
 /* ------------------------------------------------------ no path resolves --- */
 
-describe('a record has no URL', () => {
-  it('answers nothing for a path spelled like its slug', async () => {
-    expect(await folio.published(env, 'rec_ada')).toBeNull()
-    expect(await folio.published(env, 'ada-lovelace')).toBeNull()
-  })
+describe("a record has no URL", () => {
+  it("answers nothing for a path spelled like its slug", async () => {
+    expect(await folio.published(env, "rec_ada")).toBeNull();
+    expect(await folio.published(env, "ada-lovelace")).toBeNull();
+  });
 
-  it('leaves the page tree free of records', async () => {
-    const tree = (await (await get('/folio/api/stories'))!.json()) as { id: string }[]
-    const ids = JSON.stringify(tree)
-    expect(ids).not.toContain(ADA)
-    expect(ids).not.toContain(SYDNEY)
-  })
+  it("leaves the page tree free of records", async () => {
+    const tree = (await (await get("/folio/api/stories"))!.json()) as { id: string }[];
+    const ids = JSON.stringify(tree);
+    expect(ids).not.toContain(ADA);
+    expect(ids).not.toContain(SYDNEY);
+  });
 
-  it('lists them in GET /documents instead, unrouted and with no url', async () => {
-    const body = (await (await get('/folio/api/documents?type=recPersonType'))!.json()) as {
-      rows: { id: string; path: string | null; url?: string }[]
-    }
-    expect(body.rows.map((d) => d.id).sort()).toEqual([ADA, GRACE])
-    expect(body.rows.every((d) => d.path === null)).toBe(true)
-    expect(body.rows.every((d) => d.url === undefined)).toBe(true)
-  })
-})
+  it("lists them in GET /documents instead, unrouted and with no url", async () => {
+    const body = (await (await get("/folio/api/documents?type=recPersonType"))!.json()) as {
+      rows: { id: string; path: string | null; url?: string }[];
+    };
+    expect(body.rows.map((d) => d.id).sort()).toEqual([ADA, GRACE]);
+    expect(body.rows.every((d) => d.path === null)).toBe(true);
+    expect(body.rows.every((d) => d.url === undefined)).toBe(true);
+  });
+});
 
 /* ------------------------------------------------- indexed list columns --- */
 
@@ -253,33 +256,33 @@ describe('a record has no URL', () => {
  * structure the client has to zip against `rows`, and a map left over from the
  * previous page would quietly supply values for rows no longer on screen.
  */
-describe('GET /documents carries the indexed values the list view columns need', () => {
-  type Row = { id: string; indexed: Record<string, { text: string; num: number | null }> }
+describe("GET /documents carries the indexed values the list view columns need", () => {
+  type Row = { id: string; indexed: Record<string, { text: string; num: number | null }> };
 
-  it('carries each document’s own values, keyed by field', async () => {
-    const body = (await (await get('/folio/api/documents'))!.json()) as { rows: Row[] }
-    const byId = new Map(body.rows.map((r) => [r.id, r]))
-    expect(byId.get(ADA)?.indexed.fullName?.text).toBe('Ada Lovelace')
-    expect(byId.get(ADA)?.indexed.role?.text).toBe('Analyst')
-    expect(byId.get(SYDNEY)?.indexed.city?.text).toBe('Sydney')
-  })
+  it("carries each document’s own values, keyed by field", async () => {
+    const body = (await (await get("/folio/api/documents"))!.json()) as { rows: Row[] };
+    const byId = new Map(body.rows.map((r) => [r.id, r]));
+    expect(byId.get(ADA)?.indexed.fullName?.text).toBe("Ada Lovelace");
+    expect(byId.get(ADA)?.indexed.role?.text).toBe("Analyst");
+    expect(byId.get(SYDNEY)?.indexed.city?.text).toBe("Sydney");
+  });
 
-  it('gives a document with nothing published an empty object, so its cells read blank', async () => {
-    const created = (await (await send('/folio/api/stories', 'POST', {
-      title: 'Unpublished Person',
-      type: 'recPersonType',
-    }))!.json()) as { id: string }
-    const body = (await (await get('/folio/api/documents?type=recPersonType'))!.json()) as {
-      rows: Row[]
-    }
+  it("gives a document with nothing published an empty object, so its cells read blank", async () => {
+    const created = (await (await send("/folio/api/stories", "POST", {
+      title: "Unpublished Person",
+      type: "recPersonType",
+    }))!.json()) as { id: string };
+    const body = (await (await get("/folio/api/documents?type=recPersonType"))!.json()) as {
+      rows: Row[];
+    };
     // The row IS in the list — the admin lists documents, not published content.
-    const row = body.rows.find((r) => r.id === created.id)
-    expect(row).toBeDefined()
+    const row = body.rows.find((r) => r.id === created.id);
+    expect(row).toBeDefined();
     // `{}` rather than absent: a cell renderer that had to tell "no values" from
     // "no entry" would need a second branch for a distinction with no meaning.
-    expect(row?.indexed).toEqual({})
-    await send(`/folio/api/stories/${created.id}`, 'DELETE')
-  })
+    expect(row?.indexed).toEqual({});
+    await send(`/folio/api/stories/${created.id}`, "DELETE");
+  });
 
   /**
    * `filterRows`' one interesting assertion, moved server-side: it matched the
@@ -288,320 +291,320 @@ describe('GET /documents carries the indexed values the list view columns need',
    * reason — see `storyFilters`' `indexedText` option, which the tree and flat
    * reads deliberately do not pass.
    */
-  it('searches indexed values, not only the title', async () => {
+  it("searches indexed values, not only the title", async () => {
     const body = (await (await get(
-      '/folio/api/documents?type=recPersonType&q=analyst',
-    ))!.json()) as { rows: Row[] }
-    expect(body.rows.map((r) => r.id)).toEqual([ADA])
-  })
+      "/folio/api/documents?type=recPersonType&q=analyst",
+    ))!.json()) as { rows: Row[] };
+    expect(body.rows.map((r) => r.id)).toEqual([ADA]);
+  });
 
-  it('does not let an indexed value match on the tree or flat reads', async () => {
+  it("does not let an indexed value match on the tree or flat reads", async () => {
     // Those rows show title, slug, path and state — nothing on them comes from
     // `content_index`, so a match there would return a page for a reason the list
     // cannot show.
-    const body = (await (await get('/folio/api/stories?flat=1&q=analyst'))!.json()) as {
-      rows: { id: string }[]
-    }
-    expect(body.rows).toEqual([])
-  })
-})
+    const body = (await (await get("/folio/api/stories?flat=1&q=analyst"))!.json()) as {
+      rows: { id: string }[];
+    };
+    expect(body.rows).toEqual([]);
+  });
+});
 
 /* ------------------------------------------------------------ the usage --- */
 
-describe('GET /documents/:id/usage', () => {
-  it('counts the four published pages referencing an office, and names them', async () => {
+describe("GET /documents/:id/usage", () => {
+  it("counts the four published pages referencing an office, and names them", async () => {
     const usage = (await (await get(`/folio/api/documents/${SYDNEY}/usage`))!.json()) as {
-      published: { id: string; title: string; url: string; kind: string }[]
-      total: number
-      links: number
-      references: number
-    }
-    expect(usage.total).toBe(4)
-    expect(usage.references).toBe(4)
-    expect(usage.links).toBe(0)
+      published: { id: string; title: string; url: string; kind: string }[];
+      total: number;
+      links: number;
+      references: number;
+    };
+    expect(usage.total).toBe(4);
+    expect(usage.references).toBe(4);
+    expect(usage.links).toBe(0);
     expect(usage.published.map((p) => p.id).sort()).toEqual([
-      'rec_p0',
-      'rec_p1',
-      'rec_p2',
-      'rec_p3',
-    ])
+      "rec_p0",
+      "rec_p1",
+      "rec_p2",
+      "rec_p3",
+    ]);
     // Decorated through the host's own `route`, not assembled here.
-    expect(usage.published[0]?.url).toBe('/recpage0')
-    expect(usage.published.every((p) => p.kind === 'reference')).toBe(true)
-  })
+    expect(usage.published[0]?.url).toBe("/recpage0");
+    expect(usage.published.every((p) => p.kind === "reference")).toBe(true);
+  });
 
-  it('counts a hand-picked references() list as a usage of every member', async () => {
+  it("counts a hand-picked references() list as a usage of every member", async () => {
     const grace = (await (await get(`/folio/api/documents/${GRACE}/usage`))!.json()) as {
-      published: { id: string }[]
-      total: number
-    }
+      published: { id: string }[];
+      total: number;
+    };
     // Grace appears only inside `team`, never as `lead`, so this row exists
     // solely because the plural walk sees it.
-    expect(grace.total).toBe(1)
-    expect(grace.published.map((p) => p.id)).toEqual(['rec_team'])
-  })
+    expect(grace.total).toBe(1);
+    expect(grace.published.map((p) => p.id)).toEqual(["rec_team"]);
+  });
 
-  it('counts one document once even when it both references and lists the target', async () => {
+  it("counts one document once even when it both references and lists the target", async () => {
     const ada = (await (await get(`/folio/api/documents/${ADA}/usage`))!.json()) as {
-      published: { id: string; kind: string }[]
-      total: number
-      references: number
-    }
+      published: { id: string; kind: string }[];
+      total: number;
+      references: number;
+    };
     // `lead` and `team` are two `reference`-kind rows for one document...
-    expect(ada.total).toBe(1)
+    expect(ada.total).toBe(1);
     // ...and `content_refs`'s primary key collapses them, because `kind` is part
     // of it and both rows are `reference`.
-    expect(ada.references).toBe(1)
-  })
+    expect(ada.references).toBe(1);
+  });
 
-  it('is empty and does not 404 for a document nothing points at', async () => {
-    const created = (await (await send('/folio/api/stories', 'POST', {
-      title: 'Nobody',
-      type: 'recPersonType',
-    }))!.json()) as { id: string }
+  it("is empty and does not 404 for a document nothing points at", async () => {
+    const created = (await (await send("/folio/api/stories", "POST", {
+      title: "Nobody",
+      type: "recPersonType",
+    }))!.json()) as { id: string };
     const usage = (await (await get(`/folio/api/documents/${created.id}/usage`))!.json()) as {
-      published: unknown[]
-      total: number
-    }
-    expect(usage.total).toBe(0)
-    expect(usage.published).toEqual([])
-    await send(`/folio/api/stories/${created.id}`, 'DELETE')
-  })
+      published: unknown[];
+      total: number;
+    };
+    expect(usage.total).toBe(0);
+    expect(usage.published).toEqual([]);
+    await send(`/folio/api/stories/${created.id}`, "DELETE");
+  });
 
-  it('is empty for an id that never existed, rather than an error', async () => {
-    const res = (await get('/folio/api/documents/rec_nope/usage'))!
-    expect(res.status).toBe(200)
-    expect(((await res.json()) as { total: number }).total).toBe(0)
-  })
+  it("is empty for an id that never existed, rather than an error", async () => {
+    const res = (await get("/folio/api/documents/rec_nope/usage"))!;
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { total: number }).total).toBe(0);
+  });
 
-  it('excludes unpublished references, and says so by simply not having them', async () => {
+  it("excludes unpublished references, and says so by simply not having them", async () => {
     // A draft page referencing the office. Never published, so nothing was ever
     // written to `content_refs` for it — which is the whole honesty caveat.
-    const created = (await (await send('/folio/api/stories', 'POST', {
-      title: 'Draft Referrer',
-    }))!.json()) as { id: string }
+    const created = (await (await send("/folio/api/stories", "POST", {
+      title: "Draft Referrer",
+    }))!.json()) as { id: string };
     await folio.handle(
       new Request(`${ORIGIN}/folio/api/story/${created.id}/document`),
       env,
       createExecutionContext(),
-    )
+    );
     const usage = (await (await get(`/folio/api/documents/${SYDNEY}/usage`))!.json()) as {
-      total: number
-    }
-    expect(usage.total).toBe(4)
-    await send(`/folio/api/stories/${created.id}`, 'DELETE')
-  })
-})
+      total: number;
+    };
+    expect(usage.total).toBe(4);
+    await send(`/folio/api/stories/${created.id}`, "DELETE");
+  });
+});
 
 /* -------------------------------------------------- publish and version --- */
 
-describe('a record publishes and versions like a page', () => {
-  it('publishes twice and retains two versions, with no path involved', async () => {
-    const created = (await (await send('/folio/api/stories', 'POST', {
-      title: 'Versioned Person',
-      type: 'recPersonType',
-    }))!.json()) as { id: string; path: string | null }
-    expect(created.path).toBeNull()
+describe("a record publishes and versions like a page", () => {
+  it("publishes twice and retains two versions, with no path involved", async () => {
+    const created = (await (await send("/folio/api/stories", "POST", {
+      title: "Versioned Person",
+      type: "recPersonType",
+    }))!.json()) as { id: string; path: string | null };
+    expect(created.path).toBeNull();
 
     // Opening the document is what seeds the Durable Object; publish reads it.
-    await get(`/folio/api/story/${created.id}/document`)
+    await get(`/folio/api/story/${created.id}/document`);
     const first = (await (await send(
       `/folio/api/story/${created.id}/publish`,
-      'POST',
+      "POST",
     ))!.json()) as {
-      ok: boolean
-    }
-    expect(first.ok).toBe(true)
+      ok: boolean;
+    };
+    expect(first.ok).toBe(true);
     const second = (await (await send(
       `/folio/api/story/${created.id}/publish`,
-      'POST',
+      "POST",
     ))!.json()) as {
-      ok: boolean
-    }
-    expect(second.ok).toBe(true)
+      ok: boolean;
+    };
+    expect(second.ok).toBe(true);
 
     const list = (await (await get(`/folio/api/story/${created.id}/versions`))!.json()) as {
-      rows: { kind: string }[]
-    }
-    expect(list.rows.filter((v) => v.kind === 'publish').length).toBeGreaterThanOrEqual(2)
+      rows: { kind: string }[];
+    };
+    expect(list.rows.filter((v) => v.kind === "publish").length).toBeGreaterThanOrEqual(2);
 
     // Still no route to it, published or not.
-    expect(await folio.published(env, created.id)).toBeNull()
-    await send(`/folio/api/stories/${created.id}`, 'DELETE')
-  })
+    expect(await folio.published(env, created.id)).toBeNull();
+    await send(`/folio/api/stories/${created.id}`, "DELETE");
+  });
 
-  it('refuses to duplicate a singleton but happily duplicates a record', async () => {
-    const created = (await (await send('/folio/api/stories', 'POST', {
-      title: 'Copy Me',
-      type: 'recPersonType',
-    }))!.json()) as { id: string }
-    await get(`/folio/api/story/${created.id}/document`)
-    const res = (await send(`/folio/api/stories/${created.id}/duplicate`, 'POST', {
-      title: 'Copy Me 2',
-    }))!
-    expect(res.status).toBe(201)
-    const copy = ((await res.json()) as { story: { id: string; path: string | null } }).story
-    expect(copy.path).toBeNull()
-    await send(`/folio/api/stories/${copy.id}`, 'DELETE')
-    await send(`/folio/api/stories/${created.id}`, 'DELETE')
-  })
-})
+  it("refuses to duplicate a singleton but happily duplicates a record", async () => {
+    const created = (await (await send("/folio/api/stories", "POST", {
+      title: "Copy Me",
+      type: "recPersonType",
+    }))!.json()) as { id: string };
+    await get(`/folio/api/story/${created.id}/document`);
+    const res = (await send(`/folio/api/stories/${created.id}/duplicate`, "POST", {
+      title: "Copy Me 2",
+    }))!;
+    expect(res.status).toBe(201);
+    const copy = ((await res.json()) as { story: { id: string; path: string | null } }).story;
+    expect(copy.path).toBeNull();
+    await send(`/folio/api/stories/${copy.id}`, "DELETE");
+    await send(`/folio/api/stories/${created.id}`, "DELETE");
+  });
+});
 
 /* --------------------------------------------------------------- delete --- */
 
-describe('deleting a referenced record proceeds', () => {
-  it('removes the row, its index rows, and leaves the referring pages alone', async () => {
-    const created = (await (await send('/folio/api/stories', 'POST', {
-      title: 'Doomed Office',
-      type: 'recOfficeType',
-    }))!.json()) as { id: string }
-    await insertRow('rec_referrer', {
-      type: 'recPageType',
-      path: 'recreferrer',
-      title: 'Referrer',
-      doc: one('rr', 'recPage', { title: 'Referrer', office: created.id }),
-    })
-    await folio.reindex(env, { batch: 200 })
+describe("deleting a referenced record proceeds", () => {
+  it("removes the row, its index rows, and leaves the referring pages alone", async () => {
+    const created = (await (await send("/folio/api/stories", "POST", {
+      title: "Doomed Office",
+      type: "recOfficeType",
+    }))!.json()) as { id: string };
+    await insertRow("rec_referrer", {
+      type: "recPageType",
+      path: "recreferrer",
+      title: "Referrer",
+      doc: one("rr", "recPage", { title: "Referrer", office: created.id }),
+    });
+    await folio.reindex(env, { batch: 200 });
 
     const before = (await (await get(`/folio/api/documents/${created.id}/usage`))!.json()) as {
-      total: number
-    }
-    expect(before.total).toBe(1)
+      total: number;
+    };
+    expect(before.total).toBe(1);
 
     // Warns with a count, and proceeds (decision 4): the delete is not gated on
     // the usage being zero.
-    const res = (await send(`/folio/api/stories/${created.id}`, 'DELETE'))!
-    expect(res.status).toBe(200)
-    expect(((await res.json()) as { deleted: string[] }).deleted).toEqual([created.id])
+    const res = (await send(`/folio/api/stories/${created.id}`, "DELETE"))!;
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { deleted: string[] }).deleted).toEqual([created.id]);
 
-    const rows = await env.DB.prepare('select count(*) as n from content_index where story_id = ?')
+    const rows = await env.DB.prepare("select count(*) as n from content_index where story_id = ?")
       .bind(created.id)
-      .first<{ n: number }>()
-    expect(rows?.n).toBe(0)
+      .first<{ n: number }>();
+    expect(rows?.n).toBe(0);
 
     // And the full-text rows with them: `clearIndexStatements` writes all three
     // tables, so a delete cannot leave the office findable by name
     // (`full-text-search.md` decision 1).
-    expect(await searchRows(created.id)).toBe(0)
+    expect(await searchRows(created.id)).toBe(0);
 
     // The referring page is still live and still published; it renders its
     // block's empty state, which is what makes a broken reference safe.
-    expect(await folio.published(env, 'recreferrer')).not.toBeNull()
+    expect(await folio.published(env, "recreferrer")).not.toBeNull();
 
     // And the inbound edge goes with the target. It used to survive until the
     // referrer's next publish rewrote it, which meant a site that never
     // republishes accumulated edges to ids with no document behind them.
-    const refs = await env.DB.prepare('select count(*) as n from content_refs where to_id = ?')
+    const refs = await env.DB.prepare("select count(*) as n from content_refs where to_id = ?")
       .bind(created.id)
-      .first<{ n: number }>()
-    expect(refs?.n).toBe(0)
+      .first<{ n: number }>();
+    expect(refs?.n).toBe(0);
 
     // The referrer's *other* rows are untouched: this pruned one edge, not the
     // whole source document's outbound set.
     const outbound = await env.DB.prepare(
-      'select count(*) as n from content_refs where from_story = ?',
+      "select count(*) as n from content_refs where from_story = ?",
     )
-      .bind('rec_referrer')
-      .first<{ n: number }>()
-    expect(outbound?.n).toBe(0)
+      .bind("rec_referrer")
+      .first<{ n: number }>();
+    expect(outbound?.n).toBe(0);
 
-    await env.DB.prepare('delete from stories where id = ?').bind('rec_referrer').run()
-  })
+    await env.DB.prepare("delete from stories where id = ?").bind("rec_referrer").run();
+  });
 
-  it('takes the deleted subtree out of content_refs from both directions at once', async () => {
+  it("takes the deleted subtree out of content_refs from both directions at once", async () => {
     // A page that both points at a record and is pointed at by another page, so
     // one delete has an outbound edge and an inbound edge to lose.
-    await insertRow('rec_hub', {
-      type: 'recPageType',
-      path: 'rechub',
-      title: 'Hub',
-      doc: one('h', 'recPage', { title: 'Hub', office: SYDNEY }),
-    })
-    await insertRow('rec_pointer', {
-      type: 'recPageType',
-      path: 'recpointer',
-      title: 'Pointer',
-      doc: one('pt', 'recPage', { title: 'Pointer', lead: ADA, office: SYDNEY }),
-    })
-    await folio.reindex(env, { batch: 200 })
+    await insertRow("rec_hub", {
+      type: "recPageType",
+      path: "rechub",
+      title: "Hub",
+      doc: one("h", "recPage", { title: "Hub", office: SYDNEY }),
+    });
+    await insertRow("rec_pointer", {
+      type: "recPageType",
+      path: "recpointer",
+      title: "Pointer",
+      doc: one("pt", "recPage", { title: "Pointer", lead: ADA, office: SYDNEY }),
+    });
+    await folio.reindex(env, { batch: 200 });
     // A `link`-kind edge on top of the two `reference` ones the walk produced —
     // the shape a richtext link mark writes. Inserted after the reindex, because
     // a reindex rewrites `rec_pointer`'s whole outbound set.
-    await env.DB.prepare('insert into content_refs (from_story, to_id, kind) values (?, ?, ?)')
-      .bind('rec_pointer', 'rec_hub', 'link')
-      .run()
+    await env.DB.prepare("insert into content_refs (from_story, to_id, kind) values (?, ?, ?)")
+      .bind("rec_pointer", "rec_hub", "link")
+      .run();
 
     // The reindex above wrote the hub's prose too, so the delete below has
     // something to clear rather than trivially finding nothing.
-    expect(await searchRows('rec_hub')).toBeGreaterThan(0)
+    expect(await searchRows("rec_hub")).toBeGreaterThan(0);
 
-    const res = (await send('/folio/api/stories/rec_hub?redirect=false', 'DELETE'))!
-    expect(res.status).toBe(200)
+    const res = (await send("/folio/api/stories/rec_hub?redirect=false", "DELETE"))!;
+    expect(res.status).toBe(200);
 
     const rows = await env.DB.prepare(
-      'select count(*) as n from content_refs where from_story = ? or to_id = ?',
+      "select count(*) as n from content_refs where from_story = ? or to_id = ?",
     )
-      .bind('rec_hub', 'rec_hub')
-      .first<{ n: number }>()
-    expect(rows?.n).toBe(0)
+      .bind("rec_hub", "rec_hub")
+      .first<{ n: number }>();
+    expect(rows?.n).toBe(0);
 
     // `rec_pointer` itself is untouched — only the edge naming the deleted page
     // went, not every edge it owns.
     const survivors = await env.DB.prepare(
-      'select to_id as target from content_refs where from_story = ? order by target',
+      "select to_id as target from content_refs where from_story = ? order by target",
     )
-      .bind('rec_pointer')
-      .all<{ target: string }>()
-    expect(survivors.results.map((r) => r.target)).toEqual([ADA, SYDNEY])
+      .bind("rec_pointer")
+      .all<{ target: string }>();
+    expect(survivors.results.map((r) => r.target)).toEqual([ADA, SYDNEY]);
 
     // The full-text rows went with it, and only its own: `rec_pointer` is still
     // published and still findable.
-    expect(await searchRows('rec_hub')).toBe(0)
-    expect(await searchRows('rec_pointer')).toBeGreaterThan(0)
+    expect(await searchRows("rec_hub")).toBe(0);
+    expect(await searchRows("rec_pointer")).toBeGreaterThan(0);
 
-    await env.DB.prepare('delete from stories where id = ?').bind('rec_pointer').run()
-  })
+    await env.DB.prepare("delete from stories where id = ?").bind("rec_pointer").run();
+  });
 
-  it('keeps the inbound edges when a referenced record is only unpublished', async () => {
+  it("keeps the inbound edges when a referenced record is only unpublished", async () => {
     // The distinction `clearIndexStatements` and `clearInboundRefStatements`
     // exist to draw: the story is still there, so "used by N" is still a true
     // and useful warning about it.
-    await insertRow('rec_paused', {
-      type: 'recOfficeType',
+    await insertRow("rec_paused", {
+      type: "recOfficeType",
       path: null,
-      title: 'Paused Office',
-      doc: one('pa', 'recOffice', { city: 'Paused', phone: '111' }),
-    })
-    await insertRow('rec_naming', {
-      type: 'recPageType',
-      path: 'recnaming',
-      title: 'Naming',
-      doc: one('nm', 'recPage', { title: 'Naming', office: 'rec_paused' }),
-    })
-    await folio.reindex(env, { batch: 200 })
-    expect(await searchRows('rec_paused')).toBeGreaterThan(0)
+      title: "Paused Office",
+      doc: one("pa", "recOffice", { city: "Paused", phone: "111" }),
+    });
+    await insertRow("rec_naming", {
+      type: "recPageType",
+      path: "recnaming",
+      title: "Naming",
+      doc: one("nm", "recPage", { title: "Naming", office: "rec_paused" }),
+    });
+    await folio.reindex(env, { batch: 200 });
+    expect(await searchRows("rec_paused")).toBeGreaterThan(0);
 
-    expect((await send('/folio/api/story/rec_paused/unpublish', 'POST'))!.status).toBe(200)
+    expect((await send("/folio/api/story/rec_paused/unpublish", "POST"))!.status).toBe(200);
 
     // Its own projection is gone: an unpublished document leaves every collection
     // and, in the same batch, every search result.
-    expect(await searchRows('rec_paused')).toBe(0)
-    const own = await env.DB.prepare('select count(*) as n from content_index where story_id = ?')
-      .bind('rec_paused')
-      .first<{ n: number }>()
-    expect(own?.n).toBe(0)
+    expect(await searchRows("rec_paused")).toBe(0);
+    const own = await env.DB.prepare("select count(*) as n from content_index where story_id = ?")
+      .bind("rec_paused")
+      .first<{ n: number }>();
+    expect(own?.n).toBe(0);
 
     // The inbound edge is not.
-    const usage = (await (await get('/folio/api/documents/rec_paused/usage'))!.json()) as {
-      total: number
-    }
-    expect(usage.total).toBe(1)
+    const usage = (await (await get("/folio/api/documents/rec_paused/usage"))!.json()) as {
+      total: number;
+    };
+    expect(usage.total).toBe(1);
 
-    await env.DB.prepare('delete from stories where id in (?, ?)')
-      .bind('rec_paused', 'rec_naming')
-      .run()
-  })
-})
+    await env.DB.prepare("delete from stories where id in (?, ?)")
+      .bind("rec_paused", "rec_naming")
+      .run();
+  });
+});
 
 /* --------------------------------------------------------------- the search --- */
 
@@ -614,29 +617,29 @@ describe('deleting a referenced record proceeds', () => {
  * could not do are the two things asserted here: reach a *record*, and reach a
  * value that lives in `content_index` rather than on the row.
  */
-describe('GET /api/search', () => {
-  type Found = { rows: { id: string; type: string; title: string }[]; total?: number }
+describe("GET /api/search", () => {
+  type Found = { rows: { id: string; type: string; title: string }[]; total?: number };
   const search = async (query: string) =>
-    (await (await get(`/folio/api/search?${query}`))!.json()) as Found
+    (await (await get(`/folio/api/search?${query}`))!.json()) as Found;
 
-  it('spans every kind, so a record is reachable where flat mode could not reach it', async () => {
-    const found = await search('q=lovelace')
-    expect(found.rows.map((r) => r.id)).toContain(ADA)
-  })
+  it("spans every kind, so a record is reachable where flat mode could not reach it", async () => {
+    const found = await search("q=lovelace");
+    expect(found.rows.map((r) => r.id)).toContain(ADA);
+  });
 
-  it('reaches an indexed value, not only the title', async () => {
-    const found = await search('q=analyst')
-    expect(found.rows.map((r) => r.id)).toEqual([ADA])
-  })
+  it("reaches an indexed value, not only the title", async () => {
+    const found = await search("q=analyst");
+    expect(found.rows.map((r) => r.id)).toEqual([ADA]);
+  });
 
-  it('narrows to a declared kind, which is what a picker needs', async () => {
-    const records = await search('kind=record')
+  it("narrows to a declared kind, which is what a picker needs", async () => {
+    const records = await search("kind=record");
     expect(
-      records.rows.every((r) => r.type === 'recPersonType' || r.type === 'recOfficeType'),
-    ).toBe(true)
-    const pages = await search('kind=page')
-    expect(pages.rows.some((r) => r.id === ADA)).toBe(false)
-  })
+      records.rows.every((r) => r.type === "recPersonType" || r.type === "recOfficeType"),
+    ).toBe(true);
+    const pages = await search("kind=page");
+    expect(pages.rows.some((r) => r.id === ADA)).toBe(false);
+  });
 
   /**
    * Absent `types` is every type; an **empty** list is none. The distinction only
@@ -644,37 +647,37 @@ describe('GET /api/search', () => {
    * the whole table, and getting it wrong would silently offer every document in a
    * picker narrowed to something the site does not have.
    */
-  it('answers an empty page for a kind this site declares none of', async () => {
-    const found = await search('kind=singleton&count=1')
-    expect(found.rows).toEqual([])
-    expect(found.total).toBe(0)
-  })
+  it("answers an empty page for a kind this site declares none of", async () => {
+    const found = await search("kind=singleton&count=1");
+    expect(found.rows).toEqual([]);
+    expect(found.total).toBe(0);
+  });
 
-  it('answers every candidate for no query at all, which is what a picker opens on', async () => {
-    const found = await search('limit=100')
-    expect(found.rows.length).toBeGreaterThan(1)
-  })
+  it("answers every candidate for no query at all, which is what a picker opens on", async () => {
+    const found = await search("limit=100");
+    expect(found.rows.length).toBeGreaterThan(1);
+  });
 
-  it('refuses an unknown kind and an unknown sort', async () => {
-    const kind = await get('/folio/api/search?kind=widget')
-    expect(kind?.status).toBe(400)
-    const sort = await get('/folio/api/search?sort=path')
-    expect(sort?.status).toBe(400)
-  })
+  it("refuses an unknown kind and an unknown sort", async () => {
+    const kind = await get("/folio/api/search?kind=widget");
+    expect(kind?.status).toBe(400);
+    const sort = await get("/folio/api/search?sort=path");
+    expect(sort?.status).toBe(400);
+  });
 
-  it('pages over a cursor like every other admin list', async () => {
-    const first = (await (await get('/folio/api/search?limit=1&count=1'))!.json()) as Found & {
-      cursor: string | null
-    }
-    expect(first.rows).toHaveLength(1)
-    expect(first.cursor).not.toBeNull()
+  it("pages over a cursor like every other admin list", async () => {
+    const first = (await (await get("/folio/api/search?limit=1&count=1"))!.json()) as Found & {
+      cursor: string | null;
+    };
+    expect(first.rows).toHaveLength(1);
+    expect(first.cursor).not.toBeNull();
 
     const second = (await (await get(
-      `/folio/api/search?limit=1&cursor=${encodeURIComponent(first.cursor ?? '')}`,
-    ))!.json()) as Found
-    expect(second.rows[0]?.id).not.toBe(first.rows[0]?.id)
-  })
-})
+      `/folio/api/search?limit=1&cursor=${encodeURIComponent(first.cursor ?? "")}`,
+    ))!.json()) as Found;
+    expect(second.rows[0]?.id).not.toBe(first.rows[0]?.id);
+  });
+});
 
 /* ------------------------------------------------ D1's bound-parameter cap --- */
 
@@ -697,88 +700,88 @@ describe('GET /api/search', () => {
 describe("a document past D1's hundred-parameter statement cap still publishes", () => {
   /** Seeds the Durable Object so `publish` has a draft to read, then publishes it. */
   const publishDoc = async (id: string, type: string, title: string, doc: Doc) => {
-    await insertRow(id, { type, path: null, title, doc })
+    await insertRow(id, { type, path: null, title, doc });
     const stub = env.STORY.get(env.STORY.idFromName(id)) as unknown as {
-      getOrInit: (d: Doc) => Promise<Doc>
-    }
-    await stub.getOrInit(doc)
-    return (await send(`/folio/api/story/${id}/publish`, 'POST'))!
-  }
+      getOrInit: (d: Doc) => Promise<Doc>;
+    };
+    await stub.getOrInit(doc);
+    return (await send(`/folio/api/story/${id}/publish`, "POST"))!;
+  };
 
-  const countRows = async (table: 'content_index' | 'content_refs', id: string) => {
-    const column = table === 'content_index' ? 'story_id' : 'from_story'
+  const countRows = async (table: "content_index" | "content_refs", id: string) => {
+    const column = table === "content_index" ? "story_id" : "from_story";
     const row = await env.DB.prepare(`select count(*) as n from ${table} where ${column} = ?`)
       .bind(id)
-      .first<{ n: number }>()
-    return row?.n ?? 0
-  }
+      .first<{ n: number }>();
+    return row?.n ?? 0;
+  };
 
   it(`writes ${WIDE_FIELDS} content_index rows, where 21 used to fail the whole batch`, async () => {
-    const id = 'rec_wide_idx'
+    const id = "rec_wide_idx";
     const doc = one(
-      'w',
-      'recWide',
+      "w",
+      "recWide",
       Object.fromEntries(Array.from({ length: WIDE_FIELDS }, (_, i) => [`f${i}`, `value ${i}`])),
-    )
+    );
 
-    const res = await publishDoc(id, 'recWideType', 'Wide', doc)
-    expect(res.status).toBe(200)
+    const res = await publishDoc(id, "recWideType", "Wide", doc);
+    expect(res.status).toBe(200);
 
     // Every row, not merely "it did not throw": a chunker that dropped its last
     // slice would also publish cleanly.
-    expect(await countRows('content_index', id)).toBe(WIDE_FIELDS)
+    expect(await countRows("content_index", id)).toBe(WIDE_FIELDS);
     const values = await env.DB.prepare(
-      'select field, text_value as text from content_index where story_id = ? order by field',
+      "select field, text_value as text from content_index where story_id = ? order by field",
     )
       .bind(id)
-      .all<{ field: string; text: string }>()
-    expect(values.results).toHaveLength(WIDE_FIELDS)
+      .all<{ field: string; text: string }>();
+    expect(values.results).toHaveLength(WIDE_FIELDS);
     expect(values.results.find((r) => r.field === `f${WIDE_FIELDS - 1}`)?.text).toBe(
       `value ${WIDE_FIELDS - 1}`,
-    )
+    );
 
-    await send(`/folio/api/stories/${id}`, 'DELETE')
-  })
+    await send(`/folio/api/stories/${id}`, "DELETE");
+  });
 
   it(`writes ${MANY_LINKS} content_refs rows, where 34 used to fail the whole batch`, async () => {
-    const id = 'rec_many_links'
+    const id = "rec_many_links";
     // Link marks inside richtext, which is what "a page with thirty-four internal
     // links" actually is: a Folio-native mark carries a structured `attrs.link`
     // and no href at all (`core/refs.ts`).
-    const doc = one('lk', 'recPerson', {
-      fullName: 'Linky Person',
+    const doc = one("lk", "recPerson", {
+      fullName: "Linky Person",
       bio: {
-        type: 'doc',
+        type: "doc",
         content: Array.from({ length: MANY_LINKS }, (_, i) => ({
-          type: 'paragraph',
+          type: "paragraph",
           content: [
             {
-              type: 'text',
+              type: "text",
               text: `see ${i}`,
-              marks: [{ type: 'link', attrs: { link: { kind: 'story', id: `rec_target_${i}` } } }],
+              marks: [{ type: "link", attrs: { link: { kind: "story", id: `rec_target_${i}` } } }],
             },
           ],
         })),
       },
-    })
+    });
 
-    const res = await publishDoc(id, 'recPersonType', 'Linky Person', doc)
-    expect(res.status).toBe(200)
+    const res = await publishDoc(id, "recPersonType", "Linky Person", doc);
+    expect(res.status).toBe(200);
 
-    expect(await countRows('content_refs', id)).toBe(MANY_LINKS)
+    expect(await countRows("content_refs", id)).toBe(MANY_LINKS);
     // The targets, so a chunk boundary cannot silently swallow one: the last id is
     // in the final slice and the 31st is the first row of the second.
     const rows = await env.DB.prepare(
-      'select to_id as target, kind from content_refs where from_story = ?',
+      "select to_id as target, kind from content_refs where from_story = ?",
     )
       .bind(id)
-      .all<{ target: string; kind: string }>()
-    const targets = new Set(rows.results.map((r) => r.target))
-    for (let i = 0; i < MANY_LINKS; i++) expect(targets.has(`rec_target_${i}`)).toBe(true)
-    expect(rows.results.every((r) => r.kind === 'link')).toBe(true)
+      .all<{ target: string; kind: string }>();
+    const targets = new Set(rows.results.map((r) => r.target));
+    for (let i = 0; i < MANY_LINKS; i++) expect(targets.has(`rec_target_${i}`)).toBe(true);
+    expect(rows.results.every((r) => r.kind === "link")).toBe(true);
 
-    await send(`/folio/api/stories/${id}`, 'DELETE')
-  })
+    await send(`/folio/api/stories/${id}`, "DELETE");
+  });
 
   /**
    * The same two tables through `POST /folio/reindex`, which is the other caller of
@@ -786,23 +789,23 @@ describe("a document past D1's hundred-parameter statement cap still publishes",
    * oversized document used to take the whole sweep down with it, so a site could
    * not reindex its way out of the problem either.
    */
-  it('reindexes a document that projects past the cap, without failing the sweep', async () => {
-    const id = 'rec_wide_reindex'
+  it("reindexes a document that projects past the cap, without failing the sweep", async () => {
+    const id = "rec_wide_reindex";
     await insertRow(id, {
-      type: 'recWideType',
+      type: "recWideType",
       path: null,
-      title: 'Wide Reindex',
+      title: "Wide Reindex",
       doc: one(
-        'w2',
-        'recWide',
+        "w2",
+        "recWide",
         Object.fromEntries(Array.from({ length: WIDE_FIELDS }, (_, i) => [`f${i}`, `swept ${i}`])),
       ),
-    })
+    });
 
-    const report = await folio.reindex(env, { batch: 200 })
-    expect(report.documents).toBeGreaterThan(0)
-    expect(await countRows('content_index', id)).toBe(WIDE_FIELDS)
+    const report = await folio.reindex(env, { batch: 200 });
+    expect(report.documents).toBeGreaterThan(0);
+    expect(await countRows("content_index", id)).toBe(WIDE_FIELDS);
 
-    await send(`/folio/api/stories/${id}`, 'DELETE')
-  })
-})
+    await send(`/folio/api/stories/${id}`, "DELETE");
+  });
+});

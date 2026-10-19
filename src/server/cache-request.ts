@@ -24,13 +24,13 @@ import {
   readGrantCookie,
   readSessionCookie,
   shareCookieTokens,
-} from './auth/cookie'
+} from "./auth/cookie";
 
 /**
  * Whether a request may be served from a shared cache, as far as Folio can tell.
  * `null` means "not mine to judge".
  */
-export type CacheVerdict = 'cache' | 'bypass' | null
+export type CacheVerdict = "cache" | "bypass" | null;
 
 /**
  * Query parameters that identify a *click*, not a resource.
@@ -49,37 +49,37 @@ export type CacheVerdict = 'cache' | 'bypass' | null
  */
 const CLICK_IDS = new Set([
   // Google Ads / Analytics
-  'gclid',
-  'gclsrc',
-  'gbraid',
-  'wbraid',
-  'dclid',
+  "gclid",
+  "gclsrc",
+  "gbraid",
+  "wbraid",
+  "dclid",
   // Meta
-  'fbclid',
+  "fbclid",
   // Microsoft / Bing
-  'msclkid',
+  "msclkid",
   // TikTok, X, LinkedIn, Instagram, Pinterest, Yandex, Snapchat
-  'ttclid',
-  'twclid',
-  'li_fat_id',
-  'igshid',
-  'epik',
-  'yclid',
-  'sc_cid',
+  "ttclid",
+  "twclid",
+  "li_fat_id",
+  "igshid",
+  "epik",
+  "yclid",
+  "sc_cid",
   // Mailchimp
-  'mc_cid',
-  'mc_eid',
+  "mc_cid",
+  "mc_eid",
   // HubSpot
-  '_hsenc',
-  '_hsmi',
-  'hsctatracking',
+  "_hsenc",
+  "_hsmi",
+  "hsctatracking",
   // Adobe
-  's_kwcid',
-])
+  "s_kwcid",
+]);
 
 function isClickId(name: string): boolean {
-  const key = name.toLowerCase()
-  return key.startsWith('utm_') || CLICK_IDS.has(key)
+  const key = name.toLowerCase();
+  return key.startsWith("utm_") || CLICK_IDS.has(key);
 }
 
 /**
@@ -96,15 +96,15 @@ function isClickId(name: string): boolean {
  * a gateway re-keys it on the way through.
  */
 export function cacheKeyFor(url: string | URL): string {
-  const parsed = typeof url === 'string' ? new URL(url) : new URL(url.toString())
-  const kept: [string, string][] = []
+  const parsed = typeof url === "string" ? new URL(url) : new URL(url.toString());
+  const kept: [string, string][] = [];
   for (const [name, value] of parsed.searchParams) {
-    if (!isClickId(name)) kept.push([name, value])
+    if (!isClickId(name)) kept.push([name, value]);
   }
-  kept.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  parsed.search = ''
-  for (const [name, value] of kept) parsed.searchParams.append(name, value)
-  return parsed.toString()
+  kept.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  parsed.search = "";
+  for (const [name, value] of kept) parsed.searchParams.append(name, value);
+  return parsed.toString();
 }
 
 /**
@@ -135,25 +135,25 @@ export function cacheKeyFor(url: string | URL): string {
  *      its sign-in. Never.
  */
 export function cacheVerdictFor(req: Request, base: string): CacheVerdict {
-  if (req.method !== 'GET' && req.method !== 'HEAD') return 'bypass'
-  if (req.headers.get('upgrade')?.toLowerCase() === 'websocket') return 'bypass'
+  if (req.method !== "GET" && req.method !== "HEAD") return "bypass";
+  if (req.headers.get("upgrade")?.toLowerCase() === "websocket") return "bypass";
 
-  const cookie = req.headers.get('cookie')
+  const cookie = req.headers.get("cookie");
   if (
     readSessionCookie(cookie) !== null ||
     readGrantCookie(cookie) !== null ||
     hasDraftCookie(cookie) ||
     shareCookieTokens(cookie).length > 0
   ) {
-    return 'bypass'
+    return "bypass";
   }
 
-  const url = new URL(req.url)
-  const mode = url.searchParams.get('_folio')
-  if (mode === 'preview' || mode === 'draft') return 'bypass'
+  const url = new URL(req.url);
+  const mode = url.searchParams.get("_folio");
+  if (mode === "preview" || mode === "draft") return "bypass";
 
-  if (url.pathname === `${base}/asset` || url.pathname.startsWith(`${base}/asset/`)) return 'cache'
-  if (url.pathname === base || url.pathname.startsWith(`${base}/`)) return 'bypass'
+  if (url.pathname === `${base}/asset` || url.pathname.startsWith(`${base}/asset/`)) return "cache";
+  if (url.pathname === base || url.pathname.startsWith(`${base}/`)) return "bypass";
 
-  return null
+  return null;
 }

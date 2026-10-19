@@ -1,25 +1,25 @@
-import './preview.css'
-import { useEffect, useState } from 'react'
-import { hydrateRoot } from 'react-dom/client'
-import { toRegistry, toSchemaIndex, type AnyBlockDef, type Registry } from '../core/block'
-import type { Doc } from '../core/doc'
-import { applyAll } from '../core/mutations'
-import { computeBlocksDigest, diffBlocksDigest } from '../core/registry-digest'
+import "./preview.css";
+import { useEffect, useState } from "react";
+import { hydrateRoot } from "react-dom/client";
+import { toRegistry, toSchemaIndex, type AnyBlockDef, type Registry } from "../core/block";
+import type { Doc } from "../core/doc";
+import { applyAll } from "../core/mutations";
+import { computeBlocksDigest, diffBlocksDigest } from "../core/registry-digest";
 import {
   isPreviewMsg,
   PROTOCOL_VERSION,
   type PreviewFrame,
   type PreviewToAdminMsg,
-} from '../core/protocol'
-import { EMPTY_RESOLUTION, type Resolution } from '../core/resolve'
-import { type PreviewWrap, wrapPreview } from '../core/render-wrap'
-import { FolioDoc } from './Render'
+} from "../core/protocol";
+import { EMPTY_RESOLUTION, type Resolution } from "../core/resolve";
+import { type PreviewWrap, wrapPreview } from "../core/render-wrap";
+import { FolioDoc } from "./Render";
 
 declare global {
   interface Window {
     __FOLIO__?: {
-      doc: Doc
-      resolution?: Resolution
+      doc: Doc;
+      resolution?: Resolution;
       /**
        * Present only when editing a global in the context of a host page
        * (`../../docs/specs/content-model/globals.md` decision 4): `doc`
@@ -28,7 +28,7 @@ declare global {
        * — the same markup in both modes, so hydrating into it is a plain
        * `hydrateRoot`, not a rebuild. `#folio-root` stays static in this mode.
        */
-      editing?: { global: string; mount: string }
+      editing?: { global: string; mount: string };
       /**
        * `sites.admin`, on a deployment with `sites`
        * (`../../docs/specs/foundation/multi-site.md` decision 13): the preview is on
@@ -36,15 +36,15 @@ declare global {
        * Written into the bootstrap by the server, never taken from the URL or the
        * frame. Absent, the admin is this preview's own origin, as it always was.
        */
-      admin?: string
+      admin?: string;
       /**
        * A digest of the server's blocks for this brand
        * (`../../docs/specs/foundation/multi-brand.md` decision 11), compared with the
        * one computed from the registry this bundle was built with. Absent from an
        * older server, which skips the comparison.
        */
-      blocks?: string
-    }
+      blocks?: string;
+    };
   }
 }
 
@@ -53,15 +53,15 @@ declare global {
  * where there is no `sites` (see core/protocol.ts); the configured admin origin
  * where there is. Read once from the bootstrap, which only the server writes.
  */
-const adminOrigin = (): string => window.__FOLIO__?.admin ?? window.location.origin
+const adminOrigin = (): string => window.__FOLIO__?.admin ?? window.location.origin;
 
 function post(msg: PreviewToAdminMsg) {
   window.parent?.postMessage(
-    { source: 'folio-preview', v: PROTOCOL_VERSION, ...msg },
+    { source: "folio-preview", v: PROTOCOL_VERSION, ...msg },
     // An explicit target, never `*`: the frame carries the document being edited,
     // and a preview embedded anywhere but the admin must tell nobody about it.
     adminOrigin(),
-  )
+  );
 }
 
 function PreviewApp({
@@ -70,47 +70,47 @@ function PreviewApp({
   registry,
   wrap,
 }: {
-  initial: Doc
-  initialResolution: Resolution
-  registry: Registry
-  wrap?: PreviewWrap
+  initial: Doc;
+  initialResolution: Resolution;
+  registry: Registry;
+  wrap?: PreviewWrap;
 }) {
-  const [doc, setDoc] = useState(initial)
-  const [resolution, setResolution] = useState(initialResolution)
+  const [doc, setDoc] = useState(initial);
+  const [resolution, setResolution] = useState(initialResolution);
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (e.origin !== adminOrigin()) return
+      if (e.origin !== adminOrigin()) return;
       // Same hardening as the admin's side of this seam (see usePreviewBridge):
       // origin alone only proves the sender is the admin's origin, not that it is
       // the parent frame this preview was embedded in.
-      if (e.source !== window.parent) return
-      const data = e.data as Partial<PreviewFrame> | null
-      if (data?.source !== 'folio-admin') return
-      if (!isPreviewMsg(data)) return
-      const msg = data
+      if (e.source !== window.parent) return;
+      const data = e.data as Partial<PreviewFrame> | null;
+      if (data?.source !== "folio-admin") return;
+      if (!isPreviewMsg(data)) return;
+      const msg = data;
 
       switch (msg.type) {
-        case 'apply':
+        case "apply":
           // The whole point: no network, no page reload. The same reducer the
           // admin ran, against the same document.
-          setDoc((d) => applyAll(d, msg.mutations))
-          break
-        case 'replace':
-          setDoc(msg.doc)
-          break
-        case 'resolve':
-          setResolution(msg.resolution)
-          break
-        case 'select':
-          markSelected(msg.uid)
-          break
+          setDoc((d) => applyAll(d, msg.mutations));
+          break;
+        case "replace":
+          setDoc(msg.doc);
+          break;
+        case "resolve":
+          setResolution(msg.resolution);
+          break;
+        case "select":
+          markSelected(msg.uid);
+          break;
       }
-    }
-    window.addEventListener('message', onMessage)
-    post({ type: 'ready' })
-    return () => window.removeEventListener('message', onMessage)
-  }, [])
+    };
+    window.addEventListener("message", onMessage);
+    post({ type: "ready" });
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   // The same helper the server render uses, so the two trees cannot differ in
   // how the wrapper is applied — a mismatch React would report as a hydration
@@ -127,18 +127,18 @@ function PreviewApp({
   return wrapPreview(
     wrap,
     <FolioDoc doc={doc} registry={registry} mode="edit" resolution={resolution} />,
-  )
+  );
 }
 
 function markSelected(uid: string | null) {
-  for (const el of document.querySelectorAll('[data-folio-selected]')) {
-    el.removeAttribute('data-folio-selected')
+  for (const el of document.querySelectorAll("[data-folio-selected]")) {
+    el.removeAttribute("data-folio-selected");
   }
-  if (!uid) return
-  const el = document.querySelector(`[data-folio-uid="${CSS.escape(uid)}"]`)
-  if (!el) return
-  el.setAttribute('data-folio-selected', '')
-  el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  if (!uid) return;
+  const el = document.querySelector(`[data-folio-uid="${CSS.escape(uid)}"]`);
+  if (!el) return;
+  el.setAttribute("data-folio-selected", "");
+  el.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 /**
@@ -147,42 +147,42 @@ function markSelected(uid: string | null) {
  */
 function attachBridge() {
   document.addEventListener(
-    'click',
+    "click",
     (e) => {
-      const target = e.target as Element | null
-      const slot = target?.closest<HTMLElement>('[data-folio-slot]')
+      const target = e.target as Element | null;
+      const slot = target?.closest<HTMLElement>("[data-folio-slot]");
       if (slot) {
-        e.preventDefault()
-        const { folioParent: parent, folioSlot } = slot.dataset
+        e.preventDefault();
+        const { folioParent: parent, folioSlot } = slot.dataset;
         // Both attributes are set together wherever a slot is rendered
         // (see Render.tsx); a slot missing either is not a message worth
         // sending rather than one worth sending malformed.
-        if (parent && folioSlot) post({ type: 'add', parent, slot: folioSlot })
-        return
+        if (parent && folioSlot) post({ type: "add", parent, slot: folioSlot });
+        return;
       }
-      const block = target?.closest<HTMLElement>('[data-folio-uid]')
-      if (!block) return
+      const block = target?.closest<HTMLElement>("[data-folio-uid]");
+      if (!block) return;
       // Links inside the preview must not navigate while editing.
-      e.preventDefault()
-      const uid = block.dataset.folioUid!
-      markSelected(uid)
-      post({ type: 'select', uid })
+      e.preventDefault();
+      const uid = block.dataset.folioUid!;
+      markSelected(uid);
+      post({ type: "select", uid });
     },
     true,
-  )
+  );
 
-  let hovered: Element | null = null
-  document.addEventListener('mouseover', (e) => {
-    const block = (e.target as Element | null)?.closest('[data-folio-uid]') ?? null
-    if (block === hovered) return
-    hovered?.removeAttribute('data-folio-hover')
-    hovered = block
-    hovered?.setAttribute('data-folio-hover', '')
-  })
-  document.addEventListener('mouseleave', () => {
-    hovered?.removeAttribute('data-folio-hover')
-    hovered = null
-  })
+  let hovered: Element | null = null;
+  document.addEventListener("mouseover", (e) => {
+    const block = (e.target as Element | null)?.closest("[data-folio-uid]") ?? null;
+    if (block === hovered) return;
+    hovered?.removeAttribute("data-folio-hover");
+    hovered = block;
+    hovered?.setAttribute("data-folio-hover", "");
+  });
+  document.addEventListener("mouseleave", () => {
+    hovered?.removeAttribute("data-folio-hover");
+    hovered = null;
+  });
 }
 
 /**
@@ -190,11 +190,11 @@ function attachBridge() {
  */
 export function blocksNotice(diff: ReturnType<typeof diffBlocksDigest>): string {
   const parts = [
-    diff.missing.length > 0 ? `missing ${diff.missing.join(', ')}` : '',
-    diff.extra.length > 0 ? `extra ${diff.extra.join(', ')}` : '',
-    diff.changed.length > 0 ? `different fields in ${diff.changed.join(', ')}` : '',
-  ].filter(Boolean)
-  return `This preview's blocks differ from the server's: ${parts.join('; ')}. Rebuild the preview bundle from the same blocks module.`
+    diff.missing.length > 0 ? `missing ${diff.missing.join(", ")}` : "",
+    diff.extra.length > 0 ? `extra ${diff.extra.join(", ")}` : "",
+    diff.changed.length > 0 ? `different fields in ${diff.changed.join(", ")}` : "",
+  ].filter(Boolean);
+  return `This preview's blocks differ from the server's: ${parts.join("; ")}. Rebuild the preview bundle from the same blocks module.`;
 }
 
 /**
@@ -203,13 +203,13 @@ export function blocksNotice(diff: ReturnType<typeof diffBlocksDigest>): string 
  * renders on (`multi-brand.md` decision 11).
  */
 function drawBlocksNotice(text: string) {
-  const note = document.createElement('p')
-  note.setAttribute('role', 'note')
-  note.setAttribute('data-folio-blocks-notice', '')
-  note.textContent = text
+  const note = document.createElement("p");
+  note.setAttribute("role", "note");
+  note.setAttribute("data-folio-blocks-notice", "");
+  note.textContent = text;
   note.style.cssText =
-    'margin:0;padding:8px 12px;font:13px/1.4 system-ui,sans-serif;background:#fff7e0;border-bottom:1px solid #e6cf8a;color:#5c4a00'
-  document.body.insertBefore(note, document.body.firstChild)
+    "margin:0;padding:8px 12px;font:13px/1.4 system-ui,sans-serif;background:#fff7e0;border-bottom:1px solid #e6cf8a;color:#5c4a00";
+  document.body.insertBefore(note, document.body.firstChild);
 }
 
 /**
@@ -220,21 +220,21 @@ export function mountPreview(
   blocks: readonly AnyBlockDef[] | Registry,
   opts?: { wrap?: PreviewWrap },
 ) {
-  const boot = window.__FOLIO__
-  if (!boot) return
+  const boot = window.__FOLIO__;
+  if (!boot) return;
   // Editing a global in context (`editing.mount`) hydrates its own wrapper
   // instead of `#folio-root`; the page around it stays static server-rendered
   // markup with no React root of its own (`globals.md` decision 4).
   const root = boot.editing
     ? document.querySelector(boot.editing.mount)
-    : document.getElementById('folio-root')
-  if (!root) return
-  const registry = toRegistry(blocks)
+    : document.getElementById("folio-root");
+  if (!root) return;
+  const registry = toRegistry(blocks);
   // Every mounted preview is edit mode: the chrome-free draft page ships no entry.
   if (boot.blocks !== undefined) {
-    const diff = diffBlocksDigest(boot.blocks, computeBlocksDigest(toSchemaIndex(registry)))
+    const diff = diffBlocksDigest(boot.blocks, computeBlocksDigest(toSchemaIndex(registry)));
     if (diff.missing.length + diff.extra.length + diff.changed.length > 0) {
-      drawBlocksNotice(blocksNotice(diff))
+      drawBlocksNotice(blocksNotice(diff));
     }
   }
   hydrateRoot(
@@ -245,6 +245,6 @@ export function mountPreview(
       registry={registry}
       wrap={opts?.wrap}
     />,
-  )
-  attachBridge()
+  );
+  attachBridge();
 }

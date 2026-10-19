@@ -1,22 +1,22 @@
-import type { ReactNode } from 'react'
-import { useId, useRef } from 'react'
-import { createPortal } from 'react-dom'
-import { useFocusTrap } from '../hooks/useFocusTrap'
-import css from './Dialog.module.css'
-import { scoped } from './scope'
+import type { ReactNode } from "react";
+import { useId, useRef } from "react";
+import { createPortal } from "react-dom";
+import { useFocusTrap } from "../hooks/useFocusTrap";
+import css from "./Dialog.module.css";
+import { scoped } from "./scope";
 
 interface Props {
-  title: ReactNode
+  title: ReactNode;
   /** One line under the title. "This cannot be undone", and nothing longer. */
-  description?: ReactNode
+  description?: ReactNode;
   /** Wider than the default 420px. `wide` is for a picker; `full` for the media
    * library, which is a grid rather than a question. */
-  size?: 'default' | 'wide'
-  onClose: () => void
+  size?: "default" | "wide";
+  onClose: () => void;
   /** Rendered right-aligned in the footer, in reading order: cancel, then the
    * action. The action carries its own variant. */
-  actions?: ReactNode
-  children?: ReactNode
+  actions?: ReactNode;
+  children?: ReactNode;
   /**
    * This dialog's action destroys something.
    *
@@ -34,7 +34,7 @@ interface Props {
    * at its own hover weight — bordered and tinted at rest. Both use the existing
    * `--state-danger-*` tokens, so both themes are covered by construction.
    */
-  danger?: boolean
+  danger?: boolean;
   /**
    * The body frames its content instead of scrolling it.
    *
@@ -43,7 +43,7 @@ interface Props {
    * costs the caller: the child must carry a flex chain down to whatever scrolls,
    * because the body will clip rather than scroll.
    */
-  fill?: boolean
+  fill?: boolean;
 }
 
 /**
@@ -70,17 +70,17 @@ interface Props {
 export function Dialog({
   title,
   description,
-  size = 'default',
+  size = "default",
   onClose,
   actions,
   children,
   danger,
   fill,
 }: Props) {
-  const panel = useRef<HTMLDivElement>(null)
-  const titleId = useId()
-  const descId = useId()
-  useFocusTrap(panel, onClose)
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  const descId = useId();
+  useFocusTrap(panel, onClose);
 
   return createPortal(
     // A portal lands on `document.body`, outside the shell, so the styling scope
@@ -105,9 +105,9 @@ export function Dialog({
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
-        className={[css.panel, size === 'wide' ? css.wide : '', danger ? css.danger : '']
+        className={[css.panel, size === "wide" ? css.wide : "", danger ? css.danger : ""]
           .filter(Boolean)
-          .join(' ')}
+          .join(" ")}
       >
         <div className={css.head}>
           <h2 id={titleId} className={css.title}>
@@ -120,7 +120,7 @@ export function Dialog({
           ) : null}
         </div>
         {children ? (
-          <div className={[css.body, fill ? css.fill : ''].filter(Boolean).join(' ')}>
+          <div className={[css.body, fill ? css.fill : ""].filter(Boolean).join(" ")}>
             {children}
           </div>
         ) : null}
@@ -128,5 +128,5 @@ export function Dialog({
       </div>
     </div>,
     document.body,
-  )
+  );
 }

@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { MigrateReport, MigrationStatus } from '../../server/migrate'
-import { expectJson, send } from '../api'
-import type { Notify } from './useNotice'
+import { useCallback, useEffect, useState } from "react";
+import type { MigrateReport, MigrationStatus } from "../../server/migrate";
+import { expectJson, send } from "../api";
+import type { Notify } from "./useNotice";
 
 export interface Migrations {
-  status: MigrationStatus | null
+  status: MigrationStatus | null;
   /** The most recent report from a dry run or a real run, for the screen. */
-  report: MigrateReport | null
+  report: MigrateReport | null;
   /** A run is in flight; the Run and Preview buttons stay disabled. */
-  busy: boolean
-  reload: () => Promise<void>
+  busy: boolean;
+  reload: () => Promise<void>;
   /** `dryRun` computes and writes nothing, including no ledger row. */
-  run: (opts: { dryRun: boolean }) => Promise<void>
+  run: (opts: { dryRun: boolean }) => Promise<void>;
 }
 
 /**
@@ -34,9 +34,9 @@ export interface Migrations {
  * editor did.
  */
 export function useMigrations(apiBase: string, storyId: string, notify: Notify): Migrations {
-  const [status, setStatus] = useState<MigrationStatus | null>(null)
-  const [report, setReport] = useState<MigrateReport | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState<MigrationStatus | null>(null);
+  const [report, setReport] = useState<MigrateReport | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -44,15 +44,15 @@ export function useMigrations(apiBase: string, storyId: string, notify: Notify):
         await expectJson<MigrationStatus>(
           await fetch(`${apiBase}/migrations?story=${encodeURIComponent(storyId)}`),
         ),
-      )
+      );
     } catch {
       // See the note above: silent on purpose.
     }
-  }, [apiBase, storyId])
+  }, [apiBase, storyId]);
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    void reload();
+  }, [reload]);
 
   /**
    * Runs (or previews) the pending migrations, following the cursor to the end.
@@ -65,31 +65,31 @@ export function useMigrations(apiBase: string, storyId: string, notify: Notify):
    */
   const run = useCallback(
     async ({ dryRun }: { dryRun: boolean }) => {
-      setBusy(true)
-      setReport(null)
+      setBusy(true);
+      setReport(null);
       try {
-        let cursor: string | null = null
-        let total: MigrateReport | null = null
+        let cursor: string | null = null;
+        let total: MigrateReport | null = null;
         for (let calls = 0; calls < 500; calls++) {
           const batch: MigrateReport = await expectJson<MigrateReport>(
-            await send(`${apiBase}/migrate`, 'POST', { dryRun, continueFrom: cursor }),
-          )
-          total = total === null ? batch : mergeReports(total, batch)
-          cursor = batch.continueFrom
-          if (cursor === null) break
+            await send(`${apiBase}/migrate`, "POST", { dryRun, continueFrom: cursor }),
+          );
+          total = total === null ? batch : mergeReports(total, batch);
+          cursor = batch.continueFrom;
+          if (cursor === null) break;
         }
-        setReport(total)
+        setReport(total);
       } catch (e) {
-        notify((e as Error).message)
+        notify((e as Error).message);
       } finally {
-        setBusy(false)
-        await reload()
+        setBusy(false);
+        await reload();
       }
     },
     [apiBase, notify, reload],
-  )
+  );
 
-  return { status, report, busy, reload, run }
+  return { status, report, busy, reload, run };
 }
 
 /**
@@ -109,5 +109,5 @@ export function mergeReports(a: MigrateReport, b: MigrateReport): MigrateReport 
     transactions: a.transactions + b.transactions,
     oversized: [...a.oversized, ...b.oversized],
     failed: [...a.failed, ...b.failed],
-  }
+  };
 }

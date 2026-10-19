@@ -29,38 +29,38 @@
  * inherited / overridden / removed labels and the server's render come from one
  * answer.
  */
-import { type Blok, compareSiblings, type Doc, type Json } from './doc'
-import { type SchemaIndex, slotsOf } from './schema'
-import { SHARED_SCOPE, singletonTypeOf } from './sites'
+import { type Blok, compareSiblings, type Doc, type Json } from "./doc";
+import { type SchemaIndex, slotsOf } from "./schema";
+import { SHARED_SCOPE, singletonTypeOf } from "./sites";
 
 /** `parent` → `slot` → children in order, built once per document. */
-type Kids = Map<string, Map<string, Blok[]>>
+type Kids = Map<string, Map<string, Blok[]>>;
 
-const indexes = new WeakMap<Doc, Kids>()
+const indexes = new WeakMap<Doc, Kids>();
 
 function kidsIndex(doc: Doc): Kids {
-  const cached = indexes.get(doc)
-  if (cached) return cached
-  const out: Kids = new Map()
+  const cached = indexes.get(doc);
+  if (cached) return cached;
+  const out: Kids = new Map();
   for (const blok of Object.values(doc.bloks)) {
-    if (blok.parent === null || blok.slot === null) continue
-    const slots = out.get(blok.parent) ?? new Map<string, Blok[]>()
-    const list = slots.get(blok.slot) ?? []
-    list.push(blok)
-    slots.set(blok.slot, list)
-    out.set(blok.parent, slots)
+    if (blok.parent === null || blok.slot === null) continue;
+    const slots = out.get(blok.parent) ?? new Map<string, Blok[]>();
+    const list = slots.get(blok.slot) ?? [];
+    list.push(blok);
+    slots.set(blok.slot, list);
+    out.set(blok.parent, slots);
   }
   for (const slots of out.values()) {
     for (const list of slots.values()) {
-      list.sort((a, b) => compareSiblings(a.order, a.uid, b.order, b.uid))
+      list.sort((a, b) => compareSiblings(a.order, a.uid, b.order, b.uid));
     }
   }
-  indexes.set(doc, out)
-  return out
+  indexes.set(doc, out);
+  return out;
 }
 
 const childrenIn = (doc: Doc, parent: string, slot: string): Blok[] =>
-  kidsIndex(doc).get(parent)?.get(slot) ?? []
+  kidsIndex(doc).get(parent)?.get(slot) ?? [];
 
 /** Every slot name a blok has, from the schema or from the children it holds. */
 function slotNamesOf(
@@ -68,18 +68,18 @@ function slotNamesOf(
   type: string,
   ...held: { doc: Doc; uid: string }[]
 ): string[] {
-  const names = new Set(slotsOf(schema[type]).map(([name]) => name))
+  const names = new Set(slotsOf(schema[type]).map(([name]) => name));
   for (const { doc, uid } of held) {
-    for (const name of kidsIndex(doc).get(uid)?.keys() ?? []) names.add(name)
+    for (const name of kidsIndex(doc).get(uid)?.keys() ?? []) names.add(name);
   }
-  return [...names]
+  return [...names];
 }
 
 /** `max: 1`: the slot holds one child, and layers merge into it rather than replace it. */
 const isSingle = (schema: SchemaIndex, type: string, slot: string): boolean => {
-  const field = schema[type]?.fields[slot]
-  return field?.kind === 'blocks' && field.max === 1
-}
+  const field = schema[type]?.fields[slot];
+  return field?.kind === "blocks" && field.max === 1;
+};
 
 /**
  * The layers a site reads, merged into one document, or `undefined` when none of
@@ -98,19 +98,19 @@ export function mergeLayers(
   layers: readonly (Doc | undefined)[],
   schema: SchemaIndex,
 ): Doc | undefined {
-  if (layers.length === 1) return layers[0]
-  let acc: Doc | undefined
+  if (layers.length === 1) return layers[0];
+  let acc: Doc | undefined;
   for (const layer of layers) {
-    if (layer) acc = mergeTwo(acc, layer, schema)
+    if (layer) acc = mergeTwo(acc, layer, schema);
   }
-  return acc
+  return acc;
 }
 
 function mergeTwo(base: Doc | undefined, top: Doc, schema: SchemaIndex): Doc | undefined {
-  const topRoot = top.bloks[top.root]
-  if (!topRoot) return base
-  const baseRoot = base?.bloks[base.root]
-  const out: Record<string, Blok> = {}
+  const topRoot = top.bloks[top.root];
+  if (!topRoot) return base;
+  const baseRoot = base?.bloks[base.root];
+  const out: Record<string, Blok> = {};
   mergeBlok(
     out,
     schema,
@@ -118,19 +118,19 @@ function mergeTwo(base: Doc | undefined, top: Doc, schema: SchemaIndex): Doc | u
     base && baseRoot && baseRoot.type === topRoot.type ? { doc: base, blok: baseRoot } : undefined,
     { doc: top, blok: topRoot },
     { parent: null, slot: null, order: topRoot.order },
-  )
-  return { root: topRoot.uid, bloks: out }
+  );
+  return { root: topRoot.uid, bloks: out };
 }
 
 interface Side {
-  doc: Doc
-  blok: Blok
+  doc: Doc;
+  blok: Blok;
 }
 
 interface Place {
-  parent: string | null
-  slot: string | null
-  order: string
+  parent: string | null;
+  slot: string | null;
+  order: string;
 }
 
 function mergeBlok(
@@ -140,31 +140,31 @@ function mergeBlok(
   top: Side,
   at: Place,
 ): void {
-  const uid = top.blok.uid
+  const uid = top.blok.uid;
   const slots = slotNamesOf(
     schema,
     top.blok.type,
     { doc: top.doc, uid },
     ...(base ? [{ doc: base.doc, uid: base.blok.uid }] : []),
-  )
-  const isSlot = new Set(slots)
+  );
+  const isSlot = new Set(slots);
 
-  const data: Record<string, Json> = { ...base?.blok.data }
-  const removed = new Set<string>()
+  const data: Record<string, Json> = { ...base?.blok.data };
+  const removed = new Set<string>();
   for (const [name, value] of Object.entries(top.blok.data)) {
-    if (isSlot.has(name)) continue
+    if (isSlot.has(name)) continue;
     if (value === null) {
-      delete data[name]
-      removed.add(name)
+      delete data[name];
+      removed.add(name);
     } else {
-      data[name] = value
+      data[name] = value;
     }
   }
   // A slot never has a stored value; a key under its name is drift, and the
   // children are the truth (`toNested` reads it the same way).
-  for (const name of slots) delete data[name]
+  for (const name of slots) delete data[name];
 
-  const i18n = mergedI18n(base?.blok.i18n, top.blok.i18n, removed)
+  const i18n = mergedI18n(base?.blok.i18n, top.blok.i18n, removed);
 
   out[uid] = {
     uid,
@@ -174,15 +174,15 @@ function mergeBlok(
     order: at.order,
     data,
     ...(i18n ? { i18n } : {}),
-  }
+  };
 
   for (const slot of slots) {
     // `null` under a slot's name is the layer saying "no children here at all".
-    if (top.blok.data[slot] === null) continue
-    const mine = childrenIn(top.doc, uid, slot)
-    const inherited = base ? childrenIn(base.doc, base.blok.uid, slot) : []
+    if (top.blok.data[slot] === null) continue;
+    const mine = childrenIn(top.doc, uid, slot);
+    const inherited = base ? childrenIn(base.doc, base.blok.uid, slot) : [];
     if (mine.length === 0) {
-      for (const kid of inherited) adopt(out, base!.doc, kid, uid)
+      for (const kid of inherited) adopt(out, base!.doc, kid, uid);
     } else if (
       isSingle(schema, top.blok.type, slot) &&
       inherited[0] &&
@@ -194,9 +194,9 @@ function mergeBlok(
         { doc: base!.doc, blok: inherited[0] },
         { doc: top.doc, blok: mine[0]! },
         { parent: uid, slot, order: mine[0]!.order },
-      )
+      );
     } else {
-      for (const kid of mine) adopt(out, top.doc, kid, uid)
+      for (const kid of mine) adopt(out, top.doc, kid, uid);
     }
   }
 }
@@ -209,27 +209,27 @@ function mergeBlok(
  * layer *removed* from `data` are dropped with it.
  */
 function mergedI18n(
-  below: Blok['i18n'],
-  above: Blok['i18n'],
+  below: Blok["i18n"],
+  above: Blok["i18n"],
   removed: ReadonlySet<string>,
-): Blok['i18n'] {
-  if (!below && !above) return undefined
-  const out: Record<string, Record<string, Json>> = {}
+): Blok["i18n"] {
+  if (!below && !above) return undefined;
+  const out: Record<string, Record<string, Json>> = {};
   for (const [locale, map] of Object.entries(below ?? {})) {
-    const kept = Object.fromEntries(Object.entries(map).filter(([field]) => !removed.has(field)))
-    if (Object.keys(kept).length > 0) out[locale] = kept
+    const kept = Object.fromEntries(Object.entries(map).filter(([field]) => !removed.has(field)));
+    if (Object.keys(kept).length > 0) out[locale] = kept;
   }
   for (const [locale, map] of Object.entries(above ?? {})) {
-    if (Object.keys(map).length > 0) out[locale] = { ...out[locale], ...map }
+    if (Object.keys(map).length > 0) out[locale] = { ...out[locale], ...map };
   }
-  return Object.keys(out).length > 0 ? out : undefined
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** `kid` and everything under it, into `out`, under `parent`. */
 function adopt(out: Record<string, Blok>, doc: Doc, kid: Blok, parent: string): void {
-  out[kid.uid] = { ...kid, parent }
+  out[kid.uid] = { ...kid, parent };
   for (const list of kidsIndex(doc).get(kid.uid)?.values() ?? []) {
-    for (const child of list) adopt(out, doc, child, kid.uid)
+    for (const child of list) adopt(out, doc, child, kid.uid);
   }
 }
 
@@ -244,12 +244,12 @@ function adopt(out: Record<string, Blok>, doc: Doc, kid: Blok, parent: string): 
  * says anything about the field (a removal below counts, so a field a group
  * removed reads *inherited from* that group), or `null` when nothing below does.
  */
-export type LayerState = { state: 'inherited' | 'overridden' | 'removed'; from: string | null }
+export type LayerState = { state: "inherited" | "overridden" | "removed"; from: string | null };
 
 interface Entry {
-  doc: Doc
-  blok: Blok
-  scope: string
+  doc: Doc;
+  blok: Blok;
+  scope: string;
 }
 
 /**
@@ -267,24 +267,24 @@ export function layerStates(
   schema: SchemaIndex,
 ): Record<string, LayerState> {
   const entries: (Entry | undefined)[] = layers.map((doc, i) => {
-    const blok = doc?.bloks[doc.root]
-    return doc && blok ? { doc, blok, scope: scopes[i]! } : undefined
-  })
-  const type = [...entries].reverse().find((e) => e)?.blok.type
-  const out: Record<string, LayerState> = {}
-  if (!type) return out
-  const same = entries.map((e) => (e && e.blok.type === type ? e : undefined))
-  statesOf(out, schema, type, same, scopes, '')
-  return out
+    const blok = doc?.bloks[doc.root];
+    return doc && blok ? { doc, blok, scope: scopes[i]! } : undefined;
+  });
+  const type = [...entries].reverse().find((e) => e)?.blok.type;
+  const out: Record<string, LayerState> = {};
+  if (!type) return out;
+  const same = entries.map((e) => (e && e.blok.type === type ? e : undefined));
+  statesOf(out, schema, type, same, scopes, "");
+  return out;
 }
 
 /** Whether `entry` has said anything about `name`: a value, a removal, or children. */
 function speaks(entry: Entry | undefined, name: string, isBlocks: boolean): boolean {
-  if (!entry) return false
+  if (!entry) return false;
   if (isBlocks) {
-    return entry.blok.data[name] === null || childrenIn(entry.doc, entry.blok.uid, name).length > 0
+    return entry.blok.data[name] === null || childrenIn(entry.doc, entry.blok.uid, name).length > 0;
   }
-  return name in entry.blok.data
+  return name in entry.blok.data;
 }
 
 function statesOf(
@@ -295,44 +295,44 @@ function statesOf(
   scopes: readonly string[],
   prefix: string,
 ): void {
-  const last = entries.length - 1
-  const top = entries[last]
+  const last = entries.length - 1;
+  const top = entries[last];
   for (const [name, field] of Object.entries(schema[type]?.fields ?? {})) {
-    const isBlocks = field.kind === 'blocks'
-    const key = `${prefix}${name}`
+    const isBlocks = field.kind === "blocks";
+    const key = `${prefix}${name}`;
     if (top && speaks(top, name, isBlocks)) {
       if (top.blok.data[name] === null) {
-        out[key] = { state: 'removed', from: scopes[last]! }
-        continue
+        out[key] = { state: "removed", from: scopes[last]! };
+        continue;
       }
-      out[key] = { state: 'overridden', from: scopes[last]! }
+      out[key] = { state: "overridden", from: scopes[last]! };
       if (isBlocks && field.max === 1) {
         // The child continues the inherited one for as long as the layers below
         // keep giving a child of its type; a removal or another type starts it over.
-        const child = childrenIn(top.doc, top.blok.uid, name)[0]!
-        const chain: Entry[] = [{ doc: top.doc, blok: child, scope: scopes[last]! }]
-        const chainScopes: string[] = [scopes[last]!]
+        const child = childrenIn(top.doc, top.blok.uid, name)[0]!;
+        const chain: Entry[] = [{ doc: top.doc, blok: child, scope: scopes[last]! }];
+        const chainScopes: string[] = [scopes[last]!];
         for (let i = last - 1; i >= 0; i--) {
-          const e = entries[i]
-          if (!speaks(e, name, true)) continue
-          if (e!.blok.data[name] === null) break
-          const below = childrenIn(e!.doc, e!.blok.uid, name)[0]
-          if (!below || below.type !== child.type) break
-          chain.unshift({ doc: e!.doc, blok: below, scope: e!.scope })
-          chainScopes.unshift(e!.scope)
+          const e = entries[i];
+          if (!speaks(e, name, true)) continue;
+          if (e!.blok.data[name] === null) break;
+          const below = childrenIn(e!.doc, e!.blok.uid, name)[0];
+          if (!below || below.type !== child.type) break;
+          chain.unshift({ doc: e!.doc, blok: below, scope: e!.scope });
+          chainScopes.unshift(e!.scope);
         }
-        statesOf(out, schema, child.type, chain, chainScopes, `${key}.`)
+        statesOf(out, schema, child.type, chain, chainScopes, `${key}.`);
       }
-      continue
+      continue;
     }
-    let from: string | null = null
+    let from: string | null = null;
     for (let i = last - 1; i >= 0; i--) {
       if (speaks(entries[i], name, isBlocks)) {
-        from = scopes[i]!
-        break
+        from = scopes[i]!;
+        break;
       }
     }
-    out[key] = { state: 'inherited', from }
+    out[key] = { state: "inherited", from };
   }
 }
 
@@ -356,6 +356,6 @@ function statesOf(
  * every other caller has to as well.
  */
 export function isBareLayer(id: string): boolean {
-  const layer = singletonTypeOf(id)
-  return layer !== null && layer.scope !== SHARED_SCOPE
+  const layer = singletonTypeOf(id);
+  return layer !== null && layer.scope !== SHARED_SCOPE;
 }

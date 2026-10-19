@@ -6,41 +6,41 @@
  * and the config without importing the factory that builds them, which is what
  * keeps `index.tsx` free to import every route module in turn.
  */
-import type { ReactNode } from 'react'
-import type { AnyBlockDef, Registry } from '../core/block'
+import type { ReactNode } from "react";
+import type { AnyBlockDef, Registry } from "../core/block";
 import type {
   CacheHeaderOptions,
   CacheHeaders,
   CacheTagOptions,
   CacheTags,
-} from '../core/cache-tags'
-import type { Doc, Json } from '../core/doc'
-import type { PageAccess } from '../core/gate'
-import type { LocaleConfig } from '../core/locales'
-import type { Migration } from '../core/migrate'
-import type { Mutation } from '../core/mutations'
-import type { ContentPage, ContentQuery } from '../core/query'
-import type { Resolution } from '../core/resolve'
-import type { NestedValue } from '../core/nested'
-import type { DocumentType } from '../core/schema'
-import type { Registry as SiteRegistry, SiteRef, Surface } from '../core/sites'
-import type { StoryMeta, StoryNode } from '../core/story'
-import type { RenderMode } from '../preview/Render'
-import type { AuthConfig, OpenAuth } from './auth/config'
-import type { Actor } from './auth/roles'
-import type { FolioHooks } from './hooks'
-import type { AuditOptions, AuditReport } from './audit'
-import type { CacheVerdict } from './cache-request'
-import type { FolioForms } from './form-responses'
-import type { FolioDb } from './db'
-import type { MigrateOptions, MigrateReport } from './migrate'
-import type { ReindexOptions, ReindexReport } from './reindex'
-import type { BrandRuntime, ResolveOptions } from './runtime'
-import type { ScheduleRunOptions, ScheduleRunReport } from './scheduler'
-import type { PreviewWrap } from '../core/render-wrap'
-import type { SpaceDO } from './space-do'
-import type { StoryDO } from './story-do'
-import type { WriteResult } from './write'
+} from "../core/cache-tags";
+import type { Doc, Json } from "../core/doc";
+import type { PageAccess } from "../core/gate";
+import type { LocaleConfig } from "../core/locales";
+import type { Migration } from "../core/migrate";
+import type { Mutation } from "../core/mutations";
+import type { ContentPage, ContentQuery } from "../core/query";
+import type { Resolution } from "../core/resolve";
+import type { NestedValue } from "../core/nested";
+import type { DocumentType } from "../core/schema";
+import type { Registry as SiteRegistry, SiteRef, Surface } from "../core/sites";
+import type { StoryMeta, StoryNode } from "../core/story";
+import type { RenderMode } from "../preview/Render";
+import type { AuthConfig, OpenAuth } from "./auth/config";
+import type { Actor } from "./auth/roles";
+import type { FolioHooks } from "./hooks";
+import type { AuditOptions, AuditReport } from "./audit";
+import type { CacheVerdict } from "./cache-request";
+import type { FolioForms } from "./form-responses";
+import type { FolioDb } from "./db";
+import type { MigrateOptions, MigrateReport } from "./migrate";
+import type { ReindexOptions, ReindexReport } from "./reindex";
+import type { BrandRuntime, ResolveOptions } from "./runtime";
+import type { ScheduleRunOptions, ScheduleRunReport } from "./scheduler";
+import type { PreviewWrap } from "../core/render-wrap";
+import type { SpaceDO } from "./space-do";
+import type { StoryDO } from "./story-do";
+import type { WriteResult } from "./write";
 
 /**
  * What a host may ask `resolve` for.
@@ -61,7 +61,7 @@ import type { WriteResult } from './write'
  * render is for is the reader's to decide from the request or the `{ site }` it
  * was built with, and a host handing one in could resolve another site's content.
  */
-export type HostResolveOptions = Omit<ResolveOptions, 'site'>
+export type HostResolveOptions = Omit<ResolveOptions, "site">;
 
 /**
  * The two values `?_folio=` takes, and the only two `handle()` recognises
@@ -78,11 +78,11 @@ export type HostResolveOptions = Omit<ResolveOptions, 'site'>
  * they *are* for, and `?_folio=preview&chrome=0` is how you end up with four
  * combinations and two of them meaningless.
  */
-export type PreviewMode = 'preview' | 'draft'
+export type PreviewMode = "preview" | "draft";
 
 export interface FolioBindings {
-  db: D1Database
-  story: DurableObjectNamespace<StoryDO>
+  db: D1Database;
+  story: DurableObjectNamespace<StoryDO>;
   /**
    * The space channel (`../../docs/specs/editing/live-collaboration.md`):
    * cross-story presence and structural events.
@@ -95,14 +95,14 @@ export interface FolioBindings {
    * one needs a `wrangler.jsonc` migration tag as well as a binding
    * (`new_classes`, since the class holds no storage).
    */
-  space?: DurableObjectNamespace<SpaceDO>
+  space?: DurableObjectNamespace<SpaceDO>;
   /** R2 bucket for uploads. Without it the media library is read-only. */
-  media?: R2Bucket
+  media?: R2Bucket;
   /**
    * Images binding. Without it assets serve at their original size, which keeps
    * Folio working on a bare `wrangler dev` with nothing else configured.
    */
-  images?: ImagesBinding
+  images?: ImagesBinding;
   /**
    * Cloudflare Browser Rendering — "Browser Run" as of its rename — for
    * `preview_document`'s screenshot (`../../../docs/specs/platform/
@@ -123,7 +123,7 @@ export interface FolioBindings {
    * automation library. `BrowserRun`'s type ships in `@cloudflare/workers-types`,
    * already a devDependency for every other binding here.
    */
-  browser?: BrowserRun
+  browser?: BrowserRun;
 }
 
 /**
@@ -136,7 +136,7 @@ export interface FolioBindings {
  * to this, so a call site that has not been handed a session keeps working and
  * keeps talking to the primary. See `db.ts`.
  */
-export type ReadBindings = Omit<FolioBindings, 'db'> & { db: FolioDb }
+export type ReadBindings = Omit<FolioBindings, "db"> & { db: FolioDb };
 
 /**
  * What to do about a path that has no live page, answered in one round trip
@@ -156,7 +156,7 @@ export type MissArm =
    * `/old/guides/new`. So `Response.redirect(new URL(miss.to, url.origin))` and
    * the barer `redirect(miss.to)` now answer the same thing.
    */
-  { kind: 'redirect'; to: string; status: number } | { kind: 'gone' } | { kind: 'not-found' }
+  { kind: "redirect"; to: string; status: number } | { kind: "gone" } | { kind: "not-found" };
 
 /**
  * `MissArm` and the headers a host answers it with (`reader.miss`,
@@ -168,7 +168,7 @@ export type MissArm =
  * single-site publish purges). A host answering a cached 404, 410 or redirect sets
  * them as given and never spells a tag.
  */
-export type FolioMiss = MissArm & { headers: { 'cache-control': string; 'cache-tag': string } }
+export type FolioMiss = MissArm & { headers: { "cache-control": string; "cache-tag": string } };
 
 /**
  * One request's worth of reads, on one D1 session.
@@ -193,15 +193,15 @@ export type FolioMiss = MissArm & { headers: { 'cache-control': string; 'cache-t
  * to, beyond the field value itself: enough to gate on the type, the path or the
  * language without re-reading anything. */
 export interface FolioGateContext {
-  story: StoryMeta
-  doc: Doc
-  locale?: string
+  story: StoryMeta;
+  doc: Doc;
+  locale?: string;
   /**
    * The site this page is being served for (`../../docs/specs/foundation/multi-site.md`),
    * so a membership check can be per site. Null on a deployment with no `sites`, and
    * for a reader that resolved to no site.
    */
-  site: SiteRef | null
+  site: SiteRef | null;
 }
 
 /**
@@ -233,18 +233,18 @@ export interface FolioGate<Env, V = unknown> {
    * kinds, `indexed: true`, and never `translatable` — `validateGate` throws at
    * construction otherwise, each for a reason the spec argues.
    */
-  field: string
+  field: string;
   /**
    * The one stored value that means "no gate". Anything else — including no
    * value at all — reaches `allows`, so a document created before the field
    * existed fails closed rather than open.
    */
-  public: string | number | boolean
+  public: string | number | boolean;
   /**
    * Who is asking. Runs at most once per reader, and never for an ungated page
    * or for an editor holding a draft or share credential.
    */
-  visitor(req: Request, env: Env): V | null | Promise<V | null>
+  visitor(req: Request, env: Env): V | null | Promise<V | null>;
   /**
    * May this visitor read a document whose gate field holds `value`.
    *
@@ -257,7 +257,7 @@ export interface FolioGate<Env, V = unknown> {
     visitor: V | null,
     value: Json | undefined,
     ctx: FolioGateContext,
-  ): boolean | Promise<boolean>
+  ): boolean | Promise<boolean>;
 }
 
 /**
@@ -289,12 +289,12 @@ export interface FolioDescribe<Env> {
    * `FolioDescribe<Env>` would not be assignable to the `FolioDescribe<unknown>`
    * the runtime widens it to.
    */
-  fn(input: DescribeInput, env: Env): Promise<DescribeResult>
+  fn(input: DescribeInput, env: Env): Promise<DescribeResult>;
   /** Describe a new upload in the background (`ctx.waitUntil`). Default true. */
-  onUpload?: boolean
+  onUpload?: boolean;
   /** In-flight model calls per batch. Default 4; 1–8, refused at construction
    * outside that. */
-  concurrency?: number
+  concurrency?: number;
 }
 
 /**
@@ -327,28 +327,28 @@ export interface FolioDescribe<Env> {
  * whole batch's bytes live in one isolate.
  */
 export interface DescribeInput {
-  id: string
-  filename: string
-  contentType: string
-  width: number | null
-  height: number | null
+  id: string;
+  filename: string;
+  contentType: string;
+  width: number | null;
+  height: number | null;
   /** `{base}/asset/<key>?w=512&f=webp` when `images` is bound, the original
    * otherwise. Absolute. **Not for a provider to fetch** — see above. */
-  url: string
+  url: string;
   /**
    * The image as bytes a provider can accept, with the media type of *those
    * bytes* rather than of the stored object — the row says `image/jpeg` where
    * the rendition is `image/webp`, and sending the wrong one is a 400 about
    * something else. Read from R2 on demand; not read unless called.
    */
-  inline(): Promise<{ media: string; bytes: ArrayBuffer }>
+  inline(): Promise<{ media: string; bytes: ArrayBuffer }>;
   /**
    * Every tag that exists, for the prompt — and the *only* tags a result may
    * name (decision 11). A model handed an open vocabulary invents a near-synonym
    * per image, which is what would destroy the slug identity the whole taxonomy
    * rests on.
    */
-  tags: readonly { id: string; name: string }[]
+  tags: readonly { id: string; name: string }[];
 }
 
 /**
@@ -362,11 +362,11 @@ export interface DescribeInput {
  */
 export interface DescribeResult {
   /** Alt text. Truncated to 500, matching `AssetPatchBody.alt`. */
-  alt?: string
+  alt?: string;
   /** What the file *is*. Truncated to 2000, matching `AssetPatchBody.description`. */
-  description?: string
+  description?: string;
   /** Tag names or slugs. Matched against existing tag slugs; unmatched dropped. */
-  tags?: readonly string[]
+  tags?: readonly string[];
 }
 
 /**
@@ -379,7 +379,7 @@ export interface DescribeResult {
  * to go with its `Cache-Control`.
  */
 export interface FolioPage {
-  doc: Doc
+  doc: Doc;
   /**
    * The story behind the path, decorated with its urls.
    *
@@ -388,14 +388,14 @@ export interface FolioPage {
    * is the one cache tag that cannot be derived from the render, and it is the
    * tag its own next publish purges by.
    */
-  story: StoryMeta
-  resolution: Resolution
+  story: StoryMeta;
+  resolution: Resolution;
   /**
    * This render came from the draft rather than the published copy: draw a
    * banner, and do not let it near a shared cache. `headers` has already taken
    * care of the second half.
    */
-  draft: boolean
+  draft: boolean;
   /**
    * What the `gate` decided about this visitor
    * (`../../docs/specs/platform/visitor-access.md`). **Always present**, and
@@ -413,7 +413,7 @@ export interface FolioPage {
    * cannot represent — so `headers` is `no-store` for both, including the teaser
    * that looks visitor-independent and is not.
    */
-  access: PageAccess
+  access: PageAccess;
   /**
    * The cache headers this response must carry, correct for whichever of the two
    * cases this is: `no-store` for a draft, `Cache-Control` **and** `Cache-Tag`
@@ -431,18 +431,18 @@ export interface FolioPage {
    * A host that sets its own CSP should merge `frame-ancestors` into it rather than
    * drop this one.
    */
-  headers: Record<string, string>
+  headers: Record<string, string>;
 }
 
 /** What `reader.page()` needs beyond the path. */
 export interface FolioPageOptions {
   /** Refused if this site never declared it, exactly as `published` refuses it. */
-  locale?: string
+  locale?: string;
   /**
    * The page number every `collection` field in the document offsets to
    * (`collections.md` decision 5). The host reads `?page=`; Folio never does.
    */
-  page?: number
+  page?: number;
 }
 
 /**
@@ -460,27 +460,27 @@ export interface FolioPageOptions {
  * given. **Not public API**: it is not on `Folio['reader']`.
  */
 export interface GatedReaderFrom {
-  gated: SiteRef
-  surface: 'live' | 'preview'
-  request: Request
-  draft: boolean
+  gated: SiteRef;
+  surface: "live" | "preview";
+  request: Request;
+  draft: boolean;
 }
 
 /** Builds a reader for a caller that gated the site itself. See `GatedReaderFrom`. */
-export type GatedReaderFactory<Env> = (env: Env, from: GatedReaderFrom) => FolioReader
+export type GatedReaderFactory<Env> = (env: Env, from: GatedReaderFrom) => FolioReader;
 
 export interface FolioReader {
-  published: (path: string, locale?: string) => Promise<Doc | null>
+  published: (path: string, locale?: string) => Promise<Doc | null>;
   /**
    * One page request, answered from one row read plus one resolve — see
    * `FolioPage`. This is what a page route should call.
    */
-  page: (path: string, opts?: FolioPageOptions) => Promise<FolioPage | null>
-  draftAt: (path: string, locale?: string) => Promise<Doc | null>
-  resolve: (doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
-  status: (path: string) => Promise<'live' | 'unpublished' | 'unknown'>
-  storyAt: (path: string) => Promise<StoryMeta | null>
-  redirect: (path: string) => Promise<{ to: string; status: number } | null>
+  page: (path: string, opts?: FolioPageOptions) => Promise<FolioPage | null>;
+  draftAt: (path: string, locale?: string) => Promise<Doc | null>;
+  resolve: (doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>;
+  status: (path: string) => Promise<"live" | "unpublished" | "unknown">;
+  storyAt: (path: string) => Promise<StoryMeta | null>;
+  redirect: (path: string) => Promise<{ to: string; status: number } | null>;
   /**
    * `redirect` and `status` for a path, batched into a single round trip.
    *
@@ -490,29 +490,29 @@ export interface FolioReader {
    * instead of two. On the host measured in September 2026 that halved the cost
    * of every 404, which is the path a crawler spends its whole budget on.
    */
-  miss: (path: string) => Promise<FolioMiss>
+  miss: (path: string) => Promise<FolioMiss>;
   /**
    * `stories`, `tree` and `query` answer **nothing** for a request a share admitted
    * to a `draft` site (`../../docs/specs/foundation/multi-site.md` decision 13): the
    * share covers its one story, and a listing would enumerate a pre-launch site.
    * `page()` / `draftAt()` answer that story alone, and `global()` still answers.
    */
-  stories: (opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>
-  tree: () => Promise<StoryNode[]>
-  query: (q: ContentQuery) => Promise<ContentPage>
+  stories: (opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>;
+  tree: () => Promise<StoryNode[]>;
+  query: (q: ContentQuery) => Promise<ContentPage>;
   /**
    * A global's published layers, merged over the site's chain. For a request a
    * share admitted to a `draft` site, still the gated site's whole chain — its one
    * page needs its header — and still published layers only, never a draft.
    */
-  global: (name: string) => Promise<Doc | null>
+  global: (name: string) => Promise<Doc | null>;
   /**
    * The site this reader reads for (`../../docs/specs/foundation/multi-site.md`
    * decision 4): the registry row the request's host (or the `{ site }` it was
    * built with) gated to, or null — for no site, and always on a deployment with
    * no `sites`. A reader with no site answers as a site with no content.
    */
-  site: () => Promise<SiteRef | null>
+  site: () => Promise<SiteRef | null>;
   /**
    * This session's bookmark, or null before its first query.
    *
@@ -520,7 +520,7 @@ export interface FolioReader {
    * this forward itself. Folio's own admin does exactly that in a cookie, inside
    * `handle()`; a public page render has nothing to carry and ignores it.
    */
-  bookmark: () => string | null
+  bookmark: () => string | null;
 }
 
 /**
@@ -536,14 +536,14 @@ export interface FolioReader {
  */
 export type StoryStub = Pick<
   StoryDO,
-  'getOrInit' | 'getOrInitWithSyncId' | 'head' | 'recent' | 'purge' | 'commit' | 'hasTx' | 'fetch'
->
+  "getOrInit" | "getOrInitWithSyncId" | "head" | "recent" | "purge" | "commit" | "hasTx" | "fetch"
+>;
 
 /**
  * The space object's RPC surface, picked off the class for the same reason
  * `StoryStub` is. Two methods: the upgrade, and the event broadcast.
  */
-export type SpaceStub = Pick<SpaceDO, 'broadcastEvent' | 'fetch'>
+export type SpaceStub = Pick<SpaceDO, "broadcastEvent" | "fetch">;
 
 /**
  * Where Folio sends the roughly forty operational events its own code already
@@ -568,8 +568,8 @@ export type SpaceStub = Pick<SpaceDO, 'broadcastEvent' | 'fetch'>
  * without this interface deciding anything about their shape.
  */
 export interface FolioLogger {
-  error(message: string, ...detail: unknown[]): void
-  warn(message: string, ...detail: unknown[]): void
+  error(message: string, ...detail: unknown[]): void;
+  warn(message: string, ...detail: unknown[]): void;
 }
 
 /**
@@ -581,12 +581,12 @@ export interface FolioLogger {
  * construction error. Every config that existed before brands is a
  * `FolioSingleConfig` unchanged.
  */
-export type FolioConfig<Env> = FolioSingleConfig<Env> | FolioBrandedConfig<Env>
+export type FolioConfig<Env> = FolioSingleConfig<Env> | FolioBrandedConfig<Env>;
 
 /** A brand as people and models see it: the switcher, the tab title, the sign-in mail. */
 export interface BrandRef {
-  id: string
-  label: string
+  id: string;
+  label: string;
 }
 
 /**
@@ -598,20 +598,20 @@ export interface BrandRef {
 export interface FolioBrand<Env> {
   /** Shown to people and to models: the switcher, the tab title, the sign-in
    * mail, MCP's instructions. */
-  label: string
-  blocks: readonly AnyBlockDef[] | Registry
-  root?: string
-  types?: readonly DocumentType[]
-  globals?: readonly string[]
+  label: string;
+  blocks: readonly AnyBlockDef[] | Registry;
+  root?: string;
+  types?: readonly DocumentType[];
+  globals?: readonly string[];
   /** This brand's site-settings singleton (`multi-site.md` decision 2). */
-  settings?: string
-  previewCss?: string[]
-  previewWrap?: PreviewWrap
-  gate?: FolioGate<Env>
-  forms?: FolioForms<Env>
-  describe?: FolioDescribe<Env>
+  settings?: string;
+  previewCss?: string[];
+  previewWrap?: PreviewWrap;
+  gate?: FolioGate<Env>;
+  forms?: FolioForms<Env>;
+  describe?: FolioDescribe<Env>;
   /** Ids carry the brand: `takeoffgo/0001-fifty-fifty-to-feature`. */
-  migrations?: readonly Migration[]
+  migrations?: readonly Migration[];
 }
 
 /**
@@ -623,48 +623,48 @@ export interface FolioBrand<Env> {
 export interface FolioBrandedConfig<Env>
   extends Omit<
     FolioSingleConfig<Env>,
-    | 'blocks'
-    | 'root'
-    | 'types'
-    | 'globals'
-    | 'previewCss'
-    | 'previewWrap'
-    | 'gate'
-    | 'forms'
-    | 'describe'
-    | 'migrations'
-    | 'sites'
-    | 'assets'
-    | 'brands'
+    | "blocks"
+    | "root"
+    | "types"
+    | "globals"
+    | "previewCss"
+    | "previewWrap"
+    | "gate"
+    | "forms"
+    | "describe"
+    | "migrations"
+    | "sites"
+    | "assets"
+    | "brands"
   > {
   /** Keyed by brand id, which follows the site id rule and is what `sites.brand` holds. */
-  brands: Readonly<Record<string, FolioBrand<Env>>>
+  brands: Readonly<Record<string, FolioBrand<Env>>>;
   /** Required: a brand is a property of a site row. `settings` moves into the brand. */
-  sites: Omit<SitesConfig, 'settings'> & { settings?: never }
+  sites: Omit<SitesConfig, "settings"> & { settings?: never };
   assets?: {
-    admin: string
-    devClient?: string
-    adminCss?: string[]
+    admin: string;
+    devClient?: string;
+    adminCss?: string[];
     /** One preview bundle per brand, keyed like `brands` (decision 9). */
-    brands: Readonly<Record<string, { preview: string; previewCss?: string[] }>>
-    preview?: never
-    previewCss?: never
-  }
-  blocks?: never
-  root?: never
-  types?: never
-  globals?: never
-  previewCss?: never
-  previewWrap?: never
-  gate?: never
-  forms?: never
-  describe?: never
-  migrations?: never
+    brands: Readonly<Record<string, { preview: string; previewCss?: string[] }>>;
+    preview?: never;
+    previewCss?: never;
+  };
+  blocks?: never;
+  root?: never;
+  types?: never;
+  globals?: never;
+  previewCss?: never;
+  previewWrap?: never;
+  gate?: never;
+  forms?: never;
+  describe?: never;
+  migrations?: never;
 }
 
 /** One brand's config, which is every deployment's before `brands` existed. */
 export interface FolioSingleConfig<Env> {
-  blocks: readonly AnyBlockDef[] | Registry
+  blocks: readonly AnyBlockDef[] | Registry;
   /**
    * Sugar for a single routable page type, and the only shape that existed
    * before `document-types.md`: `root: 'page'` is expanded to
@@ -681,14 +681,14 @@ export interface FolioSingleConfig<Env> {
    * @deprecated Declare `types` instead. `root` keeps working; the deprecation
    * is documented, not enforced.
    */
-  root?: string
+  root?: string;
   /**
    * Every shape of document this site has: a routable page, an unrouted record,
    * or a singleton (`DocumentKind`). Each declares its own root block, so an
    * insight is not a page with six unused fields.
    */
-  types?: readonly DocumentType[]
-  bindings: (env: Env) => FolioBindings
+  types?: readonly DocumentType[];
+  bindings: (env: Env) => FolioBindings;
   /**
    * Who may edit (`../../docs/specs/foundation/identity-and-access.md`).
    *
@@ -702,9 +702,9 @@ export interface FolioSingleConfig<Env> {
    * Site-visitor auth — who may *read* a published page — is deliberately not
    * this key. See the spec's "Out of scope".
    */
-  auth: AuthConfig<Env> | OpenAuth
+  auth: AuthConfig<Env> | OpenAuth;
   /** Where these routes are mounted. Default `/folio`. */
-  basePath?: string
+  basePath?: string;
   /**
    * Public URL for a story path. `''` is the site root. `previewUrl` (see
    * `withUrls` in server/runtime.ts) is this same URL with a preview flag
@@ -732,7 +732,7 @@ export interface FolioSingleConfig<Env> {
    * because the admin is on another origin and a relative URL would resolve
    * against it. Absent, the URL is the single-site one it always was.
    */
-  route?: (path: string, locale?: string, site?: SiteRef) => string
+  route?: (path: string, locale?: string, site?: SiteRef) => string;
   /**
    * The languages this site is available in
    * (`../../docs/specs/content-model/localisation.md`). Absent means a
@@ -746,9 +746,9 @@ export interface FolioSingleConfig<Env> {
    * Validated at construction: a default that is not available, a duplicate
    * code, a fallback that does not exist, and a fallback cycle all throw.
    */
-  locales?: LocaleConfig
-  adminCss?: string[]
-  previewCss?: string[]
+  locales?: LocaleConfig;
+  adminCss?: string[];
+  previewCss?: string[];
   /**
    * Wraps the previewed document in the host's own providers, for the **server**
    * render of the preview page.
@@ -770,22 +770,22 @@ export interface FolioSingleConfig<Env> {
    * URL is Folio's, not the page's — but that is the host's call and Folio has
    * no opinion.
    */
-  previewWrap?: PreviewWrap
+  previewWrap?: PreviewWrap;
   /** Pass the `__FOLIO_ASSETS__` global the Vite plugin defines. */
   assets?: {
-    admin: string
-    preview: string
-    devClient?: string
-    adminCss?: string[]
-    previewCss?: string[]
-  }
+    admin: string;
+    preview: string;
+    devClient?: string;
+    adminCss?: string[];
+    previewCss?: string[];
+  };
   /**
    * After-commit callbacks for the host: cache purges, search indexing,
    * notifications (`../../docs/specs/platform/publish-hooks.md`). Runs after a write has
    * already landed, never inside it — there is no `before` hook and no way
    * to veto or rewrite a publish. Validated for unknown keys at construction.
    */
-  hooks?: FolioHooks<Env>
+  hooks?: FolioHooks<Env>;
   /**
    * Where Folio sends its own operational log lines — see `FolioLogger`.
    * Absent means `console`, which is also what every call site already used
@@ -798,7 +798,7 @@ export interface FolioSingleConfig<Env> {
    * at those sites, including their `folio:` prefix, are unchanged — only the
    * sink is configurable now.
    */
-  logger?: FolioLogger
+  logger?: FolioLogger;
   /**
    * Members-only pages, for a site whose membership lives outside Folio
    * (`../../docs/specs/platform/visitor-access.md`). Names a root-block field and two host
@@ -810,7 +810,7 @@ export interface FolioSingleConfig<Env> {
    * is translatable, unindexed, the wrong kind, or declared on no `page` root is
    * a gate the editor believes in and nothing enforces.
    */
-  gate?: FolioGate<Env>
+  gate?: FolioGate<Env>;
   /**
    * Machine-written alt text, descriptions and tags for the media library
    * (`../../docs/specs/content-model/media-library.md` decision 8). One host function; Folio
@@ -823,7 +823,7 @@ export interface FolioSingleConfig<Env> {
    * outside 1–8, is a config mistake and should not become a 500 on whichever
    * request reaches it first.
    */
-  describe?: FolioDescribe<Env>
+  describe?: FolioDescribe<Env>;
   /**
    * What a host decides about form submissions
    * (`../../docs/specs/content-model/forms.md` decision 9): a `verify` function
@@ -837,7 +837,7 @@ export interface FolioSingleConfig<Env> {
    * from the public internet, and `verify` fails closed, so the symptom would be
    * a contact form that silently collects nothing.
    */
-  forms?: FolioForms<Env>
+  forms?: FolioForms<Env>;
   /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An
@@ -846,7 +846,7 @@ export interface FolioSingleConfig<Env> {
    * resolution, so declaring it here is what makes the read set obvious.
    * Validated at construction — every name must name a declared `singleton`.
    */
-  globals?: readonly string[]
+  globals?: readonly string[];
   /**
    * Content migrations, in run order
    * (`../../docs/specs/foundation/schema-migrations.md`). Each is a pure
@@ -863,7 +863,7 @@ export interface FolioSingleConfig<Env> {
    * Nothing runs automatically. `folio.migrate(env)` from a script, a deploy
    * step, or `POST {base}/migrate` (checkpoint 5).
    */
-  migrations?: readonly Migration[]
+  migrations?: readonly Migration[];
   /**
    * `false` disables `{base}/mcp` entirely
    * (`../../docs/specs/platform/mcp-server.md` owner checkpoint 2). Default
@@ -877,7 +877,7 @@ export interface FolioSingleConfig<Env> {
    * not want an agent surface at all, should be able to say so in config rather
    * than leaving it to be inferred from an empty table.
    */
-  mcp?: boolean
+  mcp?: boolean;
   /**
    * **A promise that your `fetch` calls `folio.draftAt`**
    * (`../../docs/specs/platform/draft-mode.md` decision 4). Default false.
@@ -896,7 +896,7 @@ export interface FolioSingleConfig<Env> {
    * **The one way to hold this wrong** is to set it and not write the branch. Then
    * every share link lands on a published page and nothing says so.
    */
-  draftMode?: boolean
+  draftMode?: boolean;
   /**
    * Many sites in one deployment (`../../docs/specs/foundation/multi-site.md`).
    * **Its presence turns multi-site on**; absent, the deployment is one implicit
@@ -908,9 +908,9 @@ export interface FolioSingleConfig<Env> {
    * Turning it on is the point of no return (`UPGRADING.md`): code with no site
    * dimension would serve every site's rows as one.
    */
-  sites?: SitesConfig
+  sites?: SitesConfig;
   /** Many brands (`multi-brand.md`): `FolioBrandedConfig`. Never on this shape. */
-  brands?: never
+  brands?: never;
 }
 
 /**
@@ -924,19 +924,19 @@ export interface SitesConfig {
    * is the admin's before any registry row is considered, so no row can take it
    * offline.
    */
-  admin: string
+  admin: string;
   /**
    * A `singleton` type holding site-level fields (decision 2): always loaded as a
    * global, layered shared → group → site, and read with `folio.settings`. With
    * `brands` it is each brand's (`FolioBrand.settings`), and refused here.
    */
-  settings?: string
+  settings?: string;
   /**
    * Replaces the default candidate step — live host, then preview origin — and
    * nothing else. Whatever it answers is still gated by Folio: a group, `shared`
    * or a site whose status keeps it closed is no site.
    */
-  resolve?: (req: Request, registry: SiteRegistry) => string | null
+  resolve?: (req: Request, registry: SiteRegistry) => string | null;
 }
 
 export interface Folio<Env> {
@@ -944,7 +944,7 @@ export interface Folio<Env> {
    * Mount in the host's fetch handler. Returns null for anything Folio does
    * not own, so the host's own routes always win.
    */
-  handle: (req: Request, env: Env, ctx: ExecutionContext) => Promise<Response | null>
+  handle: (req: Request, env: Env, ctx: ExecutionContext) => Promise<Response | null>;
   /**
    * One request's worth of reads on one D1 session — see `FolioReader`.
    *
@@ -965,7 +965,7 @@ export interface Folio<Env> {
    * read below does there — silently answering as no site would make a sitemap
    * empty with nothing to say why.
    */
-  reader: (env: Env, from?: Request | { site: string }) => FolioReader
+  reader: (env: Env, from?: Request | { site: string }) => FolioReader;
   /**
    * The Workers Cache props a gateway passes on its loopback
    * (`multi-site.md` decision 15): `{ site, surface }` for a request a site
@@ -983,7 +983,7 @@ export interface Folio<Env> {
    * })
    * ```
    */
-  cacheProps: (req: Request, env: Env) => Promise<{ site?: string; surface?: Surface }>
+  cacheProps: (req: Request, env: Env) => Promise<{ site?: string; surface?: Surface }>;
   /**
    * The rendering site's settings (`multi-site.md` decision 2): the settings
    * type's root block as a plain nested value — each field by name, a `max: 1`
@@ -991,7 +991,7 @@ export interface Folio<Env> {
    * resolution's locale — or null when no settings type is configured or the
    * resolution carries none.
    */
-  settings: (resolution: Resolution) => NestedValue | null
+  settings: (resolution: Resolution) => NestedValue | null;
   /**
    * Published document for a URL path, or null. `path` is locale-*independent*
    * (`localisation.md` checkpoint 4): `/about` and `/fr/about` are the same
@@ -1003,7 +1003,7 @@ export interface Folio<Env> {
    * null (and the host's own 404) rather than serving English under a URL that
    * means nothing. Absent, or the source locale, behaves exactly as before.
    */
-  published: (env: Env, path: string, locale?: string) => Promise<Doc | null>
+  published: (env: Env, path: string, locale?: string) => Promise<Doc | null>;
   /**
    * What a path answers when it is not currently live: `'unpublished'` for a
    * story that was live and has been taken down, `'unknown'` for a path with
@@ -1012,7 +1012,7 @@ export interface Folio<Env> {
    * host that wants to answer `410 Gone` for the former and `404` for the
    * latter calls this instead (`unpublish.md`).
    */
-  status: (env: Env, path: string) => Promise<'live' | 'unpublished' | 'unknown'>
+  status: (env: Env, path: string) => Promise<"live" | "unpublished" | "unknown">;
   /**
    * The story row behind a URL path, decorated with its urls, or null. One
    * indexed read.
@@ -1028,7 +1028,7 @@ export interface Folio<Env> {
    * Deliberately a second call rather than a wider return from `published`,
    * which is a published type host code already reads.
    */
-  storyAt: (env: Env, path: string) => Promise<StoryMeta | null>
+  storyAt: (env: Env, path: string) => Promise<StoryMeta | null>;
   /**
    * A redirect for a path, or null. One indexed read.
    *
@@ -1042,15 +1042,15 @@ export interface Folio<Env> {
    * request's own query string is the host's job, not this call's: only the
    * host knows what it did with the rest of the URL.
    */
-  redirect: (env: Env, path: string) => Promise<{ to: string; status: number } | null>
+  redirect: (env: Env, path: string) => Promise<{ to: string; status: number } | null>;
   /**
    * `redirect` and `status` for a path in a single round trip — the whole of a
    * host's 404 branch, and the shape every host was assembling by hand out of
    * the two calls above. See `FolioReader.miss`.
    */
-  miss: (env: Env, path: string) => Promise<FolioMiss>
+  miss: (env: Env, path: string) => Promise<FolioMiss>;
   /** Live draft for a story id, creating it on first touch. */
-  draft: (env: Env, id: string) => Promise<Doc>
+  draft: (env: Env, id: string) => Promise<Doc>;
   /**
    * Commits mutations to a document's log
    * (`../../docs/specs/platform/content-api.md` architecture decision 6).
@@ -1076,15 +1076,15 @@ export interface Folio<Env> {
     id: string,
     mutations: Mutation[],
     opts: { actor: string; name?: string; txId?: string },
-  ) => Promise<WriteResult>
+  ) => Promise<WriteResult>;
   /**
    * Every story, for sitemaps and static generation. With `locales` configured
    * each routed row also carries `urls` and `previewUrls` — the host's own
    * `route` called once per locale — so a sitemap covering every language needs
    * no second call and no knowledge of the URL shape.
    */
-  stories: (env: Env, opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>
-  tree: (env: Env) => Promise<StoryNode[]>
+  stories: (env: Env, opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>;
+  tree: (env: Env) => Promise<StoryNode[]>;
   /**
    * Published documents matching a query
    * (`../../docs/specs/content-model/collections.md`): filter, sort, page.
@@ -1099,7 +1099,7 @@ export interface Folio<Env> {
    * Two D1 statements: a `count(*)` for `total`, and the page itself with its
    * documents. Offset pagination, so a page can render "page 4 of 9".
    */
-  query: (env: Env, q: ContentQuery) => Promise<ContentPage>
+  query: (env: Env, q: ContentQuery) => Promise<ContentPage>;
   /**
    * Rebuilds `content_index` and `content_refs` from `published_doc`
    * (`collections.md` architecture decision 3).
@@ -1110,7 +1110,7 @@ export interface Folio<Env> {
    * `continueFrom` until it is null — and idempotent, so racing a publish is
    * harmless.
    */
-  reindex: (env: Env, opts?: ReindexOptions) => Promise<ReindexReport>
+  reindex: (env: Env, opts?: ReindexOptions) => Promise<ReindexReport>;
   /**
    * Fires every publish and unpublish that is now due
    * (`../../docs/specs/platform/scheduled-publishing.md`).
@@ -1146,7 +1146,7 @@ export interface Folio<Env> {
    * {base}/api/schedules/run` is the manual trigger, and a site with nothing
    * scheduled costs one indexed read over an empty partial index.
    */
-  runSchedules: (env: Env, opts?: ScheduleRunOptions) => Promise<ScheduleRunReport>
+  runSchedules: (env: Env, opts?: ScheduleRunOptions) => Promise<ScheduleRunReport>;
   /**
    * Housekeeping for the auth tables nothing else prunes
    * (`../../docs/specs/foundation/auth-providers.md` decision 8): sessions past
@@ -1169,21 +1169,21 @@ export interface Folio<Env> {
   sweepAuth: (
     env: Env,
     opts?: { now?: number },
-  ) => Promise<{ sessions: number; challenges: number; events: number }>
+  ) => Promise<{ sessions: number; challenges: number; events: number }>;
   /**
    * The block registry. **Throws on a deployment with `brands`**
    * (`../../docs/specs/foundation/multi-brand.md` decision 21), where a registry
    * is a brand's: read `registryFor(brand)` there, or let `render` pick it from
    * the resolution.
    */
-  registry: Registry
+  registry: Registry;
   /**
    * One brand's block registry, on a deployment with `brands` (decision 21). A
    * brand id `brands` does not configure throws, and so does every id on a
    * deployment with no `brands`, which has no brand ids: `registry` is its one
    * registry.
    */
-  registryFor: (brand: string) => Registry
+  registryFor: (brand: string) => Registry;
   /**
    * Context the document deliberately does not contain: story ids to their
    * current URLs, and so on. Await it before rendering.
@@ -1205,7 +1205,7 @@ export interface Folio<Env> {
    * escape hatch for a host that wants the full map — a navigation built from the
    * tree — and is exactly the old behaviour.
    */
-  resolve: (env: Env, doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
+  resolve: (env: Env, doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>;
   /**
    * The draft of the page at `path`, when this request is allowed to see it, and
    * `null` otherwise (`../../docs/specs/platform/draft-mode.md` decision 1).
@@ -1238,7 +1238,7 @@ export interface Folio<Env> {
    * Answering `null` is not an error and must not be rendered as one: it is the
    * ordinary case for every visitor, and the published page is what follows.
    */
-  draftAt: (env: Env, req: Request, path: string, locale?: string) => Promise<Doc | null>
+  draftAt: (env: Env, req: Request, path: string, locale?: string) => Promise<Doc | null>;
   /**
    * Whether this request asked for draft mode — the cookie, not the authority.
    *
@@ -1247,7 +1247,7 @@ export interface Folio<Env> {
    * never gate what is rendered: the two questions are deliberately different, and
    * only `draftAt` has looked at a role or a grant.
    */
-  inDraftMode: (req: Request) => boolean
+  inDraftMode: (req: Request) => boolean;
   /**
    * The headers a draft response must carry: `private, no-store`, no cache tag.
    *
@@ -1258,7 +1258,7 @@ export interface Folio<Env> {
    * interchangeable and are not, so the safe one is as easy to reach as the
    * dangerous one.
    */
-  noStore: () => Record<string, string>
+  noStore: () => Record<string, string>;
   /**
    * The document, rendered.
    *
@@ -1270,7 +1270,7 @@ export interface Folio<Env> {
    * screenshot to one block. Absent still means `off` — no markers — so a host
    * rendering its published pages passes nothing and is unaffected.
    */
-  render: (doc: Doc, opts?: { mode?: RenderMode; resolution?: Resolution }) => ReactNode
+  render: (doc: Doc, opts?: { mode?: RenderMode; resolution?: Resolution }) => ReactNode;
   /**
    * The cache tags a rendered page should carry, and whether the set had to be
    * coarsened (`../../docs/specs/platform/caching.md`).
@@ -1286,7 +1286,7 @@ export interface Folio<Env> {
    * Reach for this over `cacheHeaders` when you want to log `degraded`, or to
    * add tags of your own before setting the header.
    */
-  cacheTags: (resolution: Resolution, opts: CacheTagOptions) => CacheTags
+  cacheTags: (resolution: Resolution, opts: CacheTagOptions) => CacheTags;
   /**
    * `cache-control` and `cache-tag` for a published response, as one spread:
    *
@@ -1305,7 +1305,7 @@ export interface Folio<Env> {
    * anything. No binding, no token, no zone, no paid plan; without it these are
    * two headers nothing acts on, and every purge is a no-op.
    */
-  cacheHeaders: (resolution: Resolution, opts: CacheHeaderOptions) => CacheHeaders
+  cacheHeaders: (resolution: Resolution, opts: CacheHeaderOptions) => CacheHeaders;
   /**
    * Folio's verdict on whether a request may be served from a shared cache, or
    * `null` when the path is the host's own to classify (`cache-request.ts`).
@@ -1316,7 +1316,7 @@ export interface Folio<Env> {
    * that `{base}/asset/:key` is public while `{base}/api/assets` is not, and
    * which three cookies mean "this render may be a draft".
    */
-  cacheVerdict: (req: Request) => CacheVerdict
+  cacheVerdict: (req: Request) => CacheVerdict;
   /**
    * The URL a request should be cached under, with click identifiers (`utm_*`,
    * `gclid`, `fbclid`, …) removed and the survivors sorted.
@@ -1327,7 +1327,7 @@ export interface Folio<Env> {
    * and social visitor both misses the cache and writes an entry nobody will
    * read again.
    */
-  cacheKey: (url: string | URL) => string
+  cacheKey: (url: string | URL) => string;
   /**
    * Published document for a global, or null — `name` is not required to be
    * one of `FolioConfig.globals`, since a host may read a singleton by name
@@ -1336,7 +1336,7 @@ export interface Folio<Env> {
    * type, or a singleton nothing has published yet — the same "nothing to show,
    * no error" shape as `published`.
    */
-  global: (env: Env, name: string) => Promise<Doc | null>
+  global: (env: Env, name: string) => Promise<Doc | null>;
   /**
    * A global, rendered from an already-built `Resolution` — never fetches, so
    * it is safe to call per keystroke in the preview. Null when the resolution
@@ -1346,7 +1346,7 @@ export interface Folio<Env> {
    * published page; a host's own render call should not set it (`globals.md` edge
    * case). Absent is `off`, so the ordinary call is unchanged.
    */
-  renderGlobal: (resolution: Resolution, name: string, opts?: { mode?: RenderMode }) => ReactNode
+  renderGlobal: (resolution: Resolution, name: string, opts?: { mode?: RenderMode }) => ReactNode;
   /**
    * Runs the pending content migrations
    * (`../../docs/specs/foundation/schema-migrations.md`). Explicit, never on
@@ -1362,7 +1362,7 @@ export interface Folio<Env> {
    * migrated document produces zero mutations and reports it `unchanged`. That
    * is also how you check the first one worked.
    */
-  migrate: (env: Env, opts?: MigrateOptions) => Promise<MigrateReport>
+  migrate: (env: Env, opts?: MigrateOptions) => Promise<MigrateReport>;
   /**
    * The drift report (`schema-migrations.md` decision 7): orphaned keys, unknown
    * block and document types, missing fields and document size across the
@@ -1375,7 +1375,7 @@ export interface Folio<Env> {
    * the tallies up. A caller that stops early has audited a prefix of the site, so
    * `documents` and every count are that prefix's.
    */
-  audit: (env: Env, opts?: AuditOptions) => Promise<AuditReport>
+  audit: (env: Env, opts?: AuditOptions) => Promise<AuditReport>;
 }
 
 /**
@@ -1399,18 +1399,18 @@ export interface Folio<Env> {
  * exists to name.
  */
 export interface FolioVars {
-  bindings: () => ReadBindings
+  bindings: () => ReadBindings;
   /**
    * The request's scope, from the `~<scope>` segment `handle()` stripped
    * (`multi-site.md` decision 11), set by `withScope`. Null when the URL named
    * none, and always on a deployment with no `sites`.
    */
-  scope: string | null
+  scope: string | null;
   /**
    * The site `handle()` gated this request to on a site's own host, with the
    * surface it arrived on. Null on the admin origin and with no `sites`.
    */
-  site: { id: string; surface: Surface } | null
+  site: { id: string; surface: Surface } | null;
   /**
    * The brand of the request's scope, or of its gated site when it named none,
    * set by `withScope` (`multi-brand.md` decision 6) — **the one place a route
@@ -1420,8 +1420,8 @@ export interface FolioVars {
    * already answered `400 site_required`; an unscoped route that needs a brand
    * says so itself (decision 12), and never picks one.
    */
-  brand: BrandRuntime | null
-  story: StoryMeta
+  brand: BrandRuntime | null;
+  story: StoryMeta;
   /**
    * Who is making this request, resolved by `withActor` (middleware.ts) from the
    * session cookie, then a bearer token, then nothing.
@@ -1436,7 +1436,7 @@ export interface FolioVars {
    * gate has already refused it, so a handler never sees this) or `auth: 'open'`,
    * where there are no users at all and every gate passes.
    */
-  actor: Actor | null
+  actor: Actor | null;
 }
 
 /**
@@ -1449,6 +1449,6 @@ export interface FolioVars {
  * — the previous `Bindings: never` made every handler write one.
  */
 export interface FolioEnv<Env> {
-  Bindings: Env & object
-  Variables: FolioVars
+  Bindings: Env & object;
+  Variables: FolioVars;
 }

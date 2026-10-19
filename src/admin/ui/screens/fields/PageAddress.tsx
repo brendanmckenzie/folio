@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { slugify, type StoryMeta } from '../../../../core/story'
-import { Field, Input } from '../../Field'
+import { useEffect, useState } from "react";
+import { slugify, type StoryMeta } from "../../../../core/story";
+import { Field, Input } from "../../Field";
 
 /**
  * Routing structure for the open page — its slug, and the URL that follows from it.
@@ -26,72 +26,72 @@ export function PageAddress({
   onNotice,
   onChanged,
 }: {
-  story: StoryMeta
-  apiBase: string
+  story: StoryMeta;
+  apiBase: string;
   /** A past version is on the stage, or the role may not manage content. */
-  disabled: boolean
-  onNotice: (message: string) => void
+  disabled: boolean;
+  onNotice: (message: string) => void;
   /** The caller's story row is stale: the slug, the path and the URL all moved. */
-  onChanged: () => void
+  onChanged: () => void;
 }) {
-  const isRoot = story.path === ''
-  const [slug, setSlug] = useState(story.slug)
-  const [busy, setBusy] = useState(false)
+  const isRoot = story.path === "";
+  const [slug, setSlug] = useState(story.slug);
+  const [busy, setBusy] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: story.id is deliberate — switching to a story with an identical slug must still discard a half-typed local edit
   useEffect(() => {
-    setSlug(story.slug)
-  }, [story.id, story.slug])
+    setSlug(story.slug);
+  }, [story.id, story.slug]);
 
   const commit = async () => {
-    const next = slugify(slug)
+    const next = slugify(slug);
     if (!slug.trim() || next === story.slug) {
-      setSlug(story.slug)
-      return
+      setSlug(story.slug);
+      return;
     }
-    setBusy(true)
+    setBusy(true);
     try {
       const res = await fetch(`${apiBase}/stories/${encodeURIComponent(story.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ slug: next }),
-      })
-      if (!res.ok) throw new Error(`Could not rename this page (${res.status})`)
-      onChanged()
+      });
+      if (!res.ok) throw new Error(`Could not rename this page (${res.status})`);
+      onChanged();
     } catch (e) {
       // Back to what the server still says, rather than leaving a slug on screen that
       // no URL resolves to.
-      setSlug(story.slug)
-      onNotice((e as Error).message)
+      setSlug(story.slug);
+      onNotice((e as Error).message);
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
-  }
+  };
 
   return (
     <Field
       label="Slug"
       help={
         isRoot
-          ? 'The site root has no slug of its own.'
-          : 'Renaming updates every page beneath this one. Existing drafts are kept.'
+          ? "The site root has no slug of its own."
+          : "Renaming updates every page beneath this one. Existing drafts are kept."
       }
     >
       {(id) => (
         <Input
           id={id}
           type="text"
-          value={isRoot ? '' : slug}
-          placeholder={isRoot ? '/' : 'page-slug'}
+          value={isRoot ? "" : slug}
+          placeholder={isRoot ? "/" : "page-slug"}
           disabled={isRoot || busy || disabled}
           onChange={(e) => setSlug(e.target.value)}
           onBlur={() => void commit()}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') e.currentTarget.blur()
-            if (e.key === 'Escape') setSlug(story.slug)
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") setSlug(story.slug);
           }}
         />
       )}
     </Field>
-  )
+  );
 }

@@ -11,20 +11,20 @@
  * is the only reason it is not runtime-independent. It is still mounted on the
  * bare path, which was never about the argument.
  */
-import type { Context } from 'hono'
-import { Hono } from 'hono'
-import type { AssetTag } from '../../core/assets'
-import { type BulkSelection, wasRefused } from '../../core/bulk'
-import { DEFAULT_SITE } from '../../core/sites'
-import { type AssetBulkOptions, type AssetBulkOutcome, runAssetBulk } from '../asset-bulk'
+import type { Context } from "hono";
+import { Hono } from "hono";
+import type { AssetTag } from "../../core/assets";
+import { type BulkSelection, wasRefused } from "../../core/bulk";
+import { DEFAULT_SITE } from "../../core/sites";
+import { type AssetBulkOptions, type AssetBulkOutcome, runAssetBulk } from "../asset-bulk";
 import {
   createFolder,
   deleteFolder,
   folderSiteOf,
   listFolders,
   updateFolder,
-} from '../asset-folders'
-import { deleteTag, ensureTag, listTags, renameTag, tagSiteOf, tagsForAssets } from '../asset-tags'
+} from "../asset-folders";
+import { deleteTag, ensureTag, listTags, renameTag, tagSiteOf, tagsForAssets } from "../asset-tags";
 import {
   assetById,
   assetSiteOf,
@@ -39,17 +39,17 @@ import {
   toAssetValue,
   updateAsset,
   uploadAsset,
-} from '../assets'
-import { ADMIN, ASSETS, EDIT, READ } from '../auth/roles'
+} from "../assets";
+import { ADMIN, ASSETS, EDIT, READ } from "../auth/roles";
 import {
   DEFAULT_DESCRIBE_BATCH,
   describeAsset,
   describeOnUpload,
   type DescribeRunOutcome,
   runDescribe,
-} from '../describe'
-import type { FolioDb } from '../db'
-import { FolioError, rethrow } from '../errors'
+} from "../describe";
+import type { FolioDb } from "../db";
+import { FolioError, rethrow } from "../errors";
 import {
   fenceRow,
   readableScopes,
@@ -57,10 +57,10 @@ import {
   requestScope,
   requestUrls,
   requireAccess,
-} from '../middleware'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
-import { brandOf, sweepOf } from './stories'
+} from "../middleware";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
+import { brandOf, sweepOf } from "./stories";
 import {
   AssetBulkBody,
   AssetBulkMoveBody,
@@ -82,7 +82,7 @@ import {
   requireCursor,
   sortDirQuery,
   tagsQuery,
-} from '../validate'
+} from "../validate";
 
 /**
  * `?folder=` and `?unfiled=1`, which are **mutually exclusive**
@@ -99,13 +99,13 @@ function assetFolderFilter(
   folder: string | undefined,
   unfiled: string | undefined,
 ): { folder?: string; unfiled?: boolean } {
-  const path = folderQuery(folder)
-  const none = unfiled === '1'
+  const path = folderQuery(folder);
+  const none = unfiled === "1";
   if (path !== undefined && none) {
-    throw new FolioError('bad_request', '`folder` and `unfiled` cannot both be given')
+    throw new FolioError("bad_request", "`folder` and `unfiled` cannot both be given");
   }
-  if (path !== undefined) return { folder: path }
-  return none ? { unfiled: true } : {}
+  if (path !== undefined) return { folder: path };
+  return none ? { unfiled: true } : {};
 }
 
 /**
@@ -123,13 +123,13 @@ function assetTagFilter(
   tags: string[] | undefined,
   untagged: string | undefined,
 ): { tags?: string[]; untagged?: boolean } {
-  const slugs = tagsQuery(tags)
-  const none = untagged === '1'
+  const slugs = tagsQuery(tags);
+  const none = untagged === "1";
   if (slugs !== undefined && none) {
-    throw new FolioError('bad_request', '`tags` and `untagged` cannot both be given')
+    throw new FolioError("bad_request", "`tags` and `untagged` cannot both be given");
   }
-  if (slugs !== undefined) return { tags: slugs }
-  return none ? { untagged: true } : {}
+  if (slugs !== undefined) return { tags: slugs };
+  return none ? { untagged: true } : {};
 }
 
 /**
@@ -152,12 +152,12 @@ async function withTags<T extends { id: string }>(
   const byAsset = await tagsForAssets(
     db,
     rows.map((row) => row.id),
-  )
-  return rows.map((row) => ({ ...row, tags: byAsset.get(row.id) ?? [] }))
+  );
+  return rows.map((row) => ({ ...row, tags: byAsset.get(row.id) ?? [] }));
 }
 
 export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * The scope whose own rows the library shows and where a write lands
@@ -165,16 +165,16 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * deployment with no `sites`. A multi-site request with no scope never reaches a
    * handler (`site_required`).
    */
-  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE
+  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE;
 
   /**
    * **The id fences.** An asset, folder or tag outside the request's chain (a read) or
    * scope (a write) answers exactly as an unknown one (decision 10). Each mounts
    * nothing with no `sites`: no read, no statement.
    */
-  const fenceAsset = (reach: 'read' | 'write') => fenceRow<Env>(rt, reach, assetSiteOf, 'asset')
-  const fenceFolder = fenceRow<Env>(rt, 'write', folderSiteOf, 'folder')
-  const fenceTag = fenceRow<Env>(rt, 'write', tagSiteOf, 'tag')
+  const fenceAsset = (reach: "read" | "write") => fenceRow<Env>(rt, reach, assetSiteOf, "asset");
+  const fenceFolder = fenceRow<Env>(rt, "write", folderSiteOf, "folder");
+  const fenceTag = fenceRow<Env>(rt, "write", tagSiteOf, "tag");
 
   /**
    * Every id of an explicit bulk selection is in the scope, checked before the run
@@ -187,46 +187,46 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     c: Context<FolioEnv<Env>>,
     selection: BulkSelection<unknown>,
   ): Promise<void> => {
-    if (!rt.sites || selection.all) return
-    const ids = [...new Set(selection.ids)]
-    const rows = await assetsFor(c.var.bindings().db, ids, [scopeOf(c)])
+    if (!rt.sites || selection.all) return;
+    const ids = [...new Set(selection.ids)];
+    const rows = await assetsFor(c.var.bindings().db, ids, [scopeOf(c)]);
     if (rows.length !== ids.length) {
-      throw new FolioError('not_found', 'One or more of those files is not in this site')
+      throw new FolioError("not_found", "One or more of those files is not in this site");
     }
-  }
+  };
 
-  app.get('/assets', requireAccess<Env>(rt, READ), async (c) => {
-    const { db } = c.var.bindings()
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
+  app.get("/assets", requireAccess<Env>(rt, READ), async (c) => {
+    const { db } = c.var.bindings();
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
     const page = await listAssets(db, {
       // The scope's own library, or — for a picker, with `?chain=1` — everything the
       // scope may pick from: its own files and those of the scopes above it.
-      chain: c.req.query('chain') === '1' ? await requestChain(c, rt) : [scopeOf(c)],
-      limit: limitParam(c.req.query('limit'), 50, 200),
+      chain: c.req.query("chain") === "1" ? await requestChain(c, rt) : [scopeOf(c)],
+      limit: limitParam(c.req.query("limit"), 50, 200),
       cursor,
-      q: c.req.query('q'),
-      kind: c.req.query('kind'),
-      count: c.req.query('count') === '1',
-      sort: assetSortQuery(c.req.query('sort')),
-      dir: sortDirQuery(c.req.query('dir')),
-      ...assetFolderFilter(c.req.query('folder'), c.req.query('unfiled')),
-      ...assetTagFilter(c.req.queries('tags'), c.req.query('untagged')),
+      q: c.req.query("q"),
+      kind: c.req.query("kind"),
+      count: c.req.query("count") === "1",
+      sort: assetSortQuery(c.req.query("sort")),
+      dir: sortDirQuery(c.req.query("dir")),
+      ...assetFolderFilter(c.req.query("folder"), c.req.query("unfiled")),
+      ...assetTagFilter(c.req.queries("tags"), c.req.query("untagged")),
       // The enrichment backlog. Answered here as well as composed into a run's
       // captured filter, because the run panel has to be able to read *how many
       // have never been described* before it offers to describe them — with
       // `?count=1`, that number is also the `expected` its count guard checks
       // against, so the two have to come off one set of clauses.
-      undescribed: c.req.query('undescribed') === '1',
+      undescribed: c.req.query("undescribed") === "1",
       // The other half: attempted and recorded a failure. Exclusive with
       // nothing, `undescribed` included — "never attempted" and "attempted and
       // failed" cannot both be true of one row, so the pair can only ever
       // narrow to nothing, which is a legitimate (empty) answer rather than one
       // the route needs to refuse the way `folder`/`unfiled` is.
-      failed: c.req.query('failed') === '1',
-    })
-    return c.json({ ...page, rows: await withTags(db, page.rows) })
-  })
+      failed: c.req.query("failed") === "1",
+    });
+    return c.json({ ...page, rows: await withTags(db, page.rows) });
+  });
 
   /* ------------------------------------------------------------ folders --- */
 
@@ -244,28 +244,28 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * organisation, not content, and anyone who can see the library can see how it
    * is filed.
    */
-  app.get('/assets/folders', requireAccess<Env>(rt, READ), async (c) => {
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
+  app.get("/assets/folders", requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
     return c.json(
       await listFolders(c.var.bindings().db, {
         site: scopeOf(c),
-        limit: limitParam(c.req.query('limit'), 100, 500),
+        limit: limitParam(c.req.query("limit"), 100, 500),
         cursor,
-        count: c.req.query('count') === '1',
+        count: c.req.query("count") === "1",
       }),
-    )
-  })
+    );
+  });
 
   /**
    * A new folder. 409 when its name slugifies onto a sibling's, naming the
    * sibling — deliberately not de-duplicated silently, because two names that
    * slugify alike are different names and the editor should choose.
    */
-  app.post('/assets/folders', requireAccess<Env>(rt, ASSETS), async (c) => {
-    const body = await parseBody(c.req, AssetFolderCreateBody)
-    return c.json(await createFolder(c.var.bindings().db, body, scopeOf(c)), 201)
-  })
+  app.post("/assets/folders", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const body = await parseBody(c.req, AssetFolderCreateBody);
+    return c.json(await createFolder(c.var.bindings().db, body, scopeOf(c)), 201);
+  });
 
   /**
    * Rename, move, or both — one subtree path rewrite either way
@@ -275,13 +275,13 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * missed cycle detaches a subtree from the tree permanently: there is no
    * recursive query anywhere here to find it again.
    */
-  app.patch('/assets/folders/:id', requireAccess<Env>(rt, ASSETS), fenceFolder, async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const body = await parseBody(c.req, AssetFolderPatchBody)
-    const row = await updateFolder(c.var.bindings().db, id, body, scopeOf(c))
-    if (!row) throw new FolioError('not_found', 'Unknown folder')
-    return c.json(row)
-  })
+  app.patch("/assets/folders/:id", requireAccess<Env>(rt, ASSETS), fenceFolder, async (c) => {
+    const id = idParam("id", c.req.param("id"));
+    const body = await parseBody(c.req, AssetFolderPatchBody);
+    const row = await updateFolder(c.var.bindings().db, id, body, scopeOf(c));
+    if (!row) throw new FolioError("not_found", "Unknown folder");
+    return c.json(row);
+  });
 
   /**
    * Deletes the folder and **nothing else** (decision 14): children re-parent to
@@ -292,12 +292,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Note it does not need the `media` binding, unlike `DELETE /assets/:id` — a
    * folder is metadata, and deleting metadata reaches no bucket.
    */
-  app.delete('/assets/folders/:id', requireAccess<Env>(rt, ASSETS), fenceFolder, async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const report = await deleteFolder(c.var.bindings().db, id, scopeOf(c))
-    if (!report) throw new FolioError('not_found', 'Unknown folder')
-    return c.json({ deleted: true, ...report })
-  })
+  app.delete("/assets/folders/:id", requireAccess<Env>(rt, ASSETS), fenceFolder, async (c) => {
+    const id = idParam("id", c.req.param("id"));
+    const report = await deleteFolder(c.var.bindings().db, id, scopeOf(c));
+    if (!report) throw new FolioError("not_found", "Unknown folder");
+    return c.json({ deleted: true, ...report });
+  });
 
   /* --------------------------------------------------------------- tags --- */
 
@@ -317,18 +317,18 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `READ` (viewer+), matching the list it narrows — a tag is organisation, not
    * content.
    */
-  app.get('/assets/tags', requireAccess<Env>(rt, READ), async (c) => {
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
+  app.get("/assets/tags", requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
     return c.json(
       await listTags(c.var.bindings().db, {
         site: scopeOf(c),
-        limit: limitParam(c.req.query('limit'), 100, 500),
+        limit: limitParam(c.req.query("limit"), 100, 500),
         cursor,
-        counts: c.req.query('counts') === '1',
+        counts: c.req.query("counts") === "1",
       }),
-    )
-  })
+    );
+  });
 
   /**
    * A tag, created **or found** (decision 4).
@@ -339,11 +339,11 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * match is on the slug, so `Headshots` finds `headshot` and the vocabulary
    * stays a taxonomy rather than growing a near-synonym per typist.
    */
-  app.post('/assets/tags', requireAccess<Env>(rt, ASSETS), async (c) => {
-    const body = await parseBody(c.req, AssetTagBody)
-    const { tag, created } = await ensureTag(c.var.bindings().db, body.name, scopeOf(c))
-    return c.json(tag, created ? 201 : 200)
-  })
+  app.post("/assets/tags", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const body = await parseBody(c.req, AssetTagBody);
+    const { tag, created } = await ensureTag(c.var.bindings().db, body.name, scopeOf(c));
+    return c.json(tag, created ? 201 : 200);
+  });
 
   /**
    * Renames a tag, re-slugging it. `409` when the new slug is another tag's,
@@ -352,13 +352,13 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Changing only the display — `head shots` to `Headshots` — is always allowed,
    * because the slug does not move.
    */
-  app.patch('/assets/tags/:id', requireAccess<Env>(rt, ASSETS), fenceTag, async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const body = await parseBody(c.req, AssetTagBody)
-    const row = await renameTag(c.var.bindings().db, id, body.name, scopeOf(c))
-    if (!row) throw new FolioError('not_found', 'Unknown tag')
-    return c.json(row)
-  })
+  app.patch("/assets/tags/:id", requireAccess<Env>(rt, ASSETS), fenceTag, async (c) => {
+    const id = idParam("id", c.req.param("id"));
+    const body = await parseBody(c.req, AssetTagBody);
+    const row = await renameTag(c.var.bindings().db, id, body.name, scopeOf(c));
+    if (!row) throw new FolioError("not_found", "Unknown tag");
+    return c.json(row);
+  });
 
   /**
    * Deletes a tag and its taggings, and **no asset** (decision 14). `removedFrom`
@@ -366,12 +366,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * rather than guess — and, like the folder delete beside it, this reaches no
    * bucket and needs no `media` binding.
    */
-  app.delete('/assets/tags/:id', requireAccess<Env>(rt, ASSETS), fenceTag, async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const report = await deleteTag(c.var.bindings().db, id, scopeOf(c))
-    if (!report) throw new FolioError('not_found', 'Unknown tag')
-    return c.json({ deleted: true, ...report })
-  })
+  app.delete("/assets/tags/:id", requireAccess<Env>(rt, ASSETS), fenceTag, async (c) => {
+    const id = idParam("id", c.req.param("id"));
+    const report = await deleteTag(c.var.bindings().db, id, scopeOf(c));
+    if (!report) throw new FolioError("not_found", "Unknown tag");
+    return c.json({ deleted: true, ...report });
+  });
 
   /* --------------------------------------------------------------- bulk --- */
 
@@ -388,11 +388,11 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     c: Context<FolioEnv<Env>>,
     outcome: AssetBulkOutcome | DescribeRunOutcome,
   ): Response => {
-    if (!wasRefused(outcome)) return c.json(outcome)
+    if (!wasRefused(outcome)) return c.json(outcome);
     return c.json(
       {
         error: {
-          code: 'conflict',
+          code: "conflict",
           message: `${outcome.expected} files matched when you chose them and ${outcome.actual} match now. Check the number and try again.`,
         },
         refused: outcome.refused,
@@ -400,8 +400,8 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         actual: outcome.actual,
       },
       409,
-    )
-  }
+    );
+  };
 
   /** The job-control fields, off any of the three bodies. No `actor`: none of
    * these four actions writes a version row or fires a hook, because none of them
@@ -409,12 +409,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const control = (
     c: Context<FolioEnv<Env>>,
     body: {
-      dryRun?: boolean
-      continueFrom?: string | null
-      batch?: number
+      dryRun?: boolean;
+      continueFrom?: string | null;
+      batch?: number;
     },
   ): AssetBulkOptions => {
-    requireCursor(body.continueFrom ?? undefined)
+    requireCursor(body.continueFrom ?? undefined);
     return {
       // The request's scope, always: what a filter selection is read against, the
       // scope every tag and folder named must be in, and the scope a move or a delete
@@ -423,8 +423,8 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
       ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
       ...(body.batch === undefined ? {} : { batch: body.batch }),
-    }
-  }
+    };
+  };
 
   /**
    * Tagging and untagging a selection — **add and remove, never replace**, which
@@ -439,34 +439,34 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * (decision 16). The one route in this feature that is `ADMIN` is phase 7's
    * describe run, because that one spends the host's money.
    */
-  for (const action of ['tag', 'untag'] as const) {
+  for (const action of ["tag", "untag"] as const) {
     app.post(`/assets/bulk/${action}`, requireAccess<Env>(rt, ASSETS), async (c) => {
-      const body = await parseBody(c.req, AssetBulkTagBody)
-      await selectionInScope(c, body.selection)
+      const body = await parseBody(c.req, AssetBulkTagBody);
+      await selectionInScope(c, body.selection);
       return answer(
         c,
         await runAssetBulk({ db: c.var.bindings().db, logger: rt.logger }, action, body.selection, {
           ...control(c, body),
           tagIds: body.tagIds,
         }),
-      )
-    })
+      );
+    });
   }
 
   /** Filing a selection. `folderId: null` is *Unfiled*, a real destination, which
    * is why the field is required and nullable rather than optional. Touches one
    * column per row and no R2 object at all (decision 1). */
-  app.post('/assets/bulk/move', requireAccess<Env>(rt, ASSETS), async (c) => {
-    const body = await parseBody(c.req, AssetBulkMoveBody)
-    await selectionInScope(c, body.selection)
+  app.post("/assets/bulk/move", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const body = await parseBody(c.req, AssetBulkMoveBody);
+    await selectionInScope(c, body.selection);
     return answer(
       c,
-      await runAssetBulk({ db: c.var.bindings().db, logger: rt.logger }, 'move', body.selection, {
+      await runAssetBulk({ db: c.var.bindings().db, logger: rt.logger }, "move", body.selection, {
         ...control(c, body),
         folderId: body.folderId,
       }),
-    )
-  })
+    );
+  });
 
   /**
    * Deleting a selection — the one irreversible action in this feature.
@@ -481,21 +481,21 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * without one, but the check is here too so the failure is a request-shaped
    * `unsupported` before a count guard runs rather than after it.
    */
-  app.post('/assets/bulk/delete', requireAccess<Env>(rt, ASSETS), async (c) => {
-    const { db, media } = c.var.bindings()
-    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
-    const body = await parseBody(c.req, AssetBulkBody)
-    await selectionInScope(c, body.selection)
+  app.post("/assets/bulk/delete", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const { db, media } = c.var.bindings();
+    if (!media) throw new FolioError("unsupported", "No media bucket is configured");
+    const body = await parseBody(c.req, AssetBulkBody);
+    await selectionInScope(c, body.selection);
     return answer(
       c,
       await runAssetBulk(
         { db, media, logger: rt.logger },
-        'delete',
+        "delete",
         body.selection,
         control(c, body),
       ),
-    )
-  })
+    );
+  });
 
   /**
    * Which published documents use one asset — the detail panel's "where it is
@@ -524,12 +524,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * so the library row has to be read to answer at all, and "no such asset" is a
    * more useful answer than "used by nobody" for a stale link.
    */
-  app.get('/assets/:id/usage', requireAccess<Env>(rt, EDIT), fenceAsset('read'), async (c) => {
-    const { db } = c.var.bindings()
-    const row = await assetById(db, idParam('id', c.req.param('id')))
-    if (!row) throw new FolioError('not_found', 'Unknown asset')
-    const usage = await assetUsage(db, row.key, await readableScopes(c, rt))
-    const urls = await requestUrls(c, rt)
+  app.get("/assets/:id/usage", requireAccess<Env>(rt, EDIT), fenceAsset("read"), async (c) => {
+    const { db } = c.var.bindings();
+    const row = await assetById(db, idParam("id", c.req.param("id")));
+    if (!row) throw new FolioError("not_found", "Unknown asset");
+    const usage = await assetUsage(db, row.key, await readableScopes(c, rt));
+    const urls = await requestUrls(c, rt);
     return c.json({
       published: usage.published.map((story) => ({
         id: story.id,
@@ -537,14 +537,14 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         path: story.path,
         // `''` rather than absent for an unrouted document, matching the document
         // usage route: a record using an asset has no URL to offer.
-        url: urls(story).url ?? '',
+        url: urls(story).url ?? "",
       })),
       total: usage.total,
       // Uses in scopes the caller cannot read: counted, never named. Every scope they can
       // read (`readableScopes`) is named, not only the request's chain.
       ...(rt.sites ? { elsewhere: usage.elsewhere } : {}),
-    })
-  })
+    });
+  });
 
   /* ----------------------------------------------------------- describe --- */
 
@@ -573,18 +573,18 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Registered **before** `/assets/:id` for the reason `folders` and `tags` are:
    * `describe` is a legal `:id` as far as the router is concerned.
    */
-  app.get('/assets/describe', requireAccess<Env>(rt, READ), (c) => {
-    const { images } = c.var.bindings()
-    const { describe } = brandOf(c)
-    if (!describe) return c.json({ configured: false })
+  app.get("/assets/describe", requireAccess<Env>(rt, READ), (c) => {
+    const { images } = c.var.bindings();
+    const { describe } = brandOf(c);
+    if (!describe) return c.json({ configured: false });
     return c.json({
       configured: true,
       onUpload: describe.onUpload,
       concurrency: describe.concurrency,
       batch: DEFAULT_DESCRIBE_BATCH,
       images: images !== undefined,
-    })
-  })
+    });
+  });
 
   /**
    * The batched enrichment run over a selection (decision 10) — the run panel's
@@ -611,19 +611,19 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * reasons. A refused count answers 409 with the new number, like every other
    * bulk route: a door, not a wall.
    */
-  app.post('/assets/describe', requireAccess<Env>(rt, ADMIN), async (c) => {
-    const { db, media, images } = c.var.bindings()
-    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
-    const { describe } = brandOf(c)
+  app.post("/assets/describe", requireAccess<Env>(rt, ADMIN), async (c) => {
+    const { db, media, images } = c.var.bindings();
+    if (!media) throw new FolioError("unsupported", "No media bucket is configured");
+    const { describe } = brandOf(c);
     if (!describe) {
-      throw new FolioError('unsupported', 'No `describe` function is configured')
+      throw new FolioError("unsupported", "No `describe` function is configured");
     }
 
-    const body = await parseBody(c.req, AssetDescribeBody)
-    requireCursor(body.continueFrom ?? undefined)
-    const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+    const body = await parseBody(c.req, AssetDescribeBody);
+    requireCursor(body.continueFrom ?? undefined);
+    const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`;
     // With `brands`, this brand's scopes only: its `fn` describes its own assets.
-    const sweep = await sweepOf(c, rt)
+    const sweep = await sweepOf(c, rt);
     return answer(
       c,
       await runDescribe(
@@ -645,8 +645,8 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           ...(body.batch === undefined ? {} : { batch: body.batch }),
         },
       ),
-    )
-  })
+    );
+  });
 
   /**
    * Alt text, a description and tags for one asset, from the host's own model
@@ -674,24 +674,24 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * caller asked for. A 500 would say Folio broke.
    */
   app.post(
-    '/assets/:id/describe',
+    "/assets/:id/describe",
     requireAccess<Env>(rt, ASSETS),
-    fenceAsset('write'),
+    fenceAsset("write"),
     async (c) => {
-      const { db, media, images } = c.var.bindings()
-      if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
-      const { describe } = brandOf(c)
+      const { db, media, images } = c.var.bindings();
+      if (!media) throw new FolioError("unsupported", "No media bucket is configured");
+      const { describe } = brandOf(c);
       if (!describe) {
-        throw new FolioError('unsupported', 'No `describe` function is configured')
+        throw new FolioError("unsupported", "No `describe` function is configured");
       }
 
-      const row = await assetById(db, idParam('id', c.req.param('id')))
-      if (!row) throw new FolioError('not_found', 'Unknown asset')
+      const row = await assetById(db, idParam("id", c.req.param("id")));
+      if (!row) throw new FolioError("not_found", "Unknown asset");
 
       // Absolute, from this request's own origin: `DescribeInput.url` is handed to
       // somebody else's API to fetch, and `rt.base` alone is a path rather than a
       // URL. The origin is only knowable here.
-      const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+      const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`;
       const outcome = await describeAsset(
         {
           db,
@@ -704,16 +704,16 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           scoped: rt.sites !== null,
         },
         row,
-      )
+      );
       return c.json({
         asset: (await withTags(db, [outcome.row]))[0],
         skipped: outcome.skipped,
         tagged: outcome.tagged,
         tagsIgnored: outcome.tagsIgnored,
         error: outcome.error,
-      })
+      });
     },
-  )
+  );
 
   /**
    * One asset by id.
@@ -735,12 +735,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * being a write nobody noticed is a read that breaks the first time the write grows
    * a side effect.
    */
-  app.get('/assets/:id', requireAccess<Env>(rt, READ), fenceAsset('read'), async (c) => {
-    const { db } = c.var.bindings()
-    const row = await assetById(db, idParam('id', c.req.param('id')))
-    if (!row) throw new FolioError('not_found', 'Unknown asset')
-    return c.json((await withTags(db, [row]))[0])
-  })
+  app.get("/assets/:id", requireAccess<Env>(rt, READ), fenceAsset("read"), async (c) => {
+    const { db } = c.var.bindings();
+    const row = await assetById(db, idParam("id", c.req.param("id")));
+    if (!row) throw new FolioError("not_found", "Unknown asset");
+    return c.json((await withTags(db, [row]))[0]);
+  });
 
   /**
    * Raw body upload with the filename in a query parameter, rather than
@@ -757,21 +757,21 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * in D1, so a failure here is a log line and an asset left in the backlog,
    * which is exactly where a never-attempted one is.
    */
-  app.post('/assets', requireAccess<Env>(rt, ASSETS), async (c) => {
-    const { db, media, images } = c.var.bindings()
-    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
+  app.post("/assets", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const { db, media, images } = c.var.bindings();
+    if (!media) throw new FolioError("unsupported", "No media bucket is configured");
 
-    const filename = filenameQuery(c.req.query('filename'))
+    const filename = filenameQuery(c.req.query("filename"));
     // A declared length already over the cap is refused before a byte is
     // read. That is the fast path, not the guarantee: `readCappedBody` is what
     // makes the cap hold for a request with no Content-Length, or a lying one.
-    contentLengthHeader(c.req.header('content-length'), MAX_UPLOAD_BYTES)
+    contentLengthHeader(c.req.header("content-length"), MAX_UPLOAD_BYTES);
     try {
-      const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES)
-      const row = await uploadAsset(db, media, { bytes, filename, site: scopeOf(c) })
-      const { describe } = brandOf(c)
+      const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES);
+      const row = await uploadAsset(db, media, { bytes, filename, site: scopeOf(c) });
+      const { describe } = brandOf(c);
       if (describe?.onUpload) {
-        const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+        const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`;
         c.executionCtx.waitUntil(
           describeOnUpload(
             {
@@ -786,15 +786,15 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
             },
             row,
           ),
-        )
+        );
       }
-      return c.json({ asset: row, value: toAssetValue(row) }, 201)
+      return c.json({ asset: row, value: toAssetValue(row) }, 201);
     } catch (e) {
       // An empty upload is a bad request; one over either size ceiling is
       // `too_large`; a failed R2 put or D1 insert is internal.
-      rethrow(e)
+      rethrow(e);
     }
-  })
+  });
 
   /**
    * Alt text, description, folder and tags — `AssetPatchBody` (`validate.ts`) has
@@ -807,24 +807,24 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * or an unknown tag id is a 400 naming it, not a silently dangling reference:
    * neither column is a foreign key, so nothing downstream would catch it.
    */
-  app.patch('/assets/:id', requireAccess<Env>(rt, ASSETS), fenceAsset('write'), async (c) => {
-    const { db } = c.var.bindings()
-    const id = idParam('id', c.req.param('id'))
-    const body = await parseOptionalBody(c.req, AssetPatchBody)
-    const row = await updateAsset(db, id, body, scopeOf(c))
-    if (!row) throw new FolioError('not_found', 'Unknown asset')
-    return c.json((await withTags(db, [row]))[0])
-  })
+  app.patch("/assets/:id", requireAccess<Env>(rt, ASSETS), fenceAsset("write"), async (c) => {
+    const { db } = c.var.bindings();
+    const id = idParam("id", c.req.param("id"));
+    const body = await parseOptionalBody(c.req, AssetPatchBody);
+    const row = await updateAsset(db, id, body, scopeOf(c));
+    if (!row) throw new FolioError("not_found", "Unknown asset");
+    return c.json((await withTags(db, [row]))[0]);
+  });
 
-  app.delete('/assets/:id', requireAccess<Env>(rt, ASSETS), fenceAsset('write'), async (c) => {
-    const { db, media } = c.var.bindings()
-    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
-    const gone = await deleteAsset(db, media, idParam('id', c.req.param('id')), scopeOf(c))
-    if (!gone) throw new FolioError('not_found', 'Unknown asset')
-    return c.json({ deleted: true })
-  })
+  app.delete("/assets/:id", requireAccess<Env>(rt, ASSETS), fenceAsset("write"), async (c) => {
+    const { db, media } = c.var.bindings();
+    if (!media) throw new FolioError("unsupported", "No media bucket is configured");
+    const gone = await deleteAsset(db, media, idParam("id", c.req.param("id")), scopeOf(c));
+    if (!gone) throw new FolioError("not_found", "Unknown asset");
+    return c.json({ deleted: true });
+  });
 
-  return app
+  return app;
 }
 
 /**
@@ -844,20 +844,20 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * co-tenanted key.
  */
 export function assetFileRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
-  app.get('/asset/:key', async (c) => {
-    const { media, images } = c.var.bindings()
-    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
+  app.get("/asset/:key", async (c) => {
+    const { media, images } = c.var.bindings();
+    if (!media) throw new FolioError("unsupported", "No media bucket is configured");
     return serveAsset(
       media,
       images,
-      assetKeyParam(c.req.param('key')),
+      assetKeyParam(c.req.param("key")),
       parseTransform(new URL(c.req.url).searchParams),
       c.req.raw,
       rt.logger,
-    )
-  })
+    );
+  });
 
-  return app
+  return app;
 }

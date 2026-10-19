@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
 
 /** How long a message stays on screen before it clears itself. */
-const NOTICE_MS = 6000
+const NOTICE_MS = 6000;
 
 /** Puts a message in front of the editor. Stable, so hooks can hold onto it. */
-export type Notify = (message: string) => void
+export type Notify = (message: string) => void;
 
 export interface Notice {
-  notice: string | null
-  notify: Notify
+  notice: string | null;
+  notify: Notify;
 }
 
 /**
@@ -21,13 +21,13 @@ export interface Notice {
  * failure does not extend the first one's six seconds.
  */
 export function useNotice(): Notice {
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!notice) return
-    const t = setTimeout(() => setNotice(null), NOTICE_MS)
-    return () => clearTimeout(t)
-  }, [notice])
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(t);
+  }, [notice]);
 
-  return { notice, notify: setNotice }
+  return { notice, notify: setNotice };
 }

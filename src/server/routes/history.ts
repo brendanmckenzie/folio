@@ -3,40 +3,47 @@
  * D1 (coarse, restorable) and the activity trail from the Durable Object's
  * mutation log (fine-grained, not restorable).
  */
-import { Hono } from 'hono'
-import { actorString, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
-import { FolioError } from '../errors'
-import { fenceStory, hookCtx, inFence, loadStory, requestScope, requireAccess } from '../middleware'
-import { checkpoint } from '../publish'
-import type { FolioRuntime } from '../runtime'
-import { storyById } from '../stories'
-import type { FolioEnv } from '../types'
-import { CheckpointBody, idParam, limitParam, parseOptionalBody, requireCursor } from '../validate'
-import { getVersion, listRecentPublishes, listVersions } from '../versions'
-import { brandOf } from './stories'
+import { Hono } from "hono";
+import { actorString, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
+import { FolioError } from "../errors";
+import {
+  fenceStory,
+  hookCtx,
+  inFence,
+  loadStory,
+  requestScope,
+  requireAccess,
+} from "../middleware";
+import { checkpoint } from "../publish";
+import type { FolioRuntime } from "../runtime";
+import { storyById } from "../stories";
+import type { FolioEnv } from "../types";
+import { CheckpointBody, idParam, limitParam, parseOptionalBody, requireCursor } from "../validate";
+import { getVersion, listRecentPublishes, listVersions } from "../versions";
+import { brandOf } from "./stories";
 
 export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   // Deliberately no existence check: a story with no versions and a story that
   // never existed both have an empty history. A story that exists outside the
   // request's chain is a 404 (`multi-site.md` decision 10), which only a
   // deployment with `sites` pays a read to learn.
   app.get(
-    '/story/:id/versions',
+    "/story/:id/versions",
     requireAccess<Env>(rt, READ),
-    fenceStory<Env>(rt, 'read', { absent: 'pass' }),
+    fenceStory<Env>(rt, "read", { absent: "pass" }),
     async (c) => {
-      const cursor = c.req.query('cursor')
-      requireCursor(cursor)
+      const cursor = c.req.query("cursor");
+      requireCursor(cursor);
       return c.json(
-        await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')), {
-          limit: limitParam(c.req.query('limit'), 50, 200),
+        await listVersions(c.var.bindings().db, idParam("id", c.req.param("id")), {
+          limit: limitParam(c.req.query("limit"), 50, 200),
           cursor,
         }),
-      )
+      );
     },
-  )
+  );
 
   /**
    * `loadStory` ahead of the body, not after it: an id that names nothing is a
@@ -51,20 +58,20 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * and the row when the caller already does.
    */
   app.post(
-    '/story/:id/versions',
+    "/story/:id/versions",
     requireAccess<Env>(rt, PUBLISH),
-    loadStory<Env>(rt, 'write'),
+    loadStory<Env>(rt, "write"),
     async (c) => {
-      const body = await parseOptionalBody(c.req, CheckpointBody)
-      const deps = brandOf(c).publishDeps(c.var.bindings(), hookCtx(c))
+      const body = await parseOptionalBody(c.req, CheckpointBody);
+      const deps = brandOf(c).publishDeps(c.var.bindings(), hookCtx(c));
       // `actor` comes off the session, never off the body: the client used to
       // send its own display name here, which made "who checkpointed this" a
       // field anybody could type into.
       return c.json(
         await checkpoint(deps, c.var.story, { label: body.label, actor: actorString(c.var.actor) }),
-      )
+      );
     },
-  )
+  );
 
   /**
    * Returns the version's document. Restoring happens on the client: it diffs
@@ -77,25 +84,25 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * shape. Without it a restore across a migration would reintroduce
    * pre-migration keys — the subtle bug that decision exists to avoid.
    */
-  app.get('/versions/:versionId', requireAccess<Env>(rt, READ_DRAFT), async (c) => {
-    const db = c.var.bindings().db
-    const brand = brandOf(c)
-    const found = await getVersion(db, idParam('versionId', c.req.param('versionId')), {
+  app.get("/versions/:versionId", requireAccess<Env>(rt, READ_DRAFT), async (c) => {
+    const db = c.var.bindings().db;
+    const brand = brandOf(c);
+    const found = await getVersion(db, idParam("versionId", c.req.param("versionId")), {
       migrations: brand.migrations,
       schema: brand.schema,
       typeOf: brand.typeOf,
-    })
-    if (!found) throw new FolioError('not_found', 'Unknown version')
+    });
+    if (!found) throw new FolioError("not_found", "Unknown version");
     // A version is its story's: outside the request's chain it is not there. The
     // extra read is multi-site's alone, for the reason `inFence` gives.
     if (rt.sites) {
-      const story = await storyById(db, found.meta.storyId)
-      if (!story || !(await inFence(c, rt, story, 'read'))) {
-        throw new FolioError('not_found', 'Unknown version')
+      const story = await storyById(db, found.meta.storyId);
+      if (!story || !(await inFence(c, rt, story, "read"))) {
+        throw new FolioError("not_found", "Unknown version");
       }
     }
-    return c.json(found)
-  })
+    return c.json(found);
+  });
 
   /**
    * The activity trail, paged — the same `Page<T>` envelope as the versions route
@@ -107,19 +114,19 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * an oversight in whoever consumes them and was a real difference in the routes.
    */
   app.get(
-    '/story/:id/activity',
+    "/story/:id/activity",
     requireAccess<Env>(rt, READ),
-    loadStory<Env>(rt, 'read'),
+    loadStory<Env>(rt, "read"),
     async (c) => {
-      const cursor = c.req.query('cursor')
-      requireCursor(cursor)
+      const cursor = c.req.query("cursor");
+      requireCursor(cursor);
       return c.json(
         await rt
           .stub(c.var.bindings(), c.var.story.id)
-          .recent(limitParam(c.req.query('limit'), 60, 200), cursor),
-      )
+          .recent(limitParam(c.req.query("limit"), 60, 200), cursor),
+      );
     },
-  )
+  );
 
   /**
    * The most recent publishes across the whole site — Home's *Latest published*
@@ -133,16 +140,16 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `READ`, matching the versions route above it: it reports on content that is
    * published, so there is nothing here a reader could not already fetch.
    */
-  app.get('/published', requireAccess<Env>(rt, READ), async (c) => {
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
+  app.get("/published", requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
     const page = await listRecentPublishes(c.var.bindings().db, {
       // The scope's own publishes, and only with `sites`: with none every version is
       // `default`'s and this is the statement it always was.
-      ...(rt.sites ? { scope: requestScope(c, rt) ?? '' } : {}),
-      limit: limitParam(c.req.query('limit'), 20, 100),
+      ...(rt.sites ? { scope: requestScope(c, rt) ?? "" } : {}),
+      limit: limitParam(c.req.query("limit"), 20, 100),
       cursor,
-    })
+    });
     // `withUrls` over the **story** half of each row, so a block can link to the
     // live page. A URL is the host's own `route()` answer, so neither this route nor
     // the reader derives one — which is also why `RecentPublish` keeps the whole
@@ -150,8 +157,8 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json({
       ...page,
       rows: page.rows.map((row) => ({ ...row, story: rt.withUrls(row.story) })),
-    })
-  })
+    });
+  });
 
-  return app
+  return app;
 }

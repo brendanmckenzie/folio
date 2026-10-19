@@ -1,6 +1,6 @@
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import type { Confirmation } from './content-model'
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import type { Confirmation } from "./content-model";
 
 /**
  * The question before a bulk write, and the one after a refused one.
@@ -28,12 +28,12 @@ export function ConfirmBulkDialog({
   onClose,
   onConfirm,
 }: {
-  confirmation: Confirmation
+  confirmation: Confirmation;
   /** The affirmative button — `verbOf` for a question, `retryLabel` for a refusal,
    * so it never reads as a bare *OK*. */
-  confirmLabel: string
-  onClose: () => void
-  onConfirm: () => void
+  confirmLabel: string;
+  onClose: () => void;
+  onConfirm: () => void;
 }) {
   return (
     <Dialog
@@ -44,11 +44,11 @@ export function ConfirmBulkDialog({
       actions={
         <>
           <Button onClick={onClose}>Cancel</Button>
-          <Button variant={confirmation.danger ? 'danger' : 'primary'} onClick={onConfirm}>
+          <Button variant={confirmation.danger ? "danger" : "primary"} onClick={onConfirm}>
             {confirmLabel}
           </Button>
         </>
       }
     />
-  )
+  );
 }

@@ -1,12 +1,12 @@
-import { useState } from 'react'
-import type { Scope } from '../../../server/auth/roles'
-import type { ScopeOptionGroup } from '../nav'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { Field, Input, Select } from '../Field'
-import css from './Access.module.css'
-import { OneTimeSecretDialog } from './OneTimeSecretDialog'
+import { useState } from "react";
+import type { Scope } from "../../../server/auth/roles";
+import type { ScopeOptionGroup } from "../nav";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { Field, Input, Select } from "../Field";
+import css from "./Access.module.css";
+import { OneTimeSecretDialog } from "./OneTimeSecretDialog";
 import {
   CUSTOM_PRESET,
   DEFAULT_PRESET,
@@ -21,13 +21,13 @@ import {
   scopesForBinding,
   scopesOfPreset,
   toggleScope,
-} from './access-model'
+} from "./access-model";
 
 /** What `POST {base}/api/tokens` answers, and the only response in the whole
  * server that carries a credential in the clear. */
 export interface Minted {
-  name: string
-  token: string
+  name: string;
+  token: string;
 }
 
 /**
@@ -77,48 +77,48 @@ export function AccessTokenDialog({
   onMint,
   bindings,
 }: {
-  onClose: () => void
+  onClose: () => void;
   onMint: (body: {
-    name: string
-    scopes: Scope[]
-    expiresInDays?: number
-    site?: string
-  }) => Promise<void>
+    name: string;
+    scopes: Scope[];
+    expiresInDays?: number;
+    site?: string;
+  }) => Promise<void>;
   /**
    * The scopes a token can be bound to, on a deployment with `sites` (`multi-site.md`
    * decision 14). Absent with none, and then there is no binding to choose and the
    * dialog is exactly the one it always was.
    */
-  bindings?: readonly ScopeOptionGroup[]
+  bindings?: readonly ScopeOptionGroup[];
 }) {
-  const [site, setSite] = useState('')
-  const bound = site !== ''
-  const [name, setName] = useState('')
-  const [scopes, setScopes] = useState<Scope[]>(() => [...(scopesOfPreset(DEFAULT_PRESET) ?? [])])
-  const [expiry, setExpiry] = useState('')
-  const [pending, setPending] = useState(false)
+  const [site, setSite] = useState("");
+  const bound = site !== "";
+  const [name, setName] = useState("");
+  const [scopes, setScopes] = useState<Scope[]>(() => [...(scopesOfPreset(DEFAULT_PRESET) ?? [])]);
+  const [expiry, setExpiry] = useState("");
+  const [pending, setPending] = useState(false);
 
   // Derived, never stored. Holding the chosen preset in its own state is how the
   // radio group and the checkboxes get to disagree: tick a box and the stored preset
   // would still say `read` while the scopes say otherwise.
-  const preset = presetOf(scopes)
-  const refusal = mintRefusal(name, scopes)
-  const days = expiryDays(expiry)
+  const preset = presetOf(scopes);
+  const refusal = mintRefusal(name, scopes);
+  const days = expiryDays(expiry);
 
   const submit = async () => {
-    if (refusal) return
-    setPending(true)
+    if (refusal) return;
+    setPending(true);
     try {
       await onMint({
         name: name.trim(),
         scopes,
         ...(days === undefined ? {} : { expiresInDays: days }),
         ...(bound ? { site } : {}),
-      })
+      });
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Dialog
@@ -132,7 +132,7 @@ export function AccessTokenDialog({
           <Button
             variant="primary"
             disabled={pending || refusal !== undefined}
-            reason={pending ? 'Creating…' : refusal}
+            reason={pending ? "Creating…" : refusal}
             onClick={() => void submit()}
           >
             Create token
@@ -161,8 +161,8 @@ export function AccessTokenDialog({
             label="Works on"
             help={
               bound
-                ? 'It writes this scope and reads what it inherits. It cannot manage access.'
-                : 'Every site. A token bound to one site is the safer key for a script that only needs one.'
+                ? "It writes this scope and reads what it inherits. It cannot manage access."
+                : "Every site. A token bound to one site is the safer key for a script that only needs one."
             }
           >
             {(id) => (
@@ -170,10 +170,10 @@ export function AccessTokenDialog({
                 id={id}
                 value={site}
                 onChange={(e) => {
-                  setSite(e.target.value)
+                  setSite(e.target.value);
                   // Full access is the platform's; a binding cannot hold it, and a
                   // selection that did falls back rather than shrinking unannounced.
-                  setScopes((held) => scopesForBinding(held, e.target.value !== ''))
+                  setScopes((held) => scopesForBinding(held, e.target.value !== ""));
                 }}
               >
                 <option value="">Every site</option>
@@ -203,8 +203,8 @@ export function AccessTokenDialog({
           {presetsFor(bound).map((option) => (
             <label
               key={option.id}
-              className={`${css.preset} ${preset === option.id ? css.presetOn : ''} ${
-                option.danger ? css.presetDanger : ''
+              className={`${css.preset} ${preset === option.id ? css.presetOn : ""} ${
+                option.danger ? css.presetDanger : ""
               }`}
             >
               <input
@@ -219,7 +219,7 @@ export function AccessTokenDialog({
                 <span className={css.presetNote}>{option.description}</span>
                 <span className={css.presetScopes}>
                   {option.scopes.map((scope) => (
-                    <Badge key={scope} mono tone={option.danger ? 'danger' : 'neutral'}>
+                    <Badge key={scope} mono tone={option.danger ? "danger" : "neutral"}>
                       {scope}
                     </Badge>
                   ))}
@@ -247,11 +247,11 @@ export function AccessTokenDialog({
           <summary className={css.scopeSummary}>Choose individual permissions</summary>
           <fieldset className={css.scopes}>
             <legend className={css.srOnly}>Individual permissions</legend>
-            {SCOPE_OPTIONS.filter((scope) => !(bound && scope === 'admin')).map((scope) => {
-              const via = grantedBy(scope, scopes)
-              const held = scopes.includes(scope)
+            {SCOPE_OPTIONS.filter((scope) => !(bound && scope === "admin")).map((scope) => {
+              const via = grantedBy(scope, scopes);
+              const held = scopes.includes(scope);
               return (
-                <label key={scope} className={`${css.scope} ${via ? css.scopeImplied : ''}`}>
+                <label key={scope} className={`${css.scope} ${via ? css.scopeImplied : ""}`}>
                   <input
                     type="checkbox"
                     checked={held || via !== null}
@@ -264,7 +264,7 @@ export function AccessTokenDialog({
                   <span className={css.scopeBody}>
                     <span className={css.scopeLabel}>
                       {SCOPE_MEANING[scope].label}
-                      <Badge mono tone={scope === 'admin' ? 'danger' : 'neutral'}>
+                      <Badge mono tone={scope === "admin" ? "danger" : "neutral"}>
                         {scope}
                       </Badge>
                     </span>
@@ -273,7 +273,7 @@ export function AccessTokenDialog({
                     </span>
                   </span>
                 </label>
-              )
+              );
             })}
           </fieldset>
         </details>
@@ -282,7 +282,7 @@ export function AccessTokenDialog({
           {(id) => (
             <Select id={id} value={expiry} onChange={(e) => setExpiry(e.target.value)}>
               {EXPIRY_OPTIONS.map((option) => (
-                <option key={option.value || 'never'} value={option.value}>
+                <option key={option.value || "never"} value={option.value}>
                   {option.label}
                 </option>
               ))}
@@ -291,7 +291,7 @@ export function AccessTokenDialog({
         </Field>
       </div>
     </Dialog>
-  )
+  );
 }
 
 /**
@@ -314,10 +314,10 @@ export function MintedTokenDialog({ minted, onClose }: { minted: Minted; onClose
   return (
     <OneTimeSecretDialog title="Copy this token now" secret={minted.token} onClose={onClose}>
       <p className={css.dialogNote}>
-        <b>{minted.name}</b> is ready to use as{' '}
+        <b>{minted.name}</b> is ready to use as{" "}
         <code className={css.inlineCode}>Authorization: Bearer …</code>. Only its SHA-256 is stored,
         so closing this is the last chance to copy it — mint a new one if it is lost.
       </p>
     </OneTimeSecretDialog>
-  )
+  );
 }

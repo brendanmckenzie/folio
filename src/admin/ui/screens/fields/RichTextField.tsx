@@ -1,21 +1,21 @@
-import type { ChainedCommands, Editor } from '@tiptap/core'
-import { EditorContent } from '@tiptap/react'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
-import type { Json } from '../../../../core/doc'
-import type { StoryRef } from '../../../../core/resolve'
+import type { ChainedCommands, Editor } from "@tiptap/core";
+import { EditorContent } from "@tiptap/react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import type { Json } from "../../../../core/doc";
+import type { StoryRef } from "../../../../core/resolve";
 import {
   RICHTEXT_MARKS,
   RICHTEXT_NODES,
   type RichtextLimits,
   type RichtextMarkName,
   type RichtextNodeName,
-} from '../../../../core/richtext'
-import { asLink } from '../../../../core/values'
-import { Button } from '../../Button'
-import { FocusMode } from '../FocusMode'
-import css from './fields.module.css'
-import { LinkField } from './LinkField'
-import { useRichtext } from './useRichtext'
+} from "../../../../core/richtext";
+import { asLink } from "../../../../core/values";
+import { Button } from "../../Button";
+import { FocusMode } from "../FocusMode";
+import css from "./fields.module.css";
+import { LinkField } from "./LinkField";
+import { useRichtext } from "./useRichtext";
 
 /**
  * What the focus overlay repeats from the row above it: the field's own label, the
@@ -24,52 +24,52 @@ import { useRichtext } from './useRichtext'
  * chrome, not a second inspector.
  */
 export interface FieldChrome {
-  label: string
-  note?: ReactNode
-  source?: ReactNode
+  label: string;
+  note?: ReactNode;
+  source?: ReactNode;
 }
 
 interface Props {
-  value: Json
-  limits: RichtextLimits
-  editable: boolean
-  onChange: (value: Json) => void
-  chrome: FieldChrome
+  value: Json;
+  limits: RichtextLimits;
+  editable: boolean;
+  onChange: (value: Json) => void;
+  chrome: FieldChrome;
   /** Every id this document points at, resolved — for the link editor's picked page. */
-  stories: Readonly<Record<string, StoryRef>>
-  apiBase: string
-  mount: string
+  stories: Readonly<Record<string, StoryRef>>;
+  apiBase: string;
+  mount: string;
   /** Open in focus mode. Owned above so the shell's `⌘⏎` can set it. */
-  expanded: boolean
-  onExpand: (open: boolean) => void
+  expanded: boolean;
+  onExpand: (open: boolean) => void;
 }
 
 /* ---------------------------------------------------------------- toolbars --- */
 
 interface Tool {
   /** What the button shows. Short, because a 340px column holds about fourteen. */
-  glyph: string
+  glyph: string;
   /** What it is called. `B` and `‹›` are not accessible names. */
-  label: string
-  run: (chain: ChainedCommands) => { run: () => boolean }
+  label: string;
+  run: (chain: ChainedCommands) => { run: () => boolean };
 }
 
 const MARK_TOOLS: Partial<Record<RichtextMarkName, Tool>> = {
-  bold: { glyph: 'B', label: 'Bold', run: (c) => c.toggleBold() },
-  italic: { glyph: 'I', label: 'Italic', run: (c) => c.toggleItalic() },
-  underline: { glyph: 'U', label: 'Underline', run: (c) => c.toggleUnderline() },
-  strike: { glyph: 'S', label: 'Strikethrough', run: (c) => c.toggleStrike() },
-  code: { glyph: '‹›', label: 'Inline code', run: (c) => c.toggleCode() },
-  superscript: { glyph: 'x²', label: 'Superscript', run: (c) => c.toggleSuperscript() },
-  subscript: { glyph: 'x₂', label: 'Subscript', run: (c) => c.toggleSubscript() },
-}
+  bold: { glyph: "B", label: "Bold", run: (c) => c.toggleBold() },
+  italic: { glyph: "I", label: "Italic", run: (c) => c.toggleItalic() },
+  underline: { glyph: "U", label: "Underline", run: (c) => c.toggleUnderline() },
+  strike: { glyph: "S", label: "Strikethrough", run: (c) => c.toggleStrike() },
+  code: { glyph: "‹›", label: "Inline code", run: (c) => c.toggleCode() },
+  superscript: { glyph: "x²", label: "Superscript", run: (c) => c.toggleSuperscript() },
+  subscript: { glyph: "x₂", label: "Subscript", run: (c) => c.toggleSubscript() },
+};
 
 const NODE_TOOLS: Partial<Record<RichtextNodeName, Tool>> = {
-  bulletList: { glyph: '• List', label: 'Bulleted list', run: (c) => c.toggleBulletList() },
-  orderedList: { glyph: '1. List', label: 'Numbered list', run: (c) => c.toggleOrderedList() },
-  blockquote: { glyph: '❝', label: 'Block quote', run: (c) => c.toggleBlockquote() },
-  codeBlock: { glyph: '{ }', label: 'Code block', run: (c) => c.toggleCodeBlock() },
-}
+  bulletList: { glyph: "• List", label: "Bulleted list", run: (c) => c.toggleBulletList() },
+  orderedList: { glyph: "1. List", label: "Numbered list", run: (c) => c.toggleOrderedList() },
+  blockquote: { glyph: "❝", label: "Block quote", run: (c) => c.toggleBlockquote() },
+  codeBlock: { glyph: "{ }", label: "Code block", run: (c) => c.toggleCodeBlock() },
+};
 
 /**
  * A toolbar toggle. `name` drives the pressed state so it reflects the caret.
@@ -89,16 +89,16 @@ function Toggle({
   tool,
   attrs,
 }: {
-  ed: Editor
-  name: string
-  tool: Tool
-  attrs?: Record<string, unknown>
+  ed: Editor;
+  name: string;
+  tool: Tool;
+  attrs?: Record<string, unknown>;
 }) {
-  const on = attrs ? ed.isActive(name, attrs) : ed.isActive(name)
+  const on = attrs ? ed.isActive(name, attrs) : ed.isActive(name);
   return (
     <button
       type="button"
-      className={`${css.segment} ${on ? css.segmentOn : ''}`}
+      className={`${css.segment} ${on ? css.segmentOn : ""}`}
       aria-pressed={on}
       aria-label={tool.label}
       title={tool.label}
@@ -107,7 +107,7 @@ function Toggle({
     >
       {tool.glyph}
     </button>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------- field --- */
@@ -124,8 +124,8 @@ export function RichTextField({
   expanded,
   onExpand,
 }: Props) {
-  const [linking, setLinking] = useState(false)
-  const { editor, behind } = useRichtext(value, limits, editable, onChange, css.surface)
+  const [linking, setLinking] = useState(false);
+  const { editor, behind } = useRichtext(value, limits, editable, onChange, css.surface);
 
   /**
    * Put the caret back where the person was.
@@ -141,23 +141,23 @@ export function RichTextField({
    * skips the first real pass, so mounting the inspector does not steal focus from
    * wherever it already is.
    */
-  const settled = useRef(false)
+  const settled = useRef(false);
   // biome-ignore lint/correctness/useExhaustiveDependencies: expanded is the trigger, not a value the body reads — the whole point is to re-focus the surface whenever it changes container
   useEffect(() => {
-    if (!editor) return
+    if (!editor) return;
     if (!settled.current) {
-      settled.current = true
-      return
+      settled.current = true;
+      return;
     }
-    editor.commands.focus()
-  }, [editor, expanded])
+    editor.commands.focus();
+  }, [editor, expanded]);
 
-  if (!editor) return <p className={css.note}>Loading editor…</p>
+  if (!editor) return <p className={css.note}>Loading editor…</p>;
 
-  const marks = new Set<string>(limits.marks ?? RICHTEXT_MARKS)
-  const nodes = new Set<string>(limits.nodes ?? RICHTEXT_NODES)
-  const levels = limits.headingLevels ?? [2, 3]
-  const activeLink = editor.getAttributes('link').link as Json | undefined
+  const marks = new Set<string>(limits.marks ?? RICHTEXT_MARKS);
+  const nodes = new Set<string>(limits.nodes ?? RICHTEXT_NODES);
+  const levels = limits.headingLevels ?? [2, 3];
+  const activeLink = editor.getAttributes("link").link as Json | undefined;
 
   const toolbar = (
     <fieldset className={`${css.group} ${css.segments}`} disabled={!editable}>
@@ -169,7 +169,7 @@ export function RichTextField({
           <Toggle key={name} ed={editor} name={name} tool={MARK_TOOLS[name]!} />
         ))}
 
-      {nodes.has('heading')
+      {nodes.has("heading")
         ? levels.map((level) => (
             <Toggle
               key={`h${level}`}
@@ -191,7 +191,7 @@ export function RichTextField({
           <Toggle key={name} ed={editor} name={name} tool={NODE_TOOLS[name]!} />
         ))}
 
-      {nodes.has('horizontalRule') ? (
+      {nodes.has("horizontalRule") ? (
         <button
           type="button"
           className={css.segment}
@@ -204,15 +204,15 @@ export function RichTextField({
         </button>
       ) : null}
 
-      {marks.has('link') ? (
+      {marks.has("link") ? (
         <button
           type="button"
-          className={`${css.segment} ${editor.isActive('link') ? css.segmentOn : ''}`}
-          aria-pressed={editor.isActive('link')}
+          className={`${css.segment} ${editor.isActive("link") ? css.segmentOn : ""}`}
+          aria-pressed={editor.isActive("link")}
           aria-expanded={linking}
           // A link needs something to attach to, so it stays disabled until text is
           // selected or the caret sits inside an existing link.
-          disabled={editor.state.selection.empty && !editor.isActive('link')}
+          disabled={editor.state.selection.empty && !editor.isActive("link")}
           title="Select some text first"
           onClick={() => setLinking((v) => !v)}
         >
@@ -227,14 +227,14 @@ export function RichTextField({
       <button
         type="button"
         className={css.segment}
-        aria-label={expanded ? 'Leave focus mode' : 'Edit this field in focus mode'}
-        title={expanded ? 'Leave focus mode (Esc)' : 'Focus mode (⌘⏎)'}
+        aria-label={expanded ? "Leave focus mode" : "Edit this field in focus mode"}
+        title={expanded ? "Leave focus mode (Esc)" : "Focus mode (⌘⏎)"}
         onClick={() => onExpand(!expanded)}
       >
-        {expanded ? '⤡' : '⤢'}
+        {expanded ? "⤡" : "⤢"}
       </button>
     </fieldset>
-  )
+  );
 
   const linkBox = linking ? (
     <div className={css.linkBox}>
@@ -247,9 +247,9 @@ export function RichTextField({
         mount={mount}
         editable={editable}
         onChange={(next) => {
-          const link = asLink(next)
-          if (link) editor.chain().focus().setMark('link', { link }).run()
-          else editor.chain().focus().unsetMark('link').run()
+          const link = asLink(next);
+          if (link) editor.chain().focus().setMark("link", { link }).run();
+          else editor.chain().focus().unsetMark("link").run();
         }}
       />
       <div className={css.row}>
@@ -258,7 +258,7 @@ export function RichTextField({
         </Button>
       </div>
     </div>
-  ) : null
+  ) : null;
 
   /*
    * The surface, and it is **one element in both modes**. What moves is where this
@@ -281,9 +281,9 @@ export function RichTextField({
         </p>
       ) : null}
     </>
-  )
+  );
 
-  if (!expanded) return <div className={css.rt}>{body}</div>
+  if (!expanded) return <div className={css.rt}>{body}</div>;
 
   return (
     <>
@@ -305,5 +305,5 @@ export function RichTextField({
         {body}
       </FocusMode>
     </>
-  )
+  );
 }

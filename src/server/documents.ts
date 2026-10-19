@@ -23,21 +23,21 @@
  * (`../../docs/specs/platform/caching.md`), and a host hook unable to tell which door a write came
  * through (`../../docs/specs/platform/publish-hooks.md`).
  */
-import { cloneDoc } from '../core/clone'
-import type { Doc } from '../core/doc'
-import type { DocumentType } from '../core/schema'
-import { DEFAULT_SITE } from '../core/sites'
-import type { StoryMeta } from '../core/story'
-import type { HookRunner } from './hooks'
+import { cloneDoc } from "../core/clone";
+import type { Doc } from "../core/doc";
+import type { DocumentType } from "../core/schema";
+import { DEFAULT_SITE } from "../core/sites";
+import type { StoryMeta } from "../core/story";
+import type { HookRunner } from "./hooks";
 import {
   deleteStoryStatement,
   duplicateStory,
   type StoryPatch,
   updateStoryStatement,
-} from './stories'
-import type { StoryStub } from './types'
-import { deleteVersionsStatement } from './versions'
-import type { FolioDb } from './db'
+} from "./stories";
+import type { StoryStub } from "./types";
+import { deleteVersionsStatement } from "./versions";
+import type { FolioDb } from "./db";
 
 /**
  * What these three need, assembled from bindings alone — no Request, no Hono, no
@@ -46,24 +46,24 @@ import type { FolioDb } from './db'
  * actions.
  */
 export interface DocumentDeps<Env = unknown> {
-  db: FolioDb
+  db: FolioDb;
   /** Declared types. Load-bearing rather than incidental: it is what says a
    * document is a singleton, and both duplicating and deleting one is refused. */
-  types: readonly DocumentType[]
+  types: readonly DocumentType[];
   /** The story's Durable Object — a duplicate seeds one, a delete purges one. */
-  stub: (id: string) => StoryStub
+  stub: (id: string) => StoryStub;
   /** The story's live draft, created from its row on first touch. */
-  draft: (story: StoryMeta) => Promise<Doc>
+  draft: (story: StoryMeta) => Promise<Doc>;
   /** Fires the after-commit lifecycle hooks. Absent only in tests that exercise a
    * workflow with no `createRuntime` behind it. */
-  hooks?: HookRunner<Env>
+  hooks?: HookRunner<Env>;
   /**
    * A scope's chain, nearest first (`multi-site.md` decision 5): what decides
    * whether a deleted **root** may go — refused when no scope above it has one, at
    * delete time. Absent, a scope is its own whole chain, which is a deployment with
    * no `sites` and there a root is never deletable.
    */
-  chainOf?: (scope: string) => Promise<readonly string[]>
+  chainOf?: (scope: string) => Promise<readonly string[]>;
 }
 
 /**
@@ -90,16 +90,16 @@ export async function duplicateDocument<Env>(
   patch: { title?: string; parentId?: string | null; site?: string },
   actor: string | null,
 ): Promise<StoryMeta> {
-  const created = await duplicateStory(deps.db, source.id, patch, deps.types)
+  const created = await duplicateStory(deps.db, source.id, patch, deps.types);
 
   // Fired the moment the row exists, same as a plain create: the D1 insert has
   // already committed, and the seed below cannot un-commit it.
-  await deps.hooks?.run('created', { story: created, actor })
+  await deps.hooks?.run("created", { story: created, actor });
 
-  const draft = await deps.draft(source)
-  await deps.stub(created.id).getOrInit(cloneDoc(draft))
+  const draft = await deps.draft(source);
+  await deps.stub(created.id).getOrInit(cloneDoc(draft));
 
-  return created
+  return created;
 }
 
 /**
@@ -133,15 +133,15 @@ export async function moveDocument<Env>(
     id,
     patch,
     deps.types,
-  )
-  if (statements.length) await deps.db.batch(statements)
+  );
+  if (statements.length) await deps.db.batch(statements);
 
   if (changes.length) {
-    await deps.hooks?.run('pathsChanged', { changes, actor, site: next.site ?? DEFAULT_SITE })
+    await deps.hooks?.run("pathsChanged", { changes, actor, site: next.site ?? DEFAULT_SITE });
   }
-  if (updated.length) await deps.hooks?.run('updated', { story: next, changed: updated, actor })
+  if (updated.length) await deps.hooks?.run("updated", { story: next, changed: updated, actor });
 
-  return { next, changes }
+  return { next, changes };
 }
 
 /**
@@ -177,8 +177,8 @@ export async function deleteDocument<Env>(
     id,
     { redirect: opts.redirect, ...(deps.chainOf ? { chainOf: deps.chainOf } : {}) },
     deps.types,
-  )
-  if (!found) return null
+  );
+  if (!found) return null;
 
   // Five spreads, and every one of them is a chunked group rather than a single
   // statement: each binds the whole subtree at one parameter per id, and D1
@@ -190,7 +190,7 @@ export async function deleteDocument<Env>(
     ...found.indexStatements,
     ...found.scheduleStatements,
     ...deleteVersionsStatement(deps.db, found.ids),
-  ])
+  ]);
 
   // Best-effort, and deliberately outside any caller's try/catch: the rows are
   // already gone, so a purge failure must never be reported back as a failed
@@ -202,15 +202,15 @@ export async function deleteDocument<Env>(
         .purge()
         .catch(() => {}),
     ),
-  )
+  );
 
-  await deps.hooks?.run('deleted', {
+  await deps.hooks?.run("deleted", {
     ids: found.ids,
     paths: found.paths,
     types: found.types,
     actor,
     site: found.site,
-  })
+  });
 
-  return { deleted: found.ids, paths: found.paths, types: found.types }
+  return { deleted: found.ids, paths: found.paths, types: found.types };
 }

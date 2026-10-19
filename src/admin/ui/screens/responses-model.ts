@@ -17,10 +17,10 @@
  * reason there ever should be — the CSV's own de-fanging lives server-side, in
  * `form-responses.ts`, because the file is written there.
  */
-import type { FormField } from '../../../core/forms'
-import type { ResponseRow } from '../../../server/form-responses'
-import type { ResponseFilter } from '../../../server/forms'
-import type { Confirmation } from './content-model'
+import type { FormField } from "../../../core/forms";
+import type { ResponseRow } from "../../../server/form-responses";
+import type { ResponseFilter } from "../../../server/forms";
+import type { Confirmation } from "./content-model";
 
 /* --------------------------------------------------------------- the URL --- */
 
@@ -35,40 +35,40 @@ import type { Confirmation } from './content-model'
  */
 export interface ResponsesUrl {
   /** Inclusive, as a calendar day. */
-  from: string
+  from: string;
   /** Inclusive, as a calendar day — the *whole* of that day (see `bounds`). */
-  to: string
-  q: string
+  to: string;
+  q: string;
 }
 
-export const BLANK_RESPONSES_URL: ResponsesUrl = { from: '', to: '', q: '' }
+export const BLANK_RESPONSES_URL: ResponsesUrl = { from: "", to: "", q: "" };
 
 /** A day as `<input type="date">` emits one. Anything else is not a date and is
  *  simply not sent — a filter the server would refuse is a filter that empties a
  *  table while somebody is still typing it. */
-const DAY = /^\d{4}-\d{2}-\d{2}$/
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 export function parseResponsesUrl(query: Readonly<Record<string, string>>): ResponsesUrl {
   return {
-    from: DAY.test(query.from ?? '') ? (query.from ?? '') : '',
-    to: DAY.test(query.to ?? '') ? (query.to ?? '') : '',
-    q: query.q ?? '',
-  }
+    from: DAY.test(query.from ?? "") ? (query.from ?? "") : "",
+    to: DAY.test(query.to ?? "") ? (query.to ?? "") : "",
+    q: query.q ?? "",
+  };
 }
 
 /** The inverse, as the query object `href` takes. Defaults are `undefined` so
  *  they leave the URL rather than sitting in it. */
 export function responsesQuery(url: ResponsesUrl): Record<string, string | undefined> {
-  return { from: url.from || undefined, to: url.to || undefined, q: url.q || undefined }
+  return { from: url.from || undefined, to: url.to || undefined, q: url.q || undefined };
 }
 
 /** Telling "nobody has answered yet" from "nothing matches" — offering *clear
  *  filters* under the first is offering to clear nothing. */
 export function isNarrowed(url: ResponsesUrl): boolean {
-  return url.from !== '' || url.to !== '' || url.q.trim() !== ''
+  return url.from !== "" || url.to !== "" || url.q.trim() !== "";
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * A calendar day to the millisecond bounds the route uses.
@@ -80,9 +80,9 @@ const DAY_MS = 24 * 60 * 60 * 1000
  * form rather than in the date picker.
  */
 function bounds(day: string): number | undefined {
-  if (!DAY.test(day)) return undefined
-  const at = Date.parse(`${day}T00:00:00Z`)
-  return Number.isFinite(at) ? at : undefined
+  if (!DAY.test(day)) return undefined;
+  const at = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(at) ? at : undefined;
 }
 
 /**
@@ -92,14 +92,14 @@ function bounds(day: string): number | undefined {
  * three clauses.
  */
 export function responseFilterOf(url: ResponsesUrl): ResponseFilter {
-  const from = bounds(url.from)
-  const to = bounds(url.to)
-  const q = url.q.trim()
+  const from = bounds(url.from);
+  const to = bounds(url.to);
+  const q = url.q.trim();
   return {
     ...(from === undefined ? {} : { from }),
     ...(to === undefined ? {} : { to: to + DAY_MS }),
     ...(q ? { q } : {}),
-  }
+  };
 }
 
 /**
@@ -113,14 +113,14 @@ export function responsesParams(
   url: ResponsesUrl,
   opts: { limit: number; cursor?: string | null; count?: boolean },
 ): URLSearchParams {
-  const params = new URLSearchParams({ limit: String(opts.limit) })
-  const filter = responseFilterOf(url)
-  if (filter.from !== undefined) params.set('from', String(filter.from))
-  if (filter.to !== undefined) params.set('to', String(filter.to))
-  if (filter.q) params.set('q', filter.q)
-  if (opts.count) params.set('count', '1')
-  if (opts.cursor) params.set('cursor', opts.cursor)
-  return params
+  const params = new URLSearchParams({ limit: String(opts.limit) });
+  const filter = responseFilterOf(url);
+  if (filter.from !== undefined) params.set("from", String(filter.from));
+  if (filter.to !== undefined) params.set("to", String(filter.to));
+  if (filter.q) params.set("q", filter.q);
+  if (opts.count) params.set("count", "1");
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  return params;
 }
 
 /** The export's URL, carrying the same filter the table is showing (decision
@@ -128,10 +128,10 @@ export function responsesParams(
  *  `content-disposition`, and the session cookie rides along as it does for
  *  every other same-origin navigation. */
 export function csvHref(apiBase: string, formId: string, url: ResponsesUrl): string {
-  const params = responsesParams(url, { limit: 1 })
-  params.delete('limit')
-  const query = params.toString()
-  return `${apiBase}/forms/${encodeURIComponent(formId)}/responses.csv${query ? `?${query}` : ''}`
+  const params = responsesParams(url, { limit: 1 });
+  params.delete("limit");
+  const query = params.toString();
+  return `${apiBase}/forms/${encodeURIComponent(formId)}/responses.csv${query ? `?${query}` : ""}`;
 }
 
 /* ---------------------------------------------------------------- a row --- */
@@ -148,13 +148,13 @@ export function csvHref(apiBase: string, formId: string, url: ResponsesUrl): str
  * one is a column of dashes.
  */
 export function tableColumns(fields: readonly FormField[]): FormField[] {
-  return fields.filter((field) => field.kind !== 'statement')
+  return fields.filter((field) => field.kind !== "statement");
 }
 
 /** What a current field asks for and this response never answered. The same `—`
  *  the export writes, and for decision 16's reason: "this did not exist yet" and
  *  "they left it blank" are different facts. */
-export const ABSENT = '—'
+export const ABSENT = "—";
 
 /**
  * One answer as text.
@@ -164,19 +164,19 @@ export const ABSENT = '—'
  * only part of an upload a table can show.
  */
 export function cellText(field: FormField, response: ResponseRow): string {
-  if (field.kind === 'file') {
-    return response.files.find((file) => file.field === field.name)?.filename ?? ABSENT
+  if (field.kind === "file") {
+    return response.files.find((file) => file.field === field.name)?.filename ?? ABSENT;
   }
-  return answerText(response.data[field.name])
+  return answerText(response.data[field.name]);
 }
 
 /** A stored value as text. `yes`/`no` for a tick box, because the question was
  *  one and `true` is a programmer's word for it. */
 export function answerText(value: unknown): string {
-  if (value === undefined) return ABSENT
-  if (Array.isArray(value)) return value.length === 0 ? ABSENT : value.join(', ')
-  if (typeof value === 'boolean') return value ? 'yes' : 'no'
-  return String(value)
+  if (value === undefined) return ABSENT;
+  if (Array.isArray(value)) return value.length === 0 ? ABSENT : value.join(", ");
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return String(value);
 }
 
 /**
@@ -188,25 +188,25 @@ export function answerText(value: unknown): string {
  * accumulate for years.
  */
 export function submittedLabel(at: number, now: number = Date.now()): string {
-  const seconds = Math.round((now - at) / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  if (days < 30) return `${days}d ago`
+  const seconds = Math.round((now - at) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
   return new Date(at).toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  })
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 /** The full timestamp, for a cell's `title` and for the drawer. Local, because
  *  the person reading it is deciding whether they saw this one yesterday. */
 export function submittedExact(at: number): string {
-  return new Date(at).toLocaleString()
+  return new Date(at).toLocaleString();
 }
 
 /**
@@ -220,12 +220,12 @@ export function submittedExact(at: number): string {
  * line was going to say"*.
  */
 export function ageLabel(at: number, now: number = Date.now()): string {
-  const days = Math.max(Math.floor((now - at) / DAY_MS), 0)
-  if (days < 1) return 'less than a day'
-  if (days < 60) return `${days} ${days === 1 ? 'day' : 'days'}`
-  const months = Math.floor(days / 30)
-  if (months < 24) return `${months} months`
-  return `${Math.floor(days / 365)} years`
+  const days = Math.max(Math.floor((now - at) / DAY_MS), 0);
+  if (days < 1) return "less than a day";
+  if (days < 60) return `${days} ${days === 1 ? "day" : "days"}`;
+  const months = Math.floor(days / 30);
+  if (months < 24) return `${months} months`;
+  return `${Math.floor(days / 365)} years`;
 }
 
 /**
@@ -237,8 +237,8 @@ export function ageLabel(at: number, now: number = Date.now()): string {
  * how long they have been collecting for.
  */
 export function retentionNote(oldest: number | null | undefined, now?: number): string | null {
-  if (oldest === undefined || oldest === null) return null
-  return `The oldest response here is ${ageLabel(oldest, now)} old. Folio never deletes one for you.`
+  if (oldest === undefined || oldest === null) return null;
+  return `The oldest response here is ${ageLabel(oldest, now)} old. Folio never deletes one for you.`;
 }
 
 /* --------------------------------------------------------------- drawer --- */
@@ -253,15 +253,15 @@ export function retentionNote(oldest: number | null | undefined, now?: number): 
  * explain.
  */
 export interface AnswerLine {
-  name: string
+  name: string;
   /** The question's label while it exists; the bare key once it does not, which
    *  is all that is left of a retired question. */
-  label: string
-  value: string
-  retired: boolean
+  label: string;
+  value: string;
+  retired: boolean;
   /** Present for a `file` question the response actually carries — the field
    *  name the gated download route is addressed by. */
-  file?: { filename: string; size: number }
+  file?: { filename: string; size: number };
 }
 
 /**
@@ -273,39 +273,39 @@ export interface AnswerLine {
  * question somebody opened the drawer with.
  */
 export function answerLines(response: ResponseRow, fields: readonly FormField[]): AnswerLine[] {
-  const lines: AnswerLine[] = []
-  const declared = new Set<string>()
+  const lines: AnswerLine[] = [];
+  const declared = new Set<string>();
 
   for (const field of tableColumns(fields)) {
-    declared.add(field.name)
-    const file = response.files.find((one) => one.field === field.name)
+    declared.add(field.name);
+    const file = response.files.find((one) => one.field === field.name);
     lines.push({
       name: field.name,
       label: field.label || field.name,
       value: cellText(field, response),
       retired: false,
       ...(file ? { file: { filename: file.filename, size: file.size } } : {}),
-    })
+    });
   }
 
-  const extras = new Set<string>()
-  for (const key of Object.keys(response.data)) if (!declared.has(key)) extras.add(key)
+  const extras = new Set<string>();
+  for (const key of Object.keys(response.data)) if (!declared.has(key)) extras.add(key);
   // A retired *file* question leaves no key in `data` at all, so the files column
   // is the only place it survives. Without this the drawer would say a response
   // holds nothing while an object with somebody's CV in it sits in the bucket.
-  for (const file of response.files) if (!declared.has(file.field)) extras.add(file.field)
+  for (const file of response.files) if (!declared.has(file.field)) extras.add(file.field);
 
   for (const key of [...extras].sort()) {
-    const file = response.files.find((one) => one.field === key)
+    const file = response.files.find((one) => one.field === key);
     lines.push({
       name: key,
       label: key,
       value: file ? file.filename : answerText(response.data[key]),
       retired: true,
       ...(file ? { file: { filename: file.filename, size: file.size } } : {}),
-    })
+    });
   }
-  return lines
+  return lines;
 }
 
 /** The gated download's URL for one question of one response. The route names
@@ -318,16 +318,16 @@ export function fileHref(
 ): string {
   return `${apiBase}/forms/${encodeURIComponent(formId)}/responses/${encodeURIComponent(
     responseId,
-  )}/file/${encodeURIComponent(field)}`
+  )}/file/${encodeURIComponent(field)}`;
 }
 
 /** A size as a person reads one. `assets-model.ts` has the same job for the
  *  library; this is not imported from there because that one is about images and
  *  carries a whole vocabulary with it. */
 export function sizeLabel(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /* ------------------------------------------------------------ selection --- */
@@ -345,18 +345,18 @@ export function sizeLabel(bytes: number): string {
  */
 export type Ticked =
   | { all: false; ids: ReadonlySet<string> }
-  | { all: true; filter: ResponseFilter; expected: number; exclude: ReadonlySet<string> }
+  | { all: true; filter: ResponseFilter; expected: number; exclude: ReadonlySet<string> };
 
-export const NOTHING: Ticked = { all: false, ids: new Set() }
+export const NOTHING: Ticked = { all: false, ids: new Set() };
 
 export function isTicked(ticked: Ticked, id: string): boolean {
-  return ticked.all ? !ticked.exclude.has(id) : ticked.ids.has(id)
+  return ticked.all ? !ticked.exclude.has(id) : ticked.ids.has(id);
 }
 
 /** How many rows the selection means. Never below zero: `exclude` can outgrow
  *  `expected` if the set shrank under somebody who kept ticking. */
 export function tickCount(ticked: Ticked): number {
-  return ticked.all ? Math.max(ticked.expected - ticked.exclude.size, 0) : ticked.ids.size
+  return ticked.all ? Math.max(ticked.expected - ticked.exclude.size, 0) : ticked.ids.size;
 }
 
 /** Ticking a row off a select-all **adds to `exclude`** rather than collapsing
@@ -364,51 +364,51 @@ export function tickCount(ticked: Ticked): number {
  *  four small JSON fields instead of 51,418 of them. */
 export function toggleTick(ticked: Ticked, id: string): Ticked {
   if (ticked.all) {
-    const exclude = new Set(ticked.exclude)
-    if (!exclude.delete(id)) exclude.add(id)
-    return { ...ticked, exclude }
+    const exclude = new Set(ticked.exclude);
+    if (!exclude.delete(id)) exclude.add(id);
+    return { ...ticked, exclude };
   }
-  const ids = new Set(ticked.ids)
-  if (!ids.delete(id)) ids.add(id)
-  return { all: false, ids }
+  const ids = new Set(ticked.ids);
+  if (!ids.delete(id)) ids.add(id);
+  return { all: false, ids };
 }
 
 export function tickAllShown(ticked: Ticked, rows: readonly ResponseRow[]): Ticked {
-  const on = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
+  const on = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id));
   if (ticked.all) {
-    const exclude = new Set(ticked.exclude)
+    const exclude = new Set(ticked.exclude);
     for (const row of rows) {
-      if (on) exclude.add(row.id)
-      else exclude.delete(row.id)
+      if (on) exclude.add(row.id);
+      else exclude.delete(row.id);
     }
-    return { ...ticked, exclude }
+    return { ...ticked, exclude };
   }
-  const ids = new Set(ticked.ids)
+  const ids = new Set(ticked.ids);
   for (const row of rows) {
-    if (on) ids.delete(row.id)
-    else ids.add(row.id)
+    if (on) ids.delete(row.id);
+    else ids.add(row.id);
   }
-  return { all: false, ids }
+  return { all: false, ids };
 }
 
 /** Everything matching the filter the person is looking at, as it stood when
  *  they clicked. `expected` is the header's own `total`, which is what makes the
  *  server's guard a comparison of one number against itself. */
 export function selectAll(url: ResponsesUrl, expected: number): Ticked {
-  return { all: true, filter: responseFilterOf(url), expected, exclude: new Set() }
+  return { all: true, filter: responseFilterOf(url), expected, exclude: new Set() };
 }
 
 /** The `selection` field of the bulk body. `exclude` is omitted when empty rather
  *  than sent as `[]`: the route's two options are `v.strictObject`, so every key
  *  in the body is one it reads. */
 export function selectionBody(ticked: Ticked): Record<string, unknown> {
-  if (!ticked.all) return { ids: [...ticked.ids] }
+  if (!ticked.all) return { ids: [...ticked.ids] };
   return {
     all: true,
     filter: ticked.filter,
     expected: ticked.expected,
     ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
-  }
+  };
 }
 
 /**
@@ -419,20 +419,20 @@ export function selectionBody(ticked: Ticked): Record<string, unknown> {
  * the admin: these rows cannot be republished, restored or undone.
  */
 export function selectionSummary(ticked: Ticked, rows: readonly ResponseRow[]): string {
-  const count = tickCount(ticked)
-  if (count === 0) return 'Nothing selected'
-  const shown = rows.filter((row) => isTicked(ticked, row.id)).length
-  const hidden = Math.max(count - shown, 0)
-  const split = hidden === 0 ? '' : shown === 0 ? ', none shown here' : ` · ${shown} shown here`
-  if (!ticked.all) return `${responses(count)} selected${split}`
-  const off = ticked.exclude.size === 0 ? '' : `, except the ${ticked.exclude.size} you ticked off`
-  return `All ${num(ticked.expected)} matching${off}${split}`
+  const count = tickCount(ticked);
+  if (count === 0) return "Nothing selected";
+  const shown = rows.filter((row) => isTicked(ticked, row.id)).length;
+  const hidden = Math.max(count - shown, 0);
+  const split = hidden === 0 ? "" : shown === 0 ? ", none shown here" : ` · ${shown} shown here`;
+  if (!ticked.all) return `${responses(count)} selected${split}`;
+  const off = ticked.exclude.size === 0 ? "" : `, except the ${ticked.exclude.size} you ticked off`;
+  return `All ${num(ticked.expected)} matching${off}${split}`;
 }
 
 /* ------------------------------------------------------- confirmations --- */
 
-const num = (n: number): string => n.toLocaleString('en-US')
-const responses = (n: number): string => `${num(n)} ${n === 1 ? 'response' : 'responses'}`
+const num = (n: number): string => n.toLocaleString("en-US");
+const responses = (n: number): string => `${num(n)} ${n === 1 ? "response" : "responses"}`;
 
 /**
  * The question before a bulk delete, or null when there is nothing to ask about.
@@ -447,45 +447,45 @@ export function deleteConfirmation(
   rows: readonly ResponseRow[],
   hasFiles: boolean,
 ): Confirmation | null {
-  const count = tickCount(ticked)
-  if (count === 0) return null
-  const shown = rows.filter((row) => isTicked(ticked, row.id)).length
-  const hidden = Math.max(count - shown, 0)
+  const count = tickCount(ticked);
+  if (count === 0) return null;
+  const shown = rows.filter((row) => isTicked(ticked, row.id)).length;
+  const hidden = Math.max(count - shown, 0);
   const invisible =
     hidden === 0
-      ? ''
+      ? ""
       : shown === 0
-        ? 'None of them are shown by the current filter.'
-        : `${num(hidden)} ${hidden === 1 ? 'is' : 'are'} not shown by the current filter.`
+        ? "None of them are shown by the current filter."
+        : `${num(hidden)} ${hidden === 1 ? "is" : "are"} not shown by the current filter.`;
   const captured = ticked.all
-    ? 'Everything matching your filters, as it stood when you chose it.'
-    : ''
-  const files = hasFiles ? ' Any files people attached go with them.' : ''
+    ? "Everything matching your filters, as it stood when you chose it."
+    : "";
+  const files = hasFiles ? " Any files people attached go with them." : "";
   return {
     title: `Delete ${responses(count)}?`,
     body: `${captured} ${invisible} This cannot be undone — a response is what one person sent once, and nothing recreates it.${files}`
-      .replace(/\s+/g, ' ')
+      .replace(/\s+/g, " ")
       .trim(),
     danger: true,
-  }
+  };
 }
 
 /** The 409's re-confirmation. **A door, not a wall**: it carries the new count,
  *  so somebody who read "40" while three more arrived confirms once rather than
  *  investigating. */
 export function deleteRefusal(refusal: { expected: number; actual: number }): Confirmation {
-  const verb = refusal.actual === 1 ? 'matches' : 'match'
+  const verb = refusal.actual === 1 ? "matches" : "match";
   return {
     title: `${responses(refusal.actual)} ${verb} now, not ${num(refusal.expected)}`,
     body: `Somebody submitted or deleted one while you were reading the number. Delete the ${num(refusal.actual)} that ${verb} now?`,
     danger: true,
-  }
+  };
 }
 
 /** The affirmative button beside `deleteRefusal`'s question, so it never reads as
  *  a bare *OK*. */
 export function retryLabel(refusal: { actual: number }): string {
-  return `Delete ${responses(refusal.actual)}`
+  return `Delete ${responses(refusal.actual)}`;
 }
 
 /**
@@ -496,24 +496,24 @@ export function retryLabel(refusal: { actual: number }): string {
  * documents and `runSummary`'s for the library.
  */
 export function runReport(done: number, failed: readonly { title: string; message: string }[]) {
-  if (failed.length === 0) return `Deleted ${responses(done)}`
+  if (failed.length === 0) return `Deleted ${responses(done)}`;
   const named = failed
     .slice(0, 2)
-    .map((one) => `${one.title || 'a response'} (${one.message})`)
-    .join(', ')
-  const rest = failed.length > 2 ? `, and ${failed.length - 2} more` : ''
+    .map((one) => `${one.title || "a response"} (${one.message})`)
+    .join(", ");
+  const rest = failed.length > 2 ? `, and ${failed.length - 2} more` : "";
   return done === 0
-    ? `Could not delete ${failed.length === 1 ? 'it' : 'any of them'}: ${named}${rest}`
-    : `Deleted ${num(done)}, ${failed.length} refused: ${named}${rest}`
+    ? `Could not delete ${failed.length === 1 ? "it" : "any of them"}: ${named}${rest}`
+    : `Deleted ${num(done)}, ${failed.length} refused: ${named}${rest}`;
 }
 
 /** What deleting one row destroys, for the single-response confirmation. Names
  *  the files, because they are the part somebody does not think of. */
 export function deleteOneWarning(response: ResponseRow): string {
-  const files = response.files.length
+  const files = response.files.length;
   const attached =
     files === 0
-      ? ''
-      : ` The ${files === 1 ? 'file' : `${files} files`} attached to it ${files === 1 ? 'goes' : 'go'} too.`
-  return `Submitted ${submittedExact(response.createdAt)}. This cannot be undone — nothing recreates it.${attached}`
+      ? ""
+      : ` The ${files === 1 ? "file" : `${files} files`} attached to it ${files === 1 ? "goes" : "go"} too.`;
+  return `Submitted ${submittedExact(response.createdAt)}. This cannot be undone — nothing recreates it.${attached}`;
 }

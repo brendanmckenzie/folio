@@ -26,15 +26,15 @@
  * guessing. A plausible fake list on a home screen is the single easiest thing
  * here to mistake for a working feature.
  */
-import type { DocumentType } from '../../../core/schema'
-import { singletonId } from '../../../core/schema'
-import { layerId } from '../../../core/sites'
-import type { StoryMeta } from '../../../core/story'
-import type { MigrationStatus } from '../../../server/migrate'
-import type { InheritedRow } from '../../../server/stories'
-import { canCreateContent, type Me } from '../../me'
-import type { Screen } from '../route'
-import { type AuditBatch, auditGroups, driftBanner, REMEDIES } from './model-model'
+import type { DocumentType } from "../../../core/schema";
+import { singletonId } from "../../../core/schema";
+import { layerId } from "../../../core/sites";
+import type { StoryMeta } from "../../../core/story";
+import type { MigrationStatus } from "../../../server/migrate";
+import type { InheritedRow } from "../../../server/stories";
+import { canCreateContent, type Me } from "../../me";
+import type { Screen } from "../route";
+import { type AuditBatch, auditGroups, driftBanner, REMEDIES } from "./model-model";
 
 /* ------------------------------------------------------------------ counts --- */
 
@@ -53,8 +53,8 @@ import { type AuditBatch, auditGroups, driftBanner, REMEDIES } from './model-mod
  * distinction and `test/workers/recency.test.ts` pins it.
  */
 export interface SiteCounts {
-  pages: number
-  types: Record<string, number>
+  pages: number;
+  types: Record<string, number>;
 }
 
 /* ----------------------------------------------------------- quick access --- */
@@ -69,15 +69,15 @@ export interface SiteCounts {
 export type CardCreate =
   /** `POST /stories { type }`, then open the document it made. Documents'
    * `NewDocumentButton` is the shape. */
-  | { kind: 'document'; type: string; label: string }
+  | { kind: "document"; type: string; label: string }
   /** A file picker into `POST /assets`. */
-  | { kind: 'upload'; label: string }
+  | { kind: "upload"; label: string };
 
 export interface QuickCard {
-  key: string
-  label: string
+  key: string;
+  label: string;
   /** Where the card itself goes. */
-  screen: Screen
+  screen: Screen;
   /**
    * Absent when there is no number to show — either because `/counts` has not
    * answered yet or because the card is a thing there is exactly one of.
@@ -85,9 +85,9 @@ export interface QuickCard {
    * Absent rather than `0`: a zero that turns into `1,284` a moment later reads as
    * data loss for as long as it is wrong.
    */
-  count?: number
-  note: string
-  create?: CardCreate
+  count?: number;
+  note: string;
+  create?: CardCreate;
 }
 
 /**
@@ -122,51 +122,51 @@ export interface QuickCard {
  * simplification of two different rules.
  */
 export function quickCards(input: {
-  types: readonly DocumentType[]
+  types: readonly DocumentType[];
   /** `FolioConfig.globals` — a subset of the singleton types. */
-  globals: readonly string[]
+  globals: readonly string[];
   /** Null until `/counts` answers, and null forever if it failed: the cards render
    * without numbers rather than not at all. */
-  counts: SiteCounts | null
+  counts: SiteCounts | null;
   /** The library's total, from the same request that fills *Latest media*. */
-  assets: number | undefined
-  mayCreate: boolean
+  assets: number | undefined;
+  mayCreate: boolean;
   /**
    * The scope being shown, on a deployment with `sites`; absent otherwise. With it a
    * global's card links to *that scope's layer* (`layerId`) — `sng_<type>` is
    * `default`'s and would open another site's document.
    */
-  scope?: string | null
+  scope?: string | null;
 }): QuickCard[] {
-  const { types, globals, counts, assets, mayCreate, scope } = input
+  const { types, globals, counts, assets, mayCreate, scope } = input;
   const cards: QuickCard[] = [
     {
-      key: 'pages',
-      label: 'Pages',
-      screen: { name: 'content' },
+      key: "pages",
+      label: "Pages",
+      screen: { name: "content" },
       ...(counts ? { count: counts.pages } : {}),
-      note: 'The tree. Every one has a URL.',
+      note: "The tree. Every one has a URL.",
     },
-  ]
+  ];
 
   for (const type of types) {
-    if (type.kind !== 'record') continue
+    if (type.kind !== "record") continue;
     cards.push({
       key: `type:${type.name}`,
       label: type.label,
-      screen: { name: 'documents', type: type.name },
+      screen: { name: "documents", type: type.name },
       ...(counts ? { count: counts.types[type.name] ?? 0 } : {}),
-      note: 'Records, edited as a table.',
+      note: "Records, edited as a table.",
       ...(mayCreate
         ? {
             create: {
-              kind: 'document',
+              kind: "document",
               type: type.name,
               label: `New ${type.label.toLowerCase()}`,
             },
           }
         : {}),
-    })
+    });
   }
 
   for (const type of singletonOrder(types, globals)) {
@@ -175,21 +175,21 @@ export function quickCards(input: {
       label: type.label,
       // Straight at the document, exactly as the sidebar does: a singleton's id is
       // derived from its type name, so no request is needed to address it.
-      screen: { name: 'edit', id: scope ? layerId(type.name, scope) : singletonId(type) },
-      note: 'One document, always.',
-    })
+      screen: { name: "edit", id: scope ? layerId(type.name, scope) : singletonId(type) },
+      note: "One document, always.",
+    });
   }
 
   cards.push({
-    key: 'assets',
-    label: 'Assets',
-    screen: { name: 'assets' },
+    key: "assets",
+    label: "Assets",
+    screen: { name: "assets" },
     ...(assets === undefined ? {} : { count: assets }),
-    note: 'The media library.',
-    ...(mayCreate ? { create: { kind: 'upload', label: 'Upload' } } : {}),
-  })
+    note: "The media library.",
+    ...(mayCreate ? { create: { kind: "upload", label: "Upload" } } : {}),
+  });
 
-  return cards
+  return cards;
 }
 
 /**
@@ -207,17 +207,17 @@ function singletonOrder(
   types: readonly DocumentType[],
   globals: readonly string[],
 ): DocumentType[] {
-  const singles = types.filter((type) => type.kind === 'singleton')
-  const declared = globals.filter((name) => singles.some((type) => type.name === name))
-  const byName = new Map(singles.map((type) => [type.name, type]))
+  const singles = types.filter((type) => type.kind === "singleton");
+  const declared = globals.filter((name) => singles.some((type) => type.name === name));
+  const byName = new Map(singles.map((type) => [type.name, type]));
   const order = [
     ...declared,
     ...singles.map((type) => type.name).filter((name) => !declared.includes(name)),
-  ]
+  ];
   return order.flatMap((name) => {
-    const type = byName.get(name)
-    return type ? [type] : []
-  })
+    const type = byName.get(name);
+    return type ? [type] : [];
+  });
 }
 
 /* ---------------------------------------------------------- latest changes --- */
@@ -239,7 +239,7 @@ function singletonOrder(
  * exists because a `versions` row stores one.
  */
 export const EDITOR_UNKNOWN_NOTE =
-  'Who made an edit is recorded per document, in its activity trail — not on the row, so it is not on this list.'
+  "Who made an edit is recorded per document, in its activity trail — not on the row, so it is not on this list.";
 
 /**
  * Where a document lives, for a row's secondary line: its path, or its type's label
@@ -253,17 +253,17 @@ export const EDITOR_UNKNOWN_NOTE =
  * because this is the second list to need them.
  */
 export function placeOf(
-  row: Pick<StoryMeta, 'path' | 'type'>,
+  row: Pick<StoryMeta, "path" | "type">,
   types: readonly DocumentType[],
 ): string {
-  if (row.path === null) return types.find((type) => type.name === row.type)?.label ?? row.type
-  return row.path === '' ? '/' : row.path
+  if (row.path === null) return types.find((type) => type.name === row.type)?.label ?? row.type;
+  return row.path === "" ? "/" : row.path;
 }
 
 /* -------------------------------------------------------- latest published --- */
 
 /** What `VersionMeta.actor` prefixes a token with (`actorString`). */
-const TOKEN_PREFIX = 'token:'
+const TOKEN_PREFIX = "token:";
 
 /**
  * How a publish's actor reads, and how far it resolved.
@@ -272,15 +272,15 @@ const TOKEN_PREFIX = 'token:'
  * monospaced, per `design-system.md`'s third commitment — instead of setting a raw
  * `usr_…` in prose as though it were somebody's name.
  */
-export type ActorKind = 'self' | 'user' | 'token' | 'id' | 'none'
+export type ActorKind = "self" | "user" | "token" | "id" | "none";
 
 export interface ActorLabel {
-  kind: ActorKind
-  text: string
+  kind: ActorKind;
+  text: string;
 }
 
 /** Editor ids to display names, for the actors a page of publishes names. */
-export type ActorDirectory = Readonly<Record<string, string>>
+export type ActorDirectory = Readonly<Record<string, string>>;
 
 /**
  * Who published something.
@@ -314,19 +314,19 @@ export function publishActor(
   actor: string | null,
   ctx: { me: Me; directory: ActorDirectory },
 ): ActorLabel {
-  if (actor === null) return { kind: 'none', text: 'Unknown' }
-  if (actor.startsWith(TOKEN_PREFIX)) return { kind: 'token', text: actor }
-  const self = ctx.me.actor
-  if (self?.kind === 'user' && self.id === actor) return { kind: 'self', text: 'You' }
-  const name = ctx.directory[actor]
-  if (name) return { kind: 'user', text: name }
-  return { kind: 'id', text: actor }
+  if (actor === null) return { kind: "none", text: "Unknown" };
+  if (actor.startsWith(TOKEN_PREFIX)) return { kind: "token", text: actor };
+  const self = ctx.me.actor;
+  if (self?.kind === "user" && self.id === actor) return { kind: "self", text: "You" };
+  const name = ctx.directory[actor];
+  if (name) return { kind: "user", text: name };
+  return { kind: "id", text: actor };
 }
 
 /** One page of `GET {base}/api/users` as a directory. Only the two fields this
  * screen reads, so it takes the narrowest shape rather than `AccessUser`. */
 export function actorDirectory(users: readonly { id: string; name: string }[]): ActorDirectory {
-  return Object.fromEntries(users.filter((user) => user.name).map((user) => [user.id, user.name]))
+  return Object.fromEntries(users.filter((user) => user.name).map((user) => [user.id, user.name]));
 }
 
 /* -------------------------------------------------------------- attention --- */
@@ -339,44 +339,44 @@ export function actorDirectory(users: readonly { id: string; name: string }[]): 
  * skeleton rows every other block here uses, so a capped list still looks like a
  * list rather than like a truncation.
  */
-export const ATTENTION_LIMIT = 6
+export const ATTENTION_LIMIT = 6;
 
 export interface AttentionRow {
-  key: string
-  kind: 'migration' | 'finding'
+  key: string;
+  kind: "migration" | "finding";
   /** What is wrong, in words. */
-  title: string
+  title: string;
   /**
    * The identifier it is about, rendered monospaced — a migration's id. Absent on
    * a finding, which is a whole family here and so names a count rather than one
    * subject.
    */
-  subject?: string
+  subject?: string;
   /** How many findings the row stands for. Absent on a migration, which is one
    * thing. */
-  count?: number
+  count?: number;
   /** **What to do about it**, which is the half this block used to leave out
    * entirely — see `attention`. */
-  detail?: string
+  detail?: string;
   /**
    * How loud the row is. A stored-value fault is `warn`: `missing-field`'s own
    * description says it "renders blank rather than breaking, which is why nobody
    * notices", and ten of those in `danger` red is a launchpad crying wolf. A
    * schema fault is a code mistake and stays `danger`.
    */
-  tone: 'warn' | 'danger'
+  tone: "warn" | "danger";
   /** Where the row goes. Always Model for a finding — see `attention`. */
-  screen: Screen
+  screen: Screen;
 }
 
 export interface Attention {
   /** `driftBanner`'s sentence about the ledger, or null. */
-  banner: string | null
-  rows: AttentionRow[]
+  banner: string | null;
+  rows: AttentionRow[];
   /** Rows the cap left off. */
-  more: number
+  more: number;
   /** True when there is nothing wrong, and the block must not render at all. */
-  quiet: boolean
+  quiet: boolean;
 }
 
 /**
@@ -402,24 +402,24 @@ export interface Attention {
  * pending migration to hang a row on.
  */
 export function attention(input: {
-  status: MigrationStatus | null
-  audit: AuditBatch | null
+  status: MigrationStatus | null;
+  audit: AuditBatch | null;
 }): Attention {
-  const { status, audit } = input
-  const banner = driftBanner(status)
+  const { status, audit } = input;
+  const banner = driftBanner(status);
 
   const migrations: AttentionRow[] = (status?.pending ?? []).map((id) => {
-    const found = status?.migrations.find((migration) => migration.id === id)
+    const found = status?.migrations.find((migration) => migration.id === id);
     return {
       key: `migration:${id}`,
-      kind: 'migration',
-      title: 'Migration not run',
+      kind: "migration",
+      title: "Migration not run",
       subject: id,
       ...(found?.description ? { detail: found.description } : {}),
-      tone: 'warn',
-      screen: { name: 'model' },
-    }
-  })
+      tone: "warn",
+      screen: { name: "model" },
+    };
+  });
 
   /**
    * **One row per family, and every row says what to do about it.**
@@ -454,34 +454,34 @@ export function attention(input: {
     group.families.map(
       (family): AttentionRow => ({
         key: `finding:${group.kind}:${family.check}`,
-        kind: 'finding',
+        kind: "finding",
         title: family.title,
         count: family.rows.length,
         detail: REMEDIES[group.kind],
-        tone: group.kind === 'schema' ? 'danger' : 'warn',
-        screen: { name: 'model' },
+        tone: group.kind === "schema" ? "danger" : "warn",
+        screen: { name: "model" },
       }),
     ),
-  )
+  );
 
-  const all = [...migrations, ...findings]
+  const all = [...migrations, ...findings];
   return {
     banner,
     rows: all.slice(0, ATTENTION_LIMIT),
     more: Math.max(0, all.length - ATTENTION_LIMIT),
     quiet: banner === null && all.length === 0,
-  }
+  };
 }
 
 /* --------------------------------------------------------------- requests --- */
 
 /** Rows in *Latest changes* and *Latest published*. Six is a glance; the screens
  * behind them are where a list is read. */
-export const RECENT_LIMIT = 6
+export const RECENT_LIMIT = 6;
 
 /** Tiles in *Latest media*. Eight, because the grid is `auto-fill` and eight fills
  * two rows at the widths this screen is used at without leaving a ragged one. */
-export const MEDIA_LIMIT = 8
+export const MEDIA_LIMIT = 8;
 
 /**
  * Published documents in the one audit batch Home asks for.
@@ -494,7 +494,7 @@ export const MEDIA_LIMIT = 8
  * report over the first hundred documents of a thousand reading as the whole
  * answer.
  */
-export const AUDIT_BATCH = 100
+export const AUDIT_BATCH = 100;
 
 /**
  * Editors resolved for the actor directory, in one page.
@@ -504,7 +504,7 @@ export const AUDIT_BATCH = 100
  * `RECENT_LIMIT` distinct actors, so this over-fetches on a large team and
  * under-resolves on a very large one — where `publishActor` degrades to the id.
  */
-export const DIRECTORY_LIMIT = 200
+export const DIRECTORY_LIMIT = 200;
 
 /**
  * Every request Home makes, as one object.
@@ -525,13 +525,13 @@ export const DIRECTORY_LIMIT = 200
  * is exactly what the card means.
  */
 export interface HomeRequests {
-  counts: string
-  changes: string
-  published: string
-  media: string
-  migrations: string
-  audit: string
-  users: string
+  counts: string;
+  changes: string;
+  published: string;
+  media: string;
+  migrations: string;
+  audit: string;
+  users: string;
 }
 
 export function homeRequests(apiBase: string): HomeRequests {
@@ -547,7 +547,7 @@ export function homeRequests(apiBase: string): HomeRequests {
     migrations: `${apiBase}/migrations`,
     audit: `${apiBase}/audit?batch=${AUDIT_BATCH}`,
     users: `${apiBase}/users?limit=${DIRECTORY_LIMIT}`,
-  }
+  };
 }
 
 /* ------------------------------------------------------------- inherited --- */
@@ -563,19 +563,19 @@ export function homeRequests(apiBase: string): HomeRequests {
  * neither draws the section at all.
  */
 export function showsInherited(me: Me): boolean {
-  const here = me.sites?.scopes.find((scope) => scope.id === me.scope)
-  return here !== undefined && here.chain.length > 1
+  const here = me.sites?.scopes.find((scope) => scope.id === me.scope);
+  return here !== undefined && here.chain.length > 1;
 }
 
 export type InheritedAction =
   /** The scope shows the inherited page. Fork makes it the scope's own. */
-  | { kind: 'fork' }
+  | { kind: "fork" }
   /** Fork is on offer in principle and refused here, with the reason. */
-  | { kind: 'blocked'; reason: string }
+  | { kind: "blocked"; reason: string }
   /** The scope has its own page at this path. */
-  | { kind: 'overridden'; id: string; changed: boolean }
+  | { kind: "overridden"; id: string; changed: boolean }
   /** Read-only: the caller cannot create in this scope. */
-  | { kind: 'none' }
+  | { kind: "none" };
 
 /**
  * What one inherited row offers. A fork needs `CREATE` on the scope, and — the rule
@@ -589,34 +589,34 @@ export function inheritedAction(
   me: Me,
 ): InheritedAction {
   if (row.shadowedBy !== null) {
-    return { kind: 'overridden', id: row.shadowedBy, changed: row.forkedSince }
+    return { kind: "overridden", id: row.shadowedBy, changed: row.forkedSince };
   }
-  if (!canCreateContent(me)) return { kind: 'none' }
-  const path = row.path ?? ''
-  const cut = path.lastIndexOf('/')
+  if (!canCreateContent(me)) return { kind: "none" };
+  const path = row.path ?? "";
+  const cut = path.lastIndexOf("/");
   if (cut > 0) {
-    const parent = rows.find((candidate) => candidate.path === path.slice(0, cut))
+    const parent = rows.find((candidate) => candidate.path === path.slice(0, cut));
     if (parent && parent.shadowedBy === null) {
-      return { kind: 'blocked', reason: `Fork ${parent.title || parent.path} first` }
+      return { kind: "blocked", reason: `Fork ${parent.title || parent.path} first` };
     }
   }
-  return { kind: 'fork' }
+  return { kind: "fork" };
 }
 
 /** A row's owner as a word: the scope's name, or its id when it has none in hand. */
-export function ownerLabel(me: Me, row: Pick<StoryMeta, 'site'>): string {
-  const id = row.site ?? ''
+export function ownerLabel(me: Me, row: Pick<StoryMeta, "site">): string {
+  const id = row.site ?? "";
   return (
-    me.sites?.scopes.find((scope) => scope.id === id)?.name ?? (id === 'shared' ? 'Shared' : id)
-  )
+    me.sites?.scopes.find((scope) => scope.id === id)?.name ?? (id === "shared" ? "Shared" : id)
+  );
 }
 
 /**
  * Whether *Create home page* is on offer: a scope with no home page of its own, for
  * someone who may create. `own` is the scope's row at `''`, or undefined.
  */
-export function canCreateHome(me: Me, own: Pick<StoryMeta, 'id'> | undefined): boolean {
-  return me.sites !== undefined && own === undefined && canCreateContent(me)
+export function canCreateHome(me: Me, own: Pick<StoryMeta, "id"> | undefined): boolean {
+  return me.sites !== undefined && own === undefined && canCreateContent(me);
 }
 
 /** The body of `POST /stories` for the home page: the type the host marked default,
@@ -625,6 +625,6 @@ export function homePageBody(
   types: readonly DocumentType[],
 ): { title: string; type: string; root: true } | null {
   const type =
-    types.find((t) => t.kind === 'page' && t.default) ?? types.find((t) => t.kind === 'page')
-  return type ? { title: 'Home', type: type.name, root: true } : null
+    types.find((t) => t.kind === "page" && t.default) ?? types.find((t) => t.kind === "page");
+  return type ? { title: "Home", type: type.name, root: true } : null;
 }

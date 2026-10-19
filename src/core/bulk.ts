@@ -25,15 +25,15 @@
  * them here.
  */
 
-import { type CursorPart, decodeCursor, encodeCursor } from './pagination'
+import { type CursorPart, decodeCursor, encodeCursor } from "./pagination";
 
 /**
  * The rows somebody ticked. Small by construction: you can only tick what you
  * can see, a page at a time.
  */
 export interface IdSelection {
-  ids: string[]
-  all?: never
+  ids: string[];
+  all?: never;
 }
 
 /**
@@ -48,8 +48,8 @@ export interface IdSelection {
  * snapshot, not a live read of whatever the screen's chips currently say.
  */
 export interface FilterSelection<F> {
-  all: true
-  filter: F
+  all: true;
+  filter: F;
   /**
    * The count the person was shown — `total` from `?count=1` on the list they
    * were looking at (`pagination.md` decision 5, which insists one `count(*)`
@@ -61,10 +61,10 @@ export interface FilterSelection<F> {
    * run ever touches more rows than this number, so a set that grows underneath a
    * long job cannot make it act on more than was agreed.
    */
-  expected: number
+  expected: number;
   /** Rows ticked *off* after the select-all. Bounded by what a person can see. */
-  exclude?: string[]
-  ids?: never
+  exclude?: string[];
+  ids?: never;
 }
 
 /**
@@ -74,7 +74,7 @@ export interface FilterSelection<F> {
  * identical either way, and a client that had to choose a *URL* by selection mode
  * would be encoding the mode twice.
  */
-export type BulkSelection<F> = IdSelection | FilterSelection<F>
+export type BulkSelection<F> = IdSelection | FilterSelection<F>;
 
 /**
  * A row the job could not act on, and why.
@@ -87,9 +87,9 @@ export type BulkSelection<F> = IdSelection | FilterSelection<F>
  * that wants to leave the refused rows selected.
  */
 export interface BulkFailure {
-  id: string
-  title: string
-  message: string
+  id: string;
+  title: string;
+  message: string;
 }
 
 /**
@@ -101,35 +101,35 @@ export interface BulkFailure {
  * and switch on a value the server can never send.
  */
 export interface BulkReport<A extends string> {
-  action: A
+  action: A;
   /**
    * Rows this **call** acted on successfully. Per call, not cumulative: the
    * server cannot know what earlier calls did, so a client that batches sums
    * these itself and calls `reportOf` once at the end.
    */
-  done: number
+  done: number;
   /** The same, refused — one entry each, named. Per call, like `done`. */
-  failed: BulkFailure[]
+  failed: BulkFailure[];
   /**
    * How many rows this selection agreed to act on: `ids.length`, or
    * `expected - exclude.length`. About the **job**, not this call, and it is what
    * a progress display divides by.
    */
-  total: number
+  total: number;
   /**
    * How many the job has consumed, this call included — the cursor's own counter,
    * so it is cumulative even though `done` is not. `seen === total` and
    * `continueFrom === null` are the same fact from either end.
    */
-  seen: number
+  seen: number;
   /**
    * Pass back as `continueFrom` to do the next batch. Null when the job is
    * finished. **Loop on this**, not on `seen < total`: a batch whose rows were
    * all refused still advances the cursor, and a comparison of counts would spin.
    */
-  continueFrom: string | null
+  continueFrom: string | null;
   /** Reports what it would do and writes nothing. */
-  dryRun: boolean
+  dryRun: boolean;
 }
 
 /**
@@ -141,16 +141,16 @@ export interface BulkReport<A extends string> {
  * value for it — the count is the only thing this can refuse over.
  */
 export interface BulkRefusal {
-  refused: 'count'
-  expected: number
-  actual: number
+  refused: "count";
+  expected: number;
+  actual: number;
 }
 
 /** A run either happened or was refused before it started. */
-export type BulkOutcome<A extends string> = BulkReport<A> | BulkRefusal
+export type BulkOutcome<A extends string> = BulkReport<A> | BulkRefusal;
 
 export function wasRefused<A extends string>(outcome: BulkOutcome<A>): outcome is BulkRefusal {
-  return 'refused' in outcome
+  return "refused" in outcome;
 }
 
 /**
@@ -172,14 +172,14 @@ export function wasRefused<A extends string>(outcome: BulkOutcome<A>): outcome i
  * readable by the document runner and mean something else.
  */
 export function writeBulkCursor(after: string, seen: number): string {
-  return encodeCursor([after, seen])
+  return encodeCursor([after, seen]);
 }
 
 /** `null` for anything that is not one of ours. Each runner turns that into its
  * own refusal, because `core/` has no error type and should not grow one. */
 export function readBulkCursor(raw: string): { after: string; seen: number } | null {
-  const parts: CursorPart[] | null = decodeCursor(raw)
-  const [after, seen] = parts ?? []
-  if (typeof after !== 'string' || typeof seen !== 'number' || seen < 0) return null
-  return { after, seen: Math.trunc(seen) }
+  const parts: CursorPart[] | null = decodeCursor(raw);
+  const [after, seen] = parts ?? [];
+  if (typeof after !== "string" || typeof seen !== "number" || seen < 0) return null;
+  return { after, seen: Math.trunc(seen) };
 }

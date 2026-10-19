@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import type { Plugin, UserConfig } from 'vite'
-import { folio } from '../../../src/vite/index'
+import { describe, expect, it } from "vitest";
+import type { Plugin, UserConfig } from "vite";
+import { folio } from "../../../src/vite/index";
 
 /**
  * The Vite plugin had no test at all before this file, and the gap had a cost: a
@@ -15,41 +15,44 @@ import { folio } from '../../../src/vite/index'
  * build fixture per CSS strategy would be minutes of CI to observe one string.
  */
 
-type ConfigHook = (config: UserConfig, env: { command: 'build' | 'serve'; mode: string }) => unknown
+type ConfigHook = (
+  config: UserConfig,
+  env: { command: "build" | "serve"; mode: string },
+) => unknown;
 
 /** Only the parts of the returned config these tests read. */
 interface HookResult {
-  define: Record<string, string | undefined>
+  define: Record<string, string | undefined>;
   environments: {
     client: {
       build: {
-        rollupOptions: { output: { assetFileNames: (asset: { names?: string[] }) => string } }
-      }
-    }
-  }
+        rollupOptions: { output: { assetFileNames: (asset: { names?: string[] }) => string } };
+      };
+    };
+  };
 }
 
 interface FolioAssets {
-  admin: string
-  preview: string
-  devClient?: string
-  adminCss: string[]
-  previewCss: string[]
+  admin: string;
+  preview: string;
+  devClient?: string;
+  adminCss: string[];
+  previewCss: string[];
 }
 
-function runConfig(userConfig: UserConfig, command: 'build' | 'serve' = 'build'): HookResult {
-  const plugin = folio({ blocks: './src/blocks/index.ts' })[0] as Plugin
-  const hook = plugin.config as unknown as ConfigHook
-  const result = hook.call(plugin, userConfig, { command, mode: 'production' })
-  if (!result) throw new Error('config() returned nothing')
-  return result as HookResult
+function runConfig(userConfig: UserConfig, command: "build" | "serve" = "build"): HookResult {
+  const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+  const hook = plugin.config as unknown as ConfigHook;
+  const result = hook.call(plugin, userConfig, { command, mode: "production" });
+  if (!result) throw new Error("config() returned nothing");
+  return result as HookResult;
 }
 
 /** Read back the assets the hook baked into `__FOLIO_ASSETS__`. */
-function assetsFor(userConfig: UserConfig, command: 'build' | 'serve' = 'build'): FolioAssets {
-  const baked = runConfig(userConfig, command).define.__FOLIO_ASSETS__
-  if (!baked) throw new Error('__FOLIO_ASSETS__ was not defined')
-  return JSON.parse(baked)
+function assetsFor(userConfig: UserConfig, command: "build" | "serve" = "build"): FolioAssets {
+  const baked = runConfig(userConfig, command).define.__FOLIO_ASSETS__;
+  if (!baked) throw new Error("__FOLIO_ASSETS__ was not defined");
+  return JSON.parse(baked);
 }
 
 /**
@@ -58,33 +61,33 @@ function assetsFor(userConfig: UserConfig, command: 'build' | 'serve' = 'build')
  * honest about where it actually has to be wired.
  */
 function assetNamer(userConfig: UserConfig): (asset: { names?: string[] }) => string {
-  return runConfig(userConfig).environments.client.build.rollupOptions.output.assetFileNames
+  return runConfig(userConfig).environments.client.build.rollupOptions.output.assetFileNames;
 }
 
-describe('the Vite plugin, CSS strategy', () => {
-  it('links the per-entry stylesheets when code splitting is on', () => {
-    const assets = assetsFor({})
-    expect(assets.adminCss).toEqual(['/folio-admin.css'])
-    expect(assets.previewCss).toEqual(['/folio-preview.css'])
-  })
+describe("the Vite plugin, CSS strategy", () => {
+  it("links the per-entry stylesheets when code splitting is on", () => {
+    const assets = assetsFor({});
+    expect(assets.adminCss).toEqual(["/folio-admin.css"]);
+    expect(assets.previewCss).toEqual(["/folio-preview.css"]);
+  });
 
-  it('links the single bundle when the host turns code splitting off', () => {
-    const assets = assetsFor({ build: { cssCodeSplit: false } })
-    expect(assets.adminCss).toEqual(['/folio-client.css'])
-    expect(assets.previewCss).toEqual(['/folio-client.css'])
-  })
+  it("links the single bundle when the host turns code splitting off", () => {
+    const assets = assetsFor({ build: { cssCodeSplit: false } });
+    expect(assets.adminCss).toEqual(["/folio-client.css"]);
+    expect(assets.previewCss).toEqual(["/folio-client.css"]);
+  });
 
-  it('sees the flag on the client environment too, not only at the top level', () => {
-    const assets = assetsFor({ environments: { client: { build: { cssCodeSplit: false } } } })
-    expect(assets.adminCss).toEqual(['/folio-client.css'])
-    expect(assets.previewCss).toEqual(['/folio-client.css'])
-  })
+  it("sees the flag on the client environment too, not only at the top level", () => {
+    const assets = assetsFor({ environments: { client: { build: { cssCodeSplit: false } } } });
+    expect(assets.adminCss).toEqual(["/folio-client.css"]);
+    expect(assets.previewCss).toEqual(["/folio-client.css"]);
+  });
 
-  it('is unaffected by the flag in dev, where Vite injects entry CSS from JS', () => {
-    const assets = assetsFor({ build: { cssCodeSplit: false } }, 'serve')
-    expect(assets.adminCss).toEqual([])
-    expect(assets.previewCss).toEqual([])
-  })
+  it("is unaffected by the flag in dev, where Vite injects entry CSS from JS", () => {
+    const assets = assetsFor({ build: { cssCodeSplit: false } }, "serve");
+    expect(assets.adminCss).toEqual([]);
+    expect(assets.previewCss).toEqual([]);
+  });
 
   /**
    * `style.css` is the name Vite gives the one bundled stylesheet, verified
@@ -93,24 +96,24 @@ describe('the Vite plugin, CSS strategy', () => {
    * generic branch it is hashed into `assets/`, which is exactly the path a
    * compile-time constant cannot name.
    */
-  it('pins the one bundled stylesheet to a fixed path when code splitting is off', () => {
-    const name = assetNamer({ build: { cssCodeSplit: false } })
-    expect(name({ names: ['style.css'] })).toBe('folio-client.css')
-  })
+  it("pins the one bundled stylesheet to a fixed path when code splitting is off", () => {
+    const name = assetNamer({ build: { cssCodeSplit: false } });
+    expect(name({ names: ["style.css"] })).toBe("folio-client.css");
+  });
 
-  it('still hashes ordinary assets when code splitting is off', () => {
-    const name = assetNamer({ build: { cssCodeSplit: false } })
-    expect(name({ names: ['logo.svg'] })).toBe('assets/[name]-[hash][extname]')
-  })
+  it("still hashes ordinary assets when code splitting is off", () => {
+    const name = assetNamer({ build: { cssCodeSplit: false } });
+    expect(name({ names: ["logo.svg"] })).toBe("assets/[name]-[hash][extname]");
+  });
 
-  it('leaves stylesheet naming alone when code splitting is on', () => {
-    const name = assetNamer({})
-    expect(name({ names: ['style.css'] })).toBe('assets/[name]-[hash][extname]')
-    expect(name({ names: ['folio-admin.css'] })).toBe('[name][extname]')
-  })
-})
+  it("leaves stylesheet naming alone when code splitting is on", () => {
+    const name = assetNamer({});
+    expect(name({ names: ["style.css"] })).toBe("assets/[name]-[hash][extname]");
+    expect(name({ names: ["folio-admin.css"] })).toBe("[name][extname]");
+  });
+});
 
-describe('the Vite plugin, a CSS strategy it could not see', () => {
+describe("the Vite plugin, a CSS strategy it could not see", () => {
   /**
    * The residual hole in reading the flag from `userConfig`: a *plugin* can set
    * it, and `config()` runs before that is knowable. The paths are baked by then,
@@ -118,45 +121,45 @@ describe('the Vite plugin, a CSS strategy it could not see', () => {
    * than the silent 404 it replaces, and is the case this assertion exists for.
    */
   const resolvedWith = (cssCodeSplit: boolean) => ({
-    root: '/tmp/host',
+    root: "/tmp/host",
     environments: { client: { build: { cssCodeSplit, rollupOptions: {} } } },
-  })
+  });
 
   function configure(userConfig: UserConfig, resolved: ReturnType<typeof resolvedWith>) {
-    const plugin = folio({ blocks: './src/blocks/index.ts' })[0] as Plugin
-    const hook = plugin.config as unknown as ConfigHook
-    hook.call(plugin, userConfig, { command: 'build', mode: 'production' })
-    const after = plugin.configResolved as unknown as (r: unknown) => void
-    after.call(plugin, resolved)
+    const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+    const hook = plugin.config as unknown as ConfigHook;
+    hook.call(plugin, userConfig, { command: "build", mode: "production" });
+    const after = plugin.configResolved as unknown as (r: unknown) => void;
+    after.call(plugin, resolved);
   }
 
-  it('throws when the client build resolved to no code splitting behind its back', () => {
-    expect(() => configure({}, resolvedWith(false))).toThrow(/cssCodeSplit: false/)
-  })
+  it("throws when the client build resolved to no code splitting behind its back", () => {
+    expect(() => configure({}, resolvedWith(false))).toThrow(/cssCodeSplit: false/);
+  });
 
-  it('does not throw when the host set the flag itself', () => {
-    expect(() => configure({ build: { cssCodeSplit: false } }, resolvedWith(false))).not.toThrow()
-  })
+  it("does not throw when the host set the flag itself", () => {
+    expect(() => configure({ build: { cssCodeSplit: false } }, resolvedWith(false))).not.toThrow();
+  });
 
-  it('does not throw in the ordinary case', () => {
-    expect(() => configure({}, resolvedWith(true))).not.toThrow()
-  })
-})
+  it("does not throw in the ordinary case", () => {
+    expect(() => configure({}, resolvedWith(true))).not.toThrow();
+  });
+});
 
 /* --------------------------------------------------- CSS Rollup hoisted out --- */
 
 /** A stand-in for the shape `generateBundle` reads out of Rollup's bundle. */
 type FakeBundle = Record<
   string,
-  | { type: 'chunk'; imports?: string[]; viteMetadata?: { importedCss?: Set<string> } }
-  | { type: 'asset'; source: string | Uint8Array }
->
+  | { type: "chunk"; imports?: string[]; viteMetadata?: { importedCss?: Set<string> } }
+  | { type: "asset"; source: string | Uint8Array }
+>;
 
 const chunk = (imports: string[], css: string[] = []) => ({
-  type: 'chunk' as const,
+  type: "chunk" as const,
   imports,
   viteMetadata: { importedCss: new Set(css) },
-})
+});
 
 /**
  * Run the plugin's `generateBundle` over a fake bundle, the way Rollup would, and
@@ -166,21 +169,21 @@ const chunk = (imports: string[], css: string[] = []) => ({
  * second alone would test a plugin no build can produce.
  */
 function generate(userConfig: UserConfig, bundle: FakeBundle) {
-  const plugin = folio({ blocks: './src/blocks/index.ts' })[0] as Plugin
-  const hook = plugin.config as unknown as ConfigHook
-  hook.call(plugin, userConfig, { command: 'build', mode: 'production' })
+  const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+  const hook = plugin.config as unknown as ConfigHook;
+  hook.call(plugin, userConfig, { command: "build", mode: "production" });
 
-  const emitted: { fileName: string; source: string }[] = []
-  const ctx = { emitFile: (f: { fileName: string; source: string }) => void emitted.push(f) }
-  const gen = plugin.generateBundle as { order: string; handler: (o: unknown, b: unknown) => void }
-  gen.handler.call(ctx as never, {}, bundle)
+  const emitted: { fileName: string; source: string }[] = [];
+  const ctx = { emitFile: (f: { fileName: string; source: string }) => void emitted.push(f) };
+  const gen = plugin.generateBundle as { order: string; handler: (o: unknown, b: unknown) => void };
+  gen.handler.call(ctx as never, {}, bundle);
 
   const sourceOf = (fileName: string) => {
-    const entry = bundle[fileName]
-    if (entry?.type === 'asset') return String(entry.source)
-    return emitted.find((f) => f.fileName === fileName)?.source
-  }
-  return { emitted, sourceOf, order: gen.order }
+    const entry = bundle[fileName];
+    if (entry?.type === "asset") return String(entry.source);
+    return emitted.find((f) => f.fileName === fileName)?.source;
+  };
+  return { emitted, sourceOf, order: gen.order };
 }
 
 /**
@@ -189,267 +192,267 @@ function generate(userConfig: UserConfig, bundle: FakeBundle) {
  * with a content-hashed name — a name `config()` could not have baked.
  */
 const hostWithBlocks = (): FakeBundle => ({
-  'folio-preview.js': chunk(['assets/blocks-abc123.js'], ['folio-preview.css']),
-  'assets/blocks-abc123.js': chunk([], ['assets/blocks-abc123.css']),
-  'folio-preview.css': { type: 'asset', source: '.folio-editing{color:red}' },
-  'folio-admin.js': chunk([], ['folio-admin.css']),
-  'folio-admin.css': { type: 'asset', source: '.admin{}' },
-})
+  "folio-preview.js": chunk(["assets/blocks-abc123.js"], ["folio-preview.css"]),
+  "assets/blocks-abc123.js": chunk([], ["assets/blocks-abc123.css"]),
+  "folio-preview.css": { type: "asset", source: ".folio-editing{color:red}" },
+  "folio-admin.js": chunk([], ["folio-admin.css"]),
+  "folio-admin.css": { type: "asset", source: ".admin{}" },
+});
 
-describe('the Vite plugin, stylesheets Rollup hoisted out of an entry', () => {
+describe("the Vite plugin, stylesheets Rollup hoisted out of an entry", () => {
   /**
    * The regression this whole hook exists for: without it `folio-preview.css`
    * holds the library's selection outlines and nothing else, and the editor's
    * iframe renders the host's blocks unstyled behind a 200.
    */
-  it('imports the shared chunk the preview entry needs but cannot name', () => {
-    const { sourceOf } = generate({}, hostWithBlocks())
-    expect(sourceOf('folio-preview.css')).toBe(
+  it("imports the shared chunk the preview entry needs but cannot name", () => {
+    const { sourceOf } = generate({}, hostWithBlocks());
+    expect(sourceOf("folio-preview.css")).toBe(
       '@import url("/assets/blocks-abc123.css");\n.folio-editing{color:red}',
-    )
-  })
+    );
+  });
 
-  it('runs after the plugins that rewrite the chunk graph', () => {
+  it("runs after the plugins that rewrite the chunk graph", () => {
     // `vite:css-post` deletes pure-CSS chunks and re-attributes their CSS in its
     // own `generateBundle`. Reading the bundle before that is reading a graph
     // that is about to change shape.
-    expect(generate({}, hostWithBlocks()).order).toBe('post')
-  })
+    expect(generate({}, hostWithBlocks()).order).toBe("post");
+  });
 
-  it('leaves an entry whose CSS was not hoisted byte-identical', () => {
-    const { sourceOf, emitted } = generate({}, hostWithBlocks())
-    expect(sourceOf('folio-admin.css')).toBe('.admin{}')
-    expect(emitted).toEqual([])
-  })
+  it("leaves an entry whose CSS was not hoisted byte-identical", () => {
+    const { sourceOf, emitted } = generate({}, hostWithBlocks());
+    expect(sourceOf("folio-admin.css")).toBe(".admin{}");
+    expect(emitted).toEqual([]);
+  });
 
   /**
    * `@charset` has to be the first thing in a stylesheet, and `@import` has to
    * precede every rule that is not one. Vite writes a charset whenever the file
    * holds a non-ASCII byte, which block content very often does.
    */
-  it('keeps @charset first when it has to insert imports after it', () => {
-    const bundle = hostWithBlocks()
-    bundle['folio-preview.css'] = { type: 'asset', source: '@charset "UTF-8";.a{content:"→"}' }
-    expect(generate({}, bundle).sourceOf('folio-preview.css')).toBe(
+  it("keeps @charset first when it has to insert imports after it", () => {
+    const bundle = hostWithBlocks();
+    bundle["folio-preview.css"] = { type: "asset", source: '@charset "UTF-8";.a{content:"→"}' };
+    expect(generate({}, bundle).sourceOf("folio-preview.css")).toBe(
       '@charset "UTF-8";\n@import url("/assets/blocks-abc123.css");\n.a{content:"→"}',
-    )
-  })
+    );
+  });
 
   /**
    * An entry can reach hoisted CSS while importing none of its own, and then Vite
    * emits no file at the baked name at all — a link that 404s rather than one that
    * is merely incomplete.
    */
-  it('emits the stylesheet when the entry had none of its own', () => {
-    const bundle = hostWithBlocks()
-    bundle['folio-preview.js'] = chunk(['assets/blocks-abc123.js'])
-    delete bundle['folio-preview.css']
-    expect(generate({}, bundle).sourceOf('folio-preview.css')).toBe(
+  it("emits the stylesheet when the entry had none of its own", () => {
+    const bundle = hostWithBlocks();
+    bundle["folio-preview.js"] = chunk(["assets/blocks-abc123.js"]);
+    delete bundle["folio-preview.css"];
+    expect(generate({}, bundle).sourceOf("folio-preview.css")).toBe(
       '@import url("/assets/blocks-abc123.css");\n',
-    )
-  })
+    );
+  });
 
   /** Vite's own order for an HTML entry: a chunk's dependencies before its own CSS. */
-  it('imports dependencies before dependents, and each file once', () => {
+  it("imports dependencies before dependents, and each file once", () => {
     const bundle: FakeBundle = {
-      'folio-preview.js': chunk(['assets/mid.js', 'assets/deep.js'], ['folio-preview.css']),
-      'assets/mid.js': chunk(['assets/deep.js'], ['assets/mid.css']),
-      'assets/deep.js': chunk([], ['assets/deep.css']),
-      'folio-preview.css': { type: 'asset', source: '.p{}' },
-    }
-    expect(generate({}, bundle).sourceOf('folio-preview.css')).toBe(
+      "folio-preview.js": chunk(["assets/mid.js", "assets/deep.js"], ["folio-preview.css"]),
+      "assets/mid.js": chunk(["assets/deep.js"], ["assets/mid.css"]),
+      "assets/deep.js": chunk([], ["assets/deep.css"]),
+      "folio-preview.css": { type: "asset", source: ".p{}" },
+    };
+    expect(generate({}, bundle).sourceOf("folio-preview.css")).toBe(
       '@import url("/assets/deep.css");\n@import url("/assets/mid.css");\n.p{}',
-    )
-  })
+    );
+  });
 
   /**
    * Mirrors Vite: CSS behind a dynamic import is fetched by the preload helper
    * when the import runs, so linking it up front would load stylesheets for code
    * that may never execute.
    */
-  it('does not follow dynamic imports', () => {
-    const bundle = hostWithBlocks()
-    bundle['folio-preview.js'] = {
-      type: 'chunk',
+  it("does not follow dynamic imports", () => {
+    const bundle = hostWithBlocks();
+    bundle["folio-preview.js"] = {
+      type: "chunk",
       imports: [],
-      dynamicImports: ['assets/blocks-abc123.js'],
-      viteMetadata: { importedCss: new Set(['folio-preview.css']) },
-    } as FakeBundle[string]
-    expect(generate({}, bundle).sourceOf('folio-preview.css')).toBe('.folio-editing{color:red}')
-  })
+      dynamicImports: ["assets/blocks-abc123.js"],
+      viteMetadata: { importedCss: new Set(["folio-preview.css"]) },
+    } as FakeBundle[string];
+    expect(generate({}, bundle).sourceOf("folio-preview.css")).toBe(".folio-editing{color:red}");
+  });
 
   /**
    * With one stylesheet there is nothing hoisted anywhere: both entries already
    * link it and it holds the whole client build by construction.
    */
-  it('does nothing when the host turned code splitting off', () => {
-    const bundle = hostWithBlocks()
-    const { sourceOf, emitted } = generate({ build: { cssCodeSplit: false } }, bundle)
-    expect(sourceOf('folio-preview.css')).toBe('.folio-editing{color:red}')
-    expect(emitted).toEqual([])
-  })
+  it("does nothing when the host turned code splitting off", () => {
+    const bundle = hostWithBlocks();
+    const { sourceOf, emitted } = generate({ build: { cssCodeSplit: false } }, bundle);
+    expect(sourceOf("folio-preview.css")).toBe(".folio-editing{color:red}");
+    expect(emitted).toEqual([]);
+  });
 
-  it('reads a stylesheet Rollup handed over as bytes', () => {
-    const bundle = hostWithBlocks()
-    bundle['folio-preview.css'] = {
-      type: 'asset',
-      source: new TextEncoder().encode('.folio-editing{color:red}'),
-    }
-    expect(generate({}, bundle).sourceOf('folio-preview.css')).toBe(
+  it("reads a stylesheet Rollup handed over as bytes", () => {
+    const bundle = hostWithBlocks();
+    bundle["folio-preview.css"] = {
+      type: "asset",
+      source: new TextEncoder().encode(".folio-editing{color:red}"),
+    };
+    expect(generate({}, bundle).sourceOf("folio-preview.css")).toBe(
       '@import url("/assets/blocks-abc123.css");\n.folio-editing{color:red}',
-    )
-  })
-})
+    );
+  });
+});
 
 /**
  * The record form (`multi-brand.md` decision 9). `hook` drives `config()` with a
  * `blocks` record; the string form above is driven by `runConfig`.
  */
-describe('the Vite plugin, one preview bundle per brand', () => {
+describe("the Vite plugin, one preview bundle per brand", () => {
   const brands = {
-    allaboutafrica: './app/brands/allaboutafrica/folio/blocks.ts',
-    takeoffgo: './app/brands/takeoffgo/folio/blocks.ts',
-  }
+    allaboutafrica: "./app/brands/allaboutafrica/folio/blocks.ts",
+    takeoffgo: "./app/brands/takeoffgo/folio/blocks.ts",
+  };
 
   function brandPlugin(): Plugin {
-    return folio({ blocks: brands })[0] as Plugin
+    return folio({ blocks: brands })[0] as Plugin;
   }
 
-  function brandConfig(userConfig: UserConfig = {}, command: 'build' | 'serve' = 'build') {
-    const plugin = brandPlugin()
-    const hook = plugin.config as unknown as ConfigHook
-    return hook.call(plugin, userConfig, { command, mode: 'production' }) as {
-      define: Record<string, string | undefined>
+  function brandConfig(userConfig: UserConfig = {}, command: "build" | "serve" = "build") {
+    const plugin = brandPlugin();
+    const hook = plugin.config as unknown as ConfigHook;
+    return hook.call(plugin, userConfig, { command, mode: "production" }) as {
+      define: Record<string, string | undefined>;
       environments: {
-        client: { build: { rollupOptions: { input: Record<string, string> } } }
-      }
-    }
+        client: { build: { rollupOptions: { input: Record<string, string> } } };
+      };
+    };
   }
 
-  it('adds one preview entry per brand and no single preview entry', () => {
-    const input = brandConfig().environments.client.build.rollupOptions.input
+  it("adds one preview entry per brand and no single preview entry", () => {
+    const input = brandConfig().environments.client.build.rollupOptions.input;
     expect(Object.keys(input).sort()).toEqual([
-      'folio-admin',
-      'folio-preview-allaboutafrica',
-      'folio-preview-takeoffgo',
-    ])
-    expect(input['folio-preview-allaboutafrica']).toBe('virtual:folio/preview/allaboutafrica')
-    expect(input['folio-preview-takeoffgo']).toBe('virtual:folio/preview/takeoffgo')
-  })
+      "folio-admin",
+      "folio-preview-allaboutafrica",
+      "folio-preview-takeoffgo",
+    ]);
+    expect(input["folio-preview-allaboutafrica"]).toBe("virtual:folio/preview/allaboutafrica");
+    expect(input["folio-preview-takeoffgo"]).toBe("virtual:folio/preview/takeoffgo");
+  });
 
-  it('bakes assets.brands with a bundle and a stylesheet per brand', () => {
-    const assets = JSON.parse(brandConfig().define.__FOLIO_ASSETS__ as string)
+  it("bakes assets.brands with a bundle and a stylesheet per brand", () => {
+    const assets = JSON.parse(brandConfig().define.__FOLIO_ASSETS__ as string);
     expect(assets).toEqual({
-      admin: '/folio-admin.js',
-      adminCss: ['/folio-admin.css'],
+      admin: "/folio-admin.js",
+      adminCss: ["/folio-admin.css"],
       brands: {
         allaboutafrica: {
-          preview: '/folio-preview-allaboutafrica.js',
-          previewCss: ['/folio-preview-allaboutafrica.css'],
+          preview: "/folio-preview-allaboutafrica.js",
+          previewCss: ["/folio-preview-allaboutafrica.css"],
         },
         takeoffgo: {
-          preview: '/folio-preview-takeoffgo.js',
-          previewCss: ['/folio-preview-takeoffgo.css'],
+          preview: "/folio-preview-takeoffgo.js",
+          previewCss: ["/folio-preview-takeoffgo.css"],
         },
       },
-    })
-    expect(assets.preview).toBeUndefined()
-    expect(assets.previewCss).toBeUndefined()
-  })
+    });
+    expect(assets.preview).toBeUndefined();
+    expect(assets.previewCss).toBeUndefined();
+  });
 
-  it('serves each brand its own virtual entry in dev, with nothing to link', () => {
-    const assets = JSON.parse(brandConfig({}, 'serve').define.__FOLIO_ASSETS__ as string)
+  it("serves each brand its own virtual entry in dev, with nothing to link", () => {
+    const assets = JSON.parse(brandConfig({}, "serve").define.__FOLIO_ASSETS__ as string);
     expect(assets.brands.takeoffgo).toEqual({
-      preview: '/@id/__x00__virtual:folio/preview/takeoffgo',
+      preview: "/@id/__x00__virtual:folio/preview/takeoffgo",
       previewCss: [],
-    })
-    expect(assets.devClient).toBe('/@vite/client')
-  })
+    });
+    expect(assets.devClient).toBe("/@vite/client");
+  });
 
   it("generates each brand's entry over that brand's blocks module only", () => {
-    const plugin = brandPlugin()
-    const resolveId = plugin.resolveId as unknown as (id: string) => string | null
-    const load = plugin.load as unknown as (id: string) => string | null
-    const id = resolveId('virtual:folio/preview/takeoffgo')
-    expect(id).toBe('\0virtual:folio/preview/takeoffgo')
-    const code = load(id as string) as string
-    expect(code).toContain('takeoffgo/folio/blocks.ts')
-    expect(code).not.toContain('allaboutafrica')
-    expect(load('\0virtual:folio/preview/unknown')).toBeNull()
-  })
+    const plugin = brandPlugin();
+    const resolveId = plugin.resolveId as unknown as (id: string) => string | null;
+    const load = plugin.load as unknown as (id: string) => string | null;
+    const id = resolveId("virtual:folio/preview/takeoffgo");
+    expect(id).toBe("\0virtual:folio/preview/takeoffgo");
+    const code = load(id as string) as string;
+    expect(code).toContain("takeoffgo/folio/blocks.ts");
+    expect(code).not.toContain("allaboutafrica");
+    expect(load("\0virtual:folio/preview/unknown")).toBeNull();
+  });
 
-  it('runs the hoisted-stylesheet repair for every brand entry', () => {
-    const plugin = brandPlugin()
-    brandConfig()
-    const emitted: string[] = []
+  it("runs the hoisted-stylesheet repair for every brand entry", () => {
+    const plugin = brandPlugin();
+    brandConfig();
+    const emitted: string[] = [];
     const bundle = {
-      'folio-preview-takeoffgo.js': {
-        type: 'chunk',
-        imports: ['assets/shared-abc.js'],
-        viteMetadata: { importedCss: new Set(['folio-preview-takeoffgo.css']) },
+      "folio-preview-takeoffgo.js": {
+        type: "chunk",
+        imports: ["assets/shared-abc.js"],
+        viteMetadata: { importedCss: new Set(["folio-preview-takeoffgo.css"]) },
       },
-      'assets/shared-abc.js': {
-        type: 'chunk',
-        viteMetadata: { importedCss: new Set(['assets/shared-abc.css']) },
+      "assets/shared-abc.js": {
+        type: "chunk",
+        viteMetadata: { importedCss: new Set(["assets/shared-abc.css"]) },
       },
-      'folio-preview-takeoffgo.css': { type: 'asset', source: '.a{}' },
-    }
+      "folio-preview-takeoffgo.css": { type: "asset", source: ".a{}" },
+    };
     const gen = plugin.generateBundle as unknown as {
-      handler: (this: unknown, o: unknown, b: unknown) => void
-    }
+      handler: (this: unknown, o: unknown, b: unknown) => void;
+    };
     // The hook reads `noSplit` and the brand list set up in `config()`.
     gen.handler.call(
       { emitFile: (f: { fileName: string }) => emitted.push(f.fileName) },
       {},
       bundle,
-    )
-    expect((bundle['folio-preview-takeoffgo.css'] as { source: string }).source).toBe(
+    );
+    expect((bundle["folio-preview-takeoffgo.css"] as { source: string }).source).toBe(
       '@import url("/assets/shared-abc.css");\n.a{}',
-    )
-  })
+    );
+  });
 
-  it('refuses cssCodeSplit: false, at the top level or on the client environment', () => {
-    expect(() => brandConfig({ build: { cssCodeSplit: false } })).toThrow(/cssCodeSplit: false/)
+  it("refuses cssCodeSplit: false, at the top level or on the client environment", () => {
+    expect(() => brandConfig({ build: { cssCodeSplit: false } })).toThrow(/cssCodeSplit: false/);
     expect(() =>
       brandConfig({ environments: { client: { build: { cssCodeSplit: false } } } }),
-    ).toThrow(/every brand's CSS into every brand's preview/)
-  })
+    ).toThrow(/every brand's CSS into every brand's preview/);
+  });
 
-  it('refuses an empty record and a brand id that is not a site id', () => {
-    expect(() => folio({ blocks: {} })).toThrow(/names no brands/)
-    expect(() => folio({ blocks: { 'Bad Id': './x.ts' } })).toThrow(/not a brand id/)
-  })
-})
+  it("refuses an empty record and a brand id that is not a site id", () => {
+    expect(() => folio({ blocks: {} })).toThrow(/names no brands/);
+    expect(() => folio({ blocks: { "Bad Id": "./x.ts" } })).toThrow(/not a brand id/);
+  });
+});
 
-describe('the Vite plugin, the string form is what it was', () => {
+describe("the Vite plugin, the string form is what it was", () => {
   // Captured from the plugin before the record form existed. Do not regenerate it:
   // a change here is a change to every existing host's bundle.
   const BUILD =
-    '{"admin":"/folio-admin.js","preview":"/folio-preview.js","adminCss":["/folio-admin.css"],"previewCss":["/folio-preview.css"]}'
+    '{"admin":"/folio-admin.js","preview":"/folio-preview.js","adminCss":["/folio-admin.css"],"previewCss":["/folio-preview.css"]}';
   const SPLIT_OFF =
-    '{"admin":"/folio-admin.js","preview":"/folio-preview.js","adminCss":["/folio-client.css"],"previewCss":["/folio-client.css"]}'
-  const SERVE = `{"admin":"/@fs${'ADMIN'}","preview":"/@id/__x00__virtual:folio/preview","devClient":"/@vite/client","adminCss":[],"previewCss":[]}`
+    '{"admin":"/folio-admin.js","preview":"/folio-preview.js","adminCss":["/folio-client.css"],"previewCss":["/folio-client.css"]}';
+  const SERVE = `{"admin":"/@fs${"ADMIN"}","preview":"/@id/__x00__virtual:folio/preview","devClient":"/@vite/client","adminCss":[],"previewCss":[]}`;
 
-  it('defines __FOLIO_ASSETS__ byte for byte', () => {
-    expect(runConfig({}).define.__FOLIO_ASSETS__).toBe(BUILD)
-    expect(runConfig({ build: { cssCodeSplit: false } }).define.__FOLIO_ASSETS__).toBe(SPLIT_OFF)
-    const dev = runConfig({}, 'serve').define.__FOLIO_ASSETS__ as string
-    const admin = JSON.parse(dev).admin as string
-    expect(dev).toBe(SERVE.replace('/@fsADMIN', admin))
-  })
+  it("defines __FOLIO_ASSETS__ byte for byte", () => {
+    expect(runConfig({}).define.__FOLIO_ASSETS__).toBe(BUILD);
+    expect(runConfig({ build: { cssCodeSplit: false } }).define.__FOLIO_ASSETS__).toBe(SPLIT_OFF);
+    const dev = runConfig({}, "serve").define.__FOLIO_ASSETS__ as string;
+    const admin = JSON.parse(dev).admin as string;
+    expect(dev).toBe(SERVE.replace("/@fsADMIN", admin));
+  });
 
-  it('keeps the one preview entry', () => {
-    const plugin = folio({ blocks: './src/blocks/index.ts' })[0] as Plugin
-    const hook = plugin.config as unknown as ConfigHook
-    const r = hook.call(plugin, {}, { command: 'build', mode: 'production' }) as {
-      environments: { client: { build: { rollupOptions: { input: Record<string, string> } } } }
-    }
-    expect(r.environments.client.build.rollupOptions.input['folio-preview']).toBe(
-      'virtual:folio/preview',
-    )
+  it("keeps the one preview entry", () => {
+    const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+    const hook = plugin.config as unknown as ConfigHook;
+    const r = hook.call(plugin, {}, { command: "build", mode: "production" }) as {
+      environments: { client: { build: { rollupOptions: { input: Record<string, string> } } } };
+    };
+    expect(r.environments.client.build.rollupOptions.input["folio-preview"]).toBe(
+      "virtual:folio/preview",
+    );
     expect(Object.keys(r.environments.client.build.rollupOptions.input).sort()).toEqual([
-      'folio-admin',
-      'folio-preview',
-    ])
-  })
-})
+      "folio-admin",
+      "folio-preview",
+    ]);
+  });
+});

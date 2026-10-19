@@ -1,12 +1,12 @@
-import type { CSSProperties, KeyboardEvent, ReactNode } from 'react'
-import { useRef } from 'react'
-import css from './List.module.css'
-import { nextIndex } from './rank'
+import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
+import { useRef } from "react";
+import css from "./List.module.css";
+import { nextIndex } from "./rank";
 
 interface ListProps {
   /** Required: an unlabelled list of rows is unreadable to a screen reader, and
    * every list in this admin has a heading it can borrow. */
-  label: string
+  label: string;
   /**
    * Switches the container to `role="tree"` and its rows to `role="treeitem"`.
    *
@@ -17,10 +17,10 @@ interface ListProps {
    * list stays a listbox, because a tree with every item at level 1 announces
    * depth that is not there.
    */
-  tree?: boolean
+  tree?: boolean;
   /** Whether rows can be ticked for a bulk action, which a tree or listbox has to
    * declare rather than imply. */
-  multiselect?: boolean
+  multiselect?: boolean;
   /**
    * A keypress this list did not handle, with the focused row's index and a way to
    * move focus.
@@ -39,8 +39,8 @@ interface ListProps {
     e: KeyboardEvent<HTMLDivElement>,
     focused: number,
     focus: (index: number) => void,
-  ) => void
-  children: ReactNode
+  ) => void;
+  children: ReactNode;
 }
 
 /**
@@ -84,19 +84,19 @@ interface ListProps {
  * needs its own focus ring.
  */
 export function List({ label, tree, multiselect, onUnhandledKey, children }: ListProps) {
-  const box = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement>(null);
 
-  const rowsOf = () => Array.from(box.current?.querySelectorAll<HTMLElement>('[data-row]') ?? [])
+  const rowsOf = () => Array.from(box.current?.querySelectorAll<HTMLElement>("[data-row]") ?? []);
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!box.current) return
-    const rows = rowsOf()
-    const active = document.activeElement
+    if (!box.current) return;
+    const rows = rowsOf();
+    const active = document.activeElement;
     // -1 when focus is on the container rather than a row, which is the state
     // after tabbing in — `nextIndex` reads that as "nothing active yet" and puts
     // ArrowDown on the first row rather than the second.
-    const current = active instanceof HTMLElement ? rows.indexOf(active) : -1
-    const focus = (index: number) => rows[Math.min(rows.length - 1, Math.max(0, index))]?.focus()
+    const current = active instanceof HTMLElement ? rows.indexOf(active) : -1;
+    const focus = (index: number) => rows[Math.min(rows.length - 1, Math.max(0, index))]?.focus();
 
     /**
      * A modified arrow is not ours.
@@ -112,15 +112,15 @@ export function List({ label, tree, multiselect, onUnhandledKey, children }: Lis
      * this row", not "move the cursor", and a container that consumed both would
      * leave no way to tell them apart.
      */
-    const bare = !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey
-    const next = bare ? nextIndex(e.key, current, rows.length) : null
+    const bare = !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey;
+    const next = bare ? nextIndex(e.key, current, rows.length) : null;
     if (next !== null) {
-      e.preventDefault()
-      rows[next]?.focus()
-      return
+      e.preventDefault();
+      rows[next]?.focus();
+      return;
     }
-    onUnhandledKey?.(e, current, focus)
-  }
+    onUnhandledKey?.(e, current, focus);
+  };
 
   // Two literal roles rather than one expression, because `role={tree ? … : …}`
   // makes the element's role unresolvable to a linter — and then every `aria-*`
@@ -152,12 +152,12 @@ export function List({ label, tree, multiselect, onUnhandledKey, children }: Lis
     >
       {children}
     </div>
-  )
+  );
 }
 
 interface RowProps {
   /** Ticked for a bulk action. Becomes `aria-selected`. */
-  selected?: boolean
+  selected?: boolean;
   /**
    * The row you are looking at — the open document, in a list you reached the
    * editor from.
@@ -168,10 +168,10 @@ interface RowProps {
    * `aria-current="page"`. Rendering the second as the first would tell a screen
    * reader the open page is part of the next bulk delete.
    */
-  current?: boolean
+  current?: boolean;
   /** Tree depth. Indents by `--indent` per level — 16px, up from the old 10px,
    * where a child and its parent were hard to tell apart. */
-  depth?: number
+  depth?: number;
   /**
    * Matches the `tree` on the `List` around it, switching this row to
    * `role="treeitem"` and letting it declare `aria-level`.
@@ -183,32 +183,32 @@ interface RowProps {
    * depth nor children still has to be an `option` inside a listbox rather than a
    * one-level tree.
    */
-  tree?: boolean
+  tree?: boolean;
   /** Whether this row's children are showing. `undefined` for a leaf, and that is
    * load-bearing: `aria-expanded={false}` on a treeitem means *closed parent*, so
    * a leaf that declared it would promise children it does not have. */
-  expanded?: boolean
+  expanded?: boolean;
   /** The drag affordance, or a tree's disclosure control. Only the handle is ever
    * draggable, never the whole row: a few pixels of movement during a click must
    * not silently reparent a page. */
-  handle?: ReactNode
+  handle?: ReactNode;
   /** Before the handle and outside the indent — the selection checkbox. */
-  lead?: ReactNode
+  lead?: ReactNode;
   /** Right-aligned, revealed on hover or focus-within. */
-  actions?: ReactNode
+  actions?: ReactNode;
   /** Secondary text after the title — a path, a slug, a summary. Truncates. */
-  meta?: ReactNode
+  meta?: ReactNode;
   /** Right of `meta` and always visible: state badges, presence, counts. */
-  trailing?: ReactNode
-  onOpen?: () => void
+  trailing?: ReactNode;
+  onOpen?: () => void;
   /**
    * Ticks or unticks the row. When present, **Space selects and Enter opens** —
    * the Finder and Gmail convention, and the only way a keyboard reaches a
    * checkbox inside a roving-tabindex list without the checkbox becoming its own
    * tab stop and costing the list its "one stop in the tab order" property.
    */
-  onSelect?: () => void
-  children: ReactNode
+  onSelect?: () => void;
+  children: ReactNode;
 }
 
 /**
@@ -234,29 +234,29 @@ export function Row({
   children,
 }: RowProps) {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === ' ' && onSelect) {
-      e.preventDefault()
-      onSelect()
-      return
+    if (e.key === " " && onSelect) {
+      e.preventDefault();
+      onSelect();
+      return;
     }
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onOpen?.()
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onOpen?.();
     }
-  }
+  };
 
   const shared = {
-    'data-row': '',
-    'aria-selected': Boolean(selected),
-    'aria-current': current ? ('page' as const) : undefined,
+    "data-row": "",
+    "aria-selected": Boolean(selected),
+    "aria-current": current ? ("page" as const) : undefined,
     // The escape hatch for a `meta` that truncated: nothing may be visible only
     // sometimes and unrecoverable the rest of the time.
-    title: typeof meta === 'string' ? meta : undefined,
-    style: { '--depth': depth } as CSSProperties,
-    className: [css.row, selected ? css.ticked : '', current ? css.selected : ''].join(' '),
+    title: typeof meta === "string" ? meta : undefined,
+    style: { "--depth": depth } as CSSProperties,
+    className: [css.row, selected ? css.ticked : "", current ? css.selected : ""].join(" "),
     onClick: onOpen,
     onKeyDown,
-  }
+  };
 
   const inner = (
     <>
@@ -268,7 +268,7 @@ export function Row({
       {trailing ? <span className={css.trailing}>{trailing}</span> : null}
       {actions ? <span className={css.actions}>{actions}</span> : null}
     </>
-  )
+  );
 
   // Literal roles and a literal `tabIndex`, for the reason `List` gives above —
   // and `tabIndex` for a second one: a role that arrives through a spread is a role
@@ -283,7 +283,7 @@ export function Row({
     <div {...shared} role="option" tabIndex={-1}>
       {inner}
     </div>
-  )
+  );
 }
 
 /**
@@ -312,5 +312,5 @@ export function ListHeader({ children, actions }: { children?: ReactNode; action
       {children ? <h2 className={css.headerTitle}>{children}</h2> : null}
       {actions ? <div className={css.headerActions}>{actions}</div> : null}
     </div>
-  )
+  );
 }

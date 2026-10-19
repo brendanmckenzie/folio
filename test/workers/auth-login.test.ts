@@ -1,7 +1,7 @@
-import { createExecutionContext, env } from 'cloudflare:test'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { defineBlock, text } from '../../src/core'
-import type { AuthConfig, MagicLinkMail, Role, RoleMapper } from '../../src/server'
+import { createExecutionContext, env } from "cloudflare:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { defineBlock, text } from "../../src/core";
+import type { AuthConfig, MagicLinkMail, Role, RoleMapper } from "../../src/server";
 import {
   createFolio,
   LOGIN_PASSKEY_SCRIPT_HASH,
@@ -9,13 +9,13 @@ import {
   oidc,
   passkeys,
   roleFromClaim,
-} from '../../src/server'
-import { CHALLENGE_TTL_MS, createChallenge } from '../../src/server/auth/challenges'
-import { PLAIN_COOKIE, SECURE_COOKIE } from '../../src/server/auth/cookie'
-import { resetDiscoveryCache, verifyIdToken } from '../../src/server/auth/oidc'
-import type { UserActor } from '../../src/server/auth/roles'
-import { createSession, readSession } from '../../src/server/auth/session'
-import { createUser, userByEmail } from '../../src/server/auth/users'
+} from "../../src/server";
+import { CHALLENGE_TTL_MS, createChallenge } from "../../src/server/auth/challenges";
+import { PLAIN_COOKIE, SECURE_COOKIE } from "../../src/server/auth/cookie";
+import { resetDiscoveryCache, verifyIdToken } from "../../src/server/auth/oidc";
+import type { UserActor } from "../../src/server/auth/roles";
+import { createSession, readSession } from "../../src/server/auth/session";
+import { createUser, userByEmail } from "../../src/server/auth/users";
 
 /**
  * Signing in: the magic-link flow, the OIDC flow, and the properties both are
@@ -29,204 +29,204 @@ import { createUser, userByEmail } from '../../src/server/auth/users'
  * RPC boundary.
  */
 
-const ORIGIN = 'https://folio.test'
-const BASE = `${ORIGIN}/folio`
+const ORIGIN = "https://folio.test";
+const BASE = `${ORIGIN}/folio`;
 
 const page = defineBlock({
-  name: 'page',
-  label: 'Page',
-  summary: 'title',
-  fields: { title: text({ label: 'Title', required: true }) },
+  name: "page",
+  label: "Page",
+  summary: "title",
+  fields: { title: text({ label: "Title", required: true }) },
   render: () => null,
-})
+});
 
 const bindings = (e: Cloudflare.Env) => ({
   db: e.DB,
   story: e.STORY,
   media: e.MEDIA,
   images: e.IMAGES,
-})
+});
 
-function folioWith(auth: AuthConfig<Cloudflare.Env> | 'open') {
+function folioWith(auth: AuthConfig<Cloudflare.Env> | "open") {
   return createFolio<Cloudflare.Env>({
     blocks: [page],
-    root: 'page',
+    root: "page",
     bindings,
-    basePath: '/folio',
+    basePath: "/folio",
     auth,
-  })
+  });
 }
 
-type Folio = ReturnType<typeof folioWith>
+type Folio = ReturnType<typeof folioWith>;
 
 function call(folio: Folio, path: string, init?: RequestInit): Promise<Response> {
   return folio.handle(
     new Request(`${ORIGIN}${path}`, init),
     env,
     createExecutionContext(),
-  ) as Promise<Response>
+  ) as Promise<Response>;
 }
 
 /** The `Set-Cookie` values a response carries, in order. */
 function setCookies(res: Response): string[] {
-  const all = res.headers.getSetCookie?.()
-  if (all && all.length > 0) return all
-  const one = res.headers.get('set-cookie')
-  return one ? [one] : []
+  const all = res.headers.getSetCookie?.();
+  if (all && all.length > 0) return all;
+  const one = res.headers.get("set-cookie");
+  return one ? [one] : [];
 }
 
 /** One cookie's value out of a response, by name. */
 function cookieFrom(res: Response, name: string): string | null {
   for (const raw of setCookies(res)) {
-    const [pair] = raw.split(';')
-    const eq = pair?.indexOf('=') ?? -1
-    if (eq === -1 || !pair) continue
-    if (pair.slice(0, eq) !== name) continue
-    return pair.slice(eq + 1) || null
+    const [pair] = raw.split(";");
+    const eq = pair?.indexOf("=") ?? -1;
+    if (eq === -1 || !pair) continue;
+    if (pair.slice(0, eq) !== name) continue;
+    return pair.slice(eq + 1) || null;
   }
-  return null
+  return null;
 }
 
 /** The captured sign-in mail, since the host's `send` is what receives it. */
-let outbox: MagicLinkMail[] = []
+let outbox: MagicLinkMail[] = [];
 
 const capturingMagicLink = magicLink<Cloudflare.Env>({
   send: (_env, mail) => {
-    outbox.push(mail)
+    outbox.push(mail);
   },
-})
+});
 
-const magicAuth: AuthConfig<Cloudflare.Env> = { providers: [capturingMagicLink] }
+const magicAuth: AuthConfig<Cloudflare.Env> = { providers: [capturingMagicLink] };
 
 beforeEach(async () => {
-  outbox = []
-  resetDiscoveryCache()
+  outbox = [];
+  resetDiscoveryCache();
   await env.DB.batch([
-    env.DB.prepare('delete from sessions'),
-    env.DB.prepare('delete from login_challenges'),
-    env.DB.prepare('delete from auth_events'),
-    env.DB.prepare('delete from users'),
-  ])
-})
+    env.DB.prepare("delete from sessions"),
+    env.DB.prepare("delete from login_challenges"),
+    env.DB.prepare("delete from auth_events"),
+    env.DB.prepare("delete from users"),
+  ]);
+});
 
-const seedEditor = (role: 'viewer' | 'editor' | 'publisher' | 'admin' = 'editor') =>
-  createUser(env.DB, { email: 'ann@example.com', name: 'Ann', role })
+const seedEditor = (role: "viewer" | "editor" | "publisher" | "admin" = "editor") =>
+  createUser(env.DB, { email: "ann@example.com", name: "Ann", role });
 
 /* ------------------------------------------- where a sign-in lands, by shape --- */
 
-describe('the default post-sign-in destination', () => {
+describe("the default post-sign-in destination", () => {
   const multiSite = () =>
     createFolio<Cloudflare.Env>({
       blocks: [page],
-      root: 'page',
+      root: "page",
       bindings,
-      basePath: '/folio',
+      basePath: "/folio",
       auth: magicAuth,
-      route: (p) => (p ? `/${p}` : '/'),
+      route: (p) => (p ? `/${p}` : "/"),
       sites: { admin: ORIGIN },
-    })
+    });
 
   const verifyWith = async (folio: Folio, next?: string) => {
-    await seedEditor()
-    await requestLink(folio, 'ann@example.com')
-    const t = new URL(outbox[0]!.url).searchParams.get('t') ?? ''
+    await seedEditor();
+    await requestLink(folio, "ann@example.com");
+    const t = new URL(outbox[0]!.url).searchParams.get("t") ?? "";
     return call(
       folio,
-      `/folio/login/verify?t=${t}${next ? `&next=${encodeURIComponent(next)}` : ''}`,
-    )
-  }
+      `/folio/login/verify?t=${t}${next ? `&next=${encodeURIComponent(next)}` : ""}`,
+    );
+  };
 
-  it('is the editor on a single-site deployment', async () => {
-    const res = await verifyWith(folioWith(magicAuth))
-    expect(res.headers.get('location')).toBe('/folio/edit')
-  })
+  it("is the editor on a single-site deployment", async () => {
+    const res = await verifyWith(folioWith(magicAuth));
+    expect(res.headers.get("location")).toBe("/folio/edit");
+  });
 
-  it('is the unscoped admin shell on a multi-site deployment', async () => {
-    const res = await verifyWith(multiSite())
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/folio/')
-  })
+  it("is the unscoped admin shell on a multi-site deployment", async () => {
+    const res = await verifyWith(multiSite());
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/folio/");
+  });
 
-  it('yields to an explicit next on a multi-site deployment', async () => {
-    const res = await verifyWith(multiSite(), '/folio/~alpha/edit')
-    expect(res.headers.get('location')).toBe('/folio/~alpha/edit')
-  })
+  it("yields to an explicit next on a multi-site deployment", async () => {
+    const res = await verifyWith(multiSite(), "/folio/~alpha/edit");
+    expect(res.headers.get("location")).toBe("/folio/~alpha/edit");
+  });
 
-  it('redirects a signed-in {base}/edit with no scope to {base}/ instead of a 404', async () => {
-    const folio = multiSite()
-    const signIn = await verifyWith(folio)
-    const cookie = `${SECURE_COOKIE}=${cookieFrom(signIn, SECURE_COOKIE)}`
-    const res = await call(folio, '/folio/edit', { headers: { cookie } })
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/folio/')
-  })
+  it("redirects a signed-in {base}/edit with no scope to {base}/ instead of a 404", async () => {
+    const folio = multiSite();
+    const signIn = await verifyWith(folio);
+    const cookie = `${SECURE_COOKIE}=${cookieFrom(signIn, SECURE_COOKIE)}`;
+    const res = await call(folio, "/folio/edit", { headers: { cookie } });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/folio/");
+  });
 
-  it('sends an anonymous multi-site visitor to login with a next that resolves', async () => {
-    const res = await call(multiSite(), '/folio/edit')
-    const to = new URL(res.headers.get('location') ?? '', ORIGIN)
-    expect(to.pathname).toBe('/folio/login')
-    expect(to.searchParams.get('next')).toBe('/folio/edit')
-  })
-})
+  it("sends an anonymous multi-site visitor to login with a next that resolves", async () => {
+    const res = await call(multiSite(), "/folio/edit");
+    const to = new URL(res.headers.get("location") ?? "", ORIGIN);
+    expect(to.pathname).toBe("/folio/login");
+    expect(to.searchParams.get("next")).toBe("/folio/edit");
+  });
+});
 
 /* --------------------------------------------------------- the login page --- */
 
-describe('GET /folio/login', () => {
-  it('renders a form with no client bundle at all', async () => {
-    const res = await call(folioWith(magicAuth), '/folio/login')
-    const html = await res.text()
+describe("GET /folio/login", () => {
+  it("renders a form with no client bundle at all", async () => {
+    const res = await call(folioWith(magicAuth), "/folio/login");
+    const html = await res.text();
 
-    expect(res.status).toBe(200)
-    expect(html).toContain('action="/folio/login/email"')
-    expect(html).toContain('name="email"')
+    expect(res.status).toBe(200);
+    expect(html).toContain('action="/folio/login/email"');
+    expect(html).toContain('name="email"');
     // Architecture decision 7: a login page that needs a bundle to work is a
     // worse failure than an ugly one. No module script, no bootstrap global.
     // `foundation/passkeys.md` decision 4: this holds because `magicAuth` lists
     // no `passkeys()` — the acceptance criterion "GIVEN passkeys() is not
     // configured, THEN the HTML contains no <script> at all and no
     // button#folio-passkey".
-    expect(html).not.toContain('<script')
-    expect(html).not.toContain('folio-passkey')
-    expect(html).toContain('autoComplete="email"')
-    expect(html).toContain('Email me a sign-in link')
-  })
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("folio-passkey");
+    expect(html).toContain('autoComplete="email"');
+    expect(html).toContain("Email me a sign-in link");
+  });
 
-  it('renders one button per redirect provider and the form for the mail one', async () => {
+  it("renders one button per redirect provider and the form for the mail one", async () => {
     const res = await call(
       folioWith({
         providers: [
           capturingMagicLink,
           oidc<Cloudflare.Env>({
-            issuer: 'https://idp.test',
-            clientId: 'cid',
-            clientSecret: 'secret',
-            label: 'Sign in with Work',
+            issuer: "https://idp.test",
+            clientId: "cid",
+            clientSecret: "secret",
+            label: "Sign in with Work",
           }),
         ],
       }),
-      '/folio/login',
-    )
-    const html = await res.text()
-    expect(html).toContain('href="/folio/login/oidc?next=%2Ffolio%2Fedit"')
-    expect(html).toContain('Sign in with Work')
-    expect(html).toContain('name="email"')
-  })
+      "/folio/login",
+    );
+    const html = await res.text();
+    expect(html).toContain('href="/folio/login/oidc?next=%2Ffolio%2Fedit"');
+    expect(html).toContain("Sign in with Work");
+    expect(html).toContain('name="email"');
+  });
 
   it("404s under auth: 'open', where there is nothing to sign in to", async () => {
-    const res = await call(folioWith('open'), '/folio/login')
-    expect(res.status).toBe(404)
-  })
+    const res = await call(folioWith("open"), "/folio/login");
+    expect(res.status).toBe(404);
+  });
 
-  it('refuses to carry an off-site `next` through the form', async () => {
-    const res = await call(folioWith(magicAuth), '/folio/login?next=%2F%2Fevil.example%2Fsteal')
-    const html = await res.text()
+  it("refuses to carry an off-site `next` through the form", async () => {
+    const res = await call(folioWith(magicAuth), "/folio/login?next=%2F%2Fevil.example%2Fsteal");
+    const html = await res.text();
     // `//evil.example` is a protocol-relative URL: the case a bare
     // startsWith('/') check waves through, and an open redirect out of a login
     // page is the most useful kind there is.
-    expect(html).not.toContain('evil.example')
-    expect(html).toContain('value="/folio/edit"')
-  })
-})
+    expect(html).not.toContain("evil.example");
+    expect(html).toContain('value="/folio/edit"');
+  });
+});
 
 /* --------------------------------------------- the passkey login script --- */
 
@@ -234,353 +234,355 @@ describe('GET /folio/login', () => {
  * `scriptHash` does — independently, so the test is not just asserting the
  * function equals itself. */
 async function sha256Hash(text: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  let binary = ''
-  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte)
-  return `sha256-${btoa(binary)}`
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  let binary = "";
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte);
+  return `sha256-${btoa(binary)}`;
 }
 
-describe('GET /folio/login with passkeys() configured (foundation/passkeys.md decision 4)', () => {
+describe("GET /folio/login with passkeys() configured (foundation/passkeys.md decision 4)", () => {
   const withPasskeys: AuthConfig<Cloudflare.Env> = {
     providers: [capturingMagicLink, passkeys()],
-  }
+  };
 
-  it('ships exactly one inline script, a hidden button, and the webauthn autocomplete token', async () => {
-    const res = await call(folioWith(withPasskeys), '/folio/login')
-    const html = await res.text()
+  it("ships exactly one inline script, a hidden button, and the webauthn autocomplete token", async () => {
+    const res = await call(folioWith(withPasskeys), "/folio/login");
+    const html = await res.text();
 
-    expect(res.status).toBe(200)
-    const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)]
-    expect(scripts).toHaveLength(1)
+    expect(res.status).toBe(200);
+    const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)];
+    expect(scripts).toHaveLength(1);
     // No `src` attribute — it never bundles, whatever else it does.
-    expect(scripts[0]![1]).not.toContain('src')
+    expect(scripts[0]![1]).not.toContain("src");
 
-    expect(html).toMatch(/<button[^>]*id="folio-passkey"[^>]*hidden/)
-    expect(html).toContain('autoComplete="username webauthn"')
+    expect(html).toMatch(/<button[^>]*id="folio-passkey"[^>]*hidden/);
+    expect(html).toContain('autoComplete="username webauthn"');
     // The email form posts exactly as it does today.
-    expect(html).toContain('action="/folio/login/email"')
-    expect(html).toContain('method="post"')
+    expect(html).toContain('action="/folio/login/email"');
+    expect(html).toContain('method="post"');
 
     // The hash a host puts in a CSP's `script-src` matches the literal that
     // actually shipped, computed independently rather than by re-reading the
     // exported constant — a one-character edit to the script must fail this.
-    expect(await sha256Hash(scripts[0]![2]!)).toBe(LOGIN_PASSKEY_SCRIPT_HASH)
-  })
+    expect(await sha256Hash(scripts[0]![2]!)).toBe(LOGIN_PASSKEY_SCRIPT_HASH);
+  });
 
-  it('ships nothing passkey-shaped for a deployment that never listed the provider', async () => {
-    const res = await call(folioWith(magicAuth), '/folio/login')
-    const html = await res.text()
-    expect(html).not.toContain('<script')
-    expect(html).not.toContain('folio-passkey')
-    expect(html).toContain('autoComplete="email"')
-  })
-})
+  it("ships nothing passkey-shaped for a deployment that never listed the provider", async () => {
+    const res = await call(folioWith(magicAuth), "/folio/login");
+    const html = await res.text();
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("folio-passkey");
+    expect(html).toContain('autoComplete="email"');
+  });
+});
 
 /* ------------------------------------------------------------ magic links --- */
 
 async function requestLink(folio: Folio, email: string): Promise<Response> {
-  return call(folio, '/folio/login/email', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
+  return call(folio, "/folio/login/email", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ email }),
-  })
+  });
 }
 
-describe('the scope a sign-in mail is told about', () => {
+describe("the scope a sign-in mail is told about", () => {
   const multiSite = () =>
     createFolio<Cloudflare.Env>({
       blocks: [page],
-      root: 'page',
+      root: "page",
       bindings,
-      basePath: '/folio',
+      basePath: "/folio",
       auth: magicAuth,
-      route: (p) => (p ? `/${p}` : '/'),
+      route: (p) => (p ? `/${p}` : "/"),
       sites: { admin: ORIGIN },
-    })
+    });
 
   const mailFor = async (folio: Folio, next?: string) => {
-    await seedEditor()
-    const res = await call(folio, '/folio/login/email', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      body: JSON.stringify({ email: 'ann@example.com', ...(next ? { next } : {}) }),
-    })
-    expect(res.status).toBe(200)
-    expect(outbox).toHaveLength(1)
-    return outbox[0]!
-  }
+    await seedEditor();
+    const res = await call(folio, "/folio/login/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ email: "ann@example.com", ...(next ? { next } : {}) }),
+    });
+    expect(res.status).toBe(200);
+    expect(outbox).toHaveLength(1);
+    return outbox[0]!;
+  };
 
   beforeEach(async () => {
     await env.DB.batch([
-      env.DB.prepare('delete from sites'),
+      env.DB.prepare("delete from sites"),
       env.DB.prepare(
         `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
            ('north', 'group', 'North Group', null, null, null, 0, 0),
            ('alpha', 'site', 'Alpha Safaris', 'north', 'live', null, 0, 0)`,
       ),
-    ])
-  })
+    ]);
+  });
 
   afterAll(async () => {
-    await env.DB.prepare('delete from sites').run()
-  })
+    await env.DB.prepare("delete from sites").run();
+  });
 
-  it('names the site a next points at, with no brand yet', async () => {
-    const mail = await mailFor(multiSite(), '/folio/~alpha/edit')
-    expect(mail.scope).toEqual({ id: 'alpha', name: 'Alpha Safaris', brand: null })
-  })
+  it("names the site a next points at, with no brand yet", async () => {
+    const mail = await mailFor(multiSite(), "/folio/~alpha/edit");
+    expect(mail.scope).toEqual({ id: "alpha", name: "Alpha Safaris", brand: null });
+  });
 
-  it('names a group too', async () => {
-    const mail = await mailFor(multiSite(), '/folio/~north/')
-    expect(mail.scope).toEqual({ id: 'north', name: 'North Group', brand: null })
-  })
+  it("names a group too", async () => {
+    const mail = await mailFor(multiSite(), "/folio/~north/");
+    expect(mail.scope).toEqual({ id: "north", name: "North Group", brand: null });
+  });
 
-  it('names the brand of a scope on a deployment with brands, and null on one without', async () => {
+  it("names the brand of a scope on a deployment with brands, and null on one without", async () => {
     await env.DB.batch([
-      env.DB.prepare('delete from sites'),
+      env.DB.prepare("delete from sites"),
       env.DB.prepare(
         `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
            ('tog', 'site', 'Take Off Go AU', null, 'live', null, 'takeoffgo', 0, 0),
            ('orphan', 'site', 'Orphan', null, 'live', null, null, 0, 0)`,
       ),
-    ])
+    ]);
     const branded = createFolio<Cloudflare.Env>({
-      brands: { takeoffgo: { label: 'Take Off Go', blocks: [page], root: 'page' } },
+      brands: { takeoffgo: { label: "Take Off Go", blocks: [page], root: "page" } },
       bindings,
-      basePath: '/folio',
+      basePath: "/folio",
       auth: magicAuth,
-      route: (p) => (p ? `/${p}` : '/'),
+      route: (p) => (p ? `/${p}` : "/"),
       sites: { admin: ORIGIN },
-    })
-    const mail = await mailFor(branded, '/folio/~tog/edit')
+    });
+    const mail = await mailFor(branded, "/folio/~tog/edit");
     expect(mail.scope).toEqual({
-      id: 'tog',
-      name: 'Take Off Go AU',
-      brand: { id: 'takeoffgo', label: 'Take Off Go' },
-    })
-  })
+      id: "tog",
+      name: "Take Off Go AU",
+      brand: { id: "takeoffgo", label: "Take Off Go" },
+    });
+  });
 
-  it('leaves it off with no scope in next', async () => {
-    expect('scope' in (await mailFor(multiSite()))).toBe(false)
-  })
+  it("leaves it off with no scope in next", async () => {
+    expect("scope" in (await mailFor(multiSite()))).toBe(false);
+  });
 
-  it('leaves it off for a scope the registry does not hold', async () => {
-    expect('scope' in (await mailFor(multiSite(), '/folio/~nowhere/edit'))).toBe(false)
-  })
+  it("leaves it off for a scope the registry does not hold", async () => {
+    expect("scope" in (await mailFor(multiSite(), "/folio/~nowhere/edit"))).toBe(false);
+  });
 
-  it('leaves it off on a single-site deployment', async () => {
-    const mail = await mailFor(folioWith(magicAuth), '/folio/~alpha/edit')
-    expect('scope' in mail).toBe(false)
-  })
-})
+  it("leaves it off on a single-site deployment", async () => {
+    const mail = await mailFor(folioWith(magicAuth), "/folio/~alpha/edit");
+    expect("scope" in mail).toBe(false);
+  });
+});
 
-describe('POST /folio/login/email', () => {
-  it('mails a link to a known address', async () => {
-    await seedEditor()
-    const res = await requestLink(folioWith(magicAuth), 'ann@example.com')
+describe("POST /folio/login/email", () => {
+  it("mails a link to a known address", async () => {
+    await seedEditor();
+    const res = await requestLink(folioWith(magicAuth), "ann@example.com");
 
-    expect(res.status).toBe(200)
-    expect(outbox).toHaveLength(1)
-    expect(outbox[0]?.email).toBe('ann@example.com')
-    expect(outbox[0]?.url).toContain('/folio/login/verify?t=')
+    expect(res.status).toBe(200);
+    expect(outbox).toHaveLength(1);
+    expect(outbox[0]?.email).toBe("ann@example.com");
+    expect(outbox[0]?.url).toContain("/folio/login/verify?t=");
     // 15 minutes, and the host is told when so it can say so in the mail.
-    expect(outbox[0]?.expiresAt).toBeGreaterThan(Date.now())
-    expect(outbox[0]?.expiresAt).toBeLessThanOrEqual(Date.now() + CHALLENGE_TTL_MS)
-  })
+    expect(outbox[0]?.expiresAt).toBeGreaterThan(Date.now());
+    expect(outbox[0]?.expiresAt).toBeLessThanOrEqual(Date.now() + CHALLENGE_TTL_MS);
+  });
 
-  it('answers an unknown address byte-identically and sends nothing', async () => {
-    await seedEditor()
-    const known = await requestLink(folioWith(magicAuth), 'ann@example.com')
-    const unknown = await requestLink(folioWith(magicAuth), 'nobody@example.com')
+  it("answers an unknown address byte-identically and sends nothing", async () => {
+    await seedEditor();
+    const known = await requestLink(folioWith(magicAuth), "ann@example.com");
+    const unknown = await requestLink(folioWith(magicAuth), "nobody@example.com");
 
-    expect(unknown.status).toBe(known.status)
+    expect(unknown.status).toBe(known.status);
     // Byte-identical: a different message, or even a different status, turns
     // this route into an oracle for who has access to the CMS.
-    expect(await unknown.text()).toBe(await known.text())
-    expect(outbox).toHaveLength(1)
+    expect(await unknown.text()).toBe(await known.text());
+    expect(outbox).toHaveLength(1);
     // And nothing was written for the unknown address either — a row count is
     // just as much of a leak to anyone who can read the database.
-    const rows = await env.DB.prepare('select email from login_challenges').all<{ email: string }>()
-    expect(rows.results.map((r) => r.email)).toEqual(['ann@example.com'])
-  })
+    const rows = await env.DB.prepare("select email from login_challenges").all<{
+      email: string;
+    }>();
+    expect(rows.results.map((r) => r.email)).toEqual(["ann@example.com"]);
+  });
 
-  it('stops mailing past the per-address hourly limit, with the same answer', async () => {
-    await seedEditor()
-    const folio = folioWith({ providers: [capturingMagicLink], linksPerHour: 2 })
+  it("stops mailing past the per-address hourly limit, with the same answer", async () => {
+    await seedEditor();
+    const folio = folioWith({ providers: [capturingMagicLink], linksPerHour: 2 });
 
-    const first = await requestLink(folio, 'ann@example.com')
-    await requestLink(folio, 'ann@example.com')
-    const third = await requestLink(folio, 'ann@example.com')
+    const first = await requestLink(folio, "ann@example.com");
+    await requestLink(folio, "ann@example.com");
+    const third = await requestLink(folio, "ann@example.com");
 
-    expect(outbox).toHaveLength(2)
+    expect(outbox).toHaveLength(2);
     // The limit bounds how much mail one address can be made to receive; it
     // must not become a way to find out that the limit was hit.
-    expect(await third.text()).toBe(await first.text())
-  })
+    expect(await third.text()).toBe(await first.text());
+  });
 
-  it('re-renders the login page for a form post, since the page ships no JS', async () => {
-    await seedEditor()
-    const res = await call(folioWith(magicAuth), '/folio/login/email', {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'text/html' },
-      body: new URLSearchParams({ email: 'ann@example.com' }).toString(),
-    })
-    const html = await res.text()
-    expect(res.status).toBe(200)
-    expect(html).toContain('a sign-in link is on its way')
-    expect(outbox).toHaveLength(1)
-  })
+  it("re-renders the login page for a form post, since the page ships no JS", async () => {
+    await seedEditor();
+    const res = await call(folioWith(magicAuth), "/folio/login/email", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html" },
+      body: new URLSearchParams({ email: "ann@example.com" }).toString(),
+    });
+    const html = await res.text();
+    expect(res.status).toBe(200);
+    expect(html).toContain("a sign-in link is on its way");
+    expect(outbox).toHaveLength(1);
+  });
 
-  it('refuses a body that is not an email address', async () => {
-    const res = await requestLink(folioWith(magicAuth), 'not-an-address')
-    expect(res.status).toBe(400)
-    expect(await res.json()).toMatchObject({ error: { code: 'bad_request' } })
-  })
-})
+  it("refuses a body that is not an email address", async () => {
+    const res = await requestLink(folioWith(magicAuth), "not-an-address");
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: { code: "bad_request" } });
+  });
+});
 
-describe('GET /folio/login/verify', () => {
-  const tokenOf = (mail: MagicLinkMail) => new URL(mail.url).searchParams.get('t') ?? ''
+describe("GET /folio/login/verify", () => {
+  const tokenOf = (mail: MagicLinkMail) => new URL(mail.url).searchParams.get("t") ?? "";
 
-  it('creates a session, sets the prefixed cookie on https, and redirects', async () => {
-    const user = await seedEditor()
-    const folio = folioWith(magicAuth)
-    await requestLink(folio, 'ann@example.com')
-    const token = tokenOf(outbox[0]!)
+  it("creates a session, sets the prefixed cookie on https, and redirects", async () => {
+    const user = await seedEditor();
+    const folio = folioWith(magicAuth);
+    await requestLink(folio, "ann@example.com");
+    const token = tokenOf(outbox[0]!);
 
-    const res = await call(folio, `/folio/login/verify?t=${token}&next=%2Ffolio%2Fedit`)
+    const res = await call(folio, `/folio/login/verify?t=${token}&next=%2Ffolio%2Fedit`);
 
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/folio/edit')
-    const cookie = cookieFrom(res, SECURE_COOKIE)
-    expect(cookie).toMatch(/^[0-9a-f]{64}$/)
-    expect(cookieFrom(res, PLAIN_COOKIE)).toBeNull()
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/folio/edit");
+    const cookie = cookieFrom(res, SECURE_COOKIE);
+    expect(cookie).toMatch(/^[0-9a-f]{64}$/);
+    expect(cookieFrom(res, PLAIN_COOKIE)).toBeNull();
 
-    const actor = (await readSession(env.DB, cookie!)) as UserActor
-    expect(actor).toMatchObject({ kind: 'user', id: user.id, name: 'Ann', role: 'editor' })
-  })
+    const actor = (await readSession(env.DB, cookie!)) as UserActor;
+    expect(actor).toMatchObject({ kind: "user", id: user.id, name: "Ann", role: "editor" });
+  });
 
-  it('is single use: the second open is refused and creates no session', async () => {
-    await seedEditor()
-    const folio = folioWith(magicAuth)
-    await requestLink(folio, 'ann@example.com')
-    const token = tokenOf(outbox[0]!)
+  it("is single use: the second open is refused and creates no session", async () => {
+    await seedEditor();
+    const folio = folioWith(magicAuth);
+    await requestLink(folio, "ann@example.com");
+    const token = tokenOf(outbox[0]!);
 
-    await call(folio, `/folio/login/verify?t=${token}`)
-    const again = await call(folio, `/folio/login/verify?t=${token}`)
+    await call(folio, `/folio/login/verify?t=${token}`);
+    const again = await call(folio, `/folio/login/verify?t=${token}`);
 
-    expect(again.status).toBe(302)
-    expect(again.headers.get('location')).toContain('error=link')
-    expect(setCookies(again)).toEqual([])
-    const rows = await env.DB.prepare('select count(*) as n from sessions').first<{ n: number }>()
-    expect(rows?.n).toBe(1)
-  })
+    expect(again.status).toBe(302);
+    expect(again.headers.get("location")).toContain("error=link");
+    expect(setCookies(again)).toEqual([]);
+    const rows = await env.DB.prepare("select count(*) as n from sessions").first<{ n: number }>();
+    expect(rows?.n).toBe(1);
+  });
 
-  it('is refused past its expiry, with the same generic message', async () => {
-    await seedEditor()
-    const folio = folioWith(magicAuth)
-    await requestLink(folio, 'ann@example.com')
-    const token = tokenOf(outbox[0]!)
+  it("is refused past its expiry, with the same generic message", async () => {
+    await seedEditor();
+    const folio = folioWith(magicAuth);
+    await requestLink(folio, "ann@example.com");
+    const token = tokenOf(outbox[0]!);
     // Aged past the window, leeway included.
-    await env.DB.prepare('update login_challenges set expires_at = ?')
+    await env.DB.prepare("update login_challenges set expires_at = ?")
       .bind(Date.now() - 5 * 60 * 1000)
-      .run()
+      .run();
 
-    const res = await call(folio, `/folio/login/verify?t=${token}`)
-    expect(res.headers.get('location')).toContain('error=link')
-    const rows = await env.DB.prepare('select count(*) as n from sessions').first<{ n: number }>()
-    expect(rows?.n).toBe(0)
-  })
+    const res = await call(folio, `/folio/login/verify?t=${token}`);
+    expect(res.headers.get("location")).toContain("error=link");
+    const rows = await env.DB.prepare("select count(*) as n from sessions").first<{ n: number }>();
+    expect(rows?.n).toBe(0);
+  });
 
-  it('refuses a token nobody minted', async () => {
-    await seedEditor()
-    const res = await call(folioWith(magicAuth), `/folio/login/verify?t=${'a'.repeat(64)}`)
-    expect(res.headers.get('location')).toContain('error=link')
-  })
+  it("refuses a token nobody minted", async () => {
+    await seedEditor();
+    const res = await call(folioWith(magicAuth), `/folio/login/verify?t=${"a".repeat(64)}`);
+    expect(res.headers.get("location")).toContain("error=link");
+  });
 
-  it('refuses a valid link whose account has been removed since it was issued', async () => {
-    const user = await seedEditor()
-    const folio = folioWith(magicAuth)
-    await requestLink(folio, 'ann@example.com')
-    await env.DB.prepare('delete from users where id = ?').bind(user.id).run()
+  it("refuses a valid link whose account has been removed since it was issued", async () => {
+    const user = await seedEditor();
+    const folio = folioWith(magicAuth);
+    await requestLink(folio, "ann@example.com");
+    await env.DB.prepare("delete from users where id = ?").bind(user.id).run();
 
-    const res = await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`)
+    const res = await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`);
     // Refused, not provisioned: a magic link proves an address, and access is a
     // list someone maintains.
-    expect(res.headers.get('location')).toContain('error=refused')
-  })
+    expect(res.headers.get("location")).toContain("error=refused");
+  });
 
-  it('stamps `users.provider` with the provider that signed them in', async () => {
+  it("stamps `users.provider` with the provider that signed them in", async () => {
     // **The bug `completeSignIn` exists to make unrepeatable.** `users.provider`
     // was written by the OIDC callback's inline `createUser` and by nothing
     // else, so every magic-link user read "—" in the Access screen's "Signs in
     // with" column — a visible wrong answer, three files from the omission.
-    const user = await seedEditor()
-    const folio = folioWith(magicAuth)
-    await requestLink(folio, 'ann@example.com')
-    expect(user.provider).toBeNull()
+    const user = await seedEditor();
+    const folio = folioWith(magicAuth);
+    await requestLink(folio, "ann@example.com");
+    expect(user.provider).toBeNull();
 
-    await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`)
+    await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`);
 
-    expect((await userByEmail(env.DB, 'ann@example.com'))?.provider).toBe('magic')
+    expect((await userByEmail(env.DB, "ann@example.com"))?.provider).toBe("magic");
     // And the session records the provider that minted it, which is what logout
     // reads to decide where the browser goes next.
-    const row = await env.DB.prepare('select provider from sessions').first<{
-      provider: string | null
-    }>()
-    expect(row?.provider).toBe('magic')
-  })
+    const row = await env.DB.prepare("select provider from sessions").first<{
+      provider: string | null;
+    }>();
+    expect(row?.provider).toBe("magic");
+  });
 
-  it('records the sign-in as one auth_events row, in the session’s own batch', async () => {
-    const user = await seedEditor()
-    const folio = folioWith(magicAuth)
-    await requestLink(folio, 'ann@example.com')
-    await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`)
+  it("records the sign-in as one auth_events row, in the session’s own batch", async () => {
+    const user = await seedEditor();
+    const folio = folioWith(magicAuth);
+    await requestLink(folio, "ann@example.com");
+    await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`);
 
     const { results } = await env.DB.prepare(
-      'select kind, user_id, actor, provider from auth_events',
-    ).all<{ kind: string; user_id: string; actor: string; provider: string }>()
+      "select kind, user_id, actor, provider from auth_events",
+    ).all<{ kind: string; user_id: string; actor: string; provider: string }>();
     // A sign-in is the one event whose actor is its own subject.
     expect(results).toEqual([
-      { kind: 'sign_in', user_id: user.id, actor: user.id, provider: 'magic' },
-    ])
-  })
+      { kind: "sign_in", user_id: user.id, actor: user.id, provider: "magic" },
+    ]);
+  });
 
-  it('will not be talked into redirecting off-site', async () => {
-    await seedEditor()
-    const folio = folioWith(magicAuth)
-    await requestLink(folio, 'ann@example.com')
+  it("will not be talked into redirecting off-site", async () => {
+    await seedEditor();
+    const folio = folioWith(magicAuth);
+    await requestLink(folio, "ann@example.com");
 
     const res = await call(
       folio,
       `/folio/login/verify?t=${tokenOf(outbox[0]!)}&next=https%3A%2F%2Fevil.example`,
-    )
-    expect(res.headers.get('location')).toBe('/folio/edit')
-  })
-})
+    );
+    expect(res.headers.get("location")).toBe("/folio/edit");
+  });
+});
 
 /* --------------------------------------------------------- logout and /me --- */
 
-describe('sessions over HTTP', () => {
+describe("sessions over HTTP", () => {
   async function signedIn(folio: Folio): Promise<string> {
-    await seedEditor()
-    await requestLink(folio, 'ann@example.com')
-    const token = new URL(outbox[0]!.url).searchParams.get('t') ?? ''
-    const res = await call(folio, `/folio/login/verify?t=${token}`)
-    return `${SECURE_COOKIE}=${cookieFrom(res, SECURE_COOKIE)}`
+    await seedEditor();
+    await requestLink(folio, "ann@example.com");
+    const token = new URL(outbox[0]!.url).searchParams.get("t") ?? "";
+    const res = await call(folio, `/folio/login/verify?t=${token}`);
+    return `${SECURE_COOKIE}=${cookieFrom(res, SECURE_COOKIE)}`;
   }
 
-  it('GET /folio/api/me names the actor and their role', async () => {
-    const folio = folioWith(magicAuth)
-    const cookie = await signedIn(folio)
+  it("GET /folio/api/me names the actor and their role", async () => {
+    const folio = folioWith(magicAuth);
+    const cookie = await signedIn(folio);
 
-    const res = await call(folio, '/folio/api/me', { headers: { cookie } })
-    expect(res.status).toBe(200)
+    const res = await call(folio, "/folio/api/me", { headers: { cookie } });
+    expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({
-      mode: 'session',
-      actor: { kind: 'user', name: 'Ann', role: 'editor' },
-      loginUrl: '/folio/login',
-    })
-  })
+      mode: "session",
+      actor: { kind: "user", name: "Ann", role: "editor" },
+      loginUrl: "/folio/login",
+    });
+  });
 
   /**
    * The account screen's Identity section reads all four off `me.actor`, so a
@@ -593,16 +595,16 @@ describe('sessions over HTTP', () => {
    * `roleFrom` is null here because Folio placed this role. The provider-set
    * case is covered where the interaction table is, in the roles block.
    */
-  it('GET /folio/api/me answers the caller their own email and who set their role', async () => {
-    const folio = folioWith(magicAuth)
-    const cookie = await signedIn(folio)
+  it("GET /folio/api/me answers the caller their own email and who set their role", async () => {
+    const folio = folioWith(magicAuth);
+    const cookie = await signedIn(folio);
 
-    const res = await call(folio, '/folio/api/me', { headers: { cookie } })
-    expect(res.status).toBe(200)
-    const body = await res.json<{ actor: { email?: string; roleFrom?: string | null } }>()
-    expect(body.actor.email).toBe('ann@example.com')
-    expect(body.actor.roleFrom).toBeNull()
-  })
+    const res = await call(folio, "/folio/api/me", { headers: { cookie } });
+    expect(res.status).toBe(200);
+    const body = await res.json<{ actor: { email?: string; roleFrom?: string | null } }>();
+    expect(body.actor.email).toBe("ann@example.com");
+    expect(body.actor.roleFrom).toBeNull();
+  });
 
   /**
    * The `SPACE` flag, and **the reason it is answered here at all**.
@@ -619,137 +621,137 @@ describe('sessions over HTTP', () => {
    * Both directions, because only the pair says anything: a route that hardcoded
    * `true` and a route that hardcoded `false` each pass one of these.
    */
-  it('GET /folio/api/me says whether the host declared the space binding', async () => {
-    const withoutSpace = folioWith(magicAuth)
-    const cookie = await signedIn(withoutSpace)
+  it("GET /folio/api/me says whether the host declared the space binding", async () => {
+    const withoutSpace = folioWith(magicAuth);
+    const cookie = await signedIn(withoutSpace);
 
     expect(
-      await (await call(withoutSpace, '/folio/api/me', { headers: { cookie } })).json(),
+      await (await call(withoutSpace, "/folio/api/me", { headers: { cookie } })).json(),
     ).toMatchObject({
       space: false,
-    })
+    });
 
     const withSpace = createFolio<Cloudflare.Env>({
       blocks: [page],
-      root: 'page',
+      root: "page",
       bindings: (e) => ({ ...bindings(e), space: e.SPACE }),
-      basePath: '/folio',
+      basePath: "/folio",
       auth: magicAuth,
-    })
+    });
     expect(
-      await (await call(withSpace, '/folio/api/me', { headers: { cookie } })).json(),
+      await (await call(withSpace, "/folio/api/me", { headers: { cookie } })).json(),
     ).toMatchObject({
       space: true,
-    })
-  })
+    });
+  });
 
-  it('GET /folio/api/me names the provider that minted this browser’s session', async () => {
+  it("GET /folio/api/me names the provider that minted this browser’s session", async () => {
     // `session.provider` is `sessions.provider`, not `users.provider`: which
     // door *this* browser came through, which is what
     // `foundation/passkeys.md`'s account screen lists beside each one.
-    const folio = folioWith(magicAuth)
-    const cookie = await signedIn(folio)
+    const folio = folioWith(magicAuth);
+    const cookie = await signedIn(folio);
 
-    const res = await call(folio, '/folio/api/me', { headers: { cookie } })
-    expect(await res.json()).toMatchObject({ session: { provider: 'magic' } })
-  })
+    const res = await call(folio, "/folio/api/me", { headers: { cookie } });
+    expect(await res.json()).toMatchObject({ session: { provider: "magic" } });
+  });
 
-  it('GET /folio/api/me carries no session block under auth: open', async () => {
-    const res = await call(folioWith('open'), '/folio/api/me')
-    expect(await res.json()).not.toHaveProperty('session')
-  })
+  it("GET /folio/api/me carries no session block under auth: open", async () => {
+    const res = await call(folioWith("open"), "/folio/api/me");
+    expect(await res.json()).not.toHaveProperty("session");
+  });
 
-  it('GET /folio/api/me is 401 with no cookie', async () => {
-    const res = await call(folioWith(magicAuth), '/folio/api/me')
-    expect(res.status).toBe(401)
-    expect(await res.json()).toMatchObject({ error: { code: 'unauthorized' } })
-  })
+  it("GET /folio/api/me is 401 with no cookie", async () => {
+    const res = await call(folioWith(magicAuth), "/folio/api/me");
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: { code: "unauthorized" } });
+  });
 
   it("GET /folio/api/me answers mode 'open' with a null actor when auth is open", async () => {
-    const res = await call(folioWith('open'), '/folio/api/me')
+    const res = await call(folioWith("open"), "/folio/api/me");
     // 200, not 404: the admin has to tell "no auth configured" apart from "not
     // signed in", because only the first is a reason to keep its own generated
     // presence identity.
-    expect(res.status).toBe(200)
-    expect(await res.json()).toMatchObject({ mode: 'open', actor: null })
-  })
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ mode: "open", actor: null });
+  });
 
-  it('POST /folio/api/logout revokes the session and clears both cookie names', async () => {
-    const folio = folioWith(magicAuth)
-    const cookie = await signedIn(folio)
-    const token = cookie.split('=')[1]!
+  it("POST /folio/api/logout revokes the session and clears both cookie names", async () => {
+    const folio = folioWith(magicAuth);
+    const cookie = await signedIn(folio);
+    const token = cookie.split("=")[1]!;
 
-    const res = await call(folio, '/folio/api/logout', { method: 'POST', headers: { cookie } })
-    expect(res.status).toBe(200)
+    const res = await call(folio, "/folio/api/logout", { method: "POST", headers: { cookie } });
+    expect(res.status).toBe(200);
     // A mail provider has no sign-out URL of its own, so `next` is the page that
     // deliberately does not resolve trusted identity. The admin follows it.
-    expect(await res.clone().json()).toEqual({ ok: true, next: '/folio/login?signedout=1' })
-    expect(await readSession(env.DB, token)).toBeNull()
-    const cleared = setCookies(res)
-    expect(cleared.some((c) => c.startsWith(`${SECURE_COOKIE}=;`))).toBe(true)
+    expect(await res.clone().json()).toEqual({ ok: true, next: "/folio/login?signedout=1" });
+    expect(await readSession(env.DB, token)).toBeNull();
+    const cleared = setCookies(res);
+    expect(cleared.some((c) => c.startsWith(`${SECURE_COOKIE}=;`))).toBe(true);
     // Both names, always: a stale plain cookie from a localhost session must not
     // outlive a sign-out.
-    expect(cleared.some((c) => c.startsWith(`${PLAIN_COOKIE}=;`))).toBe(true)
-  })
+    expect(cleared.some((c) => c.startsWith(`${PLAIN_COOKIE}=;`))).toBe(true);
+  });
 
-  it('POST /folio/api/logout still clears the cookie for an already-dead session', async () => {
-    const folio = folioWith(magicAuth)
-    const res = await call(folio, '/folio/api/logout', {
-      method: 'POST',
-      headers: { cookie: `${SECURE_COOKIE}=${'b'.repeat(64)}` },
-    })
-    expect(res.status).toBe(200)
-    expect(setCookies(res).length).toBeGreaterThan(0)
-  })
-})
+  it("POST /folio/api/logout still clears the cookie for an already-dead session", async () => {
+    const folio = folioWith(magicAuth);
+    const res = await call(folio, "/folio/api/logout", {
+      method: "POST",
+      headers: { cookie: `${SECURE_COOKIE}=${"b".repeat(64)}` },
+    });
+    expect(res.status).toBe(200);
+    expect(setCookies(res).length).toBeGreaterThan(0);
+  });
+});
 
 /* ------------------------------------------------------------------- oidc --- */
 
-const IDP = 'https://idp.test'
+const IDP = "https://idp.test";
 
 interface Keys {
-  privateKey: CryptoKey
-  jwks: { keys: JsonWebKey[] }
+  privateKey: CryptoKey;
+  jwks: { keys: JsonWebKey[] };
 }
 
-let keys: Keys
+let keys: Keys;
 
 function b64url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-const encodeJson = (value: unknown) => b64url(new TextEncoder().encode(JSON.stringify(value)))
+const encodeJson = (value: unknown) => b64url(new TextEncoder().encode(JSON.stringify(value)));
 
-async function signIdToken(claims: Record<string, unknown>, kid = 'k1'): Promise<string> {
-  const header = encodeJson({ alg: 'RS256', kid, typ: 'JWT' })
-  const payload = encodeJson(claims)
+async function signIdToken(claims: Record<string, unknown>, kid = "k1"): Promise<string> {
+  const header = encodeJson({ alg: "RS256", kid, typ: "JWT" });
+  const payload = encodeJson(claims);
   const signature = await crypto.subtle.sign(
-    { name: 'RSASSA-PKCS1-v1_5' },
+    { name: "RSASSA-PKCS1-v1_5" },
     keys.privateKey,
     new TextEncoder().encode(`${header}.${payload}`),
-  )
-  return `${header}.${payload}.${b64url(new Uint8Array(signature))}`
+  );
+  return `${header}.${payload}.${b64url(new Uint8Array(signature))}`;
 }
 
 beforeAll(async () => {
   const pair = (await crypto.subtle.generateKey(
     {
-      name: 'RSASSA-PKCS1-v1_5',
+      name: "RSASSA-PKCS1-v1_5",
       modulusLength: 2048,
       publicExponent: new Uint8Array([1, 0, 1]),
-      hash: 'SHA-256',
+      hash: "SHA-256",
     },
     true,
-    ['sign', 'verify'],
-  )) as CryptoKeyPair
-  const jwk = await crypto.subtle.exportKey('jwk', pair.publicKey)
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
   keys = {
     privateKey: pair.privateKey,
-    jwks: { keys: [{ ...jwk, kid: 'k1', alg: 'RS256', use: 'sig' } as JsonWebKey] },
-  }
-})
+    jwks: { keys: [{ ...jwk, kid: "k1", alg: "RS256", use: "sig" } as JsonWebKey] },
+  };
+});
 
 /**
  * A stand-in identity provider: the three documents the flow fetches, and
@@ -759,22 +761,22 @@ beforeAll(async () => {
  */
 function idpFetch(idToken: () => Promise<string> | string, opts: { tokenStatus?: number } = {}) {
   return async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-    if (url.endsWith('/.well-known/openid-configuration')) {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.endsWith("/.well-known/openid-configuration")) {
       return Response.json({
         issuer: IDP,
         authorization_endpoint: `${IDP}/authorize`,
         token_endpoint: `${IDP}/token`,
         jwks_uri: `${IDP}/jwks`,
-      })
+      });
     }
     if (url === `${IDP}/token`) {
-      if (opts.tokenStatus) return new Response('no', { status: opts.tokenStatus })
-      return Response.json({ id_token: await idToken(), token_type: 'Bearer' })
+      if (opts.tokenStatus) return new Response("no", { status: opts.tokenStatus });
+      return Response.json({ id_token: await idToken(), token_type: "Bearer" });
     }
-    if (url === `${IDP}/jwks`) return Response.json(keys.jwks)
-    return new Response('not found', { status: 404 })
-  }
+    if (url === `${IDP}/jwks`) return Response.json(keys.jwks);
+    return new Response("not found", { status: 404 });
+  };
 }
 
 /**
@@ -786,221 +788,221 @@ function idpFetch(idToken: () => Promise<string> | string, opts: { tokenStatus?:
  * object with `next` as a fourth field beside the three the protocol needs.
  */
 function decodeStateCookie(res: Response): {
-  next: string
-  state: { state: string; nonce: string; verifier: string }
+  next: string;
+  state: { state: string; nonce: string; verifier: string };
 } {
-  const raw = cookieFrom(res, '__Host-folio_oidc')
-  if (!raw) throw new Error('no oidc state cookie was set')
-  const padded = raw.replace(/-/g, '+').replace(/_/g, '/')
-  const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return JSON.parse(new TextDecoder().decode(bytes))
+  const raw = cookieFrom(res, "__Host-folio_oidc");
+  if (!raw) throw new Error("no oidc state cookie was set");
+  const padded = raw.replace(/-/g, "+").replace(/_/g, "/");
+  const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 function oidcFolio(
   fetchImpl: typeof fetch,
-  provision: 'refuse' | { create: true; role?: 'viewer' | 'editor' } = 'refuse',
+  provision: "refuse" | { create: true; role?: "viewer" | "editor" } = "refuse",
 ) {
   return folioWith({
     providers: [
       oidc<Cloudflare.Env>({
         issuer: IDP,
-        clientId: 'folio-client',
-        clientSecret: (e) => (e ? 'shh' : 'shh'),
+        clientId: "folio-client",
+        clientSecret: (e) => (e ? "shh" : "shh"),
         provision,
         fetchImpl,
       }),
     ],
-  })
+  });
 }
 
 const claimsFor = (state: { nonce: string }, over: Record<string, unknown> = {}) => ({
   iss: IDP,
-  aud: 'folio-client',
-  sub: 'idp-subject',
+  aud: "folio-client",
+  sub: "idp-subject",
   nonce: state.nonce,
   exp: Math.floor(Date.now() / 1000) + 300,
   iat: Math.floor(Date.now() / 1000),
-  email: 'ann@example.com',
+  email: "ann@example.com",
   email_verified: true,
-  name: 'Ann Editor',
+  name: "Ann Editor",
   ...over,
-})
+});
 
-describe('GET /folio/login/oidc', () => {
-  it('redirects to the authorization endpoint with PKCE and remembers the state', async () => {
-    const folio = oidcFolio(idpFetch(() => ''))
-    const res = await call(folio, '/folio/login/oidc?next=%2Ffolio%2Fedit%2Fsty_a')
+describe("GET /folio/login/oidc", () => {
+  it("redirects to the authorization endpoint with PKCE and remembers the state", async () => {
+    const folio = oidcFolio(idpFetch(() => ""));
+    const res = await call(folio, "/folio/login/oidc?next=%2Ffolio%2Fedit%2Fsty_a");
 
-    expect(res.status).toBe(302)
-    const target = new URL(res.headers.get('location') ?? '')
-    expect(target.origin + target.pathname).toBe(`${IDP}/authorize`)
-    expect(target.searchParams.get('response_type')).toBe('code')
-    expect(target.searchParams.get('client_id')).toBe('folio-client')
-    expect(target.searchParams.get('redirect_uri')).toBe(`${BASE}/login/oidc/callback`)
+    expect(res.status).toBe(302);
+    const target = new URL(res.headers.get("location") ?? "");
+    expect(target.origin + target.pathname).toBe(`${IDP}/authorize`);
+    expect(target.searchParams.get("response_type")).toBe("code");
+    expect(target.searchParams.get("client_id")).toBe("folio-client");
+    expect(target.searchParams.get("redirect_uri")).toBe(`${BASE}/login/oidc/callback`);
     // PKCE even for a confidential client: it binds the code to this browser,
     // so an intercepted code is useless without the verifier.
-    expect(target.searchParams.get('code_challenge_method')).toBe('S256')
-    expect(target.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
-    expect(target.searchParams.get('nonce')).toBeTruthy()
+    expect(target.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(target.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(target.searchParams.get("nonce")).toBeTruthy();
 
-    const envelope = decodeStateCookie(res)
-    expect(envelope.state.state).toBe(target.searchParams.get('state'))
+    const envelope = decodeStateCookie(res);
+    expect(envelope.state.state).toBe(target.searchParams.get("state"));
     // `next` rides in Folio's half of the envelope, and the provider never sees
     // it: `start` is handed a `redirectUri` and nothing else.
-    expect(envelope.next).toBe('/folio/edit/sty_a')
-    expect(Object.keys(envelope.state).sort()).toEqual(['nonce', 'state', 'verifier'])
-  })
+    expect(envelope.next).toBe("/folio/edit/sty_a");
+    expect(Object.keys(envelope.state).sort()).toEqual(["nonce", "state", "verifier"]);
+  });
 
-  it('404s for a provider that is not configured', async () => {
-    expect((await call(oidcFolio(idpFetch(() => '')), '/folio/login/nope')).status).toBe(404)
-  })
-})
+  it("404s for a provider that is not configured", async () => {
+    expect((await call(oidcFolio(idpFetch(() => "")), "/folio/login/nope")).status).toBe(404);
+  });
+});
 
-describe('GET /folio/login/oidc/callback', () => {
+describe("GET /folio/login/oidc/callback", () => {
   async function start(folio: Folio) {
-    const res = await call(folio, '/folio/login/oidc')
-    const cookie = `__Host-folio_oidc=${cookieFrom(res, '__Host-folio_oidc')}`
-    return { cookie, state: decodeStateCookie(res).state }
+    const res = await call(folio, "/folio/login/oidc");
+    const cookie = `__Host-folio_oidc=${cookieFrom(res, "__Host-folio_oidc")}`;
+    return { cookie, state: decodeStateCookie(res).state };
   }
 
-  it('signs in a known user and clears the state cookie', async () => {
-    const user = await seedEditor('publisher')
-    let claims: Record<string, unknown> = {}
-    const folio = oidcFolio(idpFetch(() => signIdToken(claims)))
-    const { cookie, state } = await start(folio)
-    claims = claimsFor(state)
+  it("signs in a known user and clears the state cookie", async () => {
+    const user = await seedEditor("publisher");
+    let claims: Record<string, unknown> = {};
+    const folio = oidcFolio(idpFetch(() => signIdToken(claims)));
+    const { cookie, state } = await start(folio);
+    claims = claimsFor(state);
 
     const res = await call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
       headers: { cookie },
-    })
+    });
 
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/folio/edit')
-    const session = cookieFrom(res, SECURE_COOKIE)
-    const actor = (await readSession(env.DB, session!)) as UserActor
-    expect(actor).toMatchObject({ id: user.id, role: 'publisher' })
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/folio/edit");
+    const session = cookieFrom(res, SECURE_COOKIE);
+    const actor = (await readSession(env.DB, session!)) as UserActor;
+    expect(actor).toMatchObject({ id: user.id, role: "publisher" });
     // The one-round-trip state cookie is spent.
-    expect(setCookies(res).some((c) => c.startsWith('__Host-folio_oidc=;'))).toBe(true)
-  })
+    expect(setCookies(res).some((c) => c.startsWith("__Host-folio_oidc=;"))).toBe(true);
+  });
 
-  it('refuses a mismatched state before it fetches anything', async () => {
-    await seedEditor()
-    let fetches = 0
+  it("refuses a mismatched state before it fetches anything", async () => {
+    await seedEditor();
+    let fetches = 0;
     const counting: typeof fetch = (input, init) => {
-      fetches++
-      return idpFetch(() => '')(input, init)
-    }
-    const folio = oidcFolio(counting)
-    const { cookie } = await start(folio)
-    const before = fetches
+      fetches++;
+      return idpFetch(() => "")(input, init);
+    };
+    const folio = oidcFolio(counting);
+    const { cookie } = await start(folio);
+    const before = fetches;
 
-    const res = await call(folio, '/folio/login/oidc/callback?code=abc&state=not-the-state', {
+    const res = await call(folio, "/folio/login/oidc/callback?code=abc&state=not-the-state", {
       headers: { cookie },
-    })
+    });
 
-    expect(res.headers.get('location')).toContain('error=provider')
+    expect(res.headers.get("location")).toContain("error=provider");
     // Nothing to exchange: a mismatched state is a CSRF attempt or a stale tab.
-    expect(fetches).toBe(before)
-    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
-  })
+    expect(fetches).toBe(before);
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull();
+  });
 
-  it('refuses a callback with no state cookie at all', async () => {
-    await seedEditor()
-    const folio = oidcFolio(idpFetch(() => ''))
-    const res = await call(folio, '/folio/login/oidc/callback?code=abc&state=anything')
-    expect(res.headers.get('location')).toContain('error=provider')
-  })
+  it("refuses a callback with no state cookie at all", async () => {
+    await seedEditor();
+    const folio = oidcFolio(idpFetch(() => ""));
+    const res = await call(folio, "/folio/login/oidc/callback?code=abc&state=anything");
+    expect(res.headers.get("location")).toContain("error=provider");
+  });
 
-  it('refuses an id token carrying a different nonce', async () => {
-    await seedEditor()
-    let claims: Record<string, unknown> = {}
-    const folio = oidcFolio(idpFetch(() => signIdToken(claims)))
-    const { cookie, state } = await start(folio)
+  it("refuses an id token carrying a different nonce", async () => {
+    await seedEditor();
+    let claims: Record<string, unknown> = {};
+    const folio = oidcFolio(idpFetch(() => signIdToken(claims)));
+    const { cookie, state } = await start(folio);
     // Signed by the right key, for the right client, from the right issuer —
     // and replayed from a different sign-in attempt.
-    claims = claimsFor(state, { nonce: 'someone-elses-nonce' })
+    claims = claimsFor(state, { nonce: "someone-elses-nonce" });
 
     const res = await call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
       headers: { cookie },
-    })
-    expect(res.headers.get('location')).toContain('error=provider')
-    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
-  })
+    });
+    expect(res.headers.get("location")).toContain("error=provider");
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull();
+  });
 
   it("refuses a verified email that matches no user when provision is 'refuse'", async () => {
-    let claims: Record<string, unknown> = {}
-    const folio = oidcFolio(idpFetch(() => signIdToken(claims)))
-    const { cookie, state } = await start(folio)
-    claims = claimsFor(state, { email: 'stranger@example.com' })
+    let claims: Record<string, unknown> = {};
+    const folio = oidcFolio(idpFetch(() => signIdToken(claims)));
+    const { cookie, state } = await start(folio);
+    claims = claimsFor(state, { email: "stranger@example.com" });
 
     const res = await call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
       headers: { cookie },
-    })
+    });
     // Access is a list someone maintains, not a consequence of holding an
     // account at the identity provider.
-    expect(res.headers.get('location')).toContain('error=refused')
-    expect(await userByEmail(env.DB, 'stranger@example.com')).toBeNull()
-  })
+    expect(res.headers.get("location")).toContain("error=refused");
+    expect(await userByEmail(env.DB, "stranger@example.com")).toBeNull();
+  });
 
-  it('creates the user on first sign-in when provisioning is switched on', async () => {
-    let claims: Record<string, unknown> = {}
+  it("creates the user on first sign-in when provisioning is switched on", async () => {
+    let claims: Record<string, unknown> = {};
     const folio = oidcFolio(
       idpFetch(() => signIdToken(claims)),
-      { create: true, role: 'viewer' },
-    )
-    const { cookie, state } = await start(folio)
-    claims = claimsFor(state, { email: 'newstaff@example.com', name: 'New Staff' })
+      { create: true, role: "viewer" },
+    );
+    const { cookie, state } = await start(folio);
+    claims = claimsFor(state, { email: "newstaff@example.com", name: "New Staff" });
 
     const res = await call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
       headers: { cookie },
-    })
+    });
 
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/folio/edit')
-    const created = await userByEmail(env.DB, 'newstaff@example.com')
-    expect(created).toMatchObject({ name: 'New Staff', role: 'viewer', provider: 'oidc' })
-  })
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/folio/edit");
+    const created = await userByEmail(env.DB, "newstaff@example.com");
+    expect(created).toMatchObject({ name: "New Staff", role: "viewer", provider: "oidc" });
+  });
 
-  it('refuses an unverified email address', async () => {
-    await seedEditor()
-    let claims: Record<string, unknown> = {}
-    const folio = oidcFolio(idpFetch(() => signIdToken(claims)))
-    const { cookie, state } = await start(folio)
-    claims = claimsFor(state, { email_verified: false })
-
-    const res = await call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
-      headers: { cookie },
-    })
-    expect(res.headers.get('location')).toContain('error=provider')
-  })
-
-  it('reports a failed token exchange as a provider error, not a 500', async () => {
-    await seedEditor()
-    const folio = oidcFolio(idpFetch(() => '', { tokenStatus: 400 }))
-    const { cookie, state } = await start(folio)
+  it("refuses an unverified email address", async () => {
+    await seedEditor();
+    let claims: Record<string, unknown> = {};
+    const folio = oidcFolio(idpFetch(() => signIdToken(claims)));
+    const { cookie, state } = await start(folio);
+    claims = claimsFor(state, { email_verified: false });
 
     const res = await call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
       headers: { cookie },
-    })
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toContain('error=provider')
-  })
+    });
+    expect(res.headers.get("location")).toContain("error=provider");
+  });
 
-  it('passes the provider’s own `error` back as a refusal', async () => {
-    await seedEditor()
-    const folio = oidcFolio(idpFetch(() => ''))
-    const { cookie, state } = await start(folio)
+  it("reports a failed token exchange as a provider error, not a 500", async () => {
+    await seedEditor();
+    const folio = oidcFolio(idpFetch(() => "", { tokenStatus: 400 }));
+    const { cookie, state } = await start(folio);
+
+    const res = await call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
+      headers: { cookie },
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toContain("error=provider");
+  });
+
+  it("passes the provider’s own `error` back as a refusal", async () => {
+    await seedEditor();
+    const folio = oidcFolio(idpFetch(() => ""));
+    const { cookie, state } = await start(folio);
 
     const res = await call(
       folio,
       `/folio/login/oidc/callback?error=access_denied&state=${state.state}`,
       { headers: { cookie } },
-    )
-    expect(res.headers.get('location')).toContain('error=provider')
-  })
-})
+    );
+    expect(res.headers.get("location")).toContain("error=provider");
+  });
+});
 
 /* ------------------------------------------------------ roles from claims --- */
 
@@ -1018,38 +1020,38 @@ describe('GET /folio/login/oidc/callback', () => {
 function oidcWith(
   fetchImpl: typeof fetch,
   over: {
-    id?: string
-    roleFrom?: RoleMapper
-    provision?: 'refuse' | { create: true; role?: Role }
-    domains?: readonly string[]
+    id?: string;
+    roleFrom?: RoleMapper;
+    provision?: "refuse" | { create: true; role?: Role };
+    domains?: readonly string[];
   } = {},
 ) {
   return oidc<Cloudflare.Env>({
     issuer: IDP,
-    clientId: 'folio-client',
-    clientSecret: () => 'shh',
-    provision: over.provision ?? 'refuse',
+    clientId: "folio-client",
+    clientSecret: () => "shh",
+    provision: over.provision ?? "refuse",
     fetchImpl,
     ...(over.id ? { id: over.id } : {}),
     ...(over.roleFrom ? { roleFrom: over.roleFrom } : {}),
     ...(over.domains ? { domains: over.domains } : {}),
-  })
+  });
 }
 
 /** Starts a redirect flow and hands back what the callback needs: the state
  * cookie to send, and the nonce to sign a token with. */
-async function startFlow(folio: Folio, id = 'oidc') {
-  const res = await call(folio, `/folio/login/${id}`)
+async function startFlow(folio: Folio, id = "oidc") {
+  const res = await call(folio, `/folio/login/${id}`);
   return {
-    cookie: `__Host-folio_oidc=${cookieFrom(res, '__Host-folio_oidc')}`,
+    cookie: `__Host-folio_oidc=${cookieFrom(res, "__Host-folio_oidc")}`,
     state: decodeStateCookie(res).state,
-  }
+  };
 }
 
 const CMS_GROUPS = roleFromClaim({
-  claim: 'groups',
-  map: { 'cms-admins': 'admin', 'cms-editors': 'editor' },
-})
+  claim: "groups",
+  map: { "cms-admins": "admin", "cms-editors": "editor" },
+});
 
 /**
  * Every `auth_events` row, with `detail` parsed.
@@ -1065,12 +1067,12 @@ async function events(): Promise<
   { kind: string; user_id: string | null; actor: string | null; detail: unknown }[]
 > {
   const { results } = await env.DB.prepare(
-    'select kind, user_id, actor, detail from auth_events order by kind',
-  ).all<{ kind: string; user_id: string | null; actor: string | null; detail: string | null }>()
-  return results.map((row) => ({ ...row, detail: row.detail ? JSON.parse(row.detail) : null }))
+    "select kind, user_id, actor, detail from auth_events order by kind",
+  ).all<{ kind: string; user_id: string | null; actor: string | null; detail: string | null }>();
+  return results.map((row) => ({ ...row, detail: row.detail ? JSON.parse(row.detail) : null }));
 }
 
-describe('roles come from the directory', () => {
+describe("roles come from the directory", () => {
   /**
    * One SSO tenant, and a whole round trip per call.
    *
@@ -1079,7 +1081,7 @@ describe('roles come from the directory', () => {
    * knows the nonce it must sign.
    */
   function tenant(over: Parameters<typeof oidcWith>[1] = {}) {
-    let claims: Record<string, unknown> = {}
+    let claims: Record<string, unknown> = {};
     const folio = folioWith({
       providers: [
         oidcWith(
@@ -1087,424 +1089,430 @@ describe('roles come from the directory', () => {
           over,
         ),
       ],
-    })
+    });
     return {
       folio,
       async signIn(overrides: Record<string, unknown>): Promise<Response> {
-        const { cookie, state } = await startFlow(folio)
-        claims = claimsFor(state, overrides)
+        const { cookie, state } = await startFlow(folio);
+        claims = claimsFor(state, overrides);
         return call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
           headers: { cookie },
-        })
+        });
       },
-    }
+    };
   }
 
-  it('takes the role from the claim, revokes every other browser, and records who did it', async () => {
-    const bob = await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
+  it("takes the role from the claim, revokes every other browser, and records who did it", async () => {
+    const bob = await createUser(env.DB, { email: "bob@example.com", role: "editor" });
     // A browser he already had open somewhere else.
-    const stale = await createSession(env.DB, bob.id)
-    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+    const stale = await createSession(env.DB, bob.id);
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS });
 
-    const res = await signIn({ email: 'bob@example.com', groups: ['cms-admins'] })
+    const res = await signIn({ email: "bob@example.com", groups: ["cms-admins"] });
 
-    expect(res.status).toBe(302)
-    const row = await userByEmail(env.DB, 'bob@example.com')
-    expect(row).toMatchObject({ role: 'admin', roleFrom: 'oidc' })
+    expect(res.status).toBe(302);
+    const row = await userByEmail(env.DB, "bob@example.com");
+    expect(row).toMatchObject({ role: "admin", roleFrom: "oidc" });
     // The old browser is gone in the same batch that minted the new one — a
     // claim-driven downgrade must not sit in an open socket's attachment for the
     // window an ordinary revocation may.
-    expect(await readSession(env.DB, stale.token)).toBeNull()
+    expect(await readSession(env.DB, stale.token)).toBeNull();
     // …and the browser that just signed in is not, which is what the statement
     // order inside the batch is for.
     expect(await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)).toMatchObject({
-      role: 'admin',
-    })
+      role: "admin",
+    });
 
     // The event this table was argued for: a role change with nobody clicking.
     expect(await events()).toEqual([
       {
-        kind: 'role_changed',
+        kind: "role_changed",
         user_id: bob.id,
-        actor: 'provider:oidc',
-        detail: { from: 'editor', to: 'admin' },
+        actor: "provider:oidc",
+        detail: { from: "editor", to: "admin" },
       },
-      { kind: 'sign_in', user_id: bob.id, actor: bob.id, detail: null },
-    ])
-  })
+      { kind: "sign_in", user_id: bob.id, actor: bob.id, detail: null },
+    ]);
+  });
 
-  it('writes nothing at all when the claim agrees with the stored role', async () => {
+  it("writes nothing at all when the claim agrees with the stored role", async () => {
     const bob = await createUser(env.DB, {
-      email: 'bob@example.com',
-      role: 'admin',
-      roleFrom: 'oidc',
-    })
-    const other = await createSession(env.DB, bob.id)
-    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+      email: "bob@example.com",
+      role: "admin",
+      roleFrom: "oidc",
+    });
+    const other = await createSession(env.DB, bob.id);
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS });
 
-    await signIn({ email: 'bob@example.com', groups: ['cms-admins'] })
+    await signIn({ email: "bob@example.com", groups: ["cms-admins"] });
 
     // No update, no revocation, no event: a no-op is not a change, and a
     // `role_changed` row per sign-in would bury the ones that mean something.
-    expect(await readSession(env.DB, other.token)).not.toBeNull()
-    expect((await events()).map((e) => e.kind)).toEqual(['sign_in'])
-  })
+    expect(await readSession(env.DB, other.token)).not.toBeNull();
+    expect((await events()).map((e) => e.kind)).toEqual(["sign_in"]);
+  });
 
-  it('refuses a user this provider placed whose groups have gone', async () => {
+  it("refuses a user this provider placed whose groups have gone", async () => {
     // Checkpoint 3. The alternative was falling back to `provision.role`, which
     // would make "in no group" silently mean "editor" on a tenant that delegated
     // roles to its directory precisely so that it would not.
     const bob = await createUser(env.DB, {
-      email: 'bob@example.com',
-      role: 'admin',
-      roleFrom: 'oidc',
-    })
-    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+      email: "bob@example.com",
+      role: "admin",
+      roleFrom: "oidc",
+    });
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS });
 
-    const res = await signIn({ email: 'bob@example.com', groups: [] })
+    const res = await signIn({ email: "bob@example.com", groups: [] });
 
-    expect(res.headers.get('location')).toContain('error=refused')
-    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
+    expect(res.headers.get("location")).toContain("error=refused");
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull();
     expect(
-      await env.DB.prepare('select count(*) as n from sessions').first<{ n: number }>(),
-    ).toEqual({ n: 0 })
+      await env.DB.prepare("select count(*) as n from sessions").first<{ n: number }>(),
+    ).toEqual({ n: 0 });
     // The role is left standing: refusing the sign-in is the remedy, and
     // rewriting the row would lose the record of what the directory once said.
-    expect((await userByEmail(env.DB, 'bob@example.com'))?.role).toBe('admin')
+    expect((await userByEmail(env.DB, "bob@example.com"))?.role).toBe("admin");
     expect(await events()).toEqual([
       {
-        kind: 'sign_in_refused',
+        kind: "sign_in_refused",
         user_id: bob.id,
         actor: bob.id,
-        detail: { email: 'bob@example.com', reason: 'role_removed' },
+        detail: { email: "bob@example.com", reason: "role_removed" },
       },
-    ])
-  })
+    ]);
+  });
 
-  it('leaves a Folio-placed role alone when the mapper has no opinion', async () => {
+  it("leaves a Folio-placed role alone when the mapper has no opinion", async () => {
     // Carol was invited by an admin, so `role_from` is null and this provider was
     // never the authority on her role. "No group" is not a demotion.
-    await createUser(env.DB, { email: 'carol@example.com', role: 'publisher' })
-    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+    await createUser(env.DB, { email: "carol@example.com", role: "publisher" });
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS });
 
-    const res = await signIn({ email: 'carol@example.com', groups: [] })
+    const res = await signIn({ email: "carol@example.com", groups: [] });
 
-    expect(res.status).toBe(302)
-    expect(await userByEmail(env.DB, 'carol@example.com')).toMatchObject({
-      role: 'publisher',
+    expect(res.status).toBe(302);
+    expect(await userByEmail(env.DB, "carol@example.com")).toMatchObject({
+      role: "publisher",
       roleFrom: null,
-    })
-  })
+    });
+  });
 
-  it('provisions at the mapped role, stamping the provider as its author', async () => {
-    const { signIn } = tenant({ roleFrom: CMS_GROUPS, provision: { create: true, role: 'viewer' } })
+  it("provisions at the mapped role, stamping the provider as its author", async () => {
+    const { signIn } = tenant({
+      roleFrom: CMS_GROUPS,
+      provision: { create: true, role: "viewer" },
+    });
 
-    await signIn({ email: 'new@example.com', groups: ['cms-editors'] })
+    await signIn({ email: "new@example.com", groups: ["cms-editors"] });
 
     // The claim wins over `provision.role`: the mapper is a statement about this
     // person, and `provision.role` is the default for somebody it says nothing
     // about.
-    expect(await userByEmail(env.DB, 'new@example.com')).toMatchObject({
-      role: 'editor',
-      roleFrom: 'oidc',
-    })
-  })
+    expect(await userByEmail(env.DB, "new@example.com")).toMatchObject({
+      role: "editor",
+      roleFrom: "oidc",
+    });
+  });
 
-  it('refuses to invent a role for an unmapped stranger', async () => {
+  it("refuses to invent a role for an unmapped stranger", async () => {
     // A provider that maps roles and a `provision` with no role named: creating
     // them at the implicit `editor` default would be the same silent promotion
     // checkpoint 3 refuses one row up.
-    const { signIn } = tenant({ roleFrom: CMS_GROUPS, provision: { create: true } })
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS, provision: { create: true } });
 
-    const res = await signIn({ email: 'new@example.com', groups: ['nothing-mapped'] })
+    const res = await signIn({ email: "new@example.com", groups: ["nothing-mapped"] });
 
-    expect(res.headers.get('location')).toContain('error=refused')
-    expect(await userByEmail(env.DB, 'new@example.com')).toBeNull()
+    expect(res.headers.get("location")).toContain("error=refused");
+    expect(await userByEmail(env.DB, "new@example.com")).toBeNull();
     expect(await events()).toEqual([
       {
-        kind: 'sign_in_refused',
+        kind: "sign_in_refused",
         user_id: null,
         actor: null,
-        detail: { email: 'new@example.com', reason: 'not_invited' },
+        detail: { email: "new@example.com", reason: "not_invited" },
       },
-    ])
-  })
+    ]);
+  });
 
-  it('creates an unmapped stranger at the role the host named, owned by Folio', async () => {
-    const { signIn } = tenant({ roleFrom: CMS_GROUPS, provision: { create: true, role: 'viewer' } })
+  it("creates an unmapped stranger at the role the host named, owned by Folio", async () => {
+    const { signIn } = tenant({
+      roleFrom: CMS_GROUPS,
+      provision: { create: true, role: "viewer" },
+    });
 
-    await signIn({ email: 'new@example.com', groups: ['nothing-mapped'] })
+    await signIn({ email: "new@example.com", groups: ["nothing-mapped"] });
 
     // `role_from` stays null: the host decided this, not the directory, so an
     // admin may edit it and the next sign-in will not take it back.
-    expect(await userByEmail(env.DB, 'new@example.com')).toMatchObject({
-      role: 'viewer',
+    expect(await userByEmail(env.DB, "new@example.com")).toMatchObject({
+      role: "viewer",
       roleFrom: null,
-    })
-  })
+    });
+  });
 
-  it('treats a mapper answering a non-role as a configuration bug, not a default', async () => {
-    await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
-    const { signIn } = tenant({ roleFrom: () => 'owner' as Role })
+  it("treats a mapper answering a non-role as a configuration bug, not a default", async () => {
+    await createUser(env.DB, { email: "bob@example.com", role: "editor" });
+    const { signIn } = tenant({ roleFrom: () => "owner" as Role });
 
-    const res = await signIn({ email: 'bob@example.com' })
+    const res = await signIn({ email: "bob@example.com" });
 
-    expect(res.headers.get('location')).toContain('error=provider')
-    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
-    expect((await userByEmail(env.DB, 'bob@example.com'))?.role).toBe('editor')
-  })
+    expect(res.headers.get("location")).toContain("error=provider");
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull();
+    expect((await userByEmail(env.DB, "bob@example.com"))?.role).toBe("editor");
+  });
 
-  it('treats a mapper that throws the same way', async () => {
-    await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
+  it("treats a mapper that throws the same way", async () => {
+    await createUser(env.DB, { email: "bob@example.com", role: "editor" });
     const { signIn } = tenant({
       roleFrom: () => {
-        throw new Error('the directory API is down')
+        throw new Error("the directory API is down");
       },
-    })
+    });
 
-    const res = await signIn({ email: 'bob@example.com' })
+    const res = await signIn({ email: "bob@example.com" });
 
-    expect(res.headers.get('location')).toContain('error=provider')
-    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
-  })
+    expect(res.headers.get("location")).toContain("error=provider");
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull();
+  });
 
-  it('hands the whole id token to the mapper, not only the two fields a user row needs', async () => {
-    await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
-    const seen: unknown[] = []
+  it("hands the whole id token to the mapper, not only the two fields a user row needs", async () => {
+    await createUser(env.DB, { email: "bob@example.com", role: "editor" });
+    const seen: unknown[] = [];
     const { signIn } = tenant({
       roleFrom: (identity) => {
-        seen.push(identity.claims)
-        return null
+        seen.push(identity.claims);
+        return null;
       },
-    })
+    });
 
-    await signIn({ email: 'bob@example.com', groups: ['cms-admins'], sub: 'idp-subject' })
+    await signIn({ email: "bob@example.com", groups: ["cms-admins"], sub: "idp-subject" });
 
-    expect(seen[0]).toMatchObject({ groups: ['cms-admins'], sub: 'idp-subject', iss: IDP })
-  })
-})
+    expect(seen[0]).toMatchObject({ groups: ["cms-admins"], sub: "idp-subject", iss: IDP });
+  });
+});
 
 /* ---------------------------------------------------- one domain, one door --- */
 
-describe('an enforced domain is exactly one door', () => {
+describe("an enforced domain is exactly one door", () => {
   /** Magic link plus an SSO tenant that owns `client.com`. */
-  function agency(fetchImpl: typeof fetch = idpFetch(() => '')) {
+  function agency(fetchImpl: typeof fetch = idpFetch(() => "")) {
     return folioWith({
-      providers: [capturingMagicLink, oidcWith(fetchImpl, { id: 'okta', domains: ['client.com'] })],
-    })
+      providers: [capturingMagicLink, oidcWith(fetchImpl, { id: "okta", domains: ["client.com"] })],
+    });
   }
 
-  it('sends an enforced address to its provider before any D1 read, known or not', async () => {
-    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
-    const folio = agency()
+  it("sends an enforced address to its provider before any D1 read, known or not", async () => {
+    await createUser(env.DB, { email: "ann@client.com", role: "editor" });
+    const folio = agency();
 
-    for (const email of ['ann@client.com', 'nobody@client.com']) {
-      const res = await requestLink(folio, email)
-      expect(res.status).toBe(302)
+    for (const email of ["ann@client.com", "nobody@client.com"]) {
+      const res = await requestLink(folio, email);
+      expect(res.status).toBe(302);
       // Identical for both, which is what keeps it non-enumerating *with respect
       // to accounts* — the property `SENT` protects. What it does disclose is a
       // configuration fact about the domain, which the SSO button on the same
       // page already discloses.
-      expect(res.headers.get('location')).toBe('/folio/login/okta?next=%2Ffolio%2Fedit')
+      expect(res.headers.get("location")).toBe("/folio/login/okta?next=%2Ffolio%2Fedit");
     }
 
-    expect(outbox).toHaveLength(0)
+    expect(outbox).toHaveLength(0);
     // No challenge, and no read that could have told the two addresses apart.
-    const rows = await env.DB.prepare('select email from login_challenges').all()
-    expect(rows.results).toEqual([])
-  })
+    const rows = await env.DB.prepare("select email from login_challenges").all();
+    expect(rows.results).toEqual([]);
+  });
 
-  it('answers a form post and a JSON caller the same way', async () => {
+  it("answers a form post and a JSON caller the same way", async () => {
     // A script follows redirects and the admin never posts here, so there is no
     // caller for whom a 200-with-a-message would be better than the 302.
-    const folio = agency()
-    const form = await call(folio, '/folio/login/email', {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'text/html' },
-      body: 'email=ann%40client.com',
-    })
-    expect(form.status).toBe(302)
-    expect(form.headers.get('location')).toBe('/folio/login/okta?next=%2Ffolio%2Fedit')
-  })
+    const folio = agency();
+    const form = await call(folio, "/folio/login/email", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", accept: "text/html" },
+      body: "email=ann%40client.com",
+    });
+    expect(form.status).toBe(302);
+    expect(form.headers.get("location")).toBe("/folio/login/okta?next=%2Ffolio%2Fedit");
+  });
 
-  it('leaves every other address on the byte-identical answer', async () => {
-    await createUser(env.DB, { email: 'dan@agency.example', role: 'editor' })
-    const folio = agency()
+  it("leaves every other address on the byte-identical answer", async () => {
+    await createUser(env.DB, { email: "dan@agency.example", role: "editor" });
+    const folio = agency();
 
-    const known = await requestLink(folio, 'dan@agency.example')
-    const unknown = await requestLink(folio, 'nobody@agency.example')
+    const known = await requestLink(folio, "dan@agency.example");
+    const unknown = await requestLink(folio, "nobody@agency.example");
 
-    expect(known.status).toBe(200)
-    expect(await unknown.text()).toBe(await known.text())
-    expect(outbox.map((m) => m.email)).toEqual(['dan@agency.example'])
-  })
+    expect(known.status).toBe(200);
+    expect(await unknown.text()).toBe(await known.text());
+    expect(outbox.map((m) => m.email)).toEqual(["dan@agency.example"]);
+  });
 
-  it('refuses a link that was somehow minted for an enforced address', async () => {
+  it("refuses a link that was somehow minted for an enforced address", async () => {
     // Unreachable through the route above, which is exactly why it is written:
     // `completeSignIn` re-checks the map for every kind, so a challenge that
     // predates the configuration cannot become a session.
-    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
-    const challenge = await createChallenge(env.DB, 'ann@client.com')
+    await createUser(env.DB, { email: "ann@client.com", role: "editor" });
+    const challenge = await createChallenge(env.DB, "ann@client.com");
 
-    const res = await call(agency(), `/folio/login/verify?t=${challenge.token}`)
+    const res = await call(agency(), `/folio/login/verify?t=${challenge.token}`);
 
-    expect(res.headers.get('location')).toContain('error=refused')
-    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
-    expect(await env.DB.prepare('select count(*) as n from sessions').first()).toEqual({ n: 0 })
+    expect(res.headers.get("location")).toContain("error=refused");
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull();
+    expect(await env.DB.prepare("select count(*) as n from sessions").first()).toEqual({ n: 0 });
     expect(await events()).toEqual([
       {
-        kind: 'sign_in_refused',
+        kind: "sign_in_refused",
         // No `user_id`: enforcement happens before the row is read, because the
         // answer does not depend on there being one.
         user_id: null,
         actor: null,
-        detail: { email: 'ann@client.com', reason: 'domain' },
+        detail: { email: "ann@client.com", reason: "domain" },
       },
-    ])
-  })
+    ]);
+  });
 
-  it('refuses a second SSO tenant for a domain another one owns', async () => {
+  it("refuses a second SSO tenant for a domain another one owns", async () => {
     // Two `oidc({ id })` providers side by side, which is the other half of what
     // the configurable id bought: a staff directory and a client's, at once.
-    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
-    let claims: Record<string, unknown> = {}
-    const fetchImpl = idpFetch(() => signIdToken(claims))
+    await createUser(env.DB, { email: "ann@client.com", role: "editor" });
+    let claims: Record<string, unknown> = {};
+    const fetchImpl = idpFetch(() => signIdToken(claims));
     const folio = folioWith({
       providers: [
-        oidcWith(fetchImpl, { id: 'okta', domains: ['client.com'] }),
-        oidcWith(fetchImpl, { id: 'entra' }),
+        oidcWith(fetchImpl, { id: "okta", domains: ["client.com"] }),
+        oidcWith(fetchImpl, { id: "entra" }),
       ],
-    })
+    });
 
-    const { cookie, state } = await startFlow(folio, 'entra')
-    claims = claimsFor(state, { email: 'ann@client.com' })
+    const { cookie, state } = await startFlow(folio, "entra");
+    claims = claimsFor(state, { email: "ann@client.com" });
     const res = await call(folio, `/folio/login/entra/callback?code=abc&state=${state.state}`, {
       headers: { cookie },
-    })
+    });
 
-    expect(res.headers.get('location')).toContain('error=refused')
-    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
+    expect(res.headers.get("location")).toContain("error=refused");
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull();
     // The point of the rule: the client's directory controls revocation, and a
     // second door around it is not a door the deployment agreed to.
     expect((await events())[0]).toMatchObject({
-      kind: 'sign_in_refused',
-      detail: { reason: 'domain' },
-    })
-  })
+      kind: "sign_in_refused",
+      detail: { reason: "domain" },
+    });
+  });
 
-  it('lets the domain’s own provider through', async () => {
-    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
-    let claims: Record<string, unknown> = {}
-    const fetchImpl = idpFetch(() => signIdToken(claims))
+  it("lets the domain’s own provider through", async () => {
+    await createUser(env.DB, { email: "ann@client.com", role: "editor" });
+    let claims: Record<string, unknown> = {};
+    const fetchImpl = idpFetch(() => signIdToken(claims));
     const folio = folioWith({
-      providers: [capturingMagicLink, oidcWith(fetchImpl, { id: 'okta', domains: ['client.com'] })],
-    })
+      providers: [capturingMagicLink, oidcWith(fetchImpl, { id: "okta", domains: ["client.com"] })],
+    });
 
-    const { cookie, state } = await startFlow(folio, 'okta')
-    claims = claimsFor(state, { email: 'ann@client.com' })
+    const { cookie, state } = await startFlow(folio, "okta");
+    claims = claimsFor(state, { email: "ann@client.com" });
     const res = await call(folio, `/folio/login/okta/callback?code=abc&state=${state.state}`, {
       headers: { cookie },
-    })
+    });
 
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/folio/edit')
-    expect((await userByEmail(env.DB, 'ann@client.com'))?.provider).toBe('okta')
-  })
-})
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/folio/edit");
+    expect((await userByEmail(env.DB, "ann@client.com"))?.provider).toBe("okta");
+  });
+});
 
-describe('GET /folio/login for a browser that is already signed in', () => {
-  it('redirects to next rather than rendering a form that would sign them in again', async () => {
-    const user = await seedEditor()
-    const session = await createSession(env.DB, user.id)
+describe("GET /folio/login for a browser that is already signed in", () => {
+  it("redirects to next rather than rendering a form that would sign them in again", async () => {
+    const user = await seedEditor();
+    const session = await createSession(env.DB, user.id);
 
-    const res = await call(folioWith(magicAuth), '/folio/login?next=%2Ffolio%2Fedit%2Fsty_a', {
+    const res = await call(folioWith(magicAuth), "/folio/login?next=%2Ffolio%2Fedit%2Fsty_a", {
       headers: { cookie: `${SECURE_COOKIE}=${session.token}` },
-    })
+    });
 
-    expect(res.status).toBe(302)
-    expect(res.headers.get('location')).toBe('/folio/edit/sty_a')
-  })
-})
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/folio/edit/sty_a");
+  });
+});
 
-describe('verifyIdToken', () => {
+describe("verifyIdToken", () => {
   const expected = () => ({
     issuer: IDP,
-    clientId: 'folio-client',
-    nonce: 'the-nonce',
+    clientId: "folio-client",
+    nonce: "the-nonce",
     jwks: keys.jwks,
-  })
+  });
   const good = () => ({
     iss: IDP,
-    aud: 'folio-client',
-    nonce: 'the-nonce',
+    aud: "folio-client",
+    nonce: "the-nonce",
     exp: Math.floor(Date.now() / 1000) + 300,
-    email: 'ann@example.com',
-  })
+    email: "ann@example.com",
+  });
 
-  it('accepts a well-formed token and returns its claims', async () => {
-    const claims = await verifyIdToken(await signIdToken(good()), expected())
-    expect(claims.email).toBe('ann@example.com')
-  })
+  it("accepts a well-formed token and returns its claims", async () => {
+    const claims = await verifyIdToken(await signIdToken(good()), expected());
+    expect(claims.email).toBe("ann@example.com");
+  });
 
-  it('refuses a different issuer, even with everything else right', async () => {
+  it("refuses a different issuer, even with everything else right", async () => {
     // The issuer is the check, not the email domain: a personal account signing
     // into a tenant-scoped app has a perfectly valid verified email.
     await expect(
-      verifyIdToken(await signIdToken({ ...good(), iss: 'https://elsewhere.test' }), expected()),
-    ).rejects.toThrow(/different issuer/)
-  })
+      verifyIdToken(await signIdToken({ ...good(), iss: "https://elsewhere.test" }), expected()),
+    ).rejects.toThrow(/different issuer/);
+  });
 
-  it('refuses a token minted for another client', async () => {
+  it("refuses a token minted for another client", async () => {
     await expect(
-      verifyIdToken(await signIdToken({ ...good(), aud: 'someone-else' }), expected()),
-    ).rejects.toThrow(/different client/)
-  })
+      verifyIdToken(await signIdToken({ ...good(), aud: "someone-else" }), expected()),
+    ).rejects.toThrow(/different client/);
+  });
 
-  it('accepts an audience array that contains the client id', async () => {
+  it("accepts an audience array that contains the client id", async () => {
     const claims = await verifyIdToken(
-      await signIdToken({ ...good(), aud: ['other', 'folio-client'] }),
+      await signIdToken({ ...good(), aud: ["other", "folio-client"] }),
       expected(),
-    )
-    expect(claims.email).toBe('ann@example.com')
-  })
+    );
+    expect(claims.email).toBe("ann@example.com");
+  });
 
-  it('refuses an expired token, leeway included', async () => {
+  it("refuses an expired token, leeway included", async () => {
     await expect(
       verifyIdToken(
         await signIdToken({ ...good(), exp: Math.floor(Date.now() / 1000) - 120 }),
         expected(),
       ),
-    ).rejects.toThrow(/expired/)
-  })
+    ).rejects.toThrow(/expired/);
+  });
 
-  it('refuses a token whose signature does not verify', async () => {
-    const token = await signIdToken(good())
-    const tampered = `${token.slice(0, -6)}AAAAAA`
-    await expect(verifyIdToken(tampered, expected())).rejects.toThrow(/signature|key/)
-  })
+  it("refuses a token whose signature does not verify", async () => {
+    const token = await signIdToken(good());
+    const tampered = `${token.slice(0, -6)}AAAAAA`;
+    await expect(verifyIdToken(tampered, expected())).rejects.toThrow(/signature|key/);
+  });
 
-  it('refuses a token naming a kid the JWKS does not hold', async () => {
-    await expect(verifyIdToken(await signIdToken(good(), 'rotated'), expected())).rejects.toThrow(
+  it("refuses a token naming a kid the JWKS does not hold", async () => {
+    await expect(verifyIdToken(await signIdToken(good(), "rotated"), expected())).rejects.toThrow(
       /does not have/,
-    )
-  })
+    );
+  });
 
   it("refuses alg 'none' and every symmetric alg outright", async () => {
-    const header = encodeJson({ alg: 'none', typ: 'JWT' })
-    const payload = encodeJson(good())
+    const header = encodeJson({ alg: "none", typ: "JWT" });
+    const payload = encodeJson(good());
     await expect(verifyIdToken(`${header}.${payload}.`, expected())).rejects.toThrow(
       /unsupported id token algorithm/,
-    )
-    const hs = encodeJson({ alg: 'HS256', typ: 'JWT' })
+    );
+    const hs = encodeJson({ alg: "HS256", typ: "JWT" });
     await expect(verifyIdToken(`${hs}.${payload}.AAAA`, expected())).rejects.toThrow(
       /unsupported id token algorithm/,
-    )
-  })
+    );
+  });
 
-  it('refuses something that is not a JWS at all', async () => {
-    await expect(verifyIdToken('nonsense', expected())).rejects.toThrow(/not a JWS/)
-  })
-})
+  it("refuses something that is not a JWS at all", async () => {
+    await expect(verifyIdToken("nonsense", expected())).rejects.toThrow(/not a JWS/);
+  });
+});
 
 /* ------------------------------------------------- grants from the directory --- */
 
@@ -1515,224 +1523,224 @@ describe('verifyIdToken', () => {
  * read as "the grant set" — replaced whole, stamped `role_from`, one `role_changed`,
  * a scope the registry does not hold dropped with a note.
  */
-describe('grants come from the directory', () => {
+describe("grants come from the directory", () => {
   const GROUPS = roleFromClaim({
-    claim: 'groups',
+    claim: "groups",
     map: {
-      'g-alpha': { scope: 'alpha', role: 'editor' },
-      'g-alpha-lead': { scope: 'alpha', role: 'publisher' },
-      'g-bravo': { scope: 'bravo', role: 'editor' },
-      'g-retired': { scope: 'zulu', role: 'editor' },
-      'g-central': 'admin',
+      "g-alpha": { scope: "alpha", role: "editor" },
+      "g-alpha-lead": { scope: "alpha", role: "publisher" },
+      "g-bravo": { scope: "bravo", role: "editor" },
+      "g-retired": { scope: "zulu", role: "editor" },
+      "g-central": "admin",
     },
-  })
+  });
 
   function sitesFolio(provider: ReturnType<typeof oidcWith>) {
     return createFolio<Cloudflare.Env>({
       blocks: [page],
-      root: 'page',
+      root: "page",
       bindings,
-      basePath: '/folio',
+      basePath: "/folio",
       auth: { providers: [provider] },
       route: (p, _locale, site) => (site ? `https://${site.id}.example/${p}` : `/${p}`),
       sites: { admin: ORIGIN },
-    })
+    });
   }
 
   /** One SSO tenant on a multi-site deployment, as `tenant` above is on one site. */
   function sitesTenant(over: Parameters<typeof oidcWith>[1] = {}) {
-    let claims: Record<string, unknown> = {}
+    let claims: Record<string, unknown> = {};
     const folio = sitesFolio(
       oidcWith(
         idpFetch(() => signIdToken(claims)),
         { roleFrom: GROUPS, provision: { create: true }, ...over },
       ),
-    )
+    );
     return {
       folio,
       async signIn(overrides: Record<string, unknown>): Promise<Response> {
-        const { cookie, state } = await startFlow(folio)
-        claims = claimsFor(state, overrides)
+        const { cookie, state } = await startFlow(folio);
+        claims = claimsFor(state, overrides);
         return call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
           headers: { cookie },
-        })
+        });
       },
-    }
+    };
   }
 
   const grantsOf = async (email: string) => {
-    const user = await userByEmail(env.DB, email)
-    return user?.grants.map(({ scope, role, roleFrom }) => ({ scope, role, roleFrom }))
-  }
+    const user = await userByEmail(env.DB, email);
+    return user?.grants.map(({ scope, role, roleFrom }) => ({ scope, role, roleFrom }));
+  };
 
   beforeAll(async () => {
     await env.DB.prepare(
       `insert or ignore into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
          ('alpha', 'site', 'Alpha', null, 'live', null, 0, 0),
          ('bravo', 'site', 'Bravo', null, 'live', null, 0, 0)`,
-    ).run()
-  })
+    ).run();
+  });
 
-  it('takes the highest match per scope: g-alpha and g-alpha-lead are {alpha: publisher}', async () => {
-    const { signIn } = sitesTenant()
-    const res = await signIn({ email: 'lead@example.com', groups: ['g-alpha', 'g-alpha-lead'] })
+  it("takes the highest match per scope: g-alpha and g-alpha-lead are {alpha: publisher}", async () => {
+    const { signIn } = sitesTenant();
+    const res = await signIn({ email: "lead@example.com", groups: ["g-alpha", "g-alpha-lead"] });
 
-    expect(res.status).toBe(302)
-    expect(await grantsOf('lead@example.com')).toEqual([
-      { scope: 'alpha', role: 'publisher', roleFrom: 'oidc' },
-    ])
-    const actor = (await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)) as UserActor
-    expect(actor.grants).toEqual({ alpha: 'publisher' })
-  })
+    expect(res.status).toBe(302);
+    expect(await grantsOf("lead@example.com")).toEqual([
+      { scope: "alpha", role: "publisher", roleFrom: "oidc" },
+    ]);
+    const actor = (await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)) as UserActor;
+    expect(actor.grants).toEqual({ alpha: "publisher" });
+  });
 
-  it('keeps each scope its own highest, never one role across them', async () => {
-    const { signIn } = sitesTenant()
-    await signIn({ email: 'both@example.com', groups: ['g-alpha-lead', 'g-bravo', 'g-central'] })
+  it("keeps each scope its own highest, never one role across them", async () => {
+    const { signIn } = sitesTenant();
+    await signIn({ email: "both@example.com", groups: ["g-alpha-lead", "g-bravo", "g-central"] });
 
-    expect(await grantsOf('both@example.com')).toEqual([
-      { scope: '*', role: 'admin', roleFrom: 'oidc' },
-      { scope: 'alpha', role: 'publisher', roleFrom: 'oidc' },
-      { scope: 'bravo', role: 'editor', roleFrom: 'oidc' },
-    ])
-  })
+    expect(await grantsOf("both@example.com")).toEqual([
+      { scope: "*", role: "admin", roleFrom: "oidc" },
+      { scope: "alpha", role: "publisher", roleFrom: "oidc" },
+      { scope: "bravo", role: "editor", roleFrom: "oidc" },
+    ]);
+  });
 
-  it('refuses a person matching nothing, with an auth_events row', async () => {
-    const { signIn } = sitesTenant()
-    const res = await signIn({ email: 'nobody@example.com', groups: ['elsewhere'] })
+  it("refuses a person matching nothing, with an auth_events row", async () => {
+    const { signIn } = sitesTenant();
+    const res = await signIn({ email: "nobody@example.com", groups: ["elsewhere"] });
 
-    expect(res.headers.get('location')).toContain('error=refused')
-    expect(await userByEmail(env.DB, 'nobody@example.com')).toBeNull()
+    expect(res.headers.get("location")).toContain("error=refused");
+    expect(await userByEmail(env.DB, "nobody@example.com")).toBeNull();
     expect(await events()).toEqual([
       {
-        kind: 'sign_in_refused',
+        kind: "sign_in_refused",
         user_id: null,
         actor: null,
-        detail: { email: 'nobody@example.com', reason: 'not_invited' },
+        detail: { email: "nobody@example.com", reason: "not_invited" },
       },
-    ])
-  })
+    ]);
+  });
 
-  it('replaces the whole set when their groups change, revokes other sessions, and records one role_changed', async () => {
-    const { signIn } = sitesTenant()
-    await signIn({ email: 'mover@example.com', groups: ['g-alpha'] })
-    const mover = (await userByEmail(env.DB, 'mover@example.com'))!
-    const other = await createSession(env.DB, mover.id)
-    await env.DB.prepare('delete from auth_events').run()
+  it("replaces the whole set when their groups change, revokes other sessions, and records one role_changed", async () => {
+    const { signIn } = sitesTenant();
+    await signIn({ email: "mover@example.com", groups: ["g-alpha"] });
+    const mover = (await userByEmail(env.DB, "mover@example.com"))!;
+    const other = await createSession(env.DB, mover.id);
+    await env.DB.prepare("delete from auth_events").run();
 
-    const res = await signIn({ email: 'mover@example.com', groups: ['g-bravo'] })
+    const res = await signIn({ email: "mover@example.com", groups: ["g-bravo"] });
 
-    expect(res.status).toBe(302)
-    expect(await grantsOf('mover@example.com')).toEqual([
-      { scope: 'bravo', role: 'editor', roleFrom: 'oidc' },
-    ])
-    expect(await readSession(env.DB, other.token)).toBeNull()
-    expect(await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)).not.toBeNull()
+    expect(res.status).toBe(302);
+    expect(await grantsOf("mover@example.com")).toEqual([
+      { scope: "bravo", role: "editor", roleFrom: "oidc" },
+    ]);
+    expect(await readSession(env.DB, other.token)).toBeNull();
+    expect(await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)).not.toBeNull();
     expect(await events()).toEqual([
       {
-        kind: 'role_changed',
+        kind: "role_changed",
         user_id: mover.id,
-        actor: 'provider:oidc',
-        detail: { from: { alpha: 'editor' }, to: { bravo: 'editor' } },
+        actor: "provider:oidc",
+        detail: { from: { alpha: "editor" }, to: { bravo: "editor" } },
       },
-      { kind: 'sign_in', user_id: mover.id, actor: mover.id, detail: null },
-    ])
-  })
+      { kind: "sign_in", user_id: mover.id, actor: mover.id, detail: null },
+    ]);
+  });
 
-  it('writes nothing when the set is unchanged', async () => {
-    const { signIn } = sitesTenant()
-    await signIn({ email: 'same@example.com', groups: ['g-alpha'] })
-    await env.DB.prepare('delete from auth_events').run()
-    await signIn({ email: 'same@example.com', groups: ['g-alpha'] })
-    expect((await events()).map((e) => e.kind)).toEqual(['sign_in'])
-  })
+  it("writes nothing when the set is unchanged", async () => {
+    const { signIn } = sitesTenant();
+    await signIn({ email: "same@example.com", groups: ["g-alpha"] });
+    await env.DB.prepare("delete from auth_events").run();
+    await signIn({ email: "same@example.com", groups: ["g-alpha"] });
+    expect((await events()).map((e) => e.kind)).toEqual(["sign_in"]);
+  });
 
-  it('drops a mapped scope the registry does not hold, applies the rest, and notes it', async () => {
-    const warned: string[] = []
-    const { signIn } = sitesTenant()
-    const original = console.warn
-    console.warn = (message: string) => warned.push(message)
+  it("drops a mapped scope the registry does not hold, applies the rest, and notes it", async () => {
+    const warned: string[] = [];
+    const { signIn } = sitesTenant();
+    const original = console.warn;
+    console.warn = (message: string) => warned.push(message);
     try {
-      await signIn({ email: 'retired@example.com', groups: ['g-alpha', 'g-retired'] })
+      await signIn({ email: "retired@example.com", groups: ["g-alpha", "g-retired"] });
     } finally {
-      console.warn = original
+      console.warn = original;
     }
 
-    expect(await grantsOf('retired@example.com')).toEqual([
-      { scope: 'alpha', role: 'editor', roleFrom: 'oidc' },
-    ])
-    expect(warned.some((line) => line.includes("'zulu'"))).toBe(true)
-    const user = (await userByEmail(env.DB, 'retired@example.com'))!
+    expect(await grantsOf("retired@example.com")).toEqual([
+      { scope: "alpha", role: "editor", roleFrom: "oidc" },
+    ]);
+    expect(warned.some((line) => line.includes("'zulu'"))).toBe(true);
+    const user = (await userByEmail(env.DB, "retired@example.com"))!;
     expect(await events()).toEqual([
-      { kind: 'sign_in', user_id: user.id, actor: user.id, detail: { dropped: ['zulu'] } },
-    ])
-  })
+      { kind: "sign_in", user_id: user.id, actor: user.id, detail: { dropped: ["zulu"] } },
+    ]);
+  });
 
-  it('refuses when only dropped scopes remain', async () => {
-    const { signIn } = sitesTenant()
-    const res = await signIn({ email: 'gone@example.com', groups: ['g-retired'] })
-    expect(res.headers.get('location')).toContain('error=refused')
+  it("refuses when only dropped scopes remain", async () => {
+    const { signIn } = sitesTenant();
+    const res = await signIn({ email: "gone@example.com", groups: ["g-retired"] });
+    expect(res.headers.get("location")).toContain("error=refused");
     expect((await events())[0]?.detail).toEqual({
-      email: 'gone@example.com',
-      reason: 'not_invited',
-      dropped: ['zulu'],
-    })
-  })
+      email: "gone@example.com",
+      reason: "not_invited",
+      dropped: ["zulu"],
+    });
+  });
 
-  it('refuses a person any of whose grants this provider placed, once it places nothing', async () => {
-    const { signIn } = sitesTenant()
-    await signIn({ email: 'left@example.com', groups: ['g-bravo'] })
-    const res = await signIn({ email: 'left@example.com', groups: [] })
-    expect(res.headers.get('location')).toContain('error=refused')
-    expect(await grantsOf('left@example.com')).toEqual([
-      { scope: 'bravo', role: 'editor', roleFrom: 'oidc' },
-    ])
-  })
+  it("refuses a person any of whose grants this provider placed, once it places nothing", async () => {
+    const { signIn } = sitesTenant();
+    await signIn({ email: "left@example.com", groups: ["g-bravo"] });
+    const res = await signIn({ email: "left@example.com", groups: [] });
+    expect(res.headers.get("location")).toContain("error=refused");
+    expect(await grantsOf("left@example.com")).toEqual([
+      { scope: "bravo", role: "editor", roleFrom: "oidc" },
+    ]);
+  });
 
-  it('will not let an admin edit a set a provider placed (409)', async () => {
-    const { folio, signIn } = sitesTenant()
-    await signIn({ email: 'placed@example.com', groups: ['g-alpha'] })
-    const placed = (await userByEmail(env.DB, 'placed@example.com'))!
-    const admin = await createUser(env.DB, { email: 'root@example.com', role: 'admin' })
-    const { token } = await createSession(env.DB, admin.id)
+  it("will not let an admin edit a set a provider placed (409)", async () => {
+    const { folio, signIn } = sitesTenant();
+    await signIn({ email: "placed@example.com", groups: ["g-alpha"] });
+    const placed = (await userByEmail(env.DB, "placed@example.com"))!;
+    const admin = await createUser(env.DB, { email: "root@example.com", role: "admin" });
+    const { token } = await createSession(env.DB, admin.id);
 
     const res = await call(folio, `/folio/api/users/${placed.id}`, {
-      method: 'PATCH',
-      headers: { cookie: `${SECURE_COOKIE}=${token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ grants: { bravo: 'editor' } }),
-    })
-    expect(res.status).toBe(409)
-    expect(await grantsOf('placed@example.com')).toEqual([
-      { scope: 'alpha', role: 'editor', roleFrom: 'oidc' },
-    ])
-  })
+      method: "PATCH",
+      headers: { cookie: `${SECURE_COOKIE}=${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ grants: { bravo: "editor" } }),
+    });
+    expect(res.status).toBe(409);
+    expect(await grantsOf("placed@example.com")).toEqual([
+      { scope: "alpha", role: "editor", roleFrom: "oidc" },
+    ]);
+  });
 
-  it('refuses provision.role, and provision.create with no roleFrom, at construction', () => {
+  it("refuses provision.role, and provision.create with no roleFrom, at construction", () => {
     expect(() =>
       sitesFolio(
         oidcWith(
-          idpFetch(() => ''),
-          { provision: { create: true, role: 'editor' } },
+          idpFetch(() => ""),
+          { provision: { create: true, role: "editor" } },
         ),
       ),
-    ).toThrow(/provisions with a role/)
+    ).toThrow(/provisions with a role/);
     expect(() =>
       sitesFolio(
         oidcWith(
-          idpFetch(() => ''),
+          idpFetch(() => ""),
           { provision: { create: true } },
         ),
       ),
-    ).toThrow(/needs `roleFrom`/)
+    ).toThrow(/needs `roleFrom`/);
     // The same provider on one site is today's configuration, and constructs.
     expect(() =>
       folioWith({
         providers: [
           oidcWith(
-            idpFetch(() => ''),
-            { provision: { create: true, role: 'editor' } },
+            idpFetch(() => ""),
+            { provision: { create: true, role: "editor" } },
           ),
         ],
       }),
-    ).not.toThrow()
-  })
-})
+    ).not.toThrow();
+  });
+});
