@@ -1,0 +1,21 @@
+{
+  "$comment": "Operate O37. Code finds its model here and nowhere else. See docs/operations/README.md.",
+  "watch": false,
+  "ledger": { "kind": "host" },
+  "prices": "src/server/llm-prices.json",
+  "tasks": [
+    {
+      "id": "media.describe",
+      "purpose": "Writes alt text, a description and tags from the vocabulary for an uploaded image.",
+      "vendor": "anthropic",
+      "model": "claude-opus-5",
+      "line": "opus",
+      "candidateLines": ["opus", "sonnet"],
+      "prompt": "src/server/describe-anthropic.ts",
+      "tools": null,
+      "eval": "evals/media.describe",
+      "evalGapIssue": null,
+      "budget": null
+    }
+  ]
+}

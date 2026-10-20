@@ -40,6 +40,11 @@ and new form keys, and removes nothing.
   breaks a host that builds one by hand.
   **Apply `0014_form_logic.sql` before deploying**
   ([UPGRADING](UPGRADING.md#conditional-questions-sections-and-prefill-2026-10-19-v110)).
+- **`anthropicDescriber` takes `onUsage`**, called once per request with tokens, latency
+  and an outcome (`ok`, `truncated`, `refused`, `error`), so a host can keep a cost
+  ledger. `DescribeUsage` is exported from `folio/server`. `DEFAULT_DESCRIBE_MODEL` is
+  unchanged and now lives in `src/server/llm-tasks.json`
+  ([UPGRADING](UPGRADING.md#anthropicdescriber-reports-usage-2026-10-20-v110)).
 
 ### Fixed
 

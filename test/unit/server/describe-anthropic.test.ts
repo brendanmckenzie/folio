@@ -5,6 +5,7 @@ import {
   DEFAULT_DESCRIBE_PROMPT,
   parseDescribeJson,
 } from "../../../src/server/describe-anthropic";
+import { taskModel } from "../../../src/server/llm-tasks";
 import type { DescribeInput, FolioDescribe } from "../../../src/server/types";
 
 /**
@@ -64,13 +65,17 @@ const RENDITION_B64 = "CQkJCQ==";
  * too, which needed a two-call stub; that self-fetch is gone (see `imageBlock`),
  * and the count is asserted below so it does not come back unnoticed.
  */
-function answering(text: string, init: { status?: number; stopReason?: string } = {}) {
+function answering(
+  text: string,
+  init: { status?: number; stopReason?: string; usage?: Record<string, number> } = {},
+) {
   const fetchMock = vi.fn(
     async () =>
       new Response(
         JSON.stringify({
           content: [{ type: "text", text }],
           stop_reason: init.stopReason ?? "end_turn",
+          ...(init.usage ? { usage: init.usage } : {}),
         }),
         { status: init.status ?? 200, headers: { "content-type": "application/json" } },
       ),
@@ -369,6 +374,143 @@ describe("the answer", () => {
     await expect(anthropicDescriber({ apiKey: KEY })(inputOf())).rejects.toThrow(
       /the model declined \(csam\)/,
     );
+  });
+});
+
+describe("onUsage", () => {
+  const USAGE = {
+    input_tokens: 11,
+    output_tokens: 22,
+    cache_creation_input_tokens: 33,
+    cache_read_input_tokens: 44,
+  };
+  const OK = '{"alt":"A person"}';
+
+  function hooked(extra: Partial<Parameters<typeof anthropicDescriber>[0]> = {}) {
+    const onUsage = vi.fn();
+    return { onUsage, fn: anthropicDescriber({ apiKey: KEY, onUsage, ...extra }) };
+  }
+
+  it("takes its default model from the registry", () => {
+    expect(DEFAULT_DESCRIBE_MODEL).toBe(taskModel("media.describe"));
+  });
+
+  it("reports ok once, with the tokens the API reported", async () => {
+    answering(OK, { usage: USAGE });
+    const { onUsage, fn } = hooked();
+    await fn(inputOf());
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage).toHaveBeenCalledWith({
+      model: DEFAULT_DESCRIBE_MODEL,
+      inputTokens: 11,
+      outputTokens: 22,
+      cacheCreationInputTokens: 33,
+      cacheReadInputTokens: 44,
+      latencyMs: expect.any(Number),
+      outcome: "ok",
+    });
+  });
+
+  it("reports the host's model, and zeros when the API sent no usage", async () => {
+    answering(OK);
+    const { onUsage, fn } = hooked({ model: "claude-x" });
+    await fn(inputOf());
+    expect(onUsage.mock.calls[0]![0]).toMatchObject({
+      model: "claude-x",
+      inputTokens: 0,
+      outputTokens: 0,
+      outcome: "ok",
+    });
+  });
+
+  it("reports truncated when the model hit max_tokens", async () => {
+    answering(OK, { stopReason: "max_tokens", usage: USAGE });
+    const { onUsage, fn } = hooked();
+    await fn(inputOf());
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage.mock.calls[0]![0]).toMatchObject({ outcome: "truncated", outputTokens: 22 });
+  });
+
+  it("reports truncated, and still throws, when the cut-off answer is not JSON", async () => {
+    answering('{"alt": "cut of', { stopReason: "max_tokens", usage: USAGE });
+    const { onUsage, fn } = hooked();
+    await expect(fn(inputOf())).rejects.toThrow(/no JSON object|not JSON/);
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage.mock.calls[0]![0]).toMatchObject({ outcome: "truncated" });
+  });
+
+  it("reports refused before the throw", async () => {
+    answering("", { stopReason: "refusal", usage: USAGE });
+    const { onUsage, fn } = hooked();
+    await expect(fn(inputOf())).rejects.toThrow(/declined/);
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage.mock.calls[0]![0]).toMatchObject({ outcome: "refused", inputTokens: 11 });
+  });
+
+  it("reports error with zero tokens on a non-2xx", async () => {
+    answering("nope", { status: 429 });
+    const { onUsage, fn } = hooked();
+    await expect(fn(inputOf())).rejects.toThrow(/anthropic: 429/);
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage.mock.calls[0]![0]).toMatchObject({
+      outcome: "error",
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
+  it("reports error with zero tokens on a network failure, and rethrows it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("network down");
+      }),
+    );
+    const { onUsage, fn } = hooked();
+    await expect(fn(inputOf())).rejects.toThrow("network down");
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage.mock.calls[0]![0]).toMatchObject({ outcome: "error", inputTokens: 0 });
+  });
+
+  it("reports error with the reported tokens when the answer is not JSON", async () => {
+    answering("I cannot say", { usage: USAGE });
+    const { onUsage, fn } = hooked();
+    await expect(fn(inputOf())).rejects.toThrow(/no JSON object/);
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage.mock.calls[0]![0]).toMatchObject({ outcome: "error", outputTokens: 22 });
+  });
+
+  it("does not report when no request was made", async () => {
+    const fetchMock = answering(OK);
+    const { onUsage, fn } = hooked();
+    await expect(
+      fn(inputOf({ inline: async () => ({ media: "image/svg+xml", bytes: RENDITION }) })),
+    ).rejects.toThrow(/cannot be sent inline/);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onUsage).not.toHaveBeenCalled();
+  });
+
+  it("ignores a hook that throws", async () => {
+    answering(OK);
+    const fn = anthropicDescriber({
+      apiKey: KEY,
+      onUsage: () => {
+        throw new Error("ledger down");
+      },
+    });
+    await expect(fn(inputOf())).resolves.toMatchObject({ alt: "A person" });
+  });
+
+  it("ignores a hook that rejects", async () => {
+    answering(OK);
+    const fn = anthropicDescriber({
+      apiKey: KEY,
+      onUsage: async () => {
+        throw new Error("ledger down");
+      },
+    });
+    await expect(fn(inputOf())).resolves.toMatchObject({ alt: "A person" });
+    await new Promise((r) => setTimeout(r, 0));
   });
 });
 

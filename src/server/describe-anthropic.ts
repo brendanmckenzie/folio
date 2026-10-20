@@ -45,6 +45,7 @@
  *    pre-cleaned its own output would be the one path where it is enforced
  *    twice and could drift.
  */
+import { taskModel } from "./llm-tasks";
 import type { DescribeInput, DescribeResult } from "./types";
 
 /**
@@ -56,8 +57,11 @@ import type { DescribeInput, DescribeResult } from "./types";
  * forty thousand photographs is a real bill, and a smaller model is very
  * probably right for it — but that is the host's call, made once, in their own
  * config, with their own invoice in front of them.
+ *
+ * The id itself lives in `llm-tasks.json` (task `media.describe`), so the model
+ * watch and the eval suite see the same one.
  */
-export const DEFAULT_DESCRIBE_MODEL = "claude-opus-5";
+export const DEFAULT_DESCRIBE_MODEL = taskModel("media.describe");
 
 /** The endpoint, and the API version it is pinned to. */
 const ENDPOINT = "https://api.anthropic.com/v1/messages";
@@ -94,6 +98,25 @@ Answer with a single JSON object and nothing else — no prose before it, no cod
 - "description": one or two sentences saying what the file is, for somebody searching a library of thousands. Include what a filename cannot: who or what is in it, the setting, the occasion, any legible text.
 - "tags": choose only from the tag list given below, copying each name exactly. Choose every tag that genuinely applies and none that do not. If none apply, answer an empty array. Never invent a tag that is not on the list — an invented tag is discarded, so it costs the user money and describes nothing.`;
 
+/**
+ * What one request cost, reported to {@link AnthropicDescriberOptions.onUsage}.
+ *
+ * Folio records nothing itself; a host that keeps a ledger writes this row.
+ * `outcome` is `ok` for a parsed answer, `truncated` when the model hit
+ * `max_tokens`, `refused` on a refusal, and `error` for anything else that
+ * followed a request: a non-2xx, a network failure (tokens 0) or an answer that
+ * was not a JSON object (tokens as reported).
+ */
+export interface DescribeUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  latencyMs: number;
+  outcome: "ok" | "error" | "refused" | "truncated";
+}
+
 export interface AnthropicDescriberOptions {
   /**
    * The host's own API key. Folio stores it nowhere, logs it nowhere and sends
@@ -110,6 +133,13 @@ export interface AnthropicDescriberOptions {
    * the JSON object above**, because that is what the reader below parses.
    */
   prompt?: string;
+  /**
+   * Called exactly once per request that is sent, whatever the outcome. It is
+   * never called when no request was made (an image that cannot be sent inline
+   * costs nothing). A hook that throws or rejects is ignored: it must not fail
+   * a describe.
+   */
+  onUsage?: (usage: DescribeUsage) => void | Promise<void>;
 }
 
 /**
@@ -129,59 +159,102 @@ export function anthropicDescriber(
     throw new Error("anthropicDescriber: `apiKey` is required");
   }
 
+  const report = (usage: DescribeUsage) => {
+    if (!options.onUsage) return;
+    try {
+      Promise.resolve(options.onUsage(usage)).catch(() => {});
+    } catch {
+      // A ledger write must never fail the describe.
+    }
+  };
+
   return async function describeWithAnthropic(input: DescribeInput): Promise<DescribeResult> {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": API_VERSION,
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: MAX_TOKENS,
-        // The instruction and the vocabulary go in `system`, the image in the
-        // message: the first two are identical for every asset in a run and
-        // the third is not, which is the order a cached prefix wants
-        // (system before messages) even though nothing here asks for one.
-        //
-        // Nothing else is sent. No `thinking`, no `output_config.effort`, no
-        // beta header — because `model` is the host's, and every one of those
-        // is refused by *some* model a host might reasonably name. An adapter
-        // that 400s on the cheap model somebody chose to afford the run is
-        // worse than one that leaves a knob unturned.
-        system: `${prompt}\n\n${vocabularyOf(input.tags)}`,
-        messages: [
-          {
-            role: "user",
-            content: [
-              await imageBlock(input),
-              { type: "text", text: `The file is named ${input.filename}.` },
-            ],
-          },
-        ],
-      }),
+    const image = await imageBlock(input);
+    const started = Date.now();
+    const usageOf = (
+      outcome: DescribeUsage["outcome"],
+      usage?: AnthropicMessage["usage"],
+    ): DescribeUsage => ({
+      model,
+      inputTokens: usage?.input_tokens ?? 0,
+      outputTokens: usage?.output_tokens ?? 0,
+      cacheCreationInputTokens: usage?.cache_creation_input_tokens ?? 0,
+      cacheReadInputTokens: usage?.cache_read_input_tokens ?? 0,
+      latencyMs: Date.now() - started,
+      outcome,
     });
+
+    let res: Response;
+    try {
+      res = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": API_VERSION,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: MAX_TOKENS,
+          // The instruction and the vocabulary go in `system`, the image in the
+          // message: the first two are identical for every asset in a run and
+          // the third is not, which is the order a cached prefix wants
+          // (system before messages) even though nothing here asks for one.
+          //
+          // Nothing else is sent. No `thinking`, no `output_config.effort`, no
+          // beta header — because `model` is the host's, and every one of those
+          // is refused by *some* model a host might reasonably name. An adapter
+          // that 400s on the cheap model somebody chose to afford the run is
+          // worse than one that leaves a knob unturned.
+          system: `${prompt}\n\n${vocabularyOf(input.tags)}`,
+          messages: [
+            {
+              role: "user",
+              content: [image, { type: "text", text: `The file is named ${input.filename}.` }],
+            },
+          ],
+        }),
+      });
+    } catch (err) {
+      report(usageOf("error"));
+      throw err;
+    }
 
     if (!res.ok) {
       // The body is the useful half — an invalid key, a rate limit and an
       // unsupported model are all told apart by it — and it is bounded here
       // because `describe_error` is a column somebody reads in a table.
+      report(usageOf("error"));
       throw new Error(`anthropic: ${res.status} ${(await res.text()).slice(0, 300)}`);
     }
 
-    const body = (await res.json()) as AnthropicMessage;
+    let body: AnthropicMessage;
+    try {
+      body = (await res.json()) as AnthropicMessage;
+    } catch (err) {
+      report(usageOf("error"));
+      throw err;
+    }
     // A refusal is a 200 with nothing usable in it. Recorded as a failure
     // rather than as an empty result: an empty result would stamp
     // `described_at` with no error and quietly retire the asset from the
     // backlog, which is exactly the row somebody wants to find again.
     if (body.stop_reason === "refusal") {
+      report(usageOf("refused", body.usage));
       throw new Error(
         `anthropic: the model declined (${body.stop_details?.category ?? "refusal"})`,
       );
     }
 
-    return parseDescribeJson(textOf(body));
+    let result: DescribeResult;
+    try {
+      result = parseDescribeJson(textOf(body));
+    } catch (err) {
+      report(usageOf(body.stop_reason === "max_tokens" ? "truncated" : "error", body.usage));
+      throw err;
+    }
+    report(usageOf(body.stop_reason === "max_tokens" ? "truncated" : "ok", body.usage));
+    return result;
   };
 }
 
@@ -291,6 +364,12 @@ interface AnthropicMessage {
   content?: unknown;
   stop_reason?: string;
   stop_details?: { category?: string } | null;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
 }
 
 function textOf(body: AnthropicMessage): string {
