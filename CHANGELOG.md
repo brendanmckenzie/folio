@@ -8,10 +8,10 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
-## Unreleased
+## 1.1.0
 
-On `main`, not yet tagged. The next tag is a minor (`1.1.0`): it adds a migration
-and new form keys, and removes nothing.
+A minor release: it adds a migration, new form keys and the `onUsage` hook, and
+removes nothing.
 
 ### Behaviour changes to know about
 
