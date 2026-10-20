@@ -29,6 +29,8 @@ const LABELS = [
   ["status:needs-info", "e4e669", "Waiting on more information"],
   ["deferred", "cccccc", "Parked until the Revisit date"],
   ["deps-major", "fbca04", "Major dependency update, needs a manual look"],
+  ["incident", "b60205", "Incident record"],
+  ["source:radar", "c2e0c6", "Filed by the quarterly radar"],
   // Library extras: the 1.0 punch list
   ["1.0", "d93f0b", "Wanted in the 1.0 release"],
   ["1.0-blocker", "b60205", "Must be resolved before a 1.0 can be tagged"],

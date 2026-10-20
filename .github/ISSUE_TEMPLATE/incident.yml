@@ -1,0 +1,55 @@
+name: Incident
+description: Declare an incident (a broken release, or a published package that must be pulled)
+title: "[incident] "
+labels: ["incident", "p1"]
+assignees: ["brendanmckenzie"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security exposures do not go here: report them privately through Security > Advisories (see SECURITY.md). For anything else, yank or fix first, diagnose after. The postmortem is due within seven days of resolution, as `docs/incidents/<YYYY-MM-DD>-<slug>.md` in a PR that says `Refs #<this issue>`.
+  - type: dropdown
+    id: trigger
+    attributes:
+      label: Why is this an incident?
+      options:
+        - A published release that is broken
+        - A release or package version pulled or yanked
+    validations:
+      required: true
+  - type: textarea
+    id: happening
+    attributes:
+      label: What is happening?
+      description: Who is affected and how. No customer names or addresses.
+    validations:
+      required: true
+  - type: input
+    id: started
+    attributes:
+      label: Started (Melbourne time)
+      placeholder: "2026-10-20 13:45"
+    validations:
+      required: true
+  - type: input
+    id: detected
+    attributes:
+      label: Detected (Melbourne time), and by what
+      placeholder: "2026-10-20 13:50, ops-watch alert #153"
+    validations:
+      required: true
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Mitigation so far
+      description: Rollback run, release tag, check paused. Update as it changes.
+  - type: input
+    id: resolved
+    attributes:
+      label: Resolved (Melbourne time)
+      description: Fill in when it is over.
+  - type: textarea
+    id: links
+    attributes:
+      label: Links
+      description: Alert issues, workflow runs, release tags.
