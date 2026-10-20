@@ -11,19 +11,21 @@ pays for it. The task is registered in `src/server/llm-tasks.json` with its mode
 model line, the lines a candidate may come from, its prompt file and its eval suite.
 `llm-prices.json` beside it prices those models for evals.
 
-1. **Watch.** The ops model watch reads the registry (once `watch` is `true`) and files
-   an issue labelled `source:llm-watch` when a newer model exists in a candidate line.
-   A task with no eval suite gets `eval-gap` instead.
-2. **Eval.** The `llm-eval` workflow runs the task's suite against the current model and
-   the candidate and comments the comparison on the issue: pass rate, cost per case,
-   latency and contract failures. On a pull request the `evals` job in `ci.yml` runs the
-   suite with the registry's model and compares it with `evals/media.describe/baseline.json`.
-3. **Adopt.** Adoption is a pull request that changes `model` in `llm-tasks.json` and
-   `baseline.json` together. It ships as a minor release, because `DEFAULT_DESCRIBE_MODEL`
-   changes what a host that sets no `model` pays for. The `UPGRADING.md` entry names the
-   old and new model and quotes the eval deltas.
-4. **Hold.** A model that should not move yet gets a `hold` on its registry entry with a
-   reason and a date, so the watch stops raising it.
+Folio is a library, so its consumers choose the model. The eval suite gates prompt
+changes in Folio; consumers own model choice and the model watch. The registry has
+`watch: false` (the reason is in its `watchReason` field), so the ops model watch raises
+nothing for Folio. A host registers `media.describe` in its own registry, passes `model`
+explicitly and runs Folio's suite in its own eval.
+
+1. **Eval.** On a pull request that changes a prompt or the default model, the `evals`
+   job in `ci.yml` runs the suite with the registry's model and compares it with
+   `evals/media.describe/baseline.json`. The `llm-eval.yml` workflow stays for a manual
+   dispatch that compares two models: pass rate, cost per case, latency and contract
+   failures.
+2. **Change the default.** Changing `model` in `llm-tasks.json` is a pull request that
+   updates `baseline.json` with it and ships as a minor release, because
+   `DEFAULT_DESCRIBE_MODEL` changes what a host that sets no `model` pays for. The
+   `UPGRADING.md` entry names the old and new model and quotes the eval deltas.
 
 Hosts that pass their own `model` are unaffected by any of this.
 

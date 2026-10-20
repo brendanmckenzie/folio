@@ -430,7 +430,8 @@ on a model id written anywhere else. `src/server/llm-prices.json` prices the mod
 evals only; Folio spends nothing itself, and a host records its own spend through the
 `onUsage` hook on `anthropicDescriber`. The task's eval suite is `evals/media.describe`
 (ten CC0 photographs, sources in its `SOURCES.md`); `node scripts/llm/eval.mjs` runs it.
-Lifecycle: `docs/operations/README.md`.
+The suite gates prompt changes in Folio; consumers own model choice and the model
+watch, so the registry has `watch: false`. Lifecycle: `docs/operations/README.md`.
 
 **Secrets in CI.** `ci.yml` is secret-free except for one job: `evals`, which holds
 `ANTHROPIC_EVAL_KEY` as `ANTHROPIC_API_KEY`, runs only on a same-repo PR that changes an
