@@ -1,6 +1,7 @@
 {
   "$comment": "Operate O37. Code finds its model here and nowhere else. See docs/operations/README.md.",
-  "watch": true,
+  "watch": false,
+  "watchReason": "Folio is a library: the eval suite gates prompt changes here, and consumers own model choice and model watch.",
   "ledger": { "kind": "host" },
   "prices": "src/server/llm-prices.json",
   "tasks": [
