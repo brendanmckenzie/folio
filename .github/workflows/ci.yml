@@ -59,42 +59,20 @@ jobs:
       - name: test
         run: pnpm test
 
-  # Server half of the commit convention: the squash commit subject is the PR
-  # title, so the title is linted with the same config as the commit-msg hook. The
-  # title reaches the shell through an env var, never a template expansion.
-  pr-title:
-    name: pr title
+  # The cheap checks in one job, so a run pays one runner start and one checkout instead of
+  # four. Every step runs even when an earlier one failed, so one run reports every finding.
+  # The PR title is the server half of the commit convention (squash_merge_commit_title:
+  # PR_TITLE), linted with the same config as the commit-msg hook. It reaches the shell
+  # through an env var, never a template expansion.
+  lint:
+    name: lint (title, actionlint, zizmor, gitleaks)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
+      # Full history: the scan walks the commits in the range.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
-
-      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version-file: .nvmrc
-          cache: pnpm
-
-      # No build needed to lint a string.
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: lint the PR title
-        env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
-        run: |
-          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
-          ./node_modules/.bin/commitlint --edit "$RUNNER_TEMP/pr-title.txt"
-
-  workflows:
-    name: actionlint
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
+          fetch-depth: 0
           persist-credentials: false
 
       # Fetch a pinned release into the job's temp dir and check it against its
@@ -110,21 +88,29 @@ jobs:
           echo "$d" >> "$GITHUB_PATH"
 
       - name: actionlint
+        if: ${{ !cancelled() }}
         run: actionlint -color
 
-  secrets:
-    name: gitleaks
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      # Full history: the scan walks the commits in the range.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
+      - name: install zizmor
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/zizmor"
+          mkdir -p "$d"
+          curl -fsSL -o "$d/zizmor.tar.gz" "https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99  $d/zizmor.tar.gz" | sha256sum -c -
+          tar -xzf "$d/zizmor.tar.gz" -C "$d" zizmor
+          echo "$d" >> "$GITHUB_PATH"
+
+      - name: zizmor
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --no-progress .github/workflows
 
       # The CLI, not gitleaks-action, which needs a paid licence for organisations.
       - name: install gitleaks
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/gitleaks"
@@ -136,42 +122,37 @@ jobs:
 
       # A PR scans its own commits.
       - name: scan the commit range
+        if: ${{ !cancelled() }}
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: gitleaks detect --redact --verbose --log-opts="$PR_BASE..$PR_HEAD"
 
-  # Static analysis of the workflows themselves. Online audits (impostor commits,
-  # known-vulnerable actions) call the API, so the step gets the job's read-only
-  # token and nothing else.
-  zizmor:
-    name: zizmor
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         with:
-          persist-credentials: false
+          node-version-file: .nvmrc
+          cache: pnpm
 
-      - name: install zizmor
-        run: |
-          set -euo pipefail
-          d="$RUNNER_TEMP/zizmor"
-          mkdir -p "$d"
-          curl -fsSL -o "$d/zizmor.tar.gz" "https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz"
-          echo "d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99  $d/zizmor.tar.gz" | sha256sum -c -
-          tar -xzf "$d/zizmor.tar.gz" -C "$d" zizmor
-          echo "$d" >> "$GITHUB_PATH"
+      # No build needed to lint a string.
+      - run: pnpm install --frozen-lockfile --ignore-scripts --ignore-scripts
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
 
-      - name: zizmor
+      - name: lint the PR title
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: zizmor --no-progress .github/workflows
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" > "$RUNNER_TEMP/pr-title.txt"
+          ./node_modules/.bin/commitlint --edit "$RUNNER_TEMP/pr-title.txt"
 
   # The one status a ruleset requires. Every job above must pass.
   gate:
     if: always()
-    needs: [check, pr-title, workflows, zizmor, secrets]
+    needs: [check, lint]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
