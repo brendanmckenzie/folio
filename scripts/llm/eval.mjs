@@ -93,7 +93,7 @@ const mean = (xs) => (xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.l
  * Runs every case for one model. `budget.spent` is shared across models in a
  * dispatch run so the cap is per run, not per model.
  */
-async function runModel(suite, taskDef, model, client, budget) {
+async function runModel(taskDef, model, client, budget) {
   const casesDir = join(ROOT, taskDef.eval, "cases");
   const { runCase } = await import(pathToFileURL(join(ROOT, taskDef.eval, "run.mjs")).href);
   const { score } = await import(pathToFileURL(join(ROOT, taskDef.eval, "score.mjs")).href);
@@ -263,7 +263,6 @@ async function dispatch() {
     console.log("No eval suite: this candidate cannot be judged");
     return;
   }
-  const suite = readJson(join(ROOT, taskDef.eval, "suite.json"));
   const client = { apiKey: needKey(), anthropicDescriber: await loadDescriber() };
   const budget = { spent: 0 };
   const summaries = [];
@@ -272,7 +271,7 @@ async function dispatch() {
     .map((m) => m.trim())
     .filter(Boolean)) {
     console.log(`${taskDef.id}: ${model}`);
-    summaries.push(await runModel(suite, taskDef, model, client, budget));
+    summaries.push(await runModel(taskDef, model, client, budget));
   }
   writeOut(`${taskDef.id}.dispatch.json`, { task: taskDef.id, spent: budget.spent, summaries });
   const table = renderTable(taskDef.id, summaries, budget.spent);
@@ -313,7 +312,7 @@ async function gate() {
     }
     const suite = readJson(join(ROOT, taskDef.eval, "suite.json"));
     console.log(`${id}: ${taskDef.model}`);
-    const s = await runModel(suite, taskDef, taskDef.model, client, budget);
+    const s = await runModel(taskDef, taskDef.model, client, budget);
     writeOut(`${id}.${taskDef.model}.json`, s);
     const table = renderTable(id, [s], budget.spent);
     console.log(`\n${table}`);

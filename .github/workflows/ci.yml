@@ -235,7 +235,10 @@ jobs:
           # `check` and `lint` must succeed. `evals` is the one job that may be skipped: it is
           # skipped when no LLM task changed and on a fork PR, which gets no secret. A failed or
           # cancelled `evals` still fails the gate.
-          [ "$CHECK" = success ] && [ "$LINT" = success ] || { echo "::error::check or lint did not succeed"; exit 1; }
+          if [ "$CHECK" != success ] || [ "$LINT" != success ]; then
+            echo "::error::check or lint did not succeed"
+            exit 1
+          fi
           case "$EVALS" in
             success|skipped) ;;
             *) echo "::error::evals did not pass ($EVALS)"; exit 1 ;;

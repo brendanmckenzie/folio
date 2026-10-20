@@ -1,0 +1,12 @@
+{
+  "model": "claude-opus-5",
+  "metrics": {
+    "passRate": 1,
+    "tagF1": 0.9212698412698412,
+    "factRecall": 1
+  },
+  "passRate": 1,
+  "contractFailures": 0,
+  "measured": "2026-10-20",
+  "runUrl": "https://github.com/brendanmckenzie/folio/actions/runs/39373819876"
+}
