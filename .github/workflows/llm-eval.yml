@@ -1,0 +1,66 @@
+name: llm-eval
+
+# Dispatched by the model watch (Operate O39) when a candidate model for a task
+# appears: runs the task's suite against the model it uses today and the
+# candidate, and comments the comparison table on the watch issue. Spend is
+# capped per run. The key is the eval-only ANTHROPIC_EVAL_KEY.
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task id from llm-tasks.json"
+        required: true
+      current:
+        description: "The task's model today"
+        required: true
+      candidate:
+        description: "The model to compare"
+        required: true
+      issue:
+        description: "LLM watch issue to comment on"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: llm-eval-${{ inputs.task }}
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: evaluate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_EVAL_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TASK: ${{ inputs.task }}
+          CURRENT: ${{ inputs.current }}
+          CANDIDATE: ${{ inputs.candidate }}
+          ISSUE: ${{ inputs.issue }}
+        run: node scripts/llm/eval.mjs --task "$TASK" --models "$CURRENT,$CANDIDATE" --max-usd 2.00 --issue "$ISSUE" --comment
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: eval-out
+          path: eval-out
+          if-no-files-found: ignore

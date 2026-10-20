@@ -1,0 +1,13 @@
+{
+  "tags": [
+    "Animals",
+    "Dogs"
+  ],
+  "mustMention": [
+    [
+      "dog",
+      "puppy"
+    ]
+  ],
+  "decorative": false
+}

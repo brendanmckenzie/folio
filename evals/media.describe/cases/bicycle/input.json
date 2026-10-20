@@ -1,0 +1,55 @@
+{
+  "filename": "green-bicycle.jpg",
+  "contentType": "image/webp",
+  "image": "image.webp",
+  "tags": [
+    {
+      "id": "animals",
+      "name": "Animals"
+    },
+    {
+      "id": "birds",
+      "name": "Birds"
+    },
+    {
+      "id": "dogs",
+      "name": "Dogs"
+    },
+    {
+      "id": "food",
+      "name": "Food"
+    },
+    {
+      "id": "beach",
+      "name": "Beach"
+    },
+    {
+      "id": "mountains",
+      "name": "Mountains"
+    },
+    {
+      "id": "water",
+      "name": "Water"
+    },
+    {
+      "id": "portrait",
+      "name": "Portrait"
+    },
+    {
+      "id": "nightlife",
+      "name": "Nightlife"
+    },
+    {
+      "id": "autumn",
+      "name": "Autumn"
+    },
+    {
+      "id": "market",
+      "name": "Market"
+    },
+    {
+      "id": "interior",
+      "name": "Interior"
+    }
+  ]
+}

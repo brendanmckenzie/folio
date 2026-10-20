@@ -6,9 +6,6 @@ import { TASK_IDS } from "../../src/server/llm-tasks";
 /**
  * Operate O37: the registry is the only place a model id is written, and the
  * model watch reads it. Everything here is a property the watch relies on.
- *
- * The eval checks (`eval` path, `baseline.json`) apply once `evals/<task>` exists
- * and are skipped before then, so this file can land ahead of the suite.
  */
 const ROOT = join(import.meta.dirname, "../..");
 const read = (path: string) => readFileSync(join(ROOT, path), "utf8");
@@ -90,9 +87,12 @@ describe("llm-tasks.json", () => {
     }
   });
 
-  it("keeps baseline.json on the registry's model, where a suite exists", () => {
+  it("keeps baseline.json on the registry's model", () => {
     for (const t of registry.tasks) {
-      if (!t.eval || !existsSync(join(ROOT, t.eval, "suite.json"))) continue;
+      if (!t.eval) continue;
+      expect(existsSync(join(ROOT, t.eval, "suite.json")), `${t.id}: ${t.eval}/suite.json`).toBe(
+        true,
+      );
       const baseline = JSON.parse(read(`${t.eval}/baseline.json`));
       expect(baseline.model, `${t.id}: a model change must update the baseline`).toBe(t.model);
     }

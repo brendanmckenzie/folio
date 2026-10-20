@@ -1,0 +1,22 @@
+{
+  "tags": [
+    "Landscape",
+    "Mountains",
+    "Water",
+    "Autumn"
+  ],
+  "mustMention": [
+    [
+      "mountain",
+      "mountains",
+      "peaks"
+    ],
+    [
+      "lake",
+      "reflection",
+      "reflected",
+      "water"
+    ]
+  ],
+  "decorative": false
+}

@@ -16,7 +16,8 @@ model line, the lines a candidate may come from, its prompt file and its eval su
    A task with no eval suite gets `eval-gap` instead.
 2. **Eval.** The `llm-eval` workflow runs the task's suite against the current model and
    the candidate and comments the comparison on the issue: pass rate, cost per case,
-   latency and contract failures.
+   latency and contract failures. On a pull request the `evals` job in `ci.yml` runs the
+   suite with the registry's model and compares it with `evals/media.describe/baseline.json`.
 3. **Adopt.** Adoption is a pull request that changes `model` in `llm-tasks.json` and
    `baseline.json` together. It ships as a minor release, because `DEFAULT_DESCRIBE_MODEL`
    changes what a host that sets no `model` pays for. The `UPGRADING.md` entry names the

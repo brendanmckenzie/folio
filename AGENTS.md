@@ -428,8 +428,15 @@ that site's brand.
 `taskModel()` in `src/server/llm-tasks.ts`, and `test/unit/llm-registry.test.ts` fails
 on a model id written anywhere else. `src/server/llm-prices.json` prices the models for
 evals only; Folio spends nothing itself, and a host records its own spend through the
-`onUsage` hook on `anthropicDescriber`. The task's eval suite is `evals/media.describe`.
+`onUsage` hook on `anthropicDescriber`. The task's eval suite is `evals/media.describe`
+(ten CC0 photographs, sources in its `SOURCES.md`); `node scripts/llm/eval.mjs` runs it.
 Lifecycle: `docs/operations/README.md`.
+
+**Secrets in CI.** `ci.yml` is secret-free except for one job: `evals`, which holds
+`ANTHROPIC_EVAL_KEY` as `ANTHROPIC_API_KEY`, runs only on a same-repo PR that changes an
+LLM task, and is capped at USD 2.00. A fork PR skips it and `gate` treats that skip as a
+pass; a failed or cancelled `evals` still fails `gate`. `llm-eval.yml` is the other user
+of the key (dispatch only).
 
 ## Where to look next
 
