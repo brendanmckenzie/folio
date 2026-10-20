@@ -88,7 +88,7 @@ const MAX_TOKENS = 1024;
  * sentence twice: alt text is what a screen reader says *instead of* the image,
  * and a description is what the file is, for somebody searching a library.
  */
-export const DEFAULT_DESCRIBE_PROMPT = `You are describing an image for a content management system's media library.
+export const DEFAULT_DESCRIBE_PROMPT = `You are describing a picture for a content management system's media library.
 
 Answer with a single JSON object and nothing else — no prose before it, no code fence around it:
 
