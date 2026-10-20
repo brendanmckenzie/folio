@@ -1,0 +1,14 @@
+{
+  "tags": [
+    "Food"
+  ],
+  "mustMention": [
+    [
+      "noodle",
+      "noodles",
+      "soup",
+      "ramen"
+    ]
+  ],
+  "decorative": false
+}

@@ -1,0 +1,79 @@
+{
+  "filename": "mountain-lake.jpg",
+  "contentType": "image/webp",
+  "image": "image.webp",
+  "tags": [
+    {
+      "id": "animals",
+      "name": "Animals"
+    },
+    {
+      "id": "birds",
+      "name": "Birds"
+    },
+    {
+      "id": "dogs",
+      "name": "Dogs"
+    },
+    {
+      "id": "food",
+      "name": "Food"
+    },
+    {
+      "id": "people",
+      "name": "People"
+    },
+    {
+      "id": "street",
+      "name": "Street"
+    },
+    {
+      "id": "market",
+      "name": "Market"
+    },
+    {
+      "id": "architecture",
+      "name": "Architecture"
+    },
+    {
+      "id": "interior",
+      "name": "Interior"
+    },
+    {
+      "id": "landscape",
+      "name": "Landscape"
+    },
+    {
+      "id": "mountains",
+      "name": "Mountains"
+    },
+    {
+      "id": "water",
+      "name": "Water"
+    },
+    {
+      "id": "bicycle",
+      "name": "Bicycle"
+    },
+    {
+      "id": "signage",
+      "name": "Signage"
+    },
+    {
+      "id": "autumn",
+      "name": "Autumn"
+    },
+    {
+      "id": "beach",
+      "name": "Beach"
+    },
+    {
+      "id": "nightlife",
+      "name": "Nightlife"
+    },
+    {
+      "id": "portrait",
+      "name": "Portrait"
+    }
+  ]
+}

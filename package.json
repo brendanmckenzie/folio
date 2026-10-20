@@ -31,6 +31,7 @@
     "src",
     "migrations",
     "bin",
+    "evals",
     "examples/starter",
     "!examples/starter/node_modules",
     "!examples/starter/.wrangler",

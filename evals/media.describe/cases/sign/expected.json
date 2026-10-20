@@ -1,0 +1,17 @@
+{
+  "tags": [
+    "Signage",
+    "Street",
+    "Architecture"
+  ],
+  "mustMention": [
+    [
+      "one way",
+      "one-way"
+    ],
+    [
+      "madison"
+    ]
+  ],
+  "decorative": false
+}

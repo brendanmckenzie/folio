@@ -1,0 +1,19 @@
+{
+  "task": "media.describe",
+  "metric": "passRate",
+  "tolerance": 0.1,
+  "maxUsd": 2.0,
+  "judge": null,
+  "sources": [
+    { "case": "dog", "licence": "CC0 1.0", "author": "Kurt Kaiser", "url": "https://commons.wikimedia.org/wiki/File:Dog_park,_small_dog_mix.jpg" },
+    { "case": "market", "licence": "CC0 1.0", "author": "Commons uploader (credited as \"Returned dude12345\")", "url": "https://commons.wikimedia.org/wiki/File:Street_market_inthe_Rocks_district_of_Sydney.jpg" },
+    { "case": "noodles", "licence": "CC0 1.0", "author": "Andy Li", "url": "https://commons.wikimedia.org/wiki/File:Noodle_soup_in_Asia_Bowl_2025-07-26.jpg" },
+    { "case": "lake", "licence": "CC0 1.0", "author": "Aleksandra Boguslawska", "url": "https://commons.wikimedia.org/wiki/File:Mountain_lake_(Unsplash).jpg" },
+    { "case": "bicycle", "licence": "CC0 1.0", "author": "www.Pixel.la Free Stock Photos", "url": "https://commons.wikimedia.org/wiki/File:Green_bicycle_leaning_on_the_wall.jpg" },
+    { "case": "kingfisher", "licence": "CC0 1.0", "author": "Frank-2.0", "url": "https://commons.wikimedia.org/wiki/File:Eisvogel_kingfisher.jpg" },
+    { "case": "brick", "licence": "CC0 1.0", "author": "Evelyn-rose", "url": "https://commons.wikimedia.org/wiki/File:The-Handa-Red-Brick-Building-1.jpg" },
+    { "case": "sign", "licence": "CC0 1.0", "author": "John M Wolfson", "url": "https://commons.wikimedia.org/wiki/File:One_Way_sign_Chicago.jpg" },
+    { "case": "texture", "licence": "CC0 1.0", "author": "Clara.Hoke", "url": "https://commons.wikimedia.org/wiki/File:Texture_15.JPG" },
+    { "case": "kitchen", "licence": "CC0 1.0", "author": "NeONBRAND", "url": "https://commons.wikimedia.org/wiki/File:Blue_white_kitchen_interior_(Unsplash).jpg" }
+  ]
+}
