@@ -625,7 +625,7 @@ trailing period, under about 72 characters. Types: `feat`, `fix`, `docs`, `style
 `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`; mark a breaking change
 with `!` and a `BREAKING CHANGE:` footer. The scope is optional here (one package);
 use the area when it helps, for example `fix(sync): ...`. lefthook's `commit-msg`
-hook and the `pr-title` job both run commitlint (`commitlint.config.mjs`).
+hook and the `lint` job both run commitlint (`commitlint.config.mjs`).
 
 Work happens on a `type/short-description` branch and merges through a pull request.
 Merging squashes, and **the squash commit subject is the PR title**, so the title is
