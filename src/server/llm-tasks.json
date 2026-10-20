@@ -1,6 +1,6 @@
 {
   "$comment": "Operate O37. Code finds its model here and nowhere else. See docs/operations/README.md.",
-  "watch": false,
+  "watch": true,
   "ledger": { "kind": "host" },
   "prices": "src/server/llm-prices.json",
   "tasks": [
