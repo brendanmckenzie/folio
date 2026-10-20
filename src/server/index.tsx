@@ -350,7 +350,7 @@ export type { DescribeInput, DescribeResult, FolioDescribe } from "./types";
  * it *returns* a `describe.fn` and holds no privileged access to anything, so
  * deleting it would cost a host twenty lines and no capability.
  */
-export type { AnthropicDescriberOptions } from "./describe-anthropic";
+export type { AnthropicDescriberOptions, DescribeUsage } from "./describe-anthropic";
 export {
   anthropicDescriber,
   DEFAULT_DESCRIBE_MODEL,

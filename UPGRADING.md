@@ -589,6 +589,30 @@ shown" becomes required always, which can block visitors it never applied to. Th
 columns stay in the database and the older build ignores them. If you must roll back,
 clear `required` on the conditional questions first, or roll forward instead.
 
+### `anthropicDescriber` reports usage (2026-10-20) (v1.1.0)
+
+**No action.** `anthropicDescriber` gains an optional `onUsage` hook, and
+`DescribeUsage` is exported from `folio/server`. Nothing changes for a host that does
+not pass it.
+
+```ts
+anthropicDescriber({
+  apiKey: env.ANTHROPIC_API_KEY,
+  onUsage: (u) => ctx.waitUntil(recordUsage(u)),
+})
+```
+
+It is called once per request that was sent, with `model`, `inputTokens`,
+`outputTokens`, `cacheCreationInputTokens`, `cacheReadInputTokens`, `latencyMs` and an
+`outcome` of `ok`, `truncated` (the model hit `max_tokens`), `refused`, or `error` (a
+non-2xx, a network failure with zero tokens, or an answer that was not JSON). It is not
+called when no request was made, and a hook that throws or rejects is ignored, so a
+ledger write cannot fail a describe. Folio records nothing itself: this is the seam for
+a host that keeps its own cost ledger.
+
+`DEFAULT_DESCRIBE_MODEL` now comes from `src/server/llm-tasks.json`, where the model
+watch and the eval suite read it. Its value is unchanged (`claude-opus-5`).
+
 ### A title-only patch no longer moves the page (2026-09-06) (v1.0.0)
 
 **Two bugs, one upgrade, and both were silent.** Read this one even if you skip

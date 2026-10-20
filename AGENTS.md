@@ -421,6 +421,16 @@ that site's brand.
 - **No host-defined custom field types.** The field set is what `folio/core`
   exports.
 
+## LLM tasks
+
+`src/server/llm-tasks.json` is the registry of every model call Folio ships, today
+`media.describe`. The model id lives there and nowhere else: code reads it through
+`taskModel()` in `src/server/llm-tasks.ts`, and `test/unit/llm-registry.test.ts` fails
+on a model id written anywhere else. `src/server/llm-prices.json` prices the models for
+evals only; Folio spends nothing itself, and a host records its own spend through the
+`onUsage` hook on `anthropicDescriber`. The task's eval suite is `evals/media.describe`.
+Lifecycle: `docs/operations/README.md`.
+
 ## Where to look next
 
 - `docs/configuration.md` — every `createFolio()` key, every binding, every

@@ -33,6 +33,9 @@ const LABELS = [
   ["1.0", "d93f0b", "Wanted in the 1.0 release"],
   ["1.0-blocker", "b60205", "Must be resolved before a 1.0 can be tagged"],
   ["post-1.0", "0e8a16", "Deferred past 1.0"],
+  // LLM task lifecycle (Operate O36 to O44)
+  ["source:llm-watch", "5319e7", "Filed by the LLM model watch"],
+  ["eval-gap", "fef2c0", "An LLM task with no eval suite yet"],
 ];
 
 const gh = (...a) => execFileSync("gh", a, { encoding: "utf8" });
