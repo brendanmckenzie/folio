@@ -385,9 +385,16 @@ that site's brand.
 - **A supplied slug is kept up to 200 characters** (`MAX_SLUG` from `folio/core`);
   a slug derived from a title is cut at 64. A longer one is a `400 bad_request`,
   never a silent truncation.
-- **A block's `render` is a pure function of its own fields and the `Resolution`.**
-  It receives `PropsOf<fields> & { uid: string }` and, second, the page's
-  `Resolution`. Nothing else, so no request and no environment.
+- **A block's `render` is a pure function of its own fields and the resolution**
+  (`resolution.params` included). It receives `PropsOf<fields> & { uid: string }`
+  and, second, the page's `Resolution`. It must not read the request, cookies or
+  time itself: anything a render needs from the request reaches it through
+  `params`, which the host passes to `reader.page(path, { params })`. **Passing
+  `params` makes the page `no-store`** unless you also pass `cacheable: true`, which
+  asserts the params derive from the URL alone. Never pass it with a cookie.
+- **A script that drives the admin login raises `auth.linksPerHour` in its dev config.**
+  It defaults to 5 sign-in links per address per hour, and requests past it are dropped
+  quietly, so the sixth scripted login in local dev never gets a link.
 - **Pin an exact tag.** A branch, a short SHA or a `#semver:` range will resolve differently later.
 
 ## Do not

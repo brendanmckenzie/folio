@@ -631,6 +631,25 @@ Durable Object writes the mirror as a statement of its own, so a missing column 
 logged and costs nothing else. If you roll the Worker back the column is unread and
 harmless.
 
+### Render parameters (v1.2.0)
+
+**No action; one caching rule to know.** `reader.page(path, opts)` and `reader.recordBy()` take
+`params` (a `Record<string, Json>`, read in a block as `resolution.params`), `search` (the term
+`searchable` collections run against) and `cacheable`. `folio.resolve(doc, { params })` takes
+`params` too, and `defineBlock` takes `previewParams`. If a host React context carries the
+`?tag=` or `?page=` a block reads, replace it with `params`, and a block's `render` then reads
+`resolution.params` instead.
+
+- **A page given `params` answers `Cache-Control: no-store` with no `Cache-Tag`**, unless you also
+  pass `cacheable: true`, which asserts the params are a pure function of the request URL.
+  Folio cannot see what they depend on. Never set `cacheable` for anything derived from a
+  cookie, a random value or geography. A draft and a gated page stay `no-store` regardless.
+  No existing call passes `params`, so no existing response changes.
+- **`previewParams`** on a block gives the editor's preview, `?_folio=draft` and the MCP
+  screenshot a representative `resolution.params`. Merged root first, depth first in slot
+  order, first declaration of a key winning. `GET {base}/api/audit` reports
+  `preview-params-conflict` when two block types declare one key with different values.
+
 ### `reader.recordBy` and `unique` fields (v1.2.0)
 
 **No action; opt-in.** `text({ indexed: true, unique: true })` marks a root field no two

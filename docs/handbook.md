@@ -2588,6 +2588,51 @@ The individual reads are still there for anything that is not a page — a
 sitemap wants `stories()`, a search result page has no document of its own and
 calls `resolve()` with none.
 
+### Render parameters instead of a context
+
+A page often depends on something that is not in its content: the `?tag=` a listing is
+filtered by, the `?q=` a search renders, a pagination cursor. A host used to thread that through
+a React context of its own, which a block's `render` cannot reach through Folio's renderer.
+Pass it to the reader and every block reads it from the resolution:
+
+```tsx
+const page = await reader.page(path, {
+  params: { tag: url.searchParams.get('tag') ?? '' },
+  search: url.searchParams.get('q') ?? undefined,
+  cacheable: true, // only because both come from the URL; see below
+})
+
+// in a block
+render: ({ heading }, resolution) => {
+  const tag = resolution.params?.tag
+  /* ... */
+}
+```
+
+`params` is a `Record<string, Json>`. It reaches `resolution.params` on `reader.page()`,
+`reader.recordBy()` and `folio.resolve(doc, { params })`, and **Folio never reads it and never
+puts it in a cache tag**. `search` is the full-text term every `searchable` `collection` field runs
+against; the host reads `?q=` and `reader.page()` can now pass it. A block is therefore a pure
+function of its own fields and the resolution, and must not read the request, cookies or time.
+
+**Passing `params` answers `Cache-Control: no-store` with no `Cache-Tag`**, because a page
+that depends on something Folio cannot see is not safe in a shared cache under its URL. If
+the params are a pure function of the request URL (the cache key), add `cacheable: true` and
+the page gets the normal `cacheHeaders`. **Never** pass `cacheable: true` with anything not
+derived from the URL (a cookie, a random value, geography): it stores one visitor's render under
+a URL everyone shares. A draft and a gated page are `no-store` whatever `cacheable` says, and
+`cacheable` does nothing without `params`.
+
+**Previewing a block that needs them.** `defineBlock({ previewParams: { tag: 'jazz' } })` gives the
+editor's preview, `?_folio=preview`, `?_folio=draft` and the MCP screenshot that representative
+state as `resolution.params`, so a "related posts" block shows posts instead of its empty
+state. Only previews read it; a live page gets the host's own. When several blocks declare
+them they are merged **root block first, then depth first in slot order** (slots in the
+block's field declaration order, children in sibling order), and **the first declaration of a
+key wins**. In a record preview the page's declarations come first, then the record's. The audit
+reports `preview-params-conflict` when two block types declare one key with different values,
+because which one wins then depends on document order.
+
 ### What a render actually costs
 
 A published page is **two round trips**: the row (document *and* story together),
@@ -2876,6 +2921,11 @@ const folio = createFolio<Env>({
   },
 })
 ```
+
+**`linksPerHour` defaults to 5**, per address, and further requests are dropped quietly. A script
+that signs in to the admin repeatedly in local dev (an end-to-end run, a test harness) hits it on
+the sixth login and sees no link arrive, with no error to say why. Raise it in the dev
+config only, for example `linksPerHour: 1000`, and leave production at the default.
 
 **Sessions are rows in D1 behind an opaque cookie.** 32 bytes from
 `crypto.getRandomValues`, handed out once, stored only as a SHA-256. There is no

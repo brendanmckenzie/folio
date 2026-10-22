@@ -50,6 +50,11 @@ nothing.
   draft's value. **Apply `0015_draft_data.sql` before deploying**, then run
   `POST {base}/api/reindex?drafts=1` once
   ([UPGRADING](UPGRADING.md#draft-values-in-the-data-table-v120)).
+- **Host-supplied render parameters.** `reader.page()` and `reader.recordBy()` take `params`
+  (read as `resolution.params`), `search` and `cacheable`; `defineBlock` takes `previewParams`
+  so the editor's preview shows a representative state, with a `preview-params-conflict` audit
+  check. A page given `params` is `no-store` unless `cacheable: true`
+  ([UPGRADING](UPGRADING.md#render-parameters-v120)).
 - **`unique` text fields and `reader.recordBy`.** `text({ indexed: true, unique: true })` is
   enforced at publish on every path (`409 conflict`), with a `unique-duplicate` audit check, and
   `reader.recordBy(type, field, value)` is `page()` for a record, with the editor's draft and no
