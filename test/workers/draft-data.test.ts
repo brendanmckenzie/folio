@@ -10,6 +10,7 @@ import type { Role, Scope } from "../../src/server/auth/roles";
 import { createSession } from "../../src/server/auth/session";
 import { createToken } from "../../src/server/auth/tokens";
 import { createUser } from "../../src/server/auth/users";
+import { reindexDrafts } from "../../src/server/reindex";
 import { cellsOf } from "../../src/server/stories";
 
 /**
@@ -244,6 +245,22 @@ describe("cellsOf", () => {
     expect(cellsOf(was, null)).toBe(was);
   });
 
+  it("does not flag an unchanged string the mirror cut at 512 characters", () => {
+    const long = "x".repeat(600);
+    const cells = cellsOf(
+      { bio: { text: long, num: null } },
+      { bio: { text: long.slice(0, 512), num: null } },
+    );
+    expect(cells.bio).toEqual({ text: long, num: null });
+    // A real edit inside the first 512 characters still is one.
+    expect(
+      cellsOf(
+        { bio: { text: long, num: null } },
+        { bio: { text: `y${long.slice(1, 512)}`, num: null } },
+      ).bio?.draft,
+    ).toBe(true);
+  });
+
   it("marks only what differs, and drops what the draft does not have", () => {
     expect(
       cellsOf(
@@ -334,6 +351,14 @@ describe("GET /documents?sort=field:<name>", () => {
     ]);
   });
 
+  it("treats a text field the draft cleared to an empty string as null, not as first", async () => {
+    await insert({ id: "dd_e1", title: "e1", published: null, draft: { name: "" } });
+    const editor = await cookieFor("editor");
+    const order = ids(await list("sort=field:name", editor));
+    expect(order.slice(0, 5)).toEqual(["dd_p2", "dd_p3", "dd_p5", "dd_p6", "dd_p1"]);
+    expect(order.slice(5)).toEqual(["dd_e1", "dd_p4"]);
+  });
+
   it("answers 400 for a field the type does not index, and for no type at all", async () => {
     const editor = await cookieFor("editor");
     const bio = await call("/folio/api/documents?type=ddPersonType&sort=field:bio", {
@@ -402,7 +427,7 @@ describe("the bind cap", () => {
     const editor = await cookieFor("editor");
     const page = await list("sort=field:years&limit=200", editor);
     expect(page.rows.length).toBeGreaterThan(100);
-    expect(page.rows.every((r) => r.indexed.name !== undefined || r.id.startsWith("dd_p"))).toBe(
+    expect(page.rows.filter((r) => r.id.startsWith("dd_w")).every((r) => r.indexed.name)).toBe(
       true,
     );
   });
@@ -453,6 +478,31 @@ describe("POST /reindex?drafts=1", () => {
       );
     expect(await mirror("dd_warm")).toEqual({ data: { name: "Warm draft", years: 7 } });
     expect(await mirror("dd_cold")).toEqual({ data: { name: "Cold published", years: 3 } });
+  });
+
+  it("does not overwrite a mirror an editor's alarm wrote while the sweep was reading", async () => {
+    await insert({ id: "dd_race", title: "race", published: null, draft: null });
+    await env.DB.prepare("update stories set draft_sync_id = 4 where id = 'dd_race'").run();
+    const report = await reindexDrafts({
+      db: env.DB,
+      // The read returns v1; by the time the batch lands the alarm has moved the
+      // watermark and written the newer mirror.
+      draftFor: async () => {
+        await env.DB.prepare(
+          `update stories set draft_sync_id = 5, draft_data = '{"data":{"name":"v2"}}'
+           where id = 'dd_race'`,
+        ).run();
+        return doc("r", { name: "v1" });
+      },
+      scopes: ["default"],
+    });
+    const row = await env.DB.prepare(
+      "select draft_data as d from stories where id = 'dd_race'",
+    ).first<{
+      d: string;
+    }>();
+    expect(JSON.parse(row?.d ?? "null")).toEqual({ data: { name: "v2" } });
+    expect(report.written).toBeLessThan(report.documents);
   });
 
   it("writes nothing on a dry run, and is ADMIN only", async () => {

@@ -176,7 +176,8 @@ export interface DraftReindexDeps {
 export interface DraftReindexReport {
   /** Stories examined in this call. */
   documents: number;
-  /** Stories whose `draft_data` was written (or would be, on a dry run). */
+  /** Stories whose `draft_data` this call wrote: 0 on a dry run, which only counts
+   * `documents`, and short of the drafts read when an editor got there first. */
   written: number;
   /** Stories whose draft could not be read: logged by the caller's `onError`, and
    * left as they were so a re-run can try them again. */
@@ -224,8 +225,11 @@ export async function reindexDrafts(
         const doc = await deps.draftFor(story);
         statements.push(
           deps.db
-            .prepare("update stories set draft_data = ? where id = ?")
-            .bind(draftDataOf(doc), story.id),
+            // Conditional on the position the story had when listed: an alarm that
+            // landed since moved `draft_sync_id` and wrote a newer mirror, which
+            // this older read must not overwrite.
+            .prepare("update stories set draft_data = ? where id = ? and draft_sync_id = ?")
+            .bind(draftDataOf(doc), story.id, story.draftSyncId),
         );
       } catch (err) {
         failed++;
@@ -233,11 +237,12 @@ export async function reindexDrafts(
       }
     }),
   );
-  if (!dryRun && statements.length > 0) await deps.db.batch(statements);
+  const results = !dryRun && statements.length > 0 ? await deps.db.batch(statements) : [];
+  const written = results.reduce((n, r) => n + (r.meta?.changes ?? 0), 0);
 
   return {
     documents: stories.length,
-    written: statements.length,
+    written,
     failed,
     continueFrom: stories.length < batch ? null : (stories[stories.length - 1]?.id ?? null),
     dryRun,

@@ -200,7 +200,7 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`migrations/`). **There are twelve: `0001`–`0008`, `0010`, `0011`, `0013` and `0014`.**
+**D1 migrations** (`migrations/`). **There are thirteen: `0001`–`0008`, `0010`, `0011`, `0013`, `0014` and `0015`.**
 `0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
 it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
 landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a permanent
@@ -216,7 +216,10 @@ stand-in `0012` applied after it on a local database, so the order costs nothing
 `0014_form_logic.sql` (spec 35) landed 2026-10-19: two additive columns, `forms.layout`
 (sections) and `form_responses.unasked`, both read by the release that carries them, so
 it must be applied before that Worker is deployed.
-Next free is `0015`.
+`0015_draft_data.sql` (issue #82) landed 2026-10-22: one nullable column, `stories.draft_data`, a JSON mirror
+of the draft's root scalars written by the story Durable Object, selected by the Data list of the release
+that carries it, so it must be applied before that Worker is deployed.
+Next free is `0016`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a

@@ -7,7 +7,7 @@ import {
   paginate,
   windowOf,
 } from "../core/pagination";
-import { draftIndexedValues, type IndexedCell } from "../core/index-projection";
+import { DRAFT_STRING_MAX, draftIndexedValues, type IndexedCell } from "../core/index-projection";
 import {
   canNest,
   type DocumentType,
@@ -937,8 +937,13 @@ export function cellsOf(
   const out: Record<string, IndexedCell> = {};
   for (const [name, value] of Object.entries(draft)) {
     const was = published[name];
-    const same = was !== undefined && was.text === value.text && was.num === value.num;
-    out[name] = same ? value : { ...value, draft: true };
+    // The mirror cuts strings at `DRAFT_STRING_MAX`, so compare against the published
+    // text cut the same way, and show the published (whole) value when they agree.
+    const same =
+      was !== undefined &&
+      was.text.slice(0, DRAFT_STRING_MAX) === value.text &&
+      was.num === value.num;
+    out[name] = same && was ? was : { ...value, draft: true };
   }
   return out;
 }
@@ -968,7 +973,7 @@ function fieldSortKey(
   switch (field.kind) {
     case "number":
       draft =
-        "case when json_type(draft_data, ?) in ('integer', 'real') then json_extract(draft_data, ?) end";
+        "case when json_type(draft_data, ?) in ('integer', 'real') then nullif(json_extract(draft_data, ?), '') end";
       break;
     case "boolean":
       draft = "case json_type(draft_data, ?) when 'true' then 1 when 'false' then 0 end";
@@ -978,7 +983,8 @@ function fieldSortKey(
         "case when json_type(draft_data, ?) = 'text' then (julianday(json_extract(draft_data, ?)) - 2440587.5) * 86400000.0 end";
       break;
     default:
-      draft = "case when json_type(draft_data, ?) = 'text' then json_extract(draft_data, ?) end";
+      draft =
+        "case when json_type(draft_data, ?) = 'text' then nullif(json_extract(draft_data, ?), '') end";
   }
   const pathBinds = draft.split("?").length - 1;
   return {

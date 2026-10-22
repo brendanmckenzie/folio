@@ -105,10 +105,10 @@ and whether it needs anything from you beyond applying it.
 | `0010_forms.sql` | Forms and responses | Nothing required. Add a `form()` field to a block to embed one, and a `submitted` hook to forward responses. |
 | `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29-v100) first: it changes what a rollback can do. |
 | `0013_site_brands.sql` | One nullable `sites.brand` column | **Apply it before you deploy, on every deployment with `sites`**: this release's registry read selects the column, so a Worker deployed first fails every registry read with `no such column`. It is additive and safe ahead of the deploy. It changes nothing until you configure `brands`; read [the brands section](#0013-and-turning-brands-on-2026-09-30-v100) before you do. |
-
 | `0014_form_logic.sql` | `forms.layout` (a form's sections) and `form_responses.unasked` (the questions a response was never asked) | **Apply it before you deploy**: this release's form reads select `forms.layout` and its response reads select `unasked`, so a Worker deployed first fails every form read with `no such column`. Both columns are additive with defaults (`'{}'` and `'[]'`), safe ahead of the deploy, and change nothing for a form until an editor gives it a condition or a section. Read [conditional questions](#conditional-questions-sections-and-prefill-2026-10-19) before you do. |
+| `0015_draft_data.sql` | One nullable column, `stories.draft_data` (a JSON mirror of the draft's root scalars, for the Data table) | **Apply it before you deploy**: the Data list selects it for anyone who may read drafts, so a Worker deployed first answers `500` to every editor. Additive and nullable, so safe ahead of the deploy. Then run `POST {base}/api/reindex?drafts=1` once. Read [draft values](#draft-values-in-the-data-table-v120) first. |
 
-`0011`, `0013` and `0014` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0015`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
+`0011`, `0013`, `0014` and `0015` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0016`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -588,6 +588,48 @@ conditional question becomes unconditional, and one that was "required whenever
 shown" becomes required always, which can block visitors it never applied to. The
 columns stay in the database and the older build ignores them. If you must roll back,
 clear `required` on the conditional questions first, or roll forward instead.
+
+### Draft values in the Data table (v1.2.0)
+
+`0015_draft_data.sql` adds one nullable column, `stories.draft_data`. **Apply it
+before you deploy**, the same rule as `0013` and `0014`: the Data list selects the
+column for anyone who may read drafts, so a Worker that reaches a database without it
+answers `500` to every editor opening a type under Data. Applying it first is safe,
+because the column is additive and nothing reads it until the new Worker runs.
+
+Then run the backfill once, after the deploy:
+
+```
+curl -X POST -H "content-type: application/json" -d '{"batch":200}' \
+  "$ORIGIN/folio/api/reindex?drafts=1"
+```
+
+Repeat with `"continueFrom"` set to the previous answer's `continueFrom` until it is
+`null`. It is the admin's call (`ADMIN`), the same shape as `reindex`, safe to repeat
+and safe beside editors. `dryRun: true` only counts the stories a run would visit and
+writes nothing. Without it a record nobody edits keeps blank cells in the table until
+somebody does: the Durable Object mirrors a draft's values when it is edited and when
+it is created with content, and never on a read.
+
+What changes in the table:
+
+- **A person who may read drafts sees the draft's values** where a story has them. A
+  value that differs from the published copy is italic with a dotted underline. A
+  token holding `content:read` alone, or anyone who may not read drafts, sees
+  published values only, in published order.
+- **Every column header sorts**, not only the title and last edited. An indexed
+  column orders by the value the cell shows: numbers numerically, dates by instant,
+  booleans false first, text without regard to case, and rows with no value last in
+  either direction. It pages by offset, so editing a row across a page boundary can
+  repeat or skip a row until the next reload.
+- **`GET {base}/api/documents?sort=field:<name>`** is the route behind it, internal
+  like every unversioned `{base}/api` route. It needs `?type=` and an `indexed` field
+  of that type's root block, or it answers `400`.
+
+A Worker deployed before the migration keeps its unpublished-changes badge: the
+Durable Object writes the mirror as a statement of its own, so a missing column is
+logged and costs nothing else. If you roll the Worker back the column is unread and
+harmless.
 
 ### `anthropicDescriber` reports usage (2026-10-20) (v1.1.0)
 

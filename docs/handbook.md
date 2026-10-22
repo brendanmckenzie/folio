@@ -1220,14 +1220,26 @@ different orders over the same people.
 
 The admin's left rail gains a Data tab listing every non-page type with a count.
 Selecting one opens a **table**: the type's title, its root block's `indexed`
-fields, its draft state and when it was last touched. Sortable, searchable, twenty
-rows a page — all client-side, over the list `GET /folio/documents` already
-returned in full.
+fields, its draft state and when it was last touched. Sortable, searchable and
+paged by the server (`GET {base}/api/documents`).
 
 It lists **documents, not published content**, so a person nobody has published yet
-is in it with a `draft` badge. The consequence is stated in the footer rather than
-hidden: the *columns* come from `content_index`, which is written at publish, so a
-draft document's cells stay blank until it is published.
+is in it with a `draft` badge. The *columns* are draft-or-published: published
+values come from `content_index`, written at publish, and a person who may read
+drafts sees the draft's value instead where a story has one, in italics where it
+differs from the published copy. The draft's values are a JSON mirror of the root
+block's scalars in `stories.draft_data` (migration `0015`), written by the story's
+Durable Object two seconds after an edit and when it is created with content, and
+backfilled once with `POST {base}/api/reindex?drafts=1`. Anyone who may not read
+drafts, a `content:read` token included, sees published values only, and a field
+the draft has cleared is blank rather than borrowed from the published copy.
+
+Every column header sorts. Title and last edited sort on the story; an indexed
+column sorts by the value its cells show, numbers numerically, dates by instant,
+booleans false first, text without regard to case, rows with no value last in either
+direction, and ties by id. That sort pages by offset over an unindexed expression,
+which is fine into the low thousands of documents per type; the other two keep a
+keyset.
 
 Selecting a record opens the editor in **form mode**: full width, no preview iframe,
 no viewport switcher, no "View live". There is nothing to preview, and previewing
