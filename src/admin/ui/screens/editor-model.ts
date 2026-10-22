@@ -649,13 +649,23 @@ export interface EditorLayout {
 /**
  * Which of the three columns exist.
  *
- * The one judgement in here is the rail in form mode. `ui-architecture.md` says a
- * record loses it — "minus the 240px rail spent on one row" — and that is right
- * for the common case, where a record's whole document is its root block. It is
- * wrong for the record that has nested blocks (the spec's own example is a
- * person's list of accreditations): with no rail and no preview to click, a block
- * below the root would be unreachable by any means. So the rail follows the
- * document rather than the mode, and `⌘\` still hides it either way.
+ * The one judgement in here is the rail for an unrouted document (a record or a
+ * global). `ui-architecture.md` says a record loses it — "minus the 240px rail
+ * spent on one row" — and that is right for the common case, where the whole
+ * document is its root block. It is wrong for a document with nested blocks (the
+ * spec's own example is a person's list of accreditations): with no rail, a block
+ * below the root can be unreachable by any means. So for an unrouted document the
+ * rail follows the document (`nested`) rather than the mode, **whether or not it
+ * has a preview**, and `⌘\` still hides it either way. A routed page keeps the
+ * rail always.
+ *
+ * Previewing does not change the answer, because a flat document has nothing for
+ * the rail to show. A record's preview (`previewPath`) draws the host page in
+ * `off` mode, so it has no block markers and a click selects nothing
+ * (`preview/mount.tsx`); the rail would be the only route to a nested block. A
+ * global's `?as=` preview *is* in edit mode and can select blocks, but for a flat
+ * global that is still one root block and a one-row rail, so the rule stays on
+ * `nested` alone.
  *
  * **Rejected: always hiding it in form mode**, which is what the design literally
  * says and which makes part of a document uneditable. **Rejected: always showing
@@ -675,7 +685,7 @@ export function editorLayout(opts: {
   const form = !opts.routed && opts.preview === undefined;
   return {
     form,
-    rail: opts.railCollapsed ? false : form ? opts.nested : true,
+    rail: opts.railCollapsed ? false : opts.routed ? true : opts.nested,
     inspector: form ? true : !opts.inspectorCollapsed,
   };
 }
