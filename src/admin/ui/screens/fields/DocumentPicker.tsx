@@ -205,7 +205,8 @@ function useChainCandidates(
  * from — so choosing a document costs a request and showing one costs nothing.
  *
  * `Resolution.stories` holds exactly the ids this document points at, which is
- * precisely what `useRefStories` fetched, so a reference that resolves is free here.
+ * precisely what the server-built resolution (`useServerResolution`) carries, so a
+ * reference that resolves is free here.
  * `undefined` means the target is not in the resolution: either it was deleted, or
  * the fetch has not landed yet. The caller distinguishes them by what it says —
  * `ReferenceField` names it *missing* only once the row it needs would have arrived.

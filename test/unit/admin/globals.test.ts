@@ -1,19 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { globalTypes } from "../../../src/admin/hooks/useGlobalDocs";
 import { globalPreviewUrl } from "../../../src/admin/ui/useStory";
 import type { DocumentType } from "../../../src/core/schema";
 import type { StoryMeta } from "../../../src/core/story";
 
 /**
- * The two pure pieces of `content-model/globals.md`'s admin surface: which declared
- * singletons are globals, and how one of them gets previewed in context.
- *
- * Both lived in `admin/GlobalsList.tsx` until port phase 8 deleted it, and they went
- * to different places because they answer to different callers — `globalTypes` to
- * `hooks/useGlobalDocs.ts`, its only remaining one, and `globalPreviewUrl` to
- * `ui/useStory.ts`, beside the `usePreviewHost` that now supplies its candidate. The
- * candidate list is a `StoryMeta[]` rather than the old `StoryNode[]` for the same
- * reason: the search is the server's now, so nothing here has children.
+ * The pure piece of `content-model/globals.md`'s admin surface: how a global gets
+ * previewed in context. It lives in `ui/useStory.ts`, beside the `usePreviewHost` that
+ * supplies its candidate. The candidate list is a `StoryMeta[]` rather than the old
+ * `StoryNode[]` because the search is the server's now, so nothing here has children.
+ * (`globalTypes` went with `useGlobalDocs`, once the server built the resolution.)
  */
 
 const type = (overrides: Partial<DocumentType> = {}): DocumentType => ({
@@ -41,24 +36,6 @@ const row = (overrides: Partial<StoryMeta> = {}): StoryMeta => ({
   state: "draft",
   hasUnpublishedChanges: false,
   ...overrides,
-});
-
-describe("globalTypes", () => {
-  const header = type({ name: "header", label: "Header" });
-  const footer = type({ name: "footer", label: "Footer" });
-  const settings = type({ name: "settings", label: "Settings" });
-
-  it("returns the configured globals, in FolioConfig.globals order", () => {
-    expect(globalTypes([settings, footer, header], ["header", "footer"])).toEqual([header, footer]);
-  });
-
-  it("drops a name naming no declared type, rather than throwing", () => {
-    expect(globalTypes([header], ["header", "ghost"])).toEqual([header]);
-  });
-
-  it("is empty when nothing is configured as a global", () => {
-    expect(globalTypes([header, footer, settings], [])).toEqual([]);
-  });
 });
 
 describe("globalPreviewUrl", () => {

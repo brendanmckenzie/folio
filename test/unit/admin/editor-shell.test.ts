@@ -27,7 +27,6 @@ import {
   VIEWPORT_NAMES,
   VIEWPORTS,
 } from "../../../src/admin/ui/screens/editor-model";
-import { wantedStoryIds } from "../../../src/admin/ui/screens/useEditor";
 import type { MigrationStatus } from "../../../src/server/migrate";
 
 /*
@@ -542,82 +541,6 @@ describe("clampInspector", () => {
     expect(clampInspector(9999)).toBe(MAX_INSPECTOR);
     expect(clampInspector(340.6)).toBe(341);
     expect(clampInspector(DEFAULT_INSPECTOR)).toBe(DEFAULT_INSPECTOR);
-  });
-});
-
-/* --------------------------------------------------------- the resolution --- */
-
-describe("wantedStoryIds", () => {
-  const linked = (id: string) => ({ kind: "story", id });
-
-  const linky: BlockSchema = {
-    name: "linky",
-    label: "Linky",
-    fields: {
-      cta: { kind: "multilink" },
-      body: { kind: "richtext" },
-      author: { kind: "reference" },
-    },
-  };
-  const index: SchemaIndex = { linky };
-
-  const one = (data: Blok["data"], i18n?: Blok["i18n"]): Doc => ({
-    root: "r",
-    bloks: {
-      r: {
-        uid: "r",
-        type: "linky",
-        parent: null,
-        slot: null,
-        order: "a0",
-        data,
-        ...(i18n ? { i18n } : {}),
-      },
-    },
-  });
-
-  it("is empty for no document", () => {
-    expect(wantedStoryIds(null, index)).toBe("");
-  });
-
-  it("collects link fields and reference fields together, sorted and deduped", () => {
-    const d = one({ cta: linked("s2"), author: "s1" });
-    expect(wantedStoryIds(d, index)).toBe("s1,s2");
-  });
-
-  /*
-   * The one this file exists to pin. A Folio-native link mark inside richtext
-   * stores a structured `attrs.link` and carries **no href** — the href is derived
-   * from the resolution at render — so a story id that only ever appears in prose
-   * is still an id the preview has to have. Narrowing this walk to link and
-   * reference fields makes every internal prose link render as unstyled text, and
-   * neither a richtext test nor a link-field test would catch it.
-   */
-  it("collects the story ids inside richtext link marks", () => {
-    const d = one({
-      body: {
-        type: "doc",
-        content: [
-          {
-            type: "paragraph",
-            content: [
-              {
-                type: "text",
-                text: "see this",
-                marks: [{ type: "link", attrs: { link: linked("s9") } }],
-              },
-            ],
-          },
-        ],
-      },
-    });
-    expect(wantedStoryIds(d, index)).toBe("s9");
-  });
-
-  it("walks every locale, not only the source", () => {
-    // A French paragraph can link somewhere the English one does not.
-    const d = one({ cta: linked("s1") }, { fr: { cta: linked("s7") } });
-    expect(wantedStoryIds(d, index)).toBe("s1,s7");
   });
 });
 

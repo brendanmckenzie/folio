@@ -773,6 +773,7 @@ describe("every id loader is a fence", () => {
    */
   const LOADERS: [string, string, "read" | "write", Kind, "skipUp"?][] = [
     ["GET", "/api/story/:id/document", "read", "story"],
+    ["GET", "/api/story/:id/resolution", "read", "story"],
     ["GET", "/api/story/:id/translation?locale=fr", "read", "story"],
     ["GET", "/api/story/:id/activity", "read", "story"],
     ["GET", "/api/story/:id/versions", "read", "story"],

@@ -13,8 +13,12 @@ import type { PreviewSource } from "./useVersions";
 
 interface Options {
   store: StoryStore;
-  /** Story and asset links, so the preview resolves them without a server render. */
-  resolution: Resolution;
+  /**
+   * The server-built resolution (`useServerResolution`), or null until one is held.
+   * Null posts nothing: the iframe keeps the resolution it was bootstrapped with, so
+   * the first frame is never emptier than the server's.
+   */
+  resolution: Resolution | null;
   /** What the iframe must be showing. Owned by useVersions. */
   source: PreviewSource;
   selection: string | null;
@@ -104,7 +108,8 @@ function post(win: PostableWindow | null | undefined, origin: string, msg: Admin
 
 /** What a preview must be told the instant it completes (or repeats) its `ready` handshake. */
 export interface ReadyFrames {
-  resolve: Extract<AdminToPreviewMsg, { type: "resolve" }>;
+  /** Null while the admin holds no server-built resolution: the preview's own stands. */
+  resolve: Extract<AdminToPreviewMsg, { type: "resolve" }> | null;
   /** Null when there is no document to show yet — e.g. the store has not bootstrapped. */
   replace: Extract<AdminToPreviewMsg, { type: "replace" }> | null;
   select: Extract<AdminToPreviewMsg, { type: "select" }>;
@@ -118,13 +123,13 @@ export interface ReadyFrames {
  */
 export function readyFrames(opts: {
   doc: Doc | null;
-  resolution: Resolution;
+  resolution: Resolution | null;
   selection: string | null;
   root: string | undefined;
 }): ReadyFrames {
   const { doc, resolution, selection, root } = opts;
   return {
-    resolve: { type: "resolve", resolution },
+    resolve: resolution ? { type: "resolve", resolution } : null,
     replace: doc ? { type: "replace", doc } : null,
     // The root block wraps the whole page, so outlining it in the preview
     // would just frame everything. Select it in the inspector without
@@ -176,7 +181,7 @@ export class PreviewBridge {
 
   /**
    * The preview's `ready` handshake, including a repeat one from the same
-   * frame. Always posts resolve, then replace (if there is a document yet),
+   * frame. Posts resolve (when the admin holds one), then replace (if there is a document yet),
    * then select — in that order, so a selection never highlights into a
    * document that has not been resolved or replaced yet — computed by the
    * caller from current state rather than replayed from history. This is what
@@ -186,7 +191,7 @@ export class PreviewBridge {
    */
   onReady(win: PostableWindow | null | undefined, origin: string, frames: ReadyFrames): void {
     this.ready = true;
-    post(win, origin, frames.resolve);
+    if (frames.resolve) post(win, origin, frames.resolve);
     if (frames.replace) post(win, origin, frames.replace);
     post(win, origin, frames.select);
   }
@@ -317,7 +322,7 @@ export function usePreviewBridge({
         const owner = globalOwning(
           msg.uid,
           store.getSnapshot().doc,
-          latest.current.resolution.globals,
+          latest.current.resolution?.globals,
         );
         if (owner) {
           onGlobalClick?.(owner);
@@ -355,7 +360,7 @@ export function usePreviewBridge({
   // Renaming or moving a page changes what a story link resolves to, so the
   // preview needs the new mapping without re-rendering from the server.
   useEffect(() => {
-    toFrame({ type: "resolve", resolution });
+    if (resolution) toFrame({ type: "resolve", resolution });
   }, [resolution, toFrame]);
 
   return setFrame;

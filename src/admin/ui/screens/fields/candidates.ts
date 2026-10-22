@@ -8,7 +8,7 @@
  * `useFolio().stories` — every document on the site, flat — and filtered it with
  * `referenceCandidates` / `linkCandidates`. That whole-tree fetch is what
  * `docs/specs/foundation/pagination.md` removed: `useEditor` replaced it with
- * `useRefStories`, which asks for **only the ids a document points at**, so
+ * `useServerResolution`, which asks the server for **only what the document needs**, so
  * `EditorSlot` carries no story list and cannot be given one without undoing
  * pagination phase 3.
  *
@@ -19,7 +19,7 @@
  *    returned and had no search at all — `ROADMAP.md` calls an unsorted flat list
  *    "stops working somewhere around 15", and this list was that list.
  *  - **The current value costs nothing.** `Resolution.stories` already holds every
- *    id this document points at — that is precisely what `useRefStories` fetched —
+ *    id this document points at — that is precisely what `useServerResolution` fetches —
  *    so rendering "what is picked" needs no request. Only the *candidates* do, and
  *    only while a picker is open.
  *

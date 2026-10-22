@@ -116,6 +116,23 @@ describe("PreviewBridge: onReady", () => {
     ]);
   });
 
+  it("posts no resolve while the admin holds no server-built one, so the bootstrap stands", () => {
+    const bridge = new PreviewBridge();
+    const win = new FakeWindow();
+    const frames = readyFrames({
+      doc: doc("root0000"),
+      resolution: null,
+      selection: "blk_1",
+      root: "root0000",
+    });
+    expect(frames.resolve).toBeNull();
+    bridge.onReady(win, ORIGIN, frames);
+    expect(win.posted).toEqual([
+      { source: "folio-admin", v: PROTOCOL_VERSION, type: "replace", doc: doc("root0000") },
+      { source: "folio-admin", v: PROTOCOL_VERSION, type: "select", uid: "blk_1" },
+    ]);
+  });
+
   it("sends live, unbuffered, once ready", () => {
     const bridge = new PreviewBridge();
     const win = new FakeWindow();

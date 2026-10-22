@@ -6,20 +6,16 @@ import {
   translationGaps,
   translationStatus,
 } from "../../../core/locales";
-import { linkedIds, referencedIdsAllLocales } from "../../../core/refs";
 import { buildResolution, type Resolution } from "../../../core/resolve";
 import type { DocumentType, SchemaIndex } from "../../../core/schema";
 import type { StoryMeta } from "../../../core/story";
 import { useBlocks } from "../../hooks/useBlocks";
 import { useClipboardShortcuts } from "../../hooks/useClipboardShortcuts";
-import { useCollections } from "../../hooks/useCollections";
-import { useGlobalDocs } from "../../hooks/useGlobalDocs";
 import { useMigrations } from "../../hooks/useMigrations";
 import { usePreviewBridge } from "../../hooks/usePreviewBridge";
 import { usePublish } from "../../hooks/usePublish";
 import { usePublishedDoc } from "../../hooks/usePublishedDoc";
-import { useReferencedDocs } from "../../hooks/useReferencedDocs";
-import { useResolvedForms } from "../../hooks/useResolvedForms";
+import { resolutionApiBase, useServerResolution } from "../../hooks/useServerResolution";
 import { useUndoShortcut } from "../../hooks/useUndoShortcut";
 import { useVersions, useVersionsList } from "../../hooks/useVersions";
 import { canEditIn, type Me } from "../../me";
@@ -35,8 +31,9 @@ import { type PaneChoice, paneSource, previewFrame } from "./editor-model";
  * the migration status are done and reusable, and the port is a *view* change; so
  * this is `admin/Editor.tsx`'s composition read as the dependency graph it always
  * was, minus the seven rail tabs and the layout. One thing genuinely is new and it
- * is named where it lives: `useRefStories`, below, which replaces the whole-tree
- * fetch the old editor's `Resolution` was built from.
+ * is named where it lives: `useServerResolution`, which asks the server for the
+ * resolution its own preview page would be given, in place of the four hooks that
+ * used to assemble a lesser copy by hand.
  *
  * It exists as a hook rather than as the top of `EditorShell.tsx` for one reason:
  * `EditorShell` has three panes and two of them are other agents' (the inspector,
@@ -158,7 +155,7 @@ export interface EditorApi {
 }
 
 export function useEditor(opts: EditorOptions): EditorApi {
-  const { storyId, story, apiBase, base, schema, types, globals, locales, me, notify } = opts;
+  const { storyId, story, apiBase, base, schema, locales, me, notify } = opts;
 
   // The active locale, defaulting to the source. Editor state rather than a URL
   // parameter: it is a property of this editing session, and the *preview* URL is
@@ -211,55 +208,47 @@ export function useEditor(opts: EditorOptions): EditorApi {
 
   /* ------------------------------------------------------------ resolution --- */
 
-  const refStories = useRefStories(apiBase, state.doc, schema);
-  const docs = useReferencedDocs(apiBase, state.doc, schema);
-  // Fetched once per global, not per keystroke: the admin's own copy exists only
-  // so a clicked uid can be traced back to the global it belongs to; the preview
-  // iframe renders every global server-side, fresh, on its own.
-  const globalDocs = useGlobalDocs(apiBase, types, globals);
-  const collections = useCollections(apiBase, state.doc, schema, localeCtx);
-  // The page's own URL, for the `_folio_page` hidden input a form descriptor
-  // carries — the same value the server render passes, picked the way
-  // `previewFrame` picks the iframe's src, so the preview's markup and the
-  // published page's agree down to the hidden inputs.
-  const formPage = story
-    ? isSourceLocale
-      ? story.url
-      : (story.urls?.[locale] ?? story.url)
-    : undefined;
-  const forms = useResolvedForms(
-    apiBase,
-    state.doc,
+  // The pane site's mount on a deployment with `sites`: a shared page is resolved as
+  // the site being previewed would serve it, and `loadStory`'s fence on that mount
+  // decides whether the caller may. Off it (a refusal, say) the preview simply keeps
+  // the server's own bootstrap.
+  const resolutionBase = resolutionApiBase(apiBase, base, opts.pane);
+  const serverResolution = useServerResolution({
+    apiBase: resolutionBase,
+    storyId,
+    doc: state.doc,
     schema,
-    isSourceLocale ? undefined : locale,
-    formPage,
-  );
-  const resolution = useMemo<Resolution>(
-    () => ({
-      // The open story is always in the map, whether or not anything links to it:
-      // a page that links to itself, and a host template reading the current
-      // page's own ref, both want it there.
-      ...buildResolution(
-        story ? [story, ...refStories] : refStories,
-        // The *bare* mount: the iframe is a host's page on a preview origin, and a
-        // site's host serves `{base}/asset/:key` and not `{base}/~scope/asset/:key`
-        // (`servesOnSite`). It is also what the server-rendered page emitted before
-        // this resolution replaced it, so the two agree.
-        `${bareMount(base)}/asset`,
-      ),
-      docs,
-      globals: globalDocs.docs,
-      collections,
-      // Every key the admin does not assemble is a key the preview loses the
-      // moment this resolution is posted over the server-rendered one. `forms`
-      // was missing until 2026-09-06 and every form in the editor pane rendered
-      // as nothing at all; `locale` is here for the same reason, and without it
-      // a translated preview falls back to source strings on the first keystroke.
-      ...(localeCtx ? { locale: localeCtx } : {}),
-      forms,
-    }),
-    [story, refStories, base, docs, globalDocs.docs, collections, forms, localeCtx],
-  );
+    locale: isSourceLocale ? undefined : locale,
+    localeCtx,
+    place: story?.path ?? undefined,
+  });
+  // The server's resolution, once held, is the whole of what the preview is told.
+  // **Until then the bridge is given null and posts none**, so the iframe keeps the
+  // resolution it was bootstrapped with and the first frame is never emptier than the
+  // server's (#77). The inspector's pickers still want *something* to read in the
+  // meantime, which is the open story alone.
+  //
+  // The open story's own row is laid over the server's, so a rename shows at once
+  // rather than after the next fetch. Only its title: its `url` on a site is the
+  // server's to say.
+  const resolution = useMemo<Resolution>(() => {
+    const own = story ? buildResolution([story]).stories[story.id] : undefined;
+    if (!serverResolution) {
+      return {
+        ...buildResolution(story ? [story] : [], `${bareMount(base)}/asset`),
+        ...(localeCtx ? { locale: localeCtx } : {}),
+      };
+    }
+    if (!story || !own) return serverResolution;
+    const held = serverResolution.stories[story.id];
+    return {
+      ...serverResolution,
+      stories: {
+        ...serverResolution.stories,
+        [story.id]: held ? { ...held, title: story.title } : own,
+      },
+    };
+  }, [story, base, serverResolution, localeCtx]);
 
   /* ---------------------------------------------------------------- bridge --- */
 
@@ -269,7 +258,7 @@ export function useEditor(opts: EditorOptions): EditorApi {
 
   const frame = usePreviewBridge({
     store,
-    resolution,
+    resolution: serverResolution ? resolution : null,
     source: versions.source,
     selection: state.selection,
     root: state.doc?.root,
@@ -360,92 +349,4 @@ export function useEditor(opts: EditorOptions): EditorApi {
     ),
     globalHint,
   };
-}
-
-/* ------------------------------------------------------------ story refs --- */
-
-/**
- * The story ids this document points at, sorted and joined — so an unchanged set
- * is an unchanged effect dependency.
- *
- * Both walks, because both are ids the render needs and they mean different
- * things: `linkedIds` is `multilink` fields **and the link marks inside every
- * richtext value** (a Folio-native link mark stores a structured `attrs.link` and
- * derives its href from the resolution, so narrowing this walk makes every
- * internal prose link render as unstyled text — `core/refs.ts`'s header), and
- * `referencedIdsAllLocales` is what `reference` and `references` pull in.
- *
- * Pure and exported so the union is tested without a fetch.
- */
-export function wantedStoryIds(doc: Doc | null, schema: SchemaIndex): string {
-  if (!doc) return "";
-  const ids = new Set([...linkedIds(doc, schema), ...referencedIdsAllLocales(doc, schema)]);
-  return [...ids].sort().join(",");
-}
-
-/** Ids that are wanted and not already settled, either way. `useReferencedDocs`'
- * `idsToFetch` by another name, over story rows instead of documents. */
-export function storyIdsToFetch(
-  wanted: readonly string[],
-  known: { rows: Readonly<Record<string, StoryMeta>>; missing: ReadonlySet<string> },
-): string[] {
-  return wanted.filter((id) => !known.rows[id] && !known.missing.has(id));
-}
-
-interface KnownStories {
-  rows: Readonly<Record<string, StoryMeta>>;
-  /** Ids the server answered for with no row: a deleted story. Never asked for
-   * again, or a broken link would be re-requested on every keystroke forever. */
-  missing: ReadonlySet<string>;
-}
-
-const NO_STORIES: KnownStories = { rows: {}, missing: new Set() };
-
-/**
- * The story rows the preview's `Resolution` needs, fetched by id.
- *
- * **This is what replaced `buildResolution(flat)`.** The old editor held every
- * story on the site — `useStories`' own comment calls that a stopgap that "dies
- * with this file" — because a link, a reference and the parent picker all wanted
- * the whole tree. A link only needs the rows it points at, so this asks for those:
- * one `GET {base}/api/stories?ids=` per *change to the set*, never per keystroke,
- * the same discipline `useReferencedDocs` and `useCollections` follow one level up.
- * `?ids=` is uncursored and chunked server-side, so a document with two hundred
- * links is one request rather than a walk.
- */
-function useRefStories(apiBase: string, doc: Doc | null, schema: SchemaIndex): StoryMeta[] {
-  const [known, setKnown] = useState<KnownStories>(NO_STORIES);
-  const wanted = useMemo(() => wantedStoryIds(doc, schema), [doc, schema]);
-
-  useEffect(() => {
-    const ids = storyIdsToFetch(wanted ? wanted.split(",") : [], known);
-    if (ids.length === 0) return;
-    let alive = true;
-    const query = new URLSearchParams({ ids: ids.join(",") });
-    fetch(`${apiBase}/stories?${query}`)
-      .then((res) => (res.ok ? (res.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
-      .then(({ rows }) => {
-        if (!alive) return;
-        setKnown((prev) => {
-          const found = Object.fromEntries(rows.map((row) => [row.id, row]));
-          const missing = ids.filter((id) => !found[id]);
-          // The same object when nothing was settled, which is what stops this
-          // effect looping on its own state — `mergeReferencedDocs`' rule.
-          if (rows.length === 0 && missing.length === 0) return prev;
-          return {
-            rows: rows.length ? { ...prev.rows, ...found } : prev.rows,
-            missing: missing.length ? new Set([...prev.missing, ...missing]) : prev.missing,
-          };
-        });
-      })
-      .catch(() => {
-        // A transport failure is not an answer about the story, so it is not
-        // remembered as a miss: the next change to the linked set asks again.
-      });
-    return () => {
-      alive = false;
-    };
-  }, [apiBase, known, wanted]);
-
-  return useMemo(() => Object.values(known.rows), [known.rows]);
 }

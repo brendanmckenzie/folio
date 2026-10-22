@@ -9,7 +9,8 @@ import type { Doc } from "../../core/doc";
 import { isKnownLocale, translationStatus } from "../../core/locales";
 import type { Page } from "../../core/pagination";
 import type { DocumentType } from "../../core/schema";
-import { DEFAULT_SITE, type Registry as SiteRegistry } from "../../core/sites";
+import { NO_STORE } from "../../core/cache-tags";
+import { chain, DEFAULT_SITE, type Registry as SiteRegistry } from "../../core/sites";
 import { ancestorPaths, type StoryMeta } from "../../core/story";
 import { actorString } from "../auth/roles";
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
@@ -29,7 +30,7 @@ import {
   requireAccess,
 } from "../middleware";
 import { publish, unpublish } from "../publish";
-import type { BrandRuntime, FolioRuntime } from "../runtime";
+import type { BrandRuntime, FolioRuntime, SiteRender } from "../runtime";
 import {
   countStories,
   createStory,
@@ -147,6 +148,32 @@ export async function sweepOf<Env>(
     .filter((row) => row.brand === id)
     .map((row) => row.id);
   return { id, scopes, registry };
+}
+
+/**
+ * The render a scope's draft preview resolves on: a site as itself, and a group as a
+ * host-less stand-in on its own chain (`routes/editor.ts`' `scopeRender`, which this
+ * mirrors). Null for a scope the snapshot does not hold, which resolves nothing.
+ */
+function previewRender(registry: SiteRegistry, scope: string | null): SiteRender | null {
+  if (scope === null) return null;
+  const site = registry.sites.find((s) => s.id === scope);
+  if (site) return { site, surface: "preview", chain: chain(registry, site.id) };
+  const group = registry.groups.find((g) => g.id === scope);
+  if (!group) return null;
+  return {
+    site: {
+      id: group.id,
+      name: group.name,
+      group: null,
+      status: "preview",
+      hosts: [],
+      preview: null,
+      brand: group.brand,
+    },
+    surface: "preview",
+    chain: chain(registry, group.id),
+  };
 }
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -680,6 +707,50 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     requireAccess<Env>(rt, READ_DRAFT),
     loadStory<Env>(rt, "read"),
     async (c) => c.json({ doc: await draftOf(c, rt)(c.var.story) }),
+  );
+
+  /**
+   * The resolution the server's own preview page would bootstrap for this story:
+   * the editor's preview is given this and not a hand-built copy
+   * (`useServerResolution`), so a pass-three link, a breadcrumb, a form inside a
+   * referenced card and `site`/`path` never vanish on the first frame.
+   *
+   * **It is `brand.resolve` over the draft, exactly as `previewPage` calls it**, which
+   * is the point: any second assembly of a `Resolution` is a second place for it to
+   * differ. Fetched when the document's *set* of ids changes, never per keystroke;
+   * a field edit reaches the preview through the mutation stream, not through here.
+   *
+   * Same gate and fence as `/document`: `READ_DRAFT`, and `loadStory` 404s a story
+   * outside the chain *before* `draftOf` runs, because asking a deleted story for its
+   * draft creates a Durable Object for it. A preview never writes: on a multi-site
+   * deployment `resolve` reads layers without `ensureSingleton` when it is given a
+   * site, and it always is here. The site is the request's own scope, so the chain
+   * resolved on is the chain the fence just checked — the admin asks on the pane
+   * site's mount (`~<site>`), which is how a shared page is resolved as that site
+   * would serve it.
+   */
+  app.get(
+    "/story/:id/resolution",
+    requireAccess<Env>(rt, READ_DRAFT),
+    loadStory<Env>(rt, "read"),
+    async (c) => {
+      const story = c.var.story;
+      const locale = c.req.query("locale");
+      if (locale !== undefined && !isKnownLocale(rt.locales, locale)) {
+        throw new FolioError("unsupported", `Unknown locale: ${locale}`);
+      }
+      const brand = brandOf(c);
+      const registry = rt.sites ? await rt.sites.registry(c.env) : undefined;
+      const render = registry ? previewRender(registry, c.var.scope) : undefined;
+      const doc = await draftOf(c, rt)(story);
+      const resolution = await brand.resolve(c.var.bindings(), doc, {
+        draft: true,
+        story,
+        ...(locale !== undefined ? { locale } : {}),
+        ...(render !== undefined ? { site: render } : {}),
+      });
+      return c.json(resolution, 200, { "cache-control": NO_STORE });
+    },
   );
 
   /**
