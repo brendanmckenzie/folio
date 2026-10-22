@@ -8,6 +8,17 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.2.1
+
+A patch release: nothing to run or edit.
+
+### Fixed
+
+- **The block rail no longer draws one useless row for a flat record or global.** Since
+  1.2.0 a record with `previewPath` counted as previewed and always drew the rail. An
+  unrouted document now shows it only when it has blocks under its root, previewed or
+  not; a routed page keeps it, and `⌘\` still toggles it.
+
 ## 1.2.0
 
 A minor release: it adds a migration, a field kind and a record preview, and removes
