@@ -16,7 +16,7 @@
  * here arrives in `fullName` for a `person` and in `title` for a `page`.
  */
 import { type DocumentType, type SchemaIndex, titleFieldOf } from "../../../core/schema";
-import { joinPath, slugify } from "../../../core/story";
+import { joinPath, MAX_SLUG, slugify } from "../../../core/story";
 
 /**
  * What the dialog asks for, for one document type.
@@ -100,8 +100,8 @@ export const EMPTY_DRAFT: CreateDraft = { name: "", slug: "", slugEdited: false 
  * the first keystroke of the name, and there is no way to tell that from a slug a
  * person chose.
  */
-function slugFrom(input: string): string {
-  return input.trim() ? slugify(input) : "";
+function slugFrom(input: string, max?: number): string {
+  return input.trim() ? slugify(input, max) : "";
 }
 
 /** What the slug input shows: the derivation until somebody takes it over, and
@@ -120,7 +120,10 @@ export function slugFieldValue(draft: CreateDraft): string {
  * path preview lies about where the page lands.
  */
 export function slugOf(draft: CreateDraft): string {
-  return slugFrom(slugFieldValue(draft)) || slugFrom(draft.name);
+  // A derived slug is cut to 64 like the server's; one somebody typed keeps up
+  // to `MAX_SLUG`, because the server no longer cuts a supplied slug at all.
+  const max = draft.slugEdited ? MAX_SLUG : undefined;
+  return slugFrom(slugFieldValue(draft), max) || slugFrom(draft.name);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { slugify, type StoryMeta } from "../../../../core/story";
+import { MAX_SLUG, slugify, type StoryMeta } from "../../../../core/story";
 import { Field, Input } from "../../Field";
 
 /**
@@ -44,7 +44,7 @@ export function PageAddress({
   }, [story.id, story.slug]);
 
   const commit = async () => {
-    const next = slugify(slug);
+    const next = slugify(slug, MAX_SLUG);
     if (!slug.trim() || next === story.slug) {
       setSlug(story.slug);
       return;

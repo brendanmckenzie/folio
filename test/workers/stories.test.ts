@@ -183,6 +183,48 @@ describe("createStory", () => {
     expect(story.path).toBe("team");
   });
 
+  describe("slug length", () => {
+    it("cuts a slug derived from the title at 64", async () => {
+      const story = await createStory(env.DB, { title: "word ".repeat(40), type: PAGE });
+
+      expect(story.slug.length).toBe(64);
+    });
+
+    it("keeps a supplied slug past 64, up to 200", async () => {
+      const long = "a".repeat(76);
+      const max = "b".repeat(200);
+
+      expect((await createStory(env.DB, { title: "Long", slug: long, type: PAGE })).slug).toBe(
+        long,
+      );
+      expect((await createStory(env.DB, { title: "Max", slug: max, type: PAGE })).slug).toBe(max);
+    });
+
+    it("refuses a supplied slug over 200 rather than cutting it", async () => {
+      await expect(
+        createStory(env.DB, { title: "Over", slug: "c".repeat(201), type: PAGE }),
+      ).rejects.toMatchObject({ code: "bad_request" });
+    });
+
+    it("refuses a collision suffix that pushes the slug over 200", async () => {
+      const max = "d".repeat(200);
+      await createStory(env.DB, { title: "First", slug: max, type: PAGE });
+
+      await expect(
+        createStory(env.DB, { title: "Second", slug: max, type: PAGE }),
+      ).rejects.toMatchObject({ code: "bad_request" });
+    });
+
+    it("applies the same rule to a rename", async () => {
+      const long = "e".repeat(120);
+
+      expect((await updateStory(env.DB, "sty_about", { slug: long })).slug).toBe(long);
+      await expect(
+        updateStory(env.DB, "sty_about", { slug: "f".repeat(201) }),
+      ).rejects.toMatchObject({ code: "bad_request" });
+    });
+  });
+
   it("rejects creating a story under an unknown parent", async () => {
     await expect(
       createStory(env.DB, { title: "Orphan", parentId: "sty_nope", type: PAGE }),

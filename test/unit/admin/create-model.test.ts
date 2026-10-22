@@ -161,6 +161,13 @@ describe("the slug follows the name until somebody takes it over", () => {
     expect(slugOf(typing)).toBe("the-team");
   });
 
+  it("cuts a derived slug at 64 but keeps a typed one up to 200", () => {
+    const name = "word ".repeat(40);
+    expect(slugOf(draft({ name })).length).toBe(64);
+    expect(slugOf(draft({ name, slug: "a".repeat(120), slugEdited: true }))).toBe("a".repeat(120));
+    expect(slugOf(draft({ name, slug: "a".repeat(300), slugEdited: true })).length).toBe(200);
+  });
+
   it("falls back to the name when the slug box is cleared", () => {
     // `createStory` does `slugify(input.slug || input.title)`, so a cleared box
     // means "derive it" on the server too. The two have to agree or the path

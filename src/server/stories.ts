@@ -21,6 +21,7 @@ import {
   type SearchSort,
   joinPath,
   newStoryId,
+  MAX_SLUG,
   slugify,
   storyState,
   type StoryFilter,
@@ -1801,6 +1802,23 @@ function uniqueSlug(
 }
 
 /**
+ * A slug over `MAX_SLUG` is refused, never cut (a supplied slug is slugified with
+ * no cap of its own, so this is the only gate). Checked **after** `uniqueSlug`,
+ * because its `-n` suffix can push a slug that fit over the line, and a cut there
+ * would drop the suffix and collide with the sibling it was added to avoid.
+ * Create and rename share it, so neither can reach a length the other refuses.
+ */
+function checkedSlug(slug: string): string {
+  if (slug.length > MAX_SLUG) {
+    throw new FolioError(
+      "bad_request",
+      `A slug is at most ${MAX_SLUG} characters; this one is ${slug.length}`,
+    );
+  }
+  return slug;
+}
+
+/**
  * The `under` refusal, worded once: it is thrown from creation *and* from a
  * move, because constraining one without the other means a tree can be dragged
  * into a shape the same config refuses to create (`document-types.md`'s
@@ -1904,7 +1922,15 @@ export async function createStory(
     throw new FolioError("conflict", "This scope already has a home page");
   }
 
-  const slug = input.root ? "" : uniqueSlug(siblings, group, slugify(input.slug || input.title));
+  const slug = input.root
+    ? ""
+    : checkedSlug(
+        uniqueSlug(
+          siblings,
+          group,
+          input.slug ? slugify(input.slug, Number.POSITIVE_INFINITY) : slugify(input.title),
+        ),
+      );
   const story: StoryMeta = {
     id: newStoryId(),
     type: type.name,
@@ -2414,7 +2440,14 @@ export async function updateStoryStatement(
         // Africa's staging, where one `PATCH { title }` turned `guides/safari`
         // into `guides/comparing-safari-in-east-and-southern-africa` and left a
         // redirect behind, with nothing in the response to say a URL had moved.
-        uniqueSlug(siblings, group, slugify(patch.slug ?? current.slug), id),
+        checkedSlug(
+          uniqueSlug(
+            siblings,
+            group,
+            slugify(patch.slug ?? current.slug, Number.POSITIVE_INFINITY),
+            id,
+          ),
+        ),
     parentId,
     ord:
       patch.index !== undefined || parentId !== current.parentId
