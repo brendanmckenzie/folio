@@ -8,6 +8,7 @@ import { cloneDoc } from "../../core/clone";
 import type { Doc } from "../../core/doc";
 import { isKnownLocale, translationStatus } from "../../core/locales";
 import type { Page } from "../../core/pagination";
+import { previewParamsOf } from "../../core/resolve";
 import type { DocumentType } from "../../core/schema";
 import { NO_STORE } from "../../core/cache-tags";
 import {
@@ -828,7 +829,12 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ...(locale !== undefined ? { locale } : {}),
         ...(render !== undefined ? { site: render } : {}),
       });
-      return c.json(resolution, 200, { "cache-control": NO_STORE });
+      // The same `previewParams` `previewPage` bootstraps, so the first frame the
+      // admin posts does not drop what the server's own render had.
+      const params = previewParamsOf(doc, brand.schema);
+      return c.json(params ? { ...resolution, params } : resolution, 200, {
+        "cache-control": NO_STORE,
+      });
     },
   );
 

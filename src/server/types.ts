@@ -443,6 +443,27 @@ export interface FolioPageOptions {
    * (`collections.md` decision 5). The host reads `?page=`; Folio never does.
    */
   page?: number;
+  /**
+   * The full-text term every `searchable` `collection` field in the document runs
+   * against. The host reads `?q=`; Folio never does.
+   */
+  search?: string;
+  /**
+   * Host-supplied render parameters, handed to every block's `render` as
+   * `resolution.params`. Opaque to Folio and never part of a cache tag.
+   *
+   * **Passing `params` makes the page answer `Cache-Control: no-store`** with no
+   * `Cache-Tag`, because a page that depends on something Folio cannot see is not
+   * safe in a shared cache under its URL. Add `cacheable: true` to say the params
+   * derive from the request URL (the cache key) and the normal headers apply.
+   */
+  params?: Record<string, Json>;
+  /**
+   * Asserts that `params` is a pure function of the request URL, so the page may
+   * still be cached under it. Without it, passing `params` answers `no-store`.
+   * Has no effect when `params` is absent, and a draft is `no-store` regardless.
+   */
+  cacheable?: boolean;
 }
 
 /**

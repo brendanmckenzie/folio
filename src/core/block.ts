@@ -112,6 +112,7 @@ export function toSchemaIndex(registry: Registry): SchemaIndex {
         fields: def.fields,
         presets: def.presets,
         presetsOnly: def.presetsOnly,
+        previewParams: def.previewParams,
       } satisfies BlockSchema,
     ]),
   );

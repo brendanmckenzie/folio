@@ -1328,6 +1328,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       const resolution = await brand.resolve(bindings, shown, {
         ...(locale !== undefined ? { locale } : {}),
         ...(opts?.page !== undefined ? { page: opts.page } : {}),
+        ...(opts?.search !== undefined ? { search: opts.search } : {}),
+        ...(opts?.params !== undefined ? { params: opts.params } : {}),
         story,
         // A drafted page resolves its targets from their drafts too, or it
         // links to and pulls in published copies of everything else and is
@@ -1362,7 +1364,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
          * at the edge, for everyone, forever.
          */
         headers: {
-          ...(drafted || access !== "public"
+          // Params are the host's and Folio cannot see what they depend on, so a
+          // page given them is `no-store` unless the host asserts they derive from
+          // the URL (`FolioPageOptions.cacheable`).
+          ...(drafted || access !== "public" || (opts?.params !== undefined && !opts.cacheable)
             ? { "cache-control": NO_STORE }
             : cacheHeaders(resolution, { story: story.id })),
           // On a site's preview origin the admin is the one page that may frame
