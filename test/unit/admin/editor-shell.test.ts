@@ -507,6 +507,42 @@ describe("editorLayout", () => {
     ).toEqual({ form: false, rail: true, inspector: true });
   });
 
+  it("drops the rail for a flat global with a preview, but keeps the stage", () => {
+    expect(
+      editorLayout({ ...base, routed: false, preview: "https://x/?as=header", nested: false }),
+    ).toEqual({ form: false, rail: false, inspector: true });
+  });
+
+  it("drops the rail for a flat record with a preview", () => {
+    expect(
+      editorLayout({ ...base, routed: false, preview: "https://x/p/jo", nested: false }),
+    ).toEqual({ form: false, rail: false, inspector: true });
+  });
+
+  it("keeps the rail for a nested record with a preview", () => {
+    expect(
+      editorLayout({ ...base, routed: false, preview: "https://x/p/jo", nested: true }),
+    ).toMatchObject({ form: false, rail: true });
+  });
+
+  it("keeps the rail for a flat routed page", () => {
+    expect(
+      editorLayout({ ...base, routed: true, preview: "https://x/p", nested: false }),
+    ).toMatchObject({ rail: true });
+  });
+
+  it("honours the collapse for a previewed document too", () => {
+    expect(
+      editorLayout({
+        routed: false,
+        preview: "https://x/p/jo",
+        nested: true,
+        railCollapsed: true,
+        inspectorCollapsed: false,
+      }),
+    ).toMatchObject({ rail: false });
+  });
+
   it("honours ⌘\\ in every mode", () => {
     expect(
       editorLayout({
