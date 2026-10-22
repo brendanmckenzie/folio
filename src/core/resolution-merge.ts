@@ -18,7 +18,9 @@ import type { Resolution } from "./resolve";
  *   link or a reference the editor has just added to the record resolve.
  * - The record itself is the exception in both directions: `docs[id]` is always `doc`,
  *   the live draft (the preview applies the editor's mutations to it per keystroke),
- *   and `stories[id]` is the overlay's, because that is where a rename lands first.
+ *   and `stories[id]` is the overlay's, because that is where a rename lands first:
+ *   the admin overlays the open story's row (`useEditor`'s `resolution`) on what it
+ *   posts, since the server's own resolution carries no ref for an unrouted record.
  *
  * Pure, and it returns a new object each time without mutating either input.
  */

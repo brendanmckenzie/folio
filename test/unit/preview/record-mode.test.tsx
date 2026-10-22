@@ -27,6 +27,7 @@ const hostPage = defineBlock({
       <main>
         <h1>{heading}</h1>
         <p data-testid="record">{rec ? String(rec.data.name ?? "") : "no record"}</p>
+        <p data-testid="title">{resolution.stories[resolution.record ?? ""]?.title ?? "no ref"}</p>
         <p data-testid="link">{resolution.stories.pal?.title ?? "no link"}</p>
       </main>
     );
@@ -136,6 +137,22 @@ describe("a record previewed in context", () => {
     // `replace` swaps the record's document, not the page.
     frame({ type: "replace", doc: blok("r0000001", "person", { name: "Grace" }) });
     expect(text$("record")).toBe("Grace");
+    expect(text$("link")).toBe("Pal page");
+  });
+
+  it("shows a rename of the open record, which the admin posts as the record's own ref", async () => {
+    await boot(recordResolution(pageResolution, recordOwn, "rec", recordDoc));
+    expect(text$("title")).toBe("Ada");
+    frame({
+      type: "resolve",
+      resolution: {
+        ...recordOwn,
+        stories: {
+          rec: { id: "rec", path: "", url: "", title: "Renamed", type: "person", routable: false },
+        },
+      },
+    });
+    expect(text$("title")).toBe("Renamed");
     expect(text$("link")).toBe("Pal page");
   });
 });
