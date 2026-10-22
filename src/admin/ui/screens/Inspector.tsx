@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { Blok, Doc } from "../../../core/doc";
 import type { LocaleConfig } from "../../../core/locales";
 import type { Resolution } from "../../../core/resolve";
@@ -15,6 +15,8 @@ import {
   belowBlok,
   canFocus,
   type FieldLayerInput,
+  type FieldRun,
+  groupRuns,
   inheritedValue,
   LAYER_ACTION_LABEL,
   type LayerInfo,
@@ -128,6 +130,13 @@ export function Inspector(props: InspectorProps) {
    * more machinery than a prop.
    */
   const own = useState<string | null>(null);
+  /**
+   * Which groups the editor has opened or closed, by blok uid and group. Absent
+   * means the default, collapsed only when the group is empty. Component-local and
+   * lost on unmount: it is not content, and nothing persists a panel's layout.
+   */
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
+  const idBase = useId();
   const expandedField = props.focus ? props.focus.field : own[0];
   const setExpandedField = props.focus ? props.focus.open : own[1];
 
@@ -183,7 +192,12 @@ export function Inspector(props: InspectorProps) {
     );
   }
 
-  const entries = visibleEntries(def.fields, blok.data);
+  const runs = groupRuns(visibleEntries(def.fields, blok.data), blok.data);
+  // A group with the selected field in it is open however it was last left, so
+  // focus mode and a peer's ring never land in a collapsed body.
+  const isOpen = (run: FieldRun, key: string) =>
+    run.entries.some(([name]) => name === expandedField || name === state.focus) ||
+    (opened[key] ?? !run.empty);
 
   return (
     // The gutter and the rhythm are the panel's, and form mode widens both: the same
@@ -247,35 +261,64 @@ export function Inspector(props: InspectorProps) {
 
       <fieldset className={css.fields} disabled={readOnly}>
         <legend className={css.srOnly}>{def.label} fields</legend>
-        {entries.map(([name, field]) => (
-          <FieldRow
-            layer={layerFor(props, blok, name)}
-            // `${blok.uid}:${name}`, so a field's identity never moves when a `showIf`
-            // sibling appears or disappears — an in-flight upload in one field survives
-            // a condition revealing another.
-            key={`${blok.uid}:${name}`}
-            blok={blok}
-            name={name}
-            field={field}
-            isSourceLocale={isSourceLocale}
-            locale={locale}
-            sourceLabel={sourceLabel}
-            readOnly={readOnly}
-            peers={state.peers}
-            env={{
-              apiBase: props.apiBase,
-              mount: props.mount,
-              schema,
-              types: props.types,
-              resolution: props.resolution,
-            }}
-            expanded={expandedField === name}
-            onExpand={(open) => setExpandedField(open ? name : null)}
-            onChange={blocks.setField}
-            focusedField={state.focus}
-            onFocusField={(next) => store.focusField(next)}
-          />
-        ))}
+        {runs.map((run, index) => {
+          const rows = run.entries.map(([name, field]) => (
+            <FieldRow
+              layer={layerFor(props, blok, name)}
+              // `${blok.uid}:${name}`, so a field's identity never moves when a `showIf`
+              // sibling appears or disappears — an in-flight upload in one field survives
+              // a condition revealing another.
+              key={`${blok.uid}:${name}`}
+              blok={blok}
+              name={name}
+              field={field}
+              isSourceLocale={isSourceLocale}
+              locale={locale}
+              sourceLabel={sourceLabel}
+              readOnly={readOnly}
+              peers={state.peers}
+              env={{
+                apiBase: props.apiBase,
+                mount: props.mount,
+                schema,
+                types: props.types,
+                resolution: props.resolution,
+              }}
+              expanded={expandedField === name}
+              onExpand={(open) => setExpandedField(open ? name : null)}
+              onChange={blocks.setField}
+              focusedField={state.focus}
+              onFocusField={(next) => store.focusField(next)}
+            />
+          ));
+          if (run.group === null) return rows;
+          const key = `${blok.uid}:${run.group}`;
+          const open = isOpen(run, key);
+          const bodyId = `${idBase}-group-${index}`;
+          return (
+            <section key={key} className={css.group}>
+              <h3 className={css.groupHeading}>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  aria-expanded={open}
+                  aria-controls={bodyId}
+                  onClick={() => setOpened((prev) => ({ ...prev, [key]: !open }))}
+                >
+                  <span className={css.groupChevron} aria-hidden="true">
+                    {open ? "▾" : "▸"}
+                  </span>
+                  {run.group}
+                </Button>
+              </h3>
+              {/* Hidden, never unmounted: the field rows keep their keys and any
+                  upload in flight survives a collapse (`visibleEntries`' invariant). */}
+              <div id={bodyId} className={css.groupBody} hidden={!open}>
+                {rows}
+              </div>
+            </section>
+          );
+        })}
       </fieldset>
     </div>
   );

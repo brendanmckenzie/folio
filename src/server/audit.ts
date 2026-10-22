@@ -51,6 +51,7 @@ import type { Blok, Doc } from "../core/doc";
 import { isIndexableKind } from "../core/index-projection";
 import { isBareLayer, mergeLayers } from "../core/layers";
 import { isTranslatable, type LocaleConfig } from "../core/locales";
+import { dateError } from "../core/nested";
 import { docBytes, MAX_DOC_BYTES, utf8Bytes } from "../core/protocol";
 import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from "../core/schema";
 import { chain, layerId, layerSeed, type Registry, singletonTypeOf } from "../core/sites";
@@ -400,6 +401,24 @@ const unknownLocaleValues: DocumentCheck = (blok, _def, ctx) => {
     .map(([code]) => ({ check: "unknown-locale", type: blok.type, field: code }));
 };
 
+/**
+ * A stored value in a `date` field that is not the field's exact form or not a
+ * real calendar date. The renderer passes it through unchanged, so a bad value
+ * shows on the page as written; the content API would have refused it. What a
+ * host sees after changing an ISO `text` field to `date` over content that was
+ * typed freehand. Empty and null are not findings.
+ */
+const dateInvalid: DocumentCheck = (blok, def) => {
+  if (!def) return [];
+  return Object.entries(def.fields)
+    .filter(([name, field]) => {
+      if (field.kind !== "date") return false;
+      const value = blok.data[name];
+      return value !== undefined && value !== null && dateError(field.time, value) !== null;
+    })
+    .map(([name]) => ({ check: "date-invalid", type: blok.type, field: name }));
+};
+
 /** See "Adding a check" in the file header. */
 export const DOCUMENT_CHECKS: readonly DocumentCheck[] = [
   orphanKey,
@@ -407,6 +426,7 @@ export const DOCUMENT_CHECKS: readonly DocumentCheck[] = [
   missingField,
   translatedNotTranslatable,
   unknownLocaleValues,
+  dateInvalid,
 ];
 
 /* --------------------------------------------------------- story checks --- */
@@ -787,7 +807,7 @@ const unusableIndex: SchemaCheck = (schema, ctx) => {
           block: def.name,
           field: name,
           note: field.kind,
-          detail: `'${name}' is a ${field.kind} field marked 'indexed' — only text, textarea, number, boolean and select project to a scalar, so nothing is indexed`,
+          detail: `'${name}' is a ${field.kind} field marked 'indexed' — only text, textarea, number, boolean, select and date project to a scalar, so nothing is indexed`,
         });
         continue;
       }
@@ -808,12 +828,48 @@ const unusableIndex: SchemaCheck = (schema, ctx) => {
   return out;
 };
 
+/**
+ * A field `group` that appears in two runs of one block's declaration order,
+ * with a field of another group, or none, between them. The inspector draws
+ * consecutive fields of one group under one heading, so a split group draws as
+ * two headings with the same name. Presentational and harmless to data, so a
+ * warning to move the declarations together; the finding names the first field
+ * of the later run, and the group is the note.
+ */
+const groupSplit: SchemaCheck = (schema) => {
+  const out: SchemaFinding[] = [];
+  for (const def of Object.values(schema)) {
+    const closed = new Set<string>();
+    // Once per group: a third run of the same name is the same finding.
+    const reported = new Set<string>();
+    let open: string | undefined;
+    for (const [name, field] of Object.entries(def.fields)) {
+      const group = field.group;
+      if (group === open) continue;
+      if (open !== undefined) closed.add(open);
+      open = group;
+      if (group !== undefined && closed.has(group) && !reported.has(group)) {
+        reported.add(group);
+        out.push({
+          check: "group-split",
+          block: def.name,
+          field: name,
+          note: group,
+          detail: `group '${group}' on '${def.name}' resumes at '${name}' after other fields — declare a group's fields together or the inspector draws two headings`,
+        });
+      }
+    }
+  }
+  return out;
+};
+
 /** See "Adding a check" in the file header. */
 export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
   unknownConditionField,
   hiddenSummaryField,
   untranslatableText,
   unusableIndex,
+  groupSplit,
 ];
 
 /* ------------------------------------------------------------- the walk --- */

@@ -11,6 +11,7 @@ import type { DocumentType, SchemaIndex } from "../../../../core/schema";
 import { Input, Select, Textarea } from "../../Field";
 import { AssetField, MultiAssetField } from "./AssetField";
 import { CollectionField } from "./CollectionField";
+import { dateInputValue, dateStoredValue } from "../inspector-model";
 import css from "./fields.module.css";
 import { FormField } from "./FormField";
 import { LinkField } from "./LinkField";
@@ -138,6 +139,19 @@ export function Control(props: ControlProps) {
           value={Number(value ?? 0)}
           disabled={!editable}
           onChange={(e) => onChange(e.target.valueAsNumber || 0)}
+        />
+      );
+
+    case "date":
+      // Local time in, UTC out for `time`; the conversion lives in `inspector-model.ts`
+      // so a Node test can reach it, and an input cannot produce a value the API refuses.
+      return (
+        <Input
+          id={id}
+          type={field.time ? "datetime-local" : "date"}
+          value={dateInputValue(value, field.time)}
+          disabled={!editable}
+          onChange={(e) => onChange(dateStoredValue(e.target.value, field.time))}
         />
       );
 

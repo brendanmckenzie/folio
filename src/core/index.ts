@@ -49,6 +49,7 @@ export {
   blocks,
   boolean,
   collection,
+  date,
   form,
   multiasset,
   multilink,
