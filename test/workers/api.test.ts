@@ -1410,6 +1410,53 @@ describe("GET /search", () => {
   });
 
   /**
+   * D1 refuses a `like` pattern over 50 bytes, so an unbounded term was a 500 on a
+   * search box. The term is truncated rather than refused (as `clampSearch` does),
+   * by bytes and never through a code point.
+   */
+  describe("a long or wildcard-bearing term", () => {
+    const search = async (q: string) =>
+      call(`${API}/search?q=${encodeURIComponent(q)}`, { headers: await tokenFor("content:read") });
+
+    it("truncates a 60-character ASCII term and still matches on its prefix", async () => {
+      const title = `${"abcdefghij".repeat(6)}-tail`;
+      const id = await seed({ path: "apilongascii", title });
+      const res = await search(title);
+      expect(res.status).toBe(200);
+      const page = await json<Page<{ id: string }>>(res);
+      expect(page.rows.map((r) => r.id)).toContain(id);
+    });
+
+    it("answers a 30-character multibyte term without splitting a character", async () => {
+      const title = "Привет мир".repeat(3);
+      const id = await seed({ path: "apicyrillic", title });
+      const res = await search(title);
+      expect(res.status).toBe(200);
+      const page = await json<Page<{ id: string }>>(res);
+      expect(page.rows.map((r) => r.id)).toContain(id);
+      // Four-byte code points, past the bound, must not 500 either.
+      expect((await search("😀".repeat(40))).status).toBe(200);
+    });
+
+    it("matches % and _ literally", async () => {
+      const pct = await seed({ path: "apipctterm", title: "Save 50% today" });
+      const under = await seed({ path: "apiunderterm", title: "snake_case name" });
+      const plain = await seed({ path: "apiplainterm", title: "Save 50x today" });
+      const ids = async (q: string) =>
+        (await json<Page<{ id: string }>>(await search(q))).rows.map((r) => r.id);
+
+      const percent = await ids("50% today");
+      expect(percent).toContain(pct);
+      expect(percent).not.toContain(plain);
+
+      const underscore = await ids("snake_case");
+      expect(underscore).toContain(under);
+      expect(await ids("snake_case nam_")).not.toContain(under);
+      expect(await ids("snakeXcase")).not.toContain(under);
+    });
+  });
+
+  /**
    * The property offset paging does not have, and the reason this route is
    * keyset rather than page-numbered (decision 4's second half): a cursor is
    * anchored to the last row's own sort key, not to a position, so a row

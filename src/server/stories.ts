@@ -54,6 +54,7 @@ import {
   referencesTo,
 } from "./content-index";
 import { FolioError } from "./errors";
+import { LIKE_ESCAPE, likePattern } from "./like";
 import type { StoryChange } from "./hooks";
 import {
   clearRedirectAtStatement,
@@ -572,12 +573,16 @@ function storyFilters(
     // page, and the same three `matches` compared client-side in the prototype.
     // `coalesce(path, '')` because an unrouted row has none and `null like ?` is
     // null rather than false — which would drop the whole row from an OR chain.
-    const like = `%${filter.q}%`;
+    const like = likePattern(filter.q);
     if (opts.indexedText) {
-      sql.push(`(title like ? or slug like ? or coalesce(path, '') like ? or ${INDEXED_TEXT})`);
+      sql.push(
+        `(title like ? ${LIKE_ESCAPE} or slug like ? ${LIKE_ESCAPE} or coalesce(path, '') like ? ${LIKE_ESCAPE} or ${INDEXED_TEXT})`,
+      );
       binds.push(like, like, like, like);
     } else {
-      sql.push("(title like ? or slug like ? or coalesce(path, '') like ?)");
+      sql.push(
+        `(title like ? ${LIKE_ESCAPE} or slug like ? ${LIKE_ESCAPE} or coalesce(path, '') like ? ${LIKE_ESCAPE})`,
+      );
       binds.push(like, like, like);
     }
   }
@@ -611,7 +616,7 @@ function storyFilters(
 const INDEXED_TEXT = `exists (select 1 from content_index ci
                               where ci.story_id = stories.id
                                 and ci.locale = ''
-                                and ci.text_value like ?)`;
+                                and ci.text_value like ? ${LIKE_ESCAPE})`;
 
 /**
  * One parent's children, paged over `(ord, id)`.

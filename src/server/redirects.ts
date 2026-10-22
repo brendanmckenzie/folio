@@ -25,6 +25,7 @@ import { clampLimit, decodeCursor, type Page, paginate } from "../core/paginatio
 import { DEFAULT_SITE } from "../core/sites";
 import { isSafeHref } from "../core/values";
 import { BIND_BUDGET, type FolioDb } from "./db";
+import { LIKE_ESCAPE, likePattern } from "./like";
 import type { FolioLogger } from "./types";
 
 export interface Redirect {
@@ -374,12 +375,10 @@ export async function listRedirects(
     narrowBinds.push(opts.source);
   }
   if (opts.q) {
-    // The same unescaped `like` `storyFilters` uses, deliberately: `%` and `_` in
-    // a search term are the user's wildcards rather than an injection (the term is
-    // a bound parameter), and making them literal here alone would leave the two
-    // search boxes in the admin behaving differently.
-    const like = `%${opts.q}%`;
-    narrow.push("(from_path like ? or to_path like ?)");
+    // The same `likePattern` every search box uses: bounded to D1's pattern limit,
+    // and `%` or `_` in a term match themselves.
+    const like = likePattern(opts.q);
+    narrow.push(`(from_path like ? ${LIKE_ESCAPE} or to_path like ? ${LIKE_ESCAPE})`);
     narrowBinds.push(like, like);
   }
 

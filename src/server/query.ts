@@ -36,6 +36,7 @@ import { ftsQuery, splitSnippet } from "../core/search-projection";
 import { projectValue } from "../core/index-projection";
 import type { StoryMeta } from "../core/story";
 import { FolioError } from "./errors";
+import { LIKE_ESCAPE, likePattern } from "./like";
 import { SINGLE_SITE_CHAIN } from "../core/sites";
 import { servedClause, STORY_COLS, type StoryRow, toStoryMeta } from "./stories";
 import { D1_BIND_CAP, type FolioDb } from "./db";
@@ -60,9 +61,6 @@ const BUILT_IN_COLUMNS: Readonly<Record<string, string>> = {
   ord: "stories.ord",
   title: "stories.title",
 };
-
-/** `%`, `_` and the escape character itself, so a filter for "50%" is a filter for "50%". */
-const escapeLike = (value: string) => value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 
 /**
  * One `where` clause as an `exists` (or `not exists`) subquery against
@@ -103,11 +101,11 @@ function wherePredicate(w: ContentWhere, locale: string, n: number): Sql {
       return { text: `exists (${head} and ${alias}.text_value in (${holes}))`, binds };
     }
     case "startsWith":
-      binds.push(`${escapeLike(String(scalar(w.value)))}%`);
-      return { text: `exists (${head} and ${alias}.text_value like ? escape '\\')`, binds };
+      binds.push(likePattern(String(scalar(w.value)), { leading: false }));
+      return { text: `exists (${head} and ${alias}.text_value like ? ${LIKE_ESCAPE})`, binds };
     case "contains":
-      binds.push(`%${escapeLike(String(scalar(w.value)))}%`);
-      return { text: `exists (${head} and ${alias}.text_value like ? escape '\\')`, binds };
+      binds.push(likePattern(String(scalar(w.value))));
+      return { text: `exists (${head} and ${alias}.text_value like ? ${LIKE_ESCAPE})`, binds };
   }
 }
 
