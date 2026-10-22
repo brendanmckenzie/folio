@@ -8,6 +8,7 @@ import {
   resolveReference,
   resolveReferences,
   resolveValue,
+  type ReferenceTarget,
   type Resolution,
 } from "../core/resolve";
 import { asRichtext, type RichtextLimits, sanitiseRichtext } from "../core/richtext";
@@ -49,6 +50,13 @@ interface Props {
    * Defaulted so a caller with nothing to resolve stays a one-liner.
    */
   resolution?: Resolution;
+  /**
+   * The ids of the referenced documents this render is already inside, outermost
+   * first. Internal: `referenceContent` sets it, and it is what stops a cycle
+   * (A references B references A) rendering until the stack gives out now that
+   * `docs` is no longer emptied on the way down.
+   */
+  trail?: readonly string[];
 }
 
 export function RenderBlok({
@@ -57,6 +65,7 @@ export function RenderBlok({
   uid,
   mode = "off",
   resolution = EMPTY_RESOLUTION,
+  trail = [],
 }: Props): ReactNode {
   const blok = doc.bloks[uid];
   if (!blok) return null;
@@ -118,7 +127,7 @@ export function RenderBlok({
     if (field.kind === "reference") {
       const target = resolveReference(fieldValue(blok, name, locale), resolution, field.types);
       props[name] = target
-        ? { ...target, content: referenceContent(target.doc, registry, resolution) }
+        ? { ...target, content: referenceContent(target, registry, resolution, trail) }
         : null;
       continue;
     }
@@ -126,7 +135,7 @@ export function RenderBlok({
     // dropped by `resolveReferences` (`data-documents.md` decision 3).
     if (field.kind === "references") {
       props[name] = resolveReferences(fieldValue(blok, name, locale), resolution, field.types).map(
-        (target) => ({ ...target, content: referenceContent(target.doc, registry, resolution) }),
+        (target) => ({ ...target, content: referenceContent(target, registry, resolution, trail) }),
       );
       continue;
     }
@@ -149,6 +158,7 @@ export function RenderBlok({
         uid={child.uid}
         mode={mode}
         resolution={resolution}
+        trail={trail}
       />
     ));
   }
@@ -229,19 +239,34 @@ export function RenderBlok({
  * Rendered in `off` mode whatever the caller's own mode is, so without uid
  * markers: this content belongs to another story, so clicking it here must not
  * offer to edit it in the context of this one — and a uid on it would address a
- * block of a document the caller is not looking at. `docs` is emptied on the way
- * down, which is what bounds resolution to one level and stops a story that
- * references itself from rendering until the stack gives out.
+ * block of a document the caller is not looking at.
+ *
+ * **`docs` is not emptied on the way down**, so the target's own `reference` and
+ * `references` fields resolve and carry a `content` of their own. The bound is
+ * two-part: `resolve()` loads two hops (the page's references, and what those
+ * documents reference) and nothing past them, so a field naming a third hop
+ * resolves to nothing; and `trail` holds the ids of the documents already being
+ * rendered, so a document that is reached again through a cycle (A, B, A) answers
+ * `content: null` instead of recursing. The entry itself (`id`, `data`, `title`)
+ * still resolves, so a block can label the link; only the nested render is cut.
  */
-function referenceContent(doc: Doc, registry: Registry, resolution: Resolution): ReactNode {
+function referenceContent(
+  target: ReferenceTarget,
+  registry: Registry,
+  resolution: Resolution,
+  trail: readonly string[],
+): ReactNode {
+  const { doc } = target;
   const root = doc.bloks[doc.root];
   if (!root || !registry[root.type]?.render) return null;
+  if (trail.includes(target.id)) return null;
   return (
     <RenderBlok
       doc={doc}
       registry={registry}
       uid={doc.root}
-      resolution={{ ...resolution, docs: {} }}
+      resolution={resolution}
+      trail={[...trail, target.id]}
     />
   );
 }
