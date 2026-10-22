@@ -112,4 +112,48 @@ describe("useServerResolution", () => {
     rerender(props({ doc: docWith({ title: "a", author: "sty_2" }) }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
   });
+
+  it("asks again at the next pause after a transient failure, keeping what it held", async () => {
+    let status = 200;
+    const fetchMock = vi.fn(async (_url: string) =>
+      status === 200 ? new Response(JSON.stringify(RESOLUTION)) : new Response("down", { status }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const { result, rerender } = renderHook((p) => useServerResolution(p), {
+      initialProps: props(),
+    });
+    await waitFor(() => expect(result.current).not.toBeNull());
+
+    status = 503;
+    const picked = docWith({ title: "a", author: "sty_2" });
+    rerender(props({ doc: picked }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(result.current).not.toBeNull();
+
+    status = 200;
+    rerender(props({ doc: picked, idle: false }));
+    rerender(props({ doc: picked, idle: true }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  });
+
+  it("asks again when an abort lands while the body is still being read", async () => {
+    let release: (() => void) | undefined;
+    const slow = {
+      ok: true,
+      status: 200,
+      json: () => new Promise((resolve) => (release = () => resolve(RESOLUTION))),
+    };
+    const fetchMock = vi.fn(async (_url: string) => slow as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const { result, rerender } = renderHook((p) => useServerResolution(p), {
+      initialProps: props(),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    // An edit in flight aborts the request while its body is unread.
+    rerender(props({ idle: false }));
+    release?.();
+    rerender(props({ idle: true }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(result.current).toBeNull();
+  });
 });

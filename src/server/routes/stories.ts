@@ -182,6 +182,7 @@ function previewRender(
   registry: SiteRegistry,
   scope: string | null,
   actor: Actor | null,
+  authed: boolean,
   named: { site: string; owner: string; brand: string | null } | undefined,
 ): SiteRender | null {
   if (scope === null) return null;
@@ -191,7 +192,9 @@ function previewRender(
       !site ||
       !sitesUnder(registry, named.owner).includes(site.id) ||
       (named.brand !== null && site.brand !== named.brand) ||
-      !mayPreviewDrafts(actor, registry, site.id)
+      // Under `auth: 'open'` there is no caller to ask, and every route is open; the
+      // other call sites of this rule gate the same way.
+      (authed && !mayPreviewDrafts(actor, registry, site.id))
     ) {
       throw new FolioError("not_found", "Unknown site");
     }
@@ -782,6 +785,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
             registry,
             c.var.scope,
             c.var.actor,
+            rt.auth.mode === "session",
             named
               ? { site: named, owner: story.site ?? DEFAULT_SITE, brand: brand.brand?.id ?? null }
               : undefined,

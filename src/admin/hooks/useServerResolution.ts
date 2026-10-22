@@ -11,6 +11,9 @@ import type { SchemaIndex } from "../../core/schema";
  * two connections), short enough that a freshly picked link resolves at once. */
 const SETTLE_MS = 300;
 
+/** Statuses that are the server's settled word on a request, as opposed to a hiccup. */
+const DEFINITIVE: ReadonlySet<number> = new Set([400, 401, 403, 404, 501]);
+
 /**
  * Everything in the open document that decides what the server's resolution holds,
  * as one string: the ids its links, references and forms point at, its collection
@@ -122,12 +125,19 @@ export function useServerResolution(opts: {
     const timer = setTimeout(() => {
       fetch(resolutionUrl(apiBase, storyId, { locale, site }), { signal: controller.signal })
         .then(async (res) => {
-          if (controller.signal.aborted) return;
-          // A refusal is an answer about this signature, so it is not asked again
-          // until the signature moves (a pause in typing must not retry it); it is
-          // not an answer about the document, so what was held stays.
-          answered.current = asked;
-          if (res.ok) setHeld({ key, resolution: (await res.json()) as Resolution });
+          if (res.ok) {
+            const resolution = (await res.json()) as Resolution;
+            if (controller.signal.aborted) return;
+            answered.current = asked;
+            setHeld({ key, resolution });
+          } else if (!controller.signal.aborted && DEFINITIVE.has(res.status)) {
+            // A definitive refusal is an answer about this signature, so it is not
+            // asked again until the signature moves (a pause in typing must not retry
+            // it). It is not an answer about the document, so what was held stays.
+            // Anything else (5xx, 429, a dropped connection, an abort mid-body) is
+            // transient and is left unanswered, so the next pause asks again.
+            answered.current = asked;
+          }
         })
         .catch(() => {});
     }, SETTLE_MS);
