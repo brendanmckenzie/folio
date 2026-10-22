@@ -17,3 +17,5 @@ minimumReleaseAgeExclude:
   - "@tiptap/core@3.30.5"
   # Renovate security update: hono@4.13.7 || 4.13.11
   - hono@4.13.7 || 4.13.11
+  # Renovate security update: vite@8.1.6
+  - vite@8.1.6
