@@ -14,6 +14,7 @@
  *   node scripts/release.mjs --no-gate # skip the gates (they were just run)
  *   node scripts/release.mjs --tag     # …and add the end-to-end sweep
  *   node scripts/release.mjs --tag --ci  # the release.yml run: verify a pushed tag, publish nothing
+ *   node scripts/release.mjs --smoke-only  # just the consumer smoke test, on the working tree
  *
  * Tags are created by hand (CLAUDE.md "Releasing"), never by this script. What it
  * does about them is refuse to bless a tag that has moved: see `assertTagNotMoved`.
@@ -21,8 +22,16 @@
  * What it does NOT do is push by default. Publishing is an explicit act, and the
  * printed command is one paste.
  */
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import {
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -54,6 +63,16 @@ const tag = args.has("--tag");
  * already on the remote it must name this commit, or nothing is printed.
  */
 const ci = args.has("--ci");
+/**
+ * Runs the consumer smoke test and nothing else: no branch or clean-tree
+ * precondition, no gates, no compare, no push. It exists so the one stage that
+ * installs the package can be exercised on a feature branch, against uncommitted
+ * work. It cannot publish, which is why it may skip the refusals that protect a
+ * publish; every path that can publish still takes them. The working tree is
+ * snapshotted into a throwaway commit (see `snapshotWorkingTree`) because the
+ * install is of a commit, and the snapshot never moves a branch.
+ */
+const smokeOnly = args.has("--smoke-only");
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim();
 
@@ -134,6 +153,15 @@ function runGate(label, command, commandArgs, { stream = false } = {}) {
 }
 
 // ── preconditions ────────────────────────────────────────────────────────────
+
+if (smokeOnly) {
+  if (push || ci || tag || force) {
+    die("--smoke-only cannot be combined with --push, --tag, --ci or --force.");
+  }
+  smokeTest(snapshotWorkingTree());
+  console.log("\n✓ smoke test passed.");
+  process.exit(0);
+}
 
 if (ci) {
   const refName = process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME ?? "";
@@ -331,9 +359,144 @@ function smokeTest(sha) {
       );
     }
     console.log(`ok (${shipped.length} files)`);
+
+    consumerBoots(dir, `git+file://${repoRoot}#${sha}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/**
+ * Commit the working tree, tracked and untracked, to a ref that no branch points
+ * at, and answer its SHA. `git+file:` installs a commit, so this is how
+ * `--smoke-only` sees uncommitted work. Goes through a private index so the real
+ * one is untouched, and the ref is dropped when the process exits.
+ */
+function snapshotWorkingTree() {
+  const gitDir = git("rev-parse", "--absolute-git-dir");
+  const env = { ...process.env, GIT_INDEX_FILE: join(gitDir, "folio-smoke-index") };
+  const run = (...a) => execFileSync("git", a, { encoding: "utf8", env }).trim();
+  try {
+    run("read-tree", "HEAD");
+    run("add", "-A");
+    const treeId = run("write-tree");
+    const sha = run("commit-tree", treeId, "-p", "HEAD", "-m", "folio smoke-only snapshot");
+    const ref = "refs/folio-smoke/snapshot";
+    git("update-ref", ref, sha);
+    process.on("exit", () => spawnSync("git", ["update-ref", "-d", ref]));
+    return sha;
+  } finally {
+    rmSync(env.GIT_INDEX_FILE, { force: true });
+  }
+}
+
+// A declaration, not a const: `--smoke-only` calls `smokeTest` before this line runs.
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * The starter, installed from the built package, has to boot `vite dev` and build.
+ *
+ * Everything above proves the files and names are there; none of it runs the
+ * package. Its worst failure ships green: `folio/server` resolves to `dist/`
+ * inside `node_modules`, which Vite externalises, and workerd then loads React's
+ * CommonJS entries raw and dies at startup with `module is not defined` before it
+ * can answer a request. Folio's own demo resolves the library to TypeScript source
+ * through the `development` export condition and never sees it, and `vite build`
+ * bundles CommonJS through Rollup so it never sees it either. Only a dev server
+ * started against the installed package does, which is what this does.
+ *
+ * Needs the network for the starter's own dependencies, as the install above
+ * already does.
+ */
+function consumerBoots(dir, spec) {
+  process.stdout.write("· consumer boots (init, install, vite dev, build) … ");
+  const fail = (what, detail = "") => {
+    console.log("FAILED");
+    if (detail) process.stderr.write(`${detail}\n`);
+    die(`${what}. Nothing has been pushed.`);
+  };
+  const sh = (label, command, commandArgs, cwd) => {
+    const r = spawnSync(command, commandArgs, { cwd, stdio: "pipe", encoding: "utf8" });
+    if (r.status !== 0) fail(`${label} failed (exit ${r.status})`, `${r.stdout}${r.stderr}`);
+  };
+
+  sh("folio init", "node", ["node_modules/folio/bin/folio.mjs", "init", "app"], dir);
+  const app = join(dir, "app");
+  // `init` pins the published tag; point it at the commit under test instead.
+  const pkgPath = join(app, "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  pkg.dependencies.folio = spec;
+  writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  sh("the starter's npm install", "npm", ["install", "--no-audit", "--no-fund"], app);
+  sh("db:local", "npm", ["run", "db:local"], app);
+
+  const port = spawnSync(
+    "node",
+    [
+      "-e",
+      "const s=require('net').createServer().listen(0,()=>{console.log(s.address().port);s.close()})",
+    ],
+    { encoding: "utf8" },
+  ).stdout.trim();
+  const logPath = join(dir, "dev.log");
+  const logFd = openSync(logPath, "w");
+  // Its own process group, because the Cloudflare plugin starts children that
+  // outlive a plain kill of the vite process.
+  const dev = spawn("./node_modules/.bin/vite", ["--port", port, "--strictPort"], {
+    cwd: app,
+    detached: true,
+    stdio: ["ignore", logFd, logFd],
+  });
+  const status = (path) =>
+    Number(
+      spawnSync(
+        "curl",
+        [
+          "-s",
+          "-o",
+          "/dev/null",
+          "-w",
+          "%{http_code}",
+          "--max-time",
+          "10",
+          `http://localhost:${port}${path}`,
+        ],
+        { encoding: "utf8" },
+      ).stdout,
+    );
+  const commonJsError = /module is not defined|require is not defined/;
+  try {
+    let answered = 0;
+    for (let i = 0; i < 90 && dev.exitCode === null; i++) {
+      sleep(1000);
+      answered = status("/folio/login");
+      if (answered) break;
+    }
+    if (commonJsError.test(readFileSync(logPath, "utf8"))) {
+      fail("vite dev hit a CommonJS error on startup", readFileSync(logPath, "utf8"));
+    }
+    if (!answered) fail("vite dev never answered", readFileSync(logPath, "utf8"));
+    // The Worker runs on the first request, so a startup failure can also arrive
+    // as a 500 here rather than as an exit.
+    for (const path of ["/", "/folio/login"]) {
+      const code = status(path);
+      if (code === 0 || code >= 500) {
+        fail(`GET ${path} answered ${code}`, readFileSync(logPath, "utf8"));
+      }
+    }
+    if (commonJsError.test(readFileSync(logPath, "utf8"))) {
+      fail("the Worker hit a CommonJS error", readFileSync(logPath, "utf8"));
+    }
+  } finally {
+    try {
+      process.kill(-dev.pid, "SIGTERM");
+    } catch {}
+    closeSync(logFd);
+  }
+  sh("the starter's build", "npm", ["run", "build"], app);
+  console.log("ok");
 }
 
 if (ci) {
