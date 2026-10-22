@@ -456,3 +456,22 @@ describe("the Vite plugin, the string form is what it was", () => {
     ]);
   });
 });
+
+describe("the Vite plugin, the Worker's pre-bundled dependencies", () => {
+  it("names React and react-dom, which a consumer of the built package cannot boot without", () => {
+    const { ssr } = (
+      runConfig({}, "serve") as unknown as {
+        environments: { ssr: { optimizeDeps: { include: string[] } } };
+      }
+    ).environments;
+    expect(ssr.optimizeDeps.include).toEqual(
+      expect.arrayContaining([
+        "react",
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime",
+        "react-dom",
+        "react-dom/server.edge",
+      ]),
+    );
+  });
+});

@@ -147,6 +147,15 @@ export function folio(options: FolioPluginOptions): Plugin[] {
            * stack that names the runner and nothing else. Naming it here makes
            * Vite pre-bundle it with the interop it needs.
            *
+           * **React itself is listed too, not only `react-dom/server.edge`.**
+           * Reproduced against the built package (a `git+file:` install of the
+           * starter, `vite` with no extra config): `vite dev` died at startup with
+           * `ReferenceError: module is not defined` from the runner worker, and
+           * adding `react`, `react/jsx-runtime`, `react/jsx-dev-runtime` and
+           * `react-dom` here was what made it boot. Those are CommonJS as well,
+           * reached from the externalised `dist/` the same way, and a host used
+           * to have to name them in its own `ssr.optimizeDeps.include`.
+           *
            * Declared by the plugin rather than left to each host because no
            * host could reasonably deduce it: the error mentions neither Folio
            * nor react-dom. Folio's own demo never sees it, since that project
@@ -160,7 +169,13 @@ export function folio(options: FolioPluginOptions): Plugin[] {
            */
           ssr: {
             optimizeDeps: {
-              include: ["react-dom/server.edge"],
+              include: [
+                "react",
+                "react/jsx-runtime",
+                "react/jsx-dev-runtime",
+                "react-dom",
+                "react-dom/server.edge",
+              ],
             },
           },
           client: {
