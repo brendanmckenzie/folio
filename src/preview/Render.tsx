@@ -10,7 +10,7 @@ import {
   resolveValue,
   type Resolution,
 } from "../core/resolve";
-import { asRichtext, sanitiseRichtext } from "../core/richtext";
+import { asRichtext, type RichtextLimits, sanitiseRichtext } from "../core/richtext";
 import { RichText } from "./RichText";
 
 /**
@@ -107,8 +107,9 @@ export function RenderBlok({
     // link resolution.
     if (field.kind === "richtext") {
       props[name] = (
-        <RichText
-          doc={sanitiseRichtext(asRichtext(fieldValue(blok, name, locale)), field)}
+        <RenderRichtext
+          value={fieldValue(blok, name, locale)}
+          field={field}
           resolution={resolution}
         />
       );
@@ -257,6 +258,29 @@ function EmptySlot({ parent, slot, label }: { parent: string; slot: string; labe
       Add to {label.toLowerCase()}
     </button>
   );
+}
+
+/**
+ * Renders a richtext value a host holds: `reference.data.body`, a
+ * `references[i].data` entry, a collection item's data. The one path a block's
+ * own `richtext` field goes through, so sanitising (the field's `marks`/`nodes`/
+ * `headingLevels`, and the href scheme pass) and internal-link resolution are
+ * identical wherever the value came from.
+ *
+ * `field` is the richtext field the value belongs to; omitted, only the
+ * unconditional href scheme pass applies. A link to a story renders as a link
+ * only if that story is in `resolution`; otherwise it is plain text.
+ */
+export function RenderRichtext({
+  value,
+  field,
+  resolution = EMPTY_RESOLUTION,
+}: {
+  value: unknown;
+  field?: RichtextLimits;
+  resolution?: Resolution;
+}): ReactNode {
+  return <RichText doc={sanitiseRichtext(asRichtext(value), field)} resolution={resolution} />;
 }
 
 /** Renders a whole document. The public entry point for both site and preview. */
