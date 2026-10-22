@@ -70,9 +70,13 @@ export interface Resolution {
   assetBase: string;
   /**
    * Documents pulled in by `reference` fields, keyed by story id. Populated only
-   * for the ids a document actually points at, and only one level deep — the same
-   * bound Storyblok's `resolve_relations` has, and what stops a story that
-   * references itself from rendering forever.
+   * for the ids a document actually points at, and **two hops deep**: the page's
+   * own references, and the documents those reference, so a referenced record's
+   * own `reference`/`references` fields resolve inside `content`. Nothing past the
+   * second hop is loaded. `content` nests one level, so the
+   * flat map cannot make a render recurse: a reference inside a `content` render
+   * resolves as data with `content: null`. A second-hop document is never a gated
+   * page, never the page itself, and at most 50 are loaded.
    */
   docs?: Record<string, Doc>;
   /**
@@ -81,10 +85,9 @@ export interface Resolution {
    * to know the `sng_<type>` id convention (`../../../docs/specs/content-model/
    * globals.md`). Populated by the same query `docs` is, from `FolioConfig.globals`.
    *
-   * Deliberately a separate field rather than merged into `docs`: `RenderBlok`
-   * empties `docs` one level down so a story referencing itself renders once,
-   * but a global rendered inside a referenced document still needs its own
-   * content, so `globals` has to survive that emptying.
+   * Deliberately a separate field rather than merged into `docs`: they are keyed
+   * by type name, not story id, and are resolved per layer chain, so a global
+   * rendered inside a referenced document still reads its own content.
    */
   globals?: Record<string, Doc>;
   /**

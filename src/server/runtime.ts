@@ -61,6 +61,7 @@ import { type ContentProjection, contentProjection } from "./content-index";
 import { type ResolvedDescribe, validateDescribe } from "./describe";
 import { type ResolvedForms, validateForms } from "./form-responses";
 import { compileForm, formsByIds } from "./forms";
+import { gateValue, isUngated } from "../core/gate";
 import { type ResolvedGate, validateGate } from "./gate";
 import {
   createHookRunner,
@@ -1344,6 +1345,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       // entitled to them.
       const formRows = formsByIds(db, doc ? formIds(doc, schema) : [], logger, chain);
 
+      /** A referenced story's draft. `id` must be in `known`: see the filter below. */
+      const draftOfKnown = async (id: string): Promise<Doc> =>
+        branded
+          ? (await initDraft(bindings, id, seedInChain(known.get(id)!, chain))).doc
+          : await draft(bindings, id);
+
       /** Pass two: the documents this one pulls in — references, and every global. */
       let docs: Record<string, Doc> = {};
       let globalDocs: Record<string, Doc> | undefined;
@@ -1357,17 +1364,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         const liveRefIds = refIds.filter((id) => known.has(id));
         if (loaded.length > 0 || liveRefIds.length > 0) {
           const [refEntries, globalEntries] = await Promise.all([
-            Promise.all(
-              liveRefIds.map(
-                async (id) =>
-                  [
-                    id,
-                    branded
-                      ? (await initDraft(bindings, id, seedInChain(known.get(id)!, chain))).doc
-                      : await draft(bindings, id),
-                  ] as const,
-              ),
-            ),
+            Promise.all(liveRefIds.map(async (id) => [id, await draftOfKnown(id)] as const)),
             Promise.all(
               loaded.map(async (name) => {
                 // **A render on a multi-site deployment never writes** (decision
@@ -1441,21 +1438,110 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       }
 
       /**
-       * Pass three: the ids those documents point at. One level, matching the bound
-       * `RenderBlok` already enforces on `docs` — but `stories` survives that
-       * emptying, so a link inside a global's navigation or inside a referenced card
-       * has to resolve. Skipped entirely when the whole map is already loaded, and
-       * when nothing new turned up, which is the ordinary case.
+       * Pass three: the ids those documents point at. `stories` survives
+       * `RenderBlok`'s trail, so a link inside a global's navigation or inside a
+       * referenced card has to resolve. Skipped entirely when the whole map is
+       * already loaded, and when nothing new turned up, which is the ordinary case.
+       *
+       * **And the second hop** (`reference.content` resolves the target's own
+       * references): the documents the pass-two documents' `reference` fields name.
+       * One more bounded level, never a walk — what a second-hop document itself
+       * references is not loaded. On the published branch the read goes out with the
+       * story rows above, so it costs no serial round trip of its own
+       * (`publishedDocsByIds` returns nothing for an id with no row or outside the
+       * chain, exactly as for pass two). In draft mode it cannot: the story row is
+       * what proves the id is live, and asking a deleted story for its draft creates
+       * a Durable Object, so it waits for pass three's rows and filters on `known`.
+       * Whatever it loads has its story row in `known` (the loop below adds every
+       * second-hop id), which is what puts `story:<id>` on the page's cache tags.
        */
+      const secondHopIds = (): string[] => {
+        const out = new Set<string>();
+        for (const pulled of Object.values(docs)) {
+          for (const id of referencedIdsAllLocales(pulled, schema)) {
+            if (!(id in docs)) out.add(id);
+          }
+        }
+        return [...out];
+      };
+      /**
+       * At most this many second-hop documents are loaded, in either mode. In draft
+       * mode each one is a Durable Object call (a seeded one, on a branded
+       * deployment) on every preview keystroke's resolution fetch, so an unbounded
+       * fan-out (30 cards each tagging 20 records) would run into the subrequest
+       * limit and fail the render. 50 is well past what a card's related-records
+       * list shows and well under that limit alongside the first hop. Ids beyond
+       * it get no document, so they resolve to nothing, the way a third hop does.
+       * Their story rows still load (pass three above), so links to them work.
+       */
+      const MAX_SECOND_HOP = 50;
+      // **The page itself is never a second-hop document**: a record that points back
+      // at the page it was reached from must not render that page inside itself.
+      const hopTwo = secondHopIds()
+        .filter((id) => id !== opts?.story?.id)
+        .slice(0, MAX_SECOND_HOP);
+      const nested = new Set<string>();
       if (!wantAll) {
-        const nested = new Set<string>();
         for (const pulled of [...Object.values(docs), ...Object.values(globalDocs ?? {})]) {
           for (const id of linkedIds(pulled, schema)) if (!known.has(id)) nested.add(id);
           for (const id of referencedIdsAllLocales(pulled, schema)) {
             if (!known.has(id)) nested.add(id);
           }
         }
+      }
+      let hopTwoDocs: Record<string, Doc> = {};
+      if (opts?.draft) {
         if (nested.size > 0) remember(await storiesFor(db, [...nested], [], chain));
+        const live = hopTwo.filter((id) => known.has(id));
+        hopTwoDocs = Object.fromEntries(
+          await Promise.all(live.map(async (id) => [id, await draftOfKnown(id)] as const)),
+        );
+      } else {
+        const [rows, fetched] = await Promise.all([
+          nested.size > 0 ? storiesFor(db, [...nested], [], chain) : Promise.resolve([]),
+          hopTwo.length > 0
+            ? publishedDocsByIds(db, hopTwo, chain)
+            : Promise.resolve<Record<string, Doc>>({}),
+        ]);
+        remember(rows);
+        hopTwoDocs = Object.fromEntries(
+          hopTwo.filter((id) => known.has(id) && fetched[id]).map((id) => [id, fetched[id]!]),
+        );
+      }
+      // **A second-hop document is never a gated page** (`visitor-access.md`). The
+      // first hop's reference to a gated page is a documented, remedied hole
+      // (`reference({ types })` on page blocks); a second hop would reopen it behind
+      // a record that followed that remedy, and `resolve()` has no visitor to ask,
+      // so a gated root is simply not loaded. Dropped here, after the read, in both
+      // modes: gating is a property of the document, not of the id.
+      if (gate) {
+        for (const [id, hopDoc] of Object.entries(hopTwoDocs)) {
+          const root = hopDoc.bloks[hopDoc.root];
+          if (
+            root &&
+            gate.roots.has(root.type) &&
+            !isUngated(gateValue(hopDoc, gate.config.field), gate.config.public)
+          ) {
+            delete hopTwoDocs[id];
+          }
+        }
+      }
+      if (Object.keys(hopTwoDocs).length > 0) {
+        docs = { ...docs, ...hopTwoDocs };
+        // The second-hop documents' own links, so prose in a rendered target is
+        // not unstyled text. Their references stop here. **This is a deliberate extra
+        // serial round trip** on the published branch (it needs the second-hop
+        // documents' answer to know the ids), accepted because the alternative is
+        // unstyled prose in a rendered target. It is paid only when a second-hop
+        // document carries a link no earlier read covered, so the ordinary render
+        // (no second hop, or no new links) costs exactly what it did.
+        if (!wantAll) {
+          const links = new Set<string>();
+          for (const pulled of Object.values(hopTwoDocs)) {
+            for (const id of linkedIds(pulled, schema)) if (!known.has(id)) links.add(id);
+          }
+          if (links.size > 0) remember(await storiesFor(db, [...links], [], chain));
+        }
       }
 
       /**
