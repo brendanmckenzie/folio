@@ -82,7 +82,16 @@ describe("stories", () => {
       // 0011: the owning scope, and fork provenance. Added by `alter`, so last.
       "site_id",
       "forked_from",
+      // 0015: the draft's root scalars as JSON, for the Data table.
+      "draft_data",
     ]);
+  });
+
+  it("adds `draft_data` as a nullable text column with no default (0015)", async () => {
+    const byName = new Map((await columns()).map((c) => [c.name, c]));
+    expect(byName.get("draft_data")?.type).toBe("TEXT");
+    expect(byName.get("draft_data")?.notnull).toBe(0);
+    expect(byName.get("draft_data")?.dflt_value).toBeNull();
   });
 
   it("defaults `site_id` to the default site and leaves `forked_from` null", async () => {
@@ -1678,6 +1687,7 @@ describe("the ledger", () => {
       "0011_sites.sql",
       "0013_site_brands.sql",
       "0014_form_logic.sql",
+      "0015_draft_data.sql",
     ]);
   });
 

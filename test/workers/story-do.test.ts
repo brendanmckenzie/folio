@@ -273,6 +273,78 @@ describe("StoryDO: draft watermark alarm", () => {
     writer.ws.close();
   });
 
+  /** A `stories` row for the alarm to write into, and the two columns it writes. */
+  async function watermarkRow(tag: string) {
+    await env.DB.prepare(
+      `insert into stories (id, parent_id, slug, path, ord, title, updated_at)
+       values (?, null, ?, ?, 'a0', ?, ?)`,
+    )
+      .bind(`sty_${tag}`, tag, tag, tag, Date.now())
+      .run();
+  }
+  const mirrorOf = async (tag: string) =>
+    env.DB.prepare(
+      "select draft_sync_id as syncId, draft_data as draftData from stories where id = ?",
+    )
+      .bind(`sty_${tag}`)
+      .first<{ syncId: number; draftData: string | null }>();
+
+  // Issue #82, migration 0015: the Data table's draft values.
+  it("mirrors the root's scalars into draft_data when the alarm fires, beside the watermark", async () => {
+    await watermarkRow("mirror-alarm");
+    const stub = story("mirror-alarm");
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()));
+    const writer = await join(stub, { actor: "a1", name: "Ada", colour: "#ff00ff" });
+    writer.send({ type: "tx", txId: "t1", mutations: setTitle("Mirrored") });
+    await frame(writer, "delta");
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+
+    const row = await mirrorOf("mirror-alarm");
+    expect(row?.syncId).toBe(1);
+    expect(JSON.parse(row?.draftData ?? "null")).toEqual({ data: { title: "Mirrored" } });
+    writer.ws.close();
+  });
+
+  it("mirrors a document that arrives by seeding and is never edited", async () => {
+    await watermarkRow("mirror-seed");
+    const stub = story("mirror-seed");
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()));
+    expect(JSON.parse((await mirrorOf("mirror-seed"))?.draftData ?? "null")).toEqual({
+      data: { title: "Home" },
+    });
+  });
+
+  /**
+   * The ordering argument for a statement of its own. A Worker deployed before
+   * `0015` has no `draft_data`; if the mirror shared the watermark's `update` the
+   * whole statement would fail with `no such column` and every document in the
+   * content tree would stop showing unpublished changes.
+   */
+  it("still writes the watermark on a database that has no draft_data column", async () => {
+    await watermarkRow("mirror-no-column");
+    const stub = story("mirror-no-column");
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()));
+    const writer = await join(stub, { actor: "a1", name: "Ada", colour: "#ff00ff" });
+    writer.send({ type: "tx", txId: "t1", mutations: setTitle("Before 0015") });
+    await frame(writer, "delta");
+
+    await env.DB.prepare("alter table stories drop column draft_data").run();
+    try {
+      expect(await runDurableObjectAlarm(stub)).toBe(true);
+      const row = await env.DB.prepare("select draft_sync_id as syncId from stories where id = ?")
+        .bind("sty_mirror-no-column")
+        .first<{ syncId: number }>();
+      expect(row?.syncId).toBe(1);
+      // Nothing left scheduled: a missing column must not become an alarm loop.
+      expect(await runDurableObjectAlarm(stub)).toBe(false);
+    } finally {
+      await env.DB.prepare("alter table stories add column draft_data text")
+        .run()
+        .catch(() => {});
+    }
+    writer.ws.close();
+  });
+
   it("acknowledges the sender even when the story has no D1 row to mirror into", async () => {
     // Deliberately no `stories` row for this id: the tx path must not depend
     // on the watermark write succeeding (an update matching no rows is not an

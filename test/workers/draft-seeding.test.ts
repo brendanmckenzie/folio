@@ -202,6 +202,23 @@ describe("a story whose object has no state", () => {
     expect(await folio.draft(env, id)).toEqual(published);
   });
 
+  // Migration 0015 (issue #82): a read must not write to D1, so seeding a cold object
+  // through initDraft leaves `draft_data` alone; `reindex?drafts=1` covers those rows.
+  it("does not write draft_data when a cold object seeds on a read", async () => {
+    const id = await insertRow({ published: docOf("oldroot0", "Mirrored on seed") });
+    expect(
+      (await env.DB.prepare("select draft_data as d from stories where id = ?").bind(id).first())
+        ?.d,
+    ).toBeNull();
+
+    await folio.draft(env, id);
+
+    const row = await env.DB.prepare("select draft_data as d from stories where id = ?")
+      .bind(id)
+      .first<{ d: string }>();
+    expect(row?.d).toBeNull();
+  });
+
   it("falls back to the newest version when nothing is published", async () => {
     const id = await insertRow({ unpublished: true });
     await insertVersion(id, docOf("verold01", "Older"), { createdAt: 1000 });

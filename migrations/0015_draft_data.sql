@@ -1,0 +1,17 @@
+-- Draft values for the Data table (issue #82).
+--
+-- One additive, nullable column. `stories.draft_data` is a JSON mirror of the
+-- root block's scalar field values in the draft, written by the story Durable
+-- Object (which knows no schema, so it keeps every scalar and the reader picks
+-- the indexed ones). It is what lets the Documents table show, and sort by, what
+-- an unpublished record currently says rather than a blank cell.
+--
+-- Derived, bounded and never authoritative: nothing reads it to render a page,
+-- and `content_index` / `query` / `recordBy`'s published lookup never touch it.
+-- Null means "no draft values mirrored yet" and reads as the published ones.
+--
+-- Read by the list route of the release that carries it, so apply this BEFORE
+-- that Worker is deployed (0013's rule). The Durable Object writes it as a
+-- statement of its own, separate from the draft watermark, so a Worker deployed
+-- first still keeps the unpublished-changes badge working and only logs.
+alter table stories add column draft_data text;

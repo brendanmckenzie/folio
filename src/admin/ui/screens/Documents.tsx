@@ -22,7 +22,9 @@ import {
   dirOf,
   filterOf,
   isNarrowed,
+  isDraftCell,
   isStale,
+  knownSort,
   parseDocumentsUrl,
   withSort,
 } from "./documents-model";
@@ -84,26 +86,39 @@ const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6"];
  *    an unrelated page and a migration banner above it describing that page's schema
  *    drift. That was `docs/ui-review.md`'s structural complaint about this surface,
  *    and it is fixed by moving rather than by styling.
- * 2. **Columns are published values, and a `changed` row says so.** The old footer
+ * 2. **Columns are draft-or-published, and a `changed` row says so.** The old footer
  *    carried a standing apology on every page — "Columns show published values. A
- *    draft document's cells stay blank until it is published." A row that wears
- *    `changed` beside cells that disagree with its draft explains the same thing
- *    where it is true, which is the difference between a note and an answer.
+ *    draft document's cells stay blank until it is published." Since issue #82 a
+ *    caller who may read drafts sees the draft's values (italic where they differ
+ *    from the published copy) and everyone else sees published ones. A row that
+ *    wears `changed` explains the rest where it is true, which is the difference
+ *    between a note and an answer.
  * 3. **Columns come from the type's `indexed` fields**, unchanged in principle from
  *    `dataColumns` — which got this right — and now in `documents-model.ts` where a
  *    Node test can reach it.
  * 4. **Sorting, searching and paging are the server's.** All three were client-side
  *    over a whole-table fetch, which is why `GET {base}/api/documents` was the last
  *    unbounded read in the admin. The visible cost is that an `indexed` column's
- *    header is no longer a sort button; `core/story.ts`'s `DocumentSort` argues that
- *    trade, and the short version is that the sort anybody actually reaches for on a
- *    record list is the title, which is a real `stories` column.
+ *    header was not a sort button until issue #82, which made every `indexed` column
+ *    one (`field:<name>`), ordered by the value the cell shows; `core/story.ts`'s
+ *    `DocumentSort` has the history and `server/stories.ts`'s `listDocumentPage` why
+ *    that one pages by offset.
  */
 export function Documents(props: Props) {
   const { type, schema, apiBase, onQuery, onNotice, onOpen } = props;
   const mayCreate = canCreateContent(props.me);
   const mayManage = canManageContent(props.me);
-  const url = parseDocumentsUrl(props.query);
+  // `knownSort`: a `?sort=field:` for a column this type does not have reads as the default.
+  const columns = useMemo(
+    () =>
+      documentColumns(
+        schema,
+        type,
+        (field, fallback) => schema[type.root]?.fields[field]?.label ?? fallback,
+      ),
+    [schema, type],
+  );
+  const url = knownSort(parseDocumentsUrl(props.query), columns);
   const filter = filterOf(url);
   const data = useDocuments(apiBase, type.name, url);
 
@@ -122,16 +137,6 @@ export function Documents(props: Props) {
     registerReload(data.reload);
     return () => registerReload(null);
   }, [registerReload, data.reload]);
-
-  const columns = useMemo(
-    () =>
-      documentColumns(
-        schema,
-        type,
-        (field, fallback) => schema[type.root]?.fields[field]?.label ?? fallback,
-      ),
-    [schema, type],
-  );
 
   /**
    * A singleton has exactly one document, so a list of it is a list of one — and
@@ -398,10 +403,11 @@ function Cell({ row, column }: { row: DocumentRow; column: DocumentColumn }) {
           ? {
               // The `changed` badge's job on *this* screen, which is a stronger
               // claim than the one it makes on Content: there, it means "there is
-              // something to publish". Here the cells beside it are the published
-              // values, so it also means "what you are reading is not what this
-              // document currently says".
-              title: "The cells here are published values. This document has unpublished changes.",
+              // something to publish". Here it also means a cell may not say what
+              // the document currently says: an italic one is the draft's, and for
+              // a reader who may not see drafts every cell is the published value.
+              title:
+                "This document has unpublished changes. Italic cells show the draft value; the rest are published.",
             }
           : {})}
       >
@@ -412,6 +418,16 @@ function Cell({ row, column }: { row: DocumentRow; column: DocumentColumn }) {
   if (column.kind === "updated") return <span className={css.stamp}>{when(row)}</span>;
 
   const text = cellText(row, column);
+  // A draft value is italic with a dotted underline (`css.draftValue`) and says so on
+  // hover. The title is the text alternative; the row's `changed` badge explains the
+  // rest.
+  if (text && isDraftCell(row, column)) {
+    return (
+      <span className={css.draftValue} title="From the draft. This value is not published yet.">
+        {text}
+      </span>
+    );
+  }
   // Returned bare rather than wrapped in a fragment: a component may return a
   // string in React 19, and `<>{text}</>` is a `noUselessFragments` error.
   if (text) return text;

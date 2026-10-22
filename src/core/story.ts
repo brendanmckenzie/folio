@@ -364,43 +364,33 @@ export const DEFAULT_FLAT_SORT: FlatSort = "edited";
 
 /**
  * The Documents screen's ordering — one type's records as a table
- * (`ui-architecture.md` port phase 3).
+ * (`ui-architecture.md` port phase 3, then issue #82).
  *
- * Three, and **every one of them is a column on `stories`**. That is the decision
- * rather than an accident of what was easy: the screen's other columns come from
- * the type's `indexed` fields, whose values live in `content_index`, and sorting
- * by one of those means a keyset over a joined row — which does not work here for
- * three separate reasons.
+ * Two kinds, and they page differently (`server/stories.ts`'s `listDocumentPage`
+ * argues it):
  *
- *  - A value is **two columns** (`num_value` then `text_value`, and
- *    `content-index.ts`'s `IndexedValue` says why), so the key is a triple and
- *    `server/keyset.ts`'s `Keyset` holds a pair.
- *  - Index rows are written **inside the publish batch**, so an unpublished
- *    document has none and the sort column is null. `core/pagination.ts`'s
- *    `CursorPart` is non-nullable on purpose: a cursor over a nullable column
- *    cannot express "resume after null" in a way that agrees with SQL's own null
- *    ordering.
- *  - No index helps. `content_index_lookup (field, locale, text_value)` cannot be
- *    intersected with `stories.type = ?`, so it is a sort either way.
+ *  - `ord`, `title` and `edited` are columns on `stories`, ordered by a keyset over
+ *    `(column, id)` that rides an index.
+ *  - `field:<name>` is an `indexed` field of the type's root block, ordered by the
+ *    value the table *shows*: the draft's where the caller may read drafts and the
+ *    story has one, else the published `content_index` value. Nulls last, id as
+ *    the tiebreak, paged by offset. It is an unindexed `json_extract` / coalesce
+ *    over one type's rows, which is fine at hundreds to low thousands of documents
+ *    and is the reason the other three keep their keyset.
  *
- * The consequence is small in practice and worth stating: `dataColumns`' rule —
- * carried into `documents-model.ts` — skips the type's `titleField` as a field
- * column, because its value *is* the title. So the one sort anybody reaches for on
- * a record list ("people by name") is `title`, and it is a real indexed column.
- *
- * **Rejected: widening `Keyset` to three components** and coalescing both index
- * columns to sentinels. Exact, and it pages stably; it also collapses every
- * unpublished document into one sentinel block ordered by id, and it is still a
- * sort rather than an index walk — so it buys reach at the cost of the one thing
- * that made a keyset worth having. It is the shape this takes when somebody asks.
- *
- * **Rejected: offset paging when the sort names an `indexed` field**, reusing the
- * join `server/query.ts` already writes. Two envelopes on one route told apart by
- * a query parameter, page numbers back in a live admin list (decision 1), and
- * `query.ts` filters `published_doc is not null` — so it is a parallel
- * implementation, not a call.
+ * This used to be the first kind only, on the argument that an indexed value lives
+ * in another table, is two columns wide and is null for anything unpublished, so a
+ * keyset over it was more machinery than it returned. Showing draft values made
+ * that sort the one editors asked for ("who is due to be re-listed"), and the
+ * answer was to stop pretending it was a keyset.
  */
-export type DocumentSort = "ord" | "title" | "edited";
+export type ColumnSort = "ord" | "title" | "edited";
+export type DocumentSort = ColumnSort | `field:${string}`;
+
+/** The field a `field:<name>` sort names, or null for the three column sorts. */
+export function sortFieldOf(sort: DocumentSort): string | null {
+  return sort.startsWith("field:") ? sort.slice("field:".length) : null;
+}
 
 /**
  * `title`, the default, because it is what the list this replaces showed:

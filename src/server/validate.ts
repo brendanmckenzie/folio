@@ -1407,14 +1407,29 @@ export function flatSortQuery(raw: string | undefined): FlatSort {
  * and an *unknown* sort still 400s because it is a typo or a stale link and
  * quietly serving the default would make the URL lie about what is on screen.
  *
- * `ord` and not the name of an `indexed` field, deliberately. `core/story.ts`'s
- * `DocumentSort` carries the argument; the refusal here is what a client written
- * against the old client-side sort meets, and the message names what it can have.
+ * `field:<name>` sorts by an `indexed` field's shown value (issue #82;
+ * `core/story.ts`'s `DocumentSort`). Only the *shape* is checked here: whether the
+ * name is an `indexed` field of the requested type is the route's to answer, since
+ * it needs the type and the schema.
  */
 export function documentSortQuery(raw: string | undefined): DocumentSort {
   if (raw === undefined || raw === "") return DEFAULT_DOCUMENT_SORT;
+  if (raw.startsWith("field:")) {
+    return parseOrThrow(
+      v.pipe(
+        v.string("must be a string"),
+        v.minLength(7, "must name the field: field:<name>"),
+        v.maxLength(134, "must be at most 134 characters"),
+      ),
+      raw,
+      "sort",
+    ) as DocumentSort;
+  }
   return parseOrThrow(
-    v.picklist(["ord", "title", "edited"], "must be one of: ord, title, edited"),
+    v.picklist(
+      ["ord", "title", "edited"],
+      "must be one of: ord, title, edited, or field:<name> for an indexed field",
+    ),
     raw,
     "sort",
   );
