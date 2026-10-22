@@ -47,3 +47,18 @@ export function recordResolution(
     record: id,
   };
 }
+
+/**
+ * The resolution a **global's** preview (`?as=<global>`) renders with once the admin
+ * posts the global's own: the posted one in place, except that the **page's
+ * `params`** (its blocks' `previewParams`, which the server bootstrapped) stay. The
+ * posted resolution is built from the global's document alone, so without this a
+ * global block reading a key only the host page declared would flip to empty after
+ * first paint. The page's keys win, as the first declaration of a key does everywhere.
+ *
+ * Pure, and returns the posted resolution itself when the page held none.
+ */
+export function globalResolution(initial: Resolution, posted: Resolution): Resolution {
+  if (!initial.params) return posted;
+  return { ...posted, params: { ...posted.params, ...initial.params } };
+}

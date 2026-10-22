@@ -4,7 +4,7 @@ import { type AnyBlockDef, toSchemaIndex } from "../../../src/core/block";
 import { cacheHeaders, cacheTags } from "../../../src/core/cache-tags";
 import type { Blok, Doc, Json } from "../../../src/core/doc";
 import { blocks } from "../../../src/core/fields";
-import { recordResolution } from "../../../src/core/resolution-merge";
+import { globalResolution, recordResolution } from "../../../src/core/resolution-merge";
 import { EMPTY_RESOLUTION, previewParamsOf, type Resolution } from "../../../src/core/resolve";
 import { auditSchema } from "../../../src/server/audit";
 
@@ -149,6 +149,27 @@ describe("params and the record preview merge", () => {
       tag: "x",
     });
     expect(recordResolution(base, undefined, "rec", doc).params).toEqual({ tag: "x" });
+  });
+});
+
+describe("params and a global's posted resolution", () => {
+  const initial: Resolution = { ...EMPTY_RESOLUTION, params: { tag: "page", only: 1 } };
+
+  it("keeps the page's params, which win a conflict, and adds the posted ones", () => {
+    const posted: Resolution = { ...EMPTY_RESOLUTION, params: { tag: "global", extra: 2 } };
+    expect(globalResolution(initial, posted).params).toEqual({ tag: "page", only: 1, extra: 2 });
+  });
+
+  it("keeps them when the posted resolution carries none", () => {
+    expect(globalResolution(initial, { ...EMPTY_RESOLUTION }).params).toEqual({
+      tag: "page",
+      only: 1,
+    });
+  });
+
+  it("is the posted resolution untouched when the page held none", () => {
+    const posted: Resolution = { ...EMPTY_RESOLUTION, params: { a: 1 } };
+    expect(globalResolution(EMPTY_RESOLUTION, posted)).toBe(posted);
   });
 });
 

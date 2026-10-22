@@ -118,7 +118,6 @@ export function useServerResolution(opts: {
   // pair is not asked again however often `idle` flips.
   const answered = useRef<string | null>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the dependency that matters; it is what changes when the answer may have
   useEffect(() => {
     if (!loaded || !idle) return;
     const asked = `${key}#${signature}`;

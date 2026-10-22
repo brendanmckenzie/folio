@@ -12,7 +12,7 @@ import {
   type PreviewToAdminMsg,
 } from "../core/protocol";
 import { EMPTY_RESOLUTION, type Resolution } from "../core/resolve";
-import { recordResolution } from "../core/resolution-merge";
+import { globalResolution, recordResolution } from "../core/resolution-merge";
 import { type PreviewWrap, wrapPreview } from "../core/render-wrap";
 import { FolioDoc } from "./Render";
 
@@ -71,6 +71,7 @@ function PreviewApp({
   registry,
   wrap,
   record,
+  globalPage,
 }: {
   initial: Doc;
   initialResolution: Resolution;
@@ -78,6 +79,8 @@ function PreviewApp({
   wrap?: PreviewWrap;
   /** A record in context: `initial` is its draft and `page` is what is drawn. */
   record?: { id: string; page: Doc };
+  /** A global being edited in the page's context: the page's `params` outlive a posted frame. */
+  globalPage?: boolean;
 }) {
   const [doc, setDoc] = useState(initial);
   const [resolution, setResolution] = useState(initialResolution);
@@ -120,7 +123,9 @@ function PreviewApp({
           setDoc(msg.doc);
           break;
         case "resolve":
-          setResolution(msg.resolution);
+          setResolution(
+            globalPage ? globalResolution(initialResolution, msg.resolution) : msg.resolution,
+          );
           break;
         case "select":
           markSelected(msg.uid);
@@ -130,7 +135,7 @@ function PreviewApp({
     window.addEventListener("message", onMessage);
     post({ type: "ready" });
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [globalPage, initialResolution]);
 
   // The same helper the server render uses, so the two trees cannot differ in
   // how the wrapper is applied — a mismatch React would report as a hydration
@@ -274,6 +279,7 @@ export function mountPreview(
       initialResolution={boot.resolution ?? EMPTY_RESOLUTION}
       registry={registry}
       wrap={opts?.wrap}
+      globalPage={editing !== undefined && "mount" in editing}
       {...(editing && "record" in editing
         ? { record: { id: editing.record, page: editing.page } }
         : {})}
