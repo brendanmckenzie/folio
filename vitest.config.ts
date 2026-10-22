@@ -1,21 +1,20 @@
-import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
 // Three test trees:
 //   test/unit/**            — pure logic, runs in Node (core/, admin models, preview render)
 //   test/unit/admin/render/** — the admin mounted, in a DOM (happy-dom)
 //   test/workers/**         — server + Durable Object tests, runs in workerd via
-//                             @cloudflare/vitest-pool-workers (own project config added
+//                             @cloudflare/vitest-plugin (own project config added
 //                             alongside its scaffolding).
 //
 // Sharp edges of the workers project, in the order they bite:
 //
-//  1. @cloudflare/vitest-pool-workers 0.18 dropped the '/config' entrypoint.
+//  1. @cloudflare/vitest-plugin (formerly vitest-pool-workers 0.18) dropped the '/config' entrypoint.
 //     There is no `defineWorkersProject` and no `test.poolOptions.workers` any
 //     more: what used to go in poolOptions is now the argument to the
 //     `cloudflareTest()` Vite plugin, which sets `pool` and `poolRunner` on the
-//     project itself. The package ships a codemod for the old shape at
-//     @cloudflare/vitest-pool-workers/codemods/vitest-v3-to-v4.
+//     project itself.
 //  2. `isolatedStorage`, `singleWorker` and friends are gone from the options
 //     schema, and so is the per-test storage stack they configured. Verified
 //     behaviour: storage is isolated per test *file* (one file cannot see

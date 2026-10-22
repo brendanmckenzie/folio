@@ -443,7 +443,7 @@ throwing hook not affecting the response, a failed write firing nothing, the
 idempotent-unpublish and no-path-change silences). The workers tests build their own
 `createFolio` instance per test (`app.test.ts`'s existing pattern) rather than adding
 hooks to the shared `test/workers/worker.ts` fixture — that fixture is the pool's
-`main` module, and vitest-pool-workers proxies named exports from it over an RPC
+`main` module, and @cloudflare/vitest-plugin proxies named exports from it over an RPC
 boundary that cannot carry a plain array back to the test file. A second, purpose-built
 instance sharing the same `env` (same D1, same Durable Object namespace) sidesteps
 that entirely, and `waitOnExecutionContext` drains a non-awaited hook's `waitUntil`
