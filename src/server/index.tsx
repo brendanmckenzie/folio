@@ -794,10 +794,48 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * this branch.
      */
     if (as !== null && (shared.length > 0 || mode === "draft")) return null;
+    const record = url.searchParams.get("record");
     if (as !== null) {
+      // Two editable documents is no request (see `record` below).
+      if (record !== null) return null;
       const type = brand.typeOf(as);
       if (type?.kind !== "singleton" || !brand.globals.includes(as)) return null;
       return previewPage(rt, bindings, story, { as, locale, mode, ...site, ...branded });
+    }
+
+    /**
+     * `record` previews a record in the context of this page (`previewPath` on a
+     * record type), the sibling of `as` and refused for the same two reasons: **a
+     * share grant may not use it** (it covers one page, and a record is another
+     * document), and **nor may a `draft` request**, which has no editing surface for
+     * it to name. Both are refused before the record is looked up, so the refusal
+     * cannot depend on which records exist. It is an editor's parameter and the
+     * editor is the only way to be here: a share link for a record is refused where
+     * it is minted (`routes/preview.ts`).
+     *
+     * The id is looked up like the page's own `_folio_id`: it has to exist, be a
+     * `record` of **this brand** (`brand.typeOf`, so another brand's type is
+     * unknown), and sit in this render's chain, and anything else is handed back
+     * exactly like a deleted one. Naming `as` as well is a request with two
+     * editable documents, which is no request.
+     */
+    if (record !== null) {
+      if (shared.length > 0 || mode === "draft") return null;
+      const target = await storyById(bindings.db, record);
+      if (
+        !target ||
+        brand.typeOf(target.type)?.kind !== "record" ||
+        !chain.includes(target.site ?? DEFAULT_SITE)
+      ) {
+        return null;
+      }
+      return previewPage(rt, bindings, story, {
+        record: target,
+        locale,
+        mode,
+        ...site,
+        ...branded,
+      });
     }
 
     return previewPage(rt, bindings, story, { locale, mode, ...site, ...branded });

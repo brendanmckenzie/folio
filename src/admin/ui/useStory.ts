@@ -187,3 +187,25 @@ export function globalPreviewUrl(
   }
   return `${base}/preview/global/${encodeURIComponent(type.name)}`;
 }
+
+/**
+ * The iframe src for previewing a `record` in the context of its type's host page
+ * (`previewPath` on a record type): the host page's own preview URL with
+ * `&record=<id>` appended, which `handle()` answers with the page rendered around the
+ * record's draft.
+ *
+ * Undefined when the type declares no `previewPath` or no story lives at it, and that
+ * is form mode, as it always was for a record. **There is no bare fallback** like a
+ * global's `/preview/global/:name`: a record is drawn by a host block, and without a
+ * host page there is nothing that would draw it. Pure and exported so it is tested
+ * without an iframe.
+ */
+export function recordPreviewUrl(
+  type: Pick<DocumentType, "previewPath">,
+  host: Pick<StoryMeta, "path" | "previewUrl"> | undefined,
+  id: string,
+): string | undefined {
+  if (type.previewPath === undefined || !host?.previewUrl) return undefined;
+  if (host.path !== type.previewPath) return undefined;
+  return `${host.previewUrl}&record=${encodeURIComponent(id)}`;
+}
