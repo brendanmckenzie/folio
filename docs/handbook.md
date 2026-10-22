@@ -201,6 +201,53 @@ render: ({ layout, image }) =>
   matches({ field: 'layout', eq: 'split' }, { layout }) ? <img src={image?.url} alt="" /> : null
 ```
 
+### Dates
+
+`date({ time?, indexed? })` stores an ISO 8601 string: `YYYY-MM-DD`, or with
+`time: true` a **UTC instant**, `YYYY-MM-DDTHH:mm:ssZ` (seconds required, no
+offset, no fractional seconds). The admin shows a native date input, or a
+`datetime-local` input that displays the editor's local time and stores UTC. It
+resolves to the stored string (`''` when empty), typed `string`, so a block
+renders it with `new Date(value)` or `Intl.DateTimeFormat`.
+
+```tsx
+fields: { published: date({ indexed: true }), starts: date({ time: true }) }
+```
+
+Switching an ISO `text` field to `date` is a change to the builder and nothing
+else: there is no data migration, and the audit lists the stored values that do
+not fit (`date-invalid`). `indexed: true` fills both `content_index` columns (the
+string, and epoch milliseconds), so `order`, `gte`/`lte` and `eq` agree. A date is
+not searchable. The v1 documents API refuses a string that is not the field's
+exact form or not a real calendar date (`2026-02-30`); `null` and `''` pass. The
+admin input cannot produce an invalid value, and rendering never refuses one: a
+bad stored value passes through as written.
+
+### Grouping fields in the inspector
+
+Every field accepts `group`, a heading the inspector draws over consecutive fields
+that share it:
+
+```tsx
+fields: {
+  title: text({ group: 'Basics' }),
+  slug: text({ group: 'Basics' }),
+  ogImage: asset({ group: 'Sharing' }),
+}
+```
+
+It is presentational only: stored data, the content API, the renderer and the
+index are untouched. (It is unrelated to `DocumentType.group`, the sidebar heading
+for a record type.) The heading is a collapsible disclosure. It opens by default
+unless every field in it is empty, always opens when it holds the focused field,
+and collapsing keeps the inputs mounted so an upload in flight survives. Open state
+is per block and per group, local to the panel and not remembered across reloads. A
+group whose fields are all hidden or `showIf`-false draws no heading, and emptiness
+reads the source locale, so a translator sees a group open whenever the source has
+content. **Declare a group's fields next to each other:** a group interrupted by
+another field draws as two headings, and the audit reports it once per group
+(`group-split`).
+
 ### Field defaults and presets
 
 A new block starts as its kind's zero value — `''`, `0`, the first select
@@ -440,10 +487,9 @@ const folio = createFolio<Env>({
 `resolve()` folds each configured global's id into the same query
 `reference` fields already run, so a site with globals costs no extra D1
 read. The result rides on `Resolution.globals`, keyed by *type name* rather
-than story id, next to (never merged into) `Resolution.docs`: `RenderBlok`'s
-one-level bound empties `docs` on the way into a reference's own content so
-a self-referencing story cannot recurse forever, but a header rendered
-inside a referenced document still needs its own content.
+than story id, next to (never merged into) `Resolution.docs`: a global is
+resolved per layer chain and a document by id, and a header rendered inside a
+referenced document still needs its own content.
 
 The host places a global in its own shell — Folio never wraps a page in a
 layout:
@@ -670,12 +716,22 @@ until its next publish, even though its draft now equals its publish. Only a dra
 read of an existing story seeds this way; creating a story still seeds it with the
 caller's content.
 
+A slug derived from a title is cut at 64 characters, which keeps a long headline
+from becoming a long URL. A slug somebody supplies, in the Address panel or as
+`slug` on a create or rename through `{base}/api/v1`, keeps its full length up
+to 200 (`MAX_SLUG`, exported from `folio/core` beside `slugify`), and one over
+200 is a `400 bad_request`, never a silent cut. The check runs after the `-2`,
+`-3` suffix that resolves a collision with a sibling, so a 200-character slug
+that collides is refused too. `slugify(input, max = 64)` takes the cap as an
+optional second argument.
+
 Slug and parent are edited in the **Address** panel that appears at the top of
 the inspector when "Page settings" is selected. Pages can also be reparented and
 reordered by dragging in the Content tree, subject to `under`. Switching pages is
 client-side, so the rail keeps its tab and there is no reload. An unrouted
-document has no Address panel and no preview iframe: it has no URL, so there is
-no page to show. Records and singletons live in the **Data** rail instead.
+document has no Address panel and no URL of its own: a record with no
+`previewPath` has no preview iframe either, and one with a `previewPath` is
+previewed through that page (see "The Data section"). Records and singletons live in the **Data** rail instead.
 
 ## How editing works
 
@@ -1061,6 +1117,26 @@ fields: { body: richtext({ headingLevels: [2, 3] }) },
 render: ({ body }) => <div className="prose">{body}</div>
 ```
 
+Richtext you hold *outside* a block (a reference's `data.body`, a `references()`
+entry's `data`, a collection item) is a stored value, not rendered HTML. Render it
+with `RenderRichtext` from `folio/render`, the component a block's own `richtext`
+field goes through:
+
+```tsx
+import { RenderRichtext } from 'folio/render'
+
+<RenderRichtext value={author.data.bio} field={authorBlock.fields.bio} resolution={resolution} />
+```
+
+`value` is the stored value (a richtext document, or a legacy plain string).
+`field` is the richtext field it belongs to, and its `marks`, `nodes` and
+`headingLevels` limits are applied; omit it and only the unconditional
+unsafe-`href` stripping applies, so pass it when the limits matter. `resolution`
+turns internal link marks (`attrs.link`, which carry no `href`) into hrefs; a link
+whose target is not in the resolution renders as `<a href="#" data-broken="true">`.
+`resolve()` loads the link targets found in referenced documents and globals, so a
+reference's own links resolve.
+
 ### Constraining a field
 
 `marks` and `nodes` narrow what a field permits, and both the editor and the
@@ -1109,12 +1185,36 @@ previewing a page that embeds a form sees the form as they just edited it, while
 the public page never shows another story's unpublished work. A target with
 nothing published resolves to nothing, and the block renders its own empty state.
 
-Resolution is bounded to one level, which is both what Storyblok does and what
-stops a story that references itself from rendering until the stack runs out.
+Resolution is two hops deep: the page's own references, and the documents
+those reference, so a referenced record's own `reference` and `references`
+fields resolve inside its `content` and a record that shows related records
+needs no second fetch from the host. Nothing past the second hop is loaded, so
+a field naming a third hop resolves to nothing (`resolveReference` returns
+null, `references` drops it). `resolution.docs` therefore holds second-hop
+documents too, not only what the page itself points at.
 
-In the admin, referenced documents are fetched when the *set* of referenced ids
-changes — never per render, because the preview re-renders on every keystroke with
-no network in the loop. Selecting a story that is already loaded costs nothing.
+`content` nests **exactly one level**. A reference met inside a `content`
+render still resolves as data (`id`, `title`, `data`, `url`) but carries
+`content: null`, and so does a document already being rendered above it, which
+is what stops a story that references itself, or two that reference each other,
+from rendering until the stack runs out. A block that wants a nested record's
+own card draws it from `data`. Second-hop loading has three bounds of its own:
+the page itself is never loaded as one of its own references, at most 50
+second-hop documents are loaded per resolve (ids past the cap resolve to
+nothing, though their story rows still load), and a second-hop document that is
+a gated page is dropped, because `resolve()` has no visitor to ask. A *first*-hop
+reference to a gated page is the documented gap in
+`docs/specs/platform/visitor-access.md`.
+
+In the admin, the editor's preview is given the **server's** resolution
+(`GET {base}/api/story/:id/resolution`, which runs the same `resolve()` a preview
+page does over the draft). It is fetched when the *set* of linked and referenced
+ids, forms, collection queries, locale or path changes, after a 300ms settle,
+never per keystroke, because the preview re-renders on every keystroke with no
+network in the loop. Until it arrives the preview keeps the resolution it booted
+with, so a structure change no longer flashes the page. A newly picked link or
+reference resolves after one round trip; field edits on the open document reach
+the preview at once through the mutation stream.
 
 ## Data documents
 
@@ -1221,7 +1321,10 @@ different orders over the same people.
 The admin's left rail gains a Data tab listing every non-page type with a count.
 Selecting one opens a **table**: the type's title, its root block's `indexed`
 fields, its draft state and when it was last touched. Sortable, searchable and
-paged by the server (`GET {base}/api/documents`).
+paged by the server (`GET {base}/api/documents`). The search box's term is cut to
+fit D1's 50-byte `LIKE` pattern (wildcards, escapes and UTF-8 bytes all count), so
+a long term matches on its prefix rather than erroring, and `%`, `_` and `\` in
+it match themselves.
 
 It lists **documents, not published content**, so a person nobody has published yet
 is in it with a `draft` badge. The *columns* are draft-or-published: published
@@ -1241,15 +1344,125 @@ direction, and ties by id. That sort pages by offset over an unindexed expressio
 which is fine into the low thousands of documents per type; the other two keep a
 keyset.
 
-Selecting a record opens the editor in **form mode**: full width, no preview iframe,
-no viewport switcher, no "View live". There is nothing to preview, and previewing
-the record inside a page that references it is ambiguous the moment two pages
-reference it differently. (A singleton is the exception, via its type's
-`previewPath` — a header genuinely renders in one place; a person does not.)
-Publish, History, undo, presence and multiplayer are unchanged; none of them ever
-depended on there being a preview. A record whose root has a `blocks` field still
+Selecting a record opens the editor in one of two ways, decided by its type.
+
+**With `previewPath`**, the editor shows a host page of yours beside the form. The
+page is rendered with `resolution.record` set to the record's id and the record's
+**draft** at `resolution.docs[id]`, and edits to the record update it on every
+keystroke with no round trip. The page's own content (its links, collections,
+globals and forms) is untouched by any edit, and the record's own links,
+references and forms resolve too. A block on that page draws the record:
+
+```tsx
+import { defineBlock, resolveReference, text } from 'folio/core'
+
+export const authorPage = defineBlock({
+  name: 'authorPage',
+  label: 'Author page',
+  fields: { heading: text() },
+  render: ({ heading }, resolution) => {
+    // Set only by the editor's record preview. On a live page it is undefined,
+    // so the block renders as usual from its own data path.
+    const author = resolveReference(resolution.record, resolution, ['author'])
+    return (
+      <main>
+        <h1>{heading}</h1>
+        {author ? <AuthorCard name={String(author.data.name)} /> : null}
+      </main>
+    )
+  },
+})
+```
+
+`resolveReference` answers `{ id, title, url, data, doc }` for the record's draft.
+The page renders without edit markers, so clicking it selects nothing: the form is
+the editing surface. If no story lives at `previewPath`, the record falls back to
+form mode. The preview is **editor-only**: there is no share link for a record,
+and `?_folio=preview&record=<id>` is handed back to the host for a `draft` render,
+beside `as=`, for an id that is not a `record` of the site's brand, and for a
+record outside the site's chain. On a deployment with `sites` the host page must
+be on the site being previewed and the record in that site's chain. There is no
+per-record path: giving a record a URL of its own makes it a page and brings back
+the tree this type kind exists to leave.
+
+**Without `previewPath`**, the record opens in **form mode**: full width, no preview
+iframe, no viewport switcher, no "View live". There is no page to draw it on, and
+previewing it inside whichever page references it is ambiguous the moment two pages
+reference it differently. A singleton is previewed the same way through its own
+`previewPath`, with `&as=`.
+Publish, History, undo, presence and multiplayer are unchanged either way; none of
+them ever depended on there being a preview. A record whose root has a `blocks` field still
 shows the block tree, so "a person with a list of accreditations" works exactly
 like a page's body.
+
+### Reading a record by a unique field
+
+A record has no path, so a host route like `/illustrator/:slug` cannot use `reader.page()`.
+Mark the field the URL carries `unique` and look the record up by it:
+
+```ts
+// the type's root block
+slug: text({ indexed: true, unique: true }),
+
+// the host's route
+const page = await reader.recordBy('illustrator', 'slug', params.slug)
+if (!page) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } })
+return render(page, { headers: page.headers })
+```
+
+`reader.recordBy(type, field, value, opts?)` answers a `FolioPage` exactly as `reader.page()`
+does: the same access decision, redaction, resolve and `headers`, from one shared tail, so the
+cache rule exists once. A miss is `null`. It **throws** for a programming error, as
+`folio.reader(env)` with no site does: a `type` that is not a `record` of the reader's brand, or
+a `field` that is not a `unique` indexed field of that type's root.
+
+**`unique` is `text` only**, and construction refuses it without `indexed`, on any other kind,
+or on a block that is no document type's root. No two *published* records of one type, in one
+owning scope and locale, may hold the same value. It is **enforced at publish only**, on every
+path that publishes: the admin, `POST {base}/api/v1/documents/:id/publish`, bulk publish and the
+scheduler. A publish that would duplicate another published record's value is refused
+`409 conflict` before anything is written, naming the field, the value and the other record's
+title and id. Bulk reports it against the item, and the scheduler records a failed attempt and
+leaves the story unpublished. Republishing a record is not a conflict with itself, and an empty
+value is not a duplicate (it has no index row). Drafts can hold duplicates, because a draft is a
+Durable Object the Worker never sees change; the check is made at the moment a value would go
+live.
+
+**The check is not atomic.** Two publishes of one value in the same instant can both pass.
+`GET {base}/api/audit` reports the result as `unique-duplicate`, one finding per record in a
+group, naming the others. It is computed by one group-by over `content_index` on the first call
+of a walk, for the fields now declared `unique`: it cannot list duplicates for a field you have
+not yet declared, so deploy the flag and run the audit, and expect the first publish of any
+record in a duplicate group to be refused until one of them changes.
+
+**Authority.**
+- A visitor reads the published record; an unpublished one is a miss.
+- **A draft is the editor's alone.** With the draft cookie and a session that may read drafts
+  (on a multi-site deployment, the preview origin and `mayPreviewDrafts`), the lookup matches
+  the **draft's** value, so an unpublished record, or one whose slug was changed in its draft,
+  is found, and the published slug of a record whose draft moved off it is a miss.
+- **A share link never admits a record**, because a record is looked up by a value anyone can
+  guess and a share covers one story. A request a share admitted to a draft site answers `null`.
+- The lookup is fenced to the reader's chain and brand like every read, and runs on the
+  reader's D1 session.
+
+**The draft lookup reads `stories.draft_data`** (migration `0015`), so apply `0015` before a
+Worker that calls `recordBy` in draft mode is deployed. The published half reads `content_index`
+and needs nothing new. The mirror cuts a string at 512 characters, so a longer value is matched
+on its prefix and each candidate is confirmed against the draft document. One limit remains: a
+root block whose scalars overrun the mirror's whole 32 KB budget before the field is reached
+drops it, and an editor cannot then find that record by its draft value until it is published.
+
+**Answer a `recordBy` miss `no-store`.** A record's publish purges `story:<id>` and `type:<t>`,
+so a cached hit is purged by its own publish and unpublish, but it emits no `path:` tag. The
+headers from `reader.miss()` carry `path:` and `site:` tags on a multi-site deployment, so a
+record-URL 404 cached with them would keep being served after the record is published. Only a
+hit carries cache headers (`page.headers`). On a multi-site deployment a hit also carries the
+type's tag scoped to every scope in the chain, because a publish of that type in a nearer scope
+can change which record the URL answers.
+
+**A slug change writes no redirect.** The old URL 404s once the new slug is published. A host
+that needs a redirect keeps its own map; Folio does not generate one for a record.
 
 ### Deleting one
 
@@ -1401,6 +1614,8 @@ Two D1 statements: a `count(*)` and the page with its documents. `GET
 is the same thing over HTTP.
 
 Operators: `eq`, `ne`, `in`, `contains`, `startsWith`, and `gt`/`gte`/`lt`/`lte`. A
+`contains` or `startsWith` term is cut to fit D1's 50-byte `LIKE` pattern, so a very
+long one matches on its prefix, and `%` and `_` in it match themselves. A
 numeric bound compares the numeric column; a string bound compares the text one,
 and an ISO date is stored in both, so either spelling of "since March" works. `ne`
 is a `NOT EXISTS`, so "topic is not ai" is true of a document with no topic —
@@ -2373,6 +2588,51 @@ The individual reads are still there for anything that is not a page — a
 sitemap wants `stories()`, a search result page has no document of its own and
 calls `resolve()` with none.
 
+### Render parameters instead of a context
+
+A page often depends on something that is not in its content: the `?tag=` a listing is
+filtered by, the `?q=` a search renders, a pagination cursor. A host used to thread that through
+a React context of its own, which a block's `render` cannot reach through Folio's renderer.
+Pass it to the reader and every block reads it from the resolution:
+
+```tsx
+const page = await reader.page(path, {
+  params: { tag: url.searchParams.get('tag') ?? '' },
+  search: url.searchParams.get('q') ?? undefined,
+  cacheable: true, // only because both come from the URL; see below
+})
+
+// in a block
+render: ({ heading }, resolution) => {
+  const tag = resolution.params?.tag
+  /* ... */
+}
+```
+
+`params` is a `Record<string, Json>`. It reaches `resolution.params` on `reader.page()`,
+`reader.recordBy()` and `folio.resolve(doc, { params })`, and **Folio never reads it and never
+puts it in a cache tag**. `search` is the full-text term every `searchable` `collection` field runs
+against; the host reads `?q=` and `reader.page()` can now pass it. A block is therefore a pure
+function of its own fields and the resolution, and must not read the request, cookies or time.
+
+**Passing `params` answers `Cache-Control: no-store` with no `Cache-Tag`**, because a page
+that depends on something Folio cannot see is not safe in a shared cache under its URL. If
+the params are a pure function of the request URL (the cache key), add `cacheable: true` and
+the page gets the normal `cacheHeaders`. **Never** pass `cacheable: true` with anything not
+derived from the URL (a cookie, a random value, geography): it stores one visitor's render under
+a URL everyone shares. A draft and a gated page are `no-store` whatever `cacheable` says, and
+`cacheable` does nothing without `params`.
+
+**Previewing a block that needs them.** `defineBlock({ previewParams: { tag: 'jazz' } })` gives the
+editor's preview, `?_folio=preview`, `?_folio=draft` and the MCP screenshot that representative
+state as `resolution.params`, so a "related posts" block shows posts instead of its empty
+state. Only previews read it; a live page gets the host's own. When several blocks declare
+them they are merged **root block first, then depth first in slot order** (slots in the
+block's field declaration order, children in sibling order), and **the first declaration of a
+key wins**. In a record preview the page's declarations come first, then the record's. The audit
+reports `preview-params-conflict` when two block types declare one key with different values,
+because which one wins then depends on document order.
+
 ### What a render actually costs
 
 A published page is **two round trips**: the row (document *and* story together),
@@ -2661,6 +2921,11 @@ const folio = createFolio<Env>({
   },
 })
 ```
+
+**`linksPerHour` defaults to 5**, per address, and further requests are dropped quietly. A script
+that signs in to the admin repeatedly in local dev (an end-to-end run, a test harness) hits it on
+the sixth login and sees no link arrive, with no error to say why. Raise it in the dev
+config only, for example `linksPerHour: 1000`, and leave production at the default.
 
 **Sessions are rows in D1 behind an opaque cookie.** 32 bytes from
 `crypto.getRandomValues`, handed out once, stored only as a SHA-256. There is no
@@ -4131,7 +4396,7 @@ The seven subpaths in `package.json`, and who each is for:
 | `folio/engine` | Document *tooling*: bulk imports and content migrations. `apply` outside a transaction bypasses sync, undo and multiplayer, so ordinary host code has no business here. |
 | `folio/server` | `createFolio` and everything a host's Worker wires up. |
 | `folio/vite` | The build plugin. |
-| `folio/render` | `FolioDoc`, the component that renders a resolved document. Both live consumers import it. |
+| `folio/render` | `FolioDoc`, the component that renders a resolved document, and `RenderRichtext`, which renders a richtext value you hold outside a block. Both live consumers import `FolioDoc`. |
 | `folio/preview` | The preview bundle's own entry. Folio's, not a host's. |
 | `folio/admin-entry` | The admin bundle's entry, resolved by the Vite plugin. Folio's, not a host's. |
 

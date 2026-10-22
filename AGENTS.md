@@ -157,6 +157,33 @@ shell instead of your page.
 It costs an ordinary visitor nothing: the credential is a cookie, so the test is
 a header read before any query.
 
+**A record is read by a value with `reader.recordBy`.** `recordBy('illustrator', 'slug', slug)`
+is `page()` for a record whose type declares `text({ indexed: true, unique: true })`: same
+`FolioPage`, same `headers`. Do not build its headers by hand, and **answer its miss
+`Cache-Control: no-store`, never with `reader.miss()`'s headers**, which would cache a 404 past
+the publish that creates the record. A draft is the editor's alone and a share never reaches
+one. `unique` is enforced at publish (`409 conflict`), not on a keystroke. Folio writes no
+redirect when a slug changes.
+
+**A record is previewed through a page of yours, if its type names one.** A `record`
+type (a person, an office) has no URL, so with no `previewPath` the editor opens it
+as a form with no preview. Give the type `previewPath: 'team/member'` (the path of a
+routed page) and the editor renders *that page* beside the form, with
+`resolution.record` set to the record's id and the record's **draft** at
+`resolution.docs[id]`. The page's own block draws it:
+
+```tsx
+render: ({ heading }, resolution) => {
+  // Undefined on every live render, so the block falls back to its normal data.
+  const person = resolveReference(resolution.record, resolution, ['person'])
+  return <main><h1>{heading}</h1>{person ? <Card name={String(person.data.name)} /> : null}</main>
+}
+```
+
+This is editor-only: there is no share link for a record, and the page renders
+with no edit markers, so the form is the editing surface. Nothing in your route
+changes, and `resolution.record` is never set outside the editor.
+
 **3. Add the Vite plugin.** `folio/vite` supplies the admin entry, the client
 build and the asset constants. Do not hand-roll them.
 
@@ -350,8 +377,24 @@ that site's brand.
   pages. `folio/engine` is bulk-import and migration tooling — its `apply()`
   outside a transaction bypasses sync, undo and multiplayer, so it must never
   run against content someone might have open.
-- **A block's `render` is a pure function of its own fields.** It receives
-  `PropsOf<fields> & { uid: string }` and nothing else.
+- **Render richtext you hold outside a block with `RenderRichtext`** from
+  `folio/render`: `<RenderRichtext value={author.data.bio} field={def.fields.bio}
+  resolution={resolution} />`. A reference's `data.body` is a stored value, not
+  HTML. Pass `field` so its `marks`, `nodes` and `headingLevels` limits apply;
+  without it only the unsafe-`href` stripping does.
+- **A supplied slug is kept up to 200 characters** (`MAX_SLUG` from `folio/core`);
+  a slug derived from a title is cut at 64. A longer one is a `400 bad_request`,
+  never a silent truncation.
+- **A block's `render` is a pure function of its own fields and the resolution**
+  (`resolution.params` included). It receives `PropsOf<fields> & { uid: string }`
+  and, second, the page's `Resolution`. It must not read the request, cookies or
+  time itself: anything a render needs from the request reaches it through
+  `params`, which the host passes to `reader.page(path, { params })`. **Passing
+  `params` makes the page `no-store`** unless you also pass `cacheable: true`, which
+  asserts the params derive from the URL alone. Never pass it with a cookie.
+- **A script that drives the admin login raises `auth.linksPerHour` in its dev config.**
+  It defaults to 5 sign-in links per address per hour, and requests past it are dropped
+  quietly, so the sixth scripted login in local dev never gets a link.
 - **Pin an exact tag.** A branch, a short SHA or a `#semver:` range will resolve differently later.
 
 ## Do not
@@ -363,8 +406,10 @@ that site's brand.
 - **Do not install by directory path or symlink.** It resolves `vite` from
   Folio's own tree and TypeScript then sees two incompatible `Plugin` types. Use
   a git SHA, or `npm pack` a tarball.
-- **Do not override `optimizeDeps` without re-including `react-dom/server.edge`.**
-  See the table below.
+- **Do not override `optimizeDeps` without re-including React's CommonJS entries**
+  (`react`, `react/jsx-runtime`, `react/jsx-dev-runtime`, `react-dom`,
+  `react-dom/server.edge`). `folio/vite` lists them; a host adding its own copy of
+  the list is no longer needed. See the table below.
 - **Do not write `published_doc` or a story's `doc` row directly.** Writes go
   through the mutation log or they break sync, undo, presence and the activity
   trail — visibly only to whoever had the page open.
@@ -376,10 +421,10 @@ that site's brand.
 
 | What you see | What it is |
 | --- | --- |
-| `ReferenceError: require is not defined` at Worker startup, from a stack naming nothing you wrote | `react-dom/server.edge` is CommonJS and was left external. `folio/vite` force-includes it in `optimizeDeps`; a host that replaced that config dropped it. |
+| `ReferenceError: require is not defined` or `module is not defined` at Worker startup, from a stack naming nothing you wrote | React's CommonJS entries (`react`, `react-dom`, `react-dom/server.edge` and the two JSX runtimes) were left external. `folio/vite` force-includes all five in the Worker's `optimizeDeps`; a host that replaced that config dropped them. A host on an older Folio that fixed this with its own `ssr.optimizeDeps.include` can delete those lines once it is on 1.2.0. |
 | Admin renders unstyled; its stylesheet 404s behind a 200 | `build.cssCodeSplit: false` reached the build without being set in your own `vite.config.ts` — usually a framework plugin set it. The plugin cannot see that and throws at `configResolved` naming the cause. Set it in your own config. |
 | The editor's preview iframe renders your blocks unstyled, and the live page is fine | Fixed in the plugin: with code splitting on, Rollup hoists CSS shared between the preview entry and your own pages into a content-hashed chunk that `previewCss` could not name, and `folio-preview.css` held only Folio's editing chrome. The plugin now `@import`s the hoisted files from it. If you still see this, your `folio` is older than that fix. |
-| A referenced document's asset field is empty | A block's `render` gets no `Resolution`, so it cannot resolve an asset belonging to a *referenced* document. Only the `url` arm works today. Known limitation. |
+| A referenced document's field is empty or missing | The reference is more than two hops from the page (a third-hop reference resolves to nothing), or the target is a gated page reached through a second-hop reference (not loaded). Read what you need from `resolveReference(value, resolution)` in a block's `render`, whose second argument is the `Resolution`. |
 | Typecheck reports two incompatible `Plugin` types | Folio installed by directory path. Use a SHA or a tarball. |
 | The editor shows a blank page that renders fine on the live site, after copying a database | The story's Durable Object predates the reseed fix and was seeded blank, so it holds state. Open History and restore the newest publish; restore re-roots across environments. A story whose object is empty seeds from D1 on its own. |
 | A path Folio should own returns your 404 | Your router ran before `folio.handle()`. |
@@ -394,9 +439,12 @@ that site's brand.
 
 ## Limitations worth knowing before you design around them
 
-- **A block's `render` receives no `Resolution`** (above). If a block must show
-  data from a document it references, that data has to arrive through the
-  reference's own resolved `content`.
+- **`render` receives the `Resolution` as its second argument**, and a block can
+  read a referenced document's data from it with `resolveReference`. Referenced
+  documents resolve two hops deep: the page's references and what those reference.
+  A reference's `content` nests exactly one level, so a reference met inside a
+  `content` render arrives as data (`id`, `title`, `data`, `url`) with
+  `content: null`, as does a document already being rendered above it.
 - **Draft mode is opt-in, and forgetting the branch fails quietly.** Set
   `draftMode: true` *and* render pages through `reader.page()`. Setting the key
   without the branch sends reviewers to a published page that looks correct and

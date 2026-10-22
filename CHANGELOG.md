@@ -8,6 +8,71 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.2.0
+
+A minor release: it adds a migration, a field kind and a record preview, and removes
+nothing.
+
+### Behaviour changes to know about
+
+- **An explicit slug keeps its length up to 200.** A slug supplied on a create or
+  rename used to be cut silently at 64; it is now kept, and one over 200 is a
+  `400 bad_request`. A slug derived from a title is still cut at 64
+  ([UPGRADING](UPGRADING.md#explicit-slugs-are-no-longer-truncated-v120)).
+- **Referenced documents resolve two hops deep.** `resolution.docs` can hold documents
+  the page only reaches through another reference, and a reference's `content` now
+  resolves its own references (it nests one level, deeper ones arrive as data). At
+  most 50 second-hop documents load per resolve, and a gated one is dropped
+  ([UPGRADING](UPGRADING.md#referenced-documents-resolve-two-hops-deep-v120)).
+- **A `unique` field refuses a duplicate publish.** Opt-in per field, but declaring it over
+  content that already holds duplicates blocks the first publish of each one until it changes
+  ([UPGRADING](UPGRADING.md#readerrecordby-and-unique-fields-v120)).
+- **`Field['kind']` gains `'date'`.** A host with an exhaustive switch over it needs a
+  case ([UPGRADING](UPGRADING.md#date-fields-and-field-groups-v120)).
+- **Admin search boxes bound their term and match `%`, `_` and `\` literally.** A term
+  over D1's 50-byte `LIKE` limit matched on its prefix instead of answering `500`
+  ([UPGRADING](UPGRADING.md#search-boxes-bound-their-term-v120)).
+- **The editor's preview no longer flashes on a structure change.** It is given the
+  server's resolution instead of one the admin assembled, so ancestors, nested forms,
+  and the page's site and path survive the first frame after a link or reference is added.
+
+### Added
+
+- **Preview a record in context.** A `record` type may declare `previewPath`; the editor
+  then shows that host page with `resolution.record` set and the record's draft at
+  `resolution.docs[id]`, updating per keystroke. Editor-only, with no share link
+  ([UPGRADING](UPGRADING.md#previewing-a-record-through-a-host-page-v120)).
+- **A `date` field** (`date({ time?, indexed? })`), stored as ISO 8601 (a UTC instant with
+  `time`), indexable, validated by the v1 API, with a `date-invalid` audit check.
+- **Field groups.** Every field accepts `group`, a collapsible inspector heading; the
+  audit reports a split group (`group-split`).
+- **Draft values and sorting in the Data table.** A reader of drafts sees and sorts by the
+  draft's value. **Apply `0015_draft_data.sql` before deploying**, then run
+  `POST {base}/api/reindex?drafts=1` once
+  ([UPGRADING](UPGRADING.md#draft-values-in-the-data-table-v120)).
+- **Host-supplied render parameters.** `reader.page()` and `reader.recordBy()` take `params`
+  (read as `resolution.params`), `search` and `cacheable`; `defineBlock` takes `previewParams`
+  so the editor's preview shows a representative state, with a `preview-params-conflict` audit
+  check. A page given `params` is `no-store` unless `cacheable: true`
+  ([UPGRADING](UPGRADING.md#render-parameters-v120)).
+- **`unique` text fields and `reader.recordBy`.** `text({ indexed: true, unique: true })` is
+  enforced at publish on every path (`409 conflict`), with a `unique-duplicate` audit check, and
+  `reader.recordBy(type, field, value)` is `page()` for a record, with the editor's draft and no
+  share access. A miss must be answered `no-store`
+  ([UPGRADING](UPGRADING.md#readerrecordby-and-unique-fields-v120)).
+- **`RenderRichtext` from `folio/render`** renders a richtext value you hold outside a
+  block, such as a reference's `data.body`, with the field's limits and link resolution.
+- **`MAX_SLUG`** from `folio/core`, and `slugify(input, max = 64)`.
+
+### Fixed
+
+- **`folio/vite` boots against the installed package.** It pre-bundles `react`,
+  `react/jsx-runtime`, `react/jsx-dev-runtime` and `react-dom` for the Worker, so a dev
+  server no longer dies with `module is not defined`; a host can drop its own copy of those
+  entries ([UPGRADING](UPGRADING.md#foliovite-pre-bundles-reacts-commonjs-entries-v120)).
+  The release smoke test now boots the starter under `vite dev`, which is what would have
+  caught it.
+
 ## 1.1.0
 
 A minor release: it adds a migration, new form keys and the `onUsage` hook, and
