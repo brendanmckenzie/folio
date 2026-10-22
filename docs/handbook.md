@@ -201,6 +201,53 @@ render: ({ layout, image }) =>
   matches({ field: 'layout', eq: 'split' }, { layout }) ? <img src={image?.url} alt="" /> : null
 ```
 
+### Dates
+
+`date({ time?, indexed? })` stores an ISO 8601 string: `YYYY-MM-DD`, or with
+`time: true` a **UTC instant**, `YYYY-MM-DDTHH:mm:ssZ` (seconds required, no
+offset, no fractional seconds). The admin shows a native date input, or a
+`datetime-local` input that displays the editor's local time and stores UTC. It
+resolves to the stored string (`''` when empty), typed `string`, so a block
+renders it with `new Date(value)` or `Intl.DateTimeFormat`.
+
+```tsx
+fields: { published: date({ indexed: true }), starts: date({ time: true }) }
+```
+
+Switching an ISO `text` field to `date` is a change to the builder and nothing
+else: there is no data migration, and the audit lists the stored values that do
+not fit (`date-invalid`). `indexed: true` fills both `content_index` columns (the
+string, and epoch milliseconds), so `order`, `gte`/`lte` and `eq` agree. A date is
+not searchable. The v1 documents API refuses a string that is not the field's
+exact form or not a real calendar date (`2026-02-30`); `null` and `''` pass. The
+admin input cannot produce an invalid value, and rendering never refuses one: a
+bad stored value passes through as written.
+
+### Grouping fields in the inspector
+
+Every field accepts `group`, a heading the inspector draws over consecutive fields
+that share it:
+
+```tsx
+fields: {
+  title: text({ group: 'Basics' }),
+  slug: text({ group: 'Basics' }),
+  ogImage: asset({ group: 'Sharing' }),
+}
+```
+
+It is presentational only: stored data, the content API, the renderer and the
+index are untouched. (It is unrelated to `DocumentType.group`, the sidebar heading
+for a record type.) The heading is a collapsible disclosure. It opens by default
+unless every field in it is empty, always opens when it holds the focused field,
+and collapsing keeps the inputs mounted so an upload in flight survives. Open state
+is per block and per group, local to the panel and not remembered across reloads. A
+group whose fields are all hidden or `showIf`-false draws no heading, and emptiness
+reads the source locale, so a translator sees a group open whenever the source has
+content. **Declare a group's fields next to each other:** a group interrupted by
+another field draws as two headings, and the audit reports it once per group
+(`group-split`).
+
 ### Field defaults and presets
 
 A new block starts as its kind's zero value — `''`, `0`, the first select
@@ -440,10 +487,9 @@ const folio = createFolio<Env>({
 `resolve()` folds each configured global's id into the same query
 `reference` fields already run, so a site with globals costs no extra D1
 read. The result rides on `Resolution.globals`, keyed by *type name* rather
-than story id, next to (never merged into) `Resolution.docs`: `RenderBlok`'s
-one-level bound empties `docs` on the way into a reference's own content so
-a self-referencing story cannot recurse forever, but a header rendered
-inside a referenced document still needs its own content.
+than story id, next to (never merged into) `Resolution.docs`: a global is
+resolved per layer chain and a document by id, and a header rendered inside a
+referenced document still needs its own content.
 
 The host places a global in its own shell — Folio never wraps a page in a
 layout:
@@ -670,12 +716,22 @@ until its next publish, even though its draft now equals its publish. Only a dra
 read of an existing story seeds this way; creating a story still seeds it with the
 caller's content.
 
+A slug derived from a title is cut at 64 characters, which keeps a long headline
+from becoming a long URL. A slug somebody supplies, in the Address panel or as
+`slug` on a create or rename through `{base}/api/v1`, keeps its full length up
+to 200 (`MAX_SLUG`, exported from `folio/core` beside `slugify`), and one over
+200 is a `400 bad_request`, never a silent cut. The check runs after the `-2`,
+`-3` suffix that resolves a collision with a sibling, so a 200-character slug
+that collides is refused too. `slugify(input, max = 64)` takes the cap as an
+optional second argument.
+
 Slug and parent are edited in the **Address** panel that appears at the top of
 the inspector when "Page settings" is selected. Pages can also be reparented and
 reordered by dragging in the Content tree, subject to `under`. Switching pages is
 client-side, so the rail keeps its tab and there is no reload. An unrouted
-document has no Address panel and no preview iframe: it has no URL, so there is
-no page to show. Records and singletons live in the **Data** rail instead.
+document has no Address panel and no URL of its own: a record with no
+`previewPath` has no preview iframe either, and one with a `previewPath` is
+previewed through that page (see "The Data section"). Records and singletons live in the **Data** rail instead.
 
 ## How editing works
 
@@ -1061,6 +1117,26 @@ fields: { body: richtext({ headingLevels: [2, 3] }) },
 render: ({ body }) => <div className="prose">{body}</div>
 ```
 
+Richtext you hold *outside* a block (a reference's `data.body`, a `references()`
+entry's `data`, a collection item) is a stored value, not rendered HTML. Render it
+with `RenderRichtext` from `folio/render`, the component a block's own `richtext`
+field goes through:
+
+```tsx
+import { RenderRichtext } from 'folio/render'
+
+<RenderRichtext value={author.data.bio} field={authorBlock.fields.bio} resolution={resolution} />
+```
+
+`value` is the stored value (a richtext document, or a legacy plain string).
+`field` is the richtext field it belongs to, and its `marks`, `nodes` and
+`headingLevels` limits are applied; omit it and only the unconditional
+unsafe-`href` stripping applies, so pass it when the limits matter. `resolution`
+turns internal link marks (`attrs.link`, which carry no `href`) into hrefs; a link
+whose target is not in the resolution renders as `<a href="#" data-broken="true">`.
+`resolve()` loads the link targets found in referenced documents and globals, so a
+reference's own links resolve.
+
 ### Constraining a field
 
 `marks` and `nodes` narrow what a field permits, and both the editor and the
@@ -1109,12 +1185,36 @@ previewing a page that embeds a form sees the form as they just edited it, while
 the public page never shows another story's unpublished work. A target with
 nothing published resolves to nothing, and the block renders its own empty state.
 
-Resolution is bounded to one level, which is both what Storyblok does and what
-stops a story that references itself from rendering until the stack runs out.
+Resolution is two hops deep: the page's own references, and the documents
+those reference, so a referenced record's own `reference` and `references`
+fields resolve inside its `content` and a record that shows related records
+needs no second fetch from the host. Nothing past the second hop is loaded, so
+a field naming a third hop resolves to nothing (`resolveReference` returns
+null, `references` drops it). `resolution.docs` therefore holds second-hop
+documents too, not only what the page itself points at.
 
-In the admin, referenced documents are fetched when the *set* of referenced ids
-changes — never per render, because the preview re-renders on every keystroke with
-no network in the loop. Selecting a story that is already loaded costs nothing.
+`content` nests **exactly one level**. A reference met inside a `content`
+render still resolves as data (`id`, `title`, `data`, `url`) but carries
+`content: null`, and so does a document already being rendered above it, which
+is what stops a story that references itself, or two that reference each other,
+from rendering until the stack runs out. A block that wants a nested record's
+own card draws it from `data`. Second-hop loading has three bounds of its own:
+the page itself is never loaded as one of its own references, at most 50
+second-hop documents are loaded per resolve (ids past the cap resolve to
+nothing, though their story rows still load), and a second-hop document that is
+a gated page is dropped, because `resolve()` has no visitor to ask. A *first*-hop
+reference to a gated page is the documented gap in
+`docs/specs/platform/visitor-access.md`.
+
+In the admin, the editor's preview is given the **server's** resolution
+(`GET {base}/api/story/:id/resolution`, which runs the same `resolve()` a preview
+page does over the draft). It is fetched when the *set* of linked and referenced
+ids, forms, collection queries, locale or path changes, after a 300ms settle,
+never per keystroke, because the preview re-renders on every keystroke with no
+network in the loop. Until it arrives the preview keeps the resolution it booted
+with, so a structure change no longer flashes the page. A newly picked link or
+reference resolves after one round trip; field edits on the open document reach
+the preview at once through the mutation stream.
 
 ## Data documents
 
@@ -1221,7 +1321,10 @@ different orders over the same people.
 The admin's left rail gains a Data tab listing every non-page type with a count.
 Selecting one opens a **table**: the type's title, its root block's `indexed`
 fields, its draft state and when it was last touched. Sortable, searchable and
-paged by the server (`GET {base}/api/documents`).
+paged by the server (`GET {base}/api/documents`). The search box's term is cut to
+fit D1's 50-byte `LIKE` pattern (wildcards, escapes and UTF-8 bytes all count), so
+a long term matches on its prefix rather than erroring, and `%`, `_` and `\` in
+it match themselves.
 
 It lists **documents, not published content**, so a person nobody has published yet
 is in it with a `draft` badge. The *columns* are draft-or-published: published
@@ -1241,13 +1344,54 @@ direction, and ties by id. That sort pages by offset over an unindexed expressio
 which is fine into the low thousands of documents per type; the other two keep a
 keyset.
 
-Selecting a record opens the editor in **form mode**: full width, no preview iframe,
-no viewport switcher, no "View live". There is nothing to preview, and previewing
-the record inside a page that references it is ambiguous the moment two pages
-reference it differently. (A singleton is the exception, via its type's
-`previewPath` — a header genuinely renders in one place; a person does not.)
-Publish, History, undo, presence and multiplayer are unchanged; none of them ever
-depended on there being a preview. A record whose root has a `blocks` field still
+Selecting a record opens the editor in one of two ways, decided by its type.
+
+**With `previewPath`**, the editor shows a host page of yours beside the form. The
+page is rendered with `resolution.record` set to the record's id and the record's
+**draft** at `resolution.docs[id]`, and edits to the record update it on every
+keystroke with no round trip. The page's own content (its links, collections,
+globals and forms) is untouched by any edit, and the record's own links,
+references and forms resolve too. A block on that page draws the record:
+
+```tsx
+import { defineBlock, resolveReference, text } from 'folio/core'
+
+export const authorPage = defineBlock({
+  name: 'authorPage',
+  label: 'Author page',
+  fields: { heading: text() },
+  render: ({ heading }, resolution) => {
+    // Set only by the editor's record preview. On a live page it is undefined,
+    // so the block renders as usual from its own data path.
+    const author = resolveReference(resolution.record, resolution, ['author'])
+    return (
+      <main>
+        <h1>{heading}</h1>
+        {author ? <AuthorCard name={String(author.data.name)} /> : null}
+      </main>
+    )
+  },
+})
+```
+
+`resolveReference` answers `{ id, title, url, data, doc }` for the record's draft.
+The page renders without edit markers, so clicking it selects nothing: the form is
+the editing surface. If no story lives at `previewPath`, the record falls back to
+form mode. The preview is **editor-only**: there is no share link for a record,
+and `?_folio=preview&record=<id>` is handed back to the host for a `draft` render,
+beside `as=`, for an id that is not a `record` of the site's brand, and for a
+record outside the site's chain. On a deployment with `sites` the host page must
+be on the site being previewed and the record in that site's chain. There is no
+per-record path: giving a record a URL of its own makes it a page and brings back
+the tree this type kind exists to leave.
+
+**Without `previewPath`**, the record opens in **form mode**: full width, no preview
+iframe, no viewport switcher, no "View live". There is no page to draw it on, and
+previewing it inside whichever page references it is ambiguous the moment two pages
+reference it differently. A singleton is previewed the same way through its own
+`previewPath`, with `&as=`.
+Publish, History, undo, presence and multiplayer are unchanged either way; none of
+them ever depended on there being a preview. A record whose root has a `blocks` field still
 shows the block tree, so "a person with a list of accreditations" works exactly
 like a page's body.
 
@@ -1401,6 +1545,8 @@ Two D1 statements: a `count(*)` and the page with its documents. `GET
 is the same thing over HTTP.
 
 Operators: `eq`, `ne`, `in`, `contains`, `startsWith`, and `gt`/`gte`/`lt`/`lte`. A
+`contains` or `startsWith` term is cut to fit D1's 50-byte `LIKE` pattern, so a very
+long one matches on its prefix, and `%` and `_` in it match themselves. A
 numeric bound compares the numeric column; a string bound compares the text one,
 and an ISO date is stored in both, so either spelling of "since March" works. `ne`
 is a `NOT EXISTS`, so "topic is not ai" is true of a document with no topic —
@@ -4131,7 +4277,7 @@ The seven subpaths in `package.json`, and who each is for:
 | `folio/engine` | Document *tooling*: bulk imports and content migrations. `apply` outside a transaction bypasses sync, undo and multiplayer, so ordinary host code has no business here. |
 | `folio/server` | `createFolio` and everything a host's Worker wires up. |
 | `folio/vite` | The build plugin. |
-| `folio/render` | `FolioDoc`, the component that renders a resolved document. Both live consumers import it. |
+| `folio/render` | `FolioDoc`, the component that renders a resolved document, and `RenderRichtext`, which renders a richtext value you hold outside a block. Both live consumers import `FolioDoc`. |
 | `folio/preview` | The preview bundle's own entry. Folio's, not a host's. |
 | `folio/admin-entry` | The admin bundle's entry, resolved by the Vite plugin. Folio's, not a host's. |
 

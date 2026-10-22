@@ -60,7 +60,7 @@ pnpm build:demo         # demo vite build
   group matters: `noImportantStyles` is `lint/complexity/`, not `lint/style/`.
 
 `scripts/release.mjs` runs the first three before it will publish, then smoke-tests
-the split. `.github/workflows/ci.yml` runs the same gates (`biome ci`, typecheck,
+the installed package (including a boot of the starter under `vite dev`). `.github/workflows/ci.yml` runs the same gates (`biome ci`, typecheck,
 build, test) on every pull request, and `gate` is the status the `main` ruleset
 requires. See "Releasing" below.
 
@@ -510,6 +510,7 @@ The local script still exists for a pre-flight:
 ```
 node scripts/release.mjs           # gate, smoke-test, print the push command
 node scripts/release.mjs --tag     # …and the end-to-end sweep
+node scripts/release.mjs --smoke-only  # just the consumer smoke test, on the working tree
 ```
 
 It refuses a dirty tree or a branch other than `main`, runs the three gates by
@@ -517,9 +518,19 @@ exit code, then **installs this repo the way a consumer does** — `git+file:`
 against itself, so it runs before the push — and checks that every `exports`
 subpath resolves, that the built entries still export the names a host cannot do
 without (`anchors` in `smokeTest`: add to it when a name joins the contract), and that the consumer-facing documents are in the installed
-package. That is the only check that exercises the package's own `prepare`
-build: the three gates run against the workspace, and nobody installs the
-workspace.
+package. It then runs a **consumer boots** stage: `folio init`, the starter's own
+`npm install` against the commit under test, `vite dev` (which must answer `/` and
+`/folio/login` with no CommonJS error and no 5xx), and `npm run build`. A consumer's
+dev server takes `dist/` for `folio/server`, not the `development`-condition
+source Folio's own demo resolves, so React's CommonJS entries reach workerd raw
+there and nothing else in the gates sees it. That is the only check that exercises
+the package's own `prepare` build and the package running: the three gates run
+against the workspace, and nobody installs the workspace.
+
+`--smoke-only` runs just the smoke test against the working tree, snapshotted to a
+throwaway ref so uncommitted work can be installed. It cannot publish, so it skips
+the clean-tree and branch refusals, and it refuses `--push`, `--tag`, `--ci` and
+`--force`. It needs the network, for the starter's dependencies.
 
 `--force` exists for exactly one act, the cutover from the old split history,
 whose commits are unrelated to these by construction. It is not a way past a

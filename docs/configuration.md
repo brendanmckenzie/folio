@@ -138,8 +138,8 @@ types: [
 | `titleField` | | Root field holding the display title. Defaults to `title` when the root block has one, then the root block's `summary` field, then nothing. |
 | `under` | | `page` kinds only. Constrains where a document may be created *and* dragged, with a refusal notice. Declaring it also means the type can never sit at the top level. |
 | `default` | | The type a bare "New page" creates. Implicitly the first `page` type. |
-| `group` | | Sidebar heading. `record` kinds only, purely presentational. Worth it above roughly eight record types. |
-| `previewPath` | | `singleton` kinds only: the path of a routed document whose preview the admin loads with `&as=<name>`, so a header previews on a real page rather than a blank background. `''` is the root story. |
+| `group` | | Sidebar heading. `record` kinds only, purely presentational. Worth it above roughly eight record types. Unrelated to a field's own `group`, which heads a run of fields in the inspector. |
+| `previewPath` | | `singleton` and `record` kinds only: the path of a routed document the admin loads as the preview. A singleton's draft renders on that page with `&as=<name>`, so a header previews on a real page rather than a blank background. A record opens on that page with `resolution.record` set to its id and its draft at `resolution.docs[id]`, for a host block to draw with `resolveReference`; without one a record is edited as a form. `''` is the root story. |
 
 > `root: 'page'` (the string form, without `types`) is the older sugar for a
 > single routable page type. It still works and is deprecated. `types` and
@@ -808,11 +808,14 @@ admin entry, generates the preview entry from your blocks, and defines
 
 Two things it does that you can undo by accident:
 
-- **It force-includes `react-dom/server.edge` in `optimizeDeps`.** That module
-  is CommonJS; left external, workerd throws `ReferenceError: require is not
-  defined` *during startup*, from a stack naming neither Folio nor react-dom.
-  If you override `optimizeDeps`, re-include it. If you rename the Worker
-  environment away from `ssr`, repeat the include under your name.
+- **It force-includes React's CommonJS entries in the Worker's `optimizeDeps`**:
+  `react`, `react/jsx-runtime`, `react/jsx-dev-runtime`, `react-dom` and
+  `react-dom/server.edge`. Left external, workerd loads them raw and throws
+  `ReferenceError: module is not defined` or `require is not defined` *during
+  startup*, from a stack naming neither Folio nor React. A host does not need to
+  list them in its own `ssr.optimizeDeps.include`. If you override
+  `optimizeDeps`, re-include all five. If you rename the Worker environment away
+  from `ssr`, repeat the list under your name.
 - **It needs `build.cssCodeSplit: false` set in your own config.** If a
   framework plugin sets it instead, the plugin cannot see that and throws at
   `configResolved` naming the cause — because by then the asset paths are baked

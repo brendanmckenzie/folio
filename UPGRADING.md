@@ -631,6 +631,107 @@ Durable Object writes the mirror as a statement of its own, so a missing column 
 logged and costs nothing else. If you roll the Worker back the column is unread and
 harmless.
 
+### Previewing a record through a host page (v1.2.0)
+
+**No action; opt-in per type.** A `record` type may now declare `previewPath`, the
+path of a routed page of yours, as a singleton already could. The editor then opens
+that record on that page, rendered with `resolution.record` set to the record's id
+and its **draft** at `resolution.docs[id]`, updating on every keystroke. A record
+type without `previewPath` keeps form mode exactly as before.
+
+The page's own block draws the record, so this is the host's work:
+
+```tsx
+render: ({ heading }, resolution) => {
+  const author = resolveReference(resolution.record, resolution, ['author'])
+  return <main><h1>{heading}</h1>{author ? <AuthorCard name={String(author.data.name)} /> : null}</main>
+}
+```
+
+`resolution.record` is undefined on every render outside the editor's preview, so a
+block falls back to its normal data path and a live page is unchanged. If you built
+a "record preview" workaround page, a routed page whose only job was to show one
+record, point `previewPath` at it and read `resolution.record` there instead of
+whatever it used to find the record. The preview is editor-only: there is no share
+link for a record, and the `?_folio=preview&record=<id>` request is handed back to
+your router for a draft render. No migration, no `PROTOCOL_VERSION` bump.
+
+### Referenced documents resolve two hops deep (v1.2.0)
+
+**A behaviour change with no migration.** `resolve()` now loads the documents that a
+page's referenced documents reference, so a record's own `reference` and `references`
+fields resolve inside its `content`. Before, `content` rendered with `docs` emptied and
+a nested record came out as nothing.
+
+- **`resolution.docs` can hold second-hop documents.** A host that reads it as "exactly
+  what this page points at" sees extra entries. Their story rows were already in
+  `resolution.stories` and the page's cache tags now carry `story:<id>` for each, so
+  publishing one purges the page.
+- **`content` nests exactly one level.** A reference met inside a `content` render
+  resolves as data (`id`, `title`, `data`, `url`) with `content: null`; so does a
+  document already being rendered above it, which is what stops a cycle. Draw a
+  nested record's card from `data`.
+- **Nothing past the second hop is loaded**: a third-hop field resolves to nothing.
+- **Three bounds on the second hop.** At most 50 documents are loaded per resolve (the
+  rest resolve to nothing, though their story rows still load), the page itself is never
+  one of its own references, and a gated page is dropped because `resolve()` has no
+  visitor. A first-hop reference to a gated page is the documented gap in
+  `docs/specs/platform/visitor-access.md`, unchanged by this.
+
+A published page with no second-hop references costs the same two reads as before. A
+page that reaches one costs four, in two concurrent pairs.
+
+### Explicit slugs are no longer truncated (v1.2.0)
+
+**A behaviour change.** A slug supplied on a create or rename, in the admin or as `slug`
+through `{base}/api/v1`, used to be cut silently at 64 characters. It now keeps its
+length up to 200, exported as `MAX_SLUG` from `folio/core`, and a longer one is a
+`400 bad_request`. A slug derived from a title is still cut at 64. The 200 check runs after
+the `-2`, `-3` collision suffix, so a 200-character slug that collides is refused too.
+`slugify(input, max = 64)` gains the optional `max`.
+
+Nothing is rewritten: a path already stored keeps its 64 characters. What changes is that a
+script which sent a 90-character slug and got 64 back now gets 90, so a URL you derived from
+the response by hand, or a redirect you wrote against the cut one, no longer matches.
+`GET {base}/api/v1/documents/by-path/*` also accepts a path up to 1024 characters, up from 500.
+
+### `date` fields and field groups (v1.2.0)
+
+**One thing to check if you switch a field.** `date({ time?, indexed? })` is a new field
+kind that stores `YYYY-MM-DD`, or with `time: true` a UTC instant
+`YYYY-MM-DDTHH:mm:ssZ`. It is additive: a field you do not change is untouched.
+
+- **Switching an ISO `text` field to `date` is a builder change, not a data migration.**
+  Stored values that do not fit the form (a freehand `3 March`, an impossible `2026-02-30`)
+  render as written and are listed by `GET {base}/api/audit` as `date-invalid`. Run the audit
+  after the change and fix what it names. The v1 documents API refuses such a value from then on.
+- **`Field['kind']` gains `'date'`.** A host with an exhaustive `switch` over it needs a case,
+  which is a compile error rather than a silent miss.
+- **An indexed `date` fills both `content_index` columns**, so `order`, `gte` and `lte` agree.
+  An `indexed` ISO `text` field already projected both, so switching it needs no reindex.
+
+Every field also accepts `group`, a heading the inspector draws over consecutive fields that
+share it. It is presentational and changes nothing stored or rendered. The audit's `group-split`
+check reports a group whose fields are not declared together.
+
+### `folio/vite` pre-bundles React's CommonJS entries (v1.2.0)
+
+**Nothing to do; one thing you may delete.** `folio/vite` now adds `react`,
+`react/jsx-runtime`, `react/jsx-dev-runtime` and `react-dom`, as well as
+`react-dom/server.edge`, to the Worker environment's `optimizeDeps.include`. Without them a
+dev server that took the installed package died at startup with `ReferenceError: module is not
+defined`. A host that added those lines to its own `ssr.optimizeDeps.include` to get past that
+can remove them. A host that renames the Worker environment away from `ssr` still repeats the
+list under its own name.
+
+### Search boxes bound their term (v1.2.0)
+
+**A behaviour change, small.** D1 refuses a `LIKE` pattern over 50 bytes, so a long term typed
+into a Data, media, redirects or form-responses search box used to answer `500`. The term is now
+cut to fit (counting wildcards, escapes and UTF-8 bytes) and matches on its prefix, and the same
+bound applies to `contains` and `startsWith` in content queries. `%`, `_` and `\` in a term now
+match themselves in the four admin search boxes, where before they acted as wildcards.
+
 ### `anthropicDescriber` reports usage (2026-10-20) (v1.1.0)
 
 **No action.** `anthropicDescriber` gains an optional `onUsage` hook, and

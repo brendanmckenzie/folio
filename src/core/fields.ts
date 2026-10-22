@@ -67,11 +67,10 @@ interface Common {
  * admin can show that a field is filterable and the audit can report an
  * `indexed` flag that can never take effect.
  *
- * **Deliberately not on `Common`.** Only the five scalar kinds below carry it, so
+ * **Deliberately not on `Common`.** Only the six scalar kinds below carry it, so
  * `richtext({ indexed: true })` does not compile: the table exists to filter and
- * sort, and an asset, a link or a prose document has no scalar to sort by. The
- * escape hatch for "sort by publication date" is a root `text` field holding an
- * ISO 8601 string, which is what a publish-date field is anyway.
+ * sort, and an asset, a link or a prose document has no scalar to sort by. "Sort
+ * by publication date" is a root `date` field, which projects into `num_value`.
  *
  * **Root block only.** A field on a nested block would make the index depend on
  * which blocks exist inside a document, so a block insert would change the index
