@@ -541,6 +541,10 @@ const CHECKS: Record<string, { title: string; body: string }> = {
     title: "An indexed flag on a kind that cannot be indexed",
     body: "Only text, textarea, number, boolean and select project to a scalar. The field builders make this unrepresentable, so it arrived from a hand-written schema or an importer — and filtering on the field 400s as if it were never declared.",
   },
+  "preview-params-conflict": {
+    title: "Block types declaring one preview parameter two ways",
+    body: "Two block types give the same previewParams key different values. The preview takes the first block in the document, so what an editor sees depends on which block they placed first. Informational: nothing live is affected, since only the preview reads previewParams.",
+  },
   "indexed-not-root": {
     title: "An indexed flag on a block that is no type’s root",
     body: "The content index is a fixed projection of a document, so only its root block is read. The flag looks like it works and does nothing at all.",

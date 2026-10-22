@@ -13,7 +13,7 @@
  * rare and already an event both sides handle.
  */
 import type { ReactNode } from "react";
-import type { Doc, Json } from "./doc";
+import { childrenOf, type Doc, type Json } from "./doc";
 import { defaultValue, type Field } from "./fields";
 import type { ResolvedForm } from "./forms";
 import { dataOf, type LocaleContext } from "./locales";
@@ -25,7 +25,7 @@ import {
   queryKey,
   type ResolvedCollection,
 } from "./query";
-import type { SchemaIndex } from "./schema";
+import { type SchemaIndex, slotsOf } from "./schema";
 import type { SiteContext } from "./sites";
 import type { StoryMeta } from "./story";
 import {
@@ -140,6 +140,14 @@ export interface Resolution {
    * enforcement `filterable` already has.
    */
   search?: string;
+  /**
+   * Render parameters the host supplies (`FolioPageOptions.params`), or that a
+   * block type declares for the editor's preview (`BlockDef.previewParams`).
+   * Opaque to Folio: a block reads them in `render` and nothing else does. **Never
+   * part of a cache tag**, which is why a host passing them owns the decision to
+   * cache the page (`FolioPageOptions.cacheable`). Absent unless given.
+   */
+  params?: Record<string, Json>;
   /**
    * Compiled descriptors for the `form` fields this document contains, keyed by
    * form id (`../../docs/specs/content-model/forms.md` architecture decision 4).
@@ -537,4 +545,48 @@ function windowing(link: LinkValue): { target?: "_blank"; rel?: string } {
   }
   const rel = ("rel" in link && link.rel) || "noopener noreferrer";
   return { target: "_blank", rel };
+}
+
+/**
+ * The render parameters a document's preview is given: every `previewParams` its
+ * block types declare (`BlockDef.previewParams`), merged into one object.
+ *
+ * **Root first, depth first, in slot order, and the first declaration of a key
+ * wins.** Order is the whole rule: two block types may declare the same key (the
+ * audit's `preview-params-conflict` says when they disagree), and the answer must not
+ * depend on which one an editor happened to add first, or the server's preview, the
+ * editor's posted resolution, `?_folio=draft` and the MCP screenshot would each show a
+ * different representative state. Slots are walked in the block's declared field
+ * order and children in sibling order. Given several documents (a record previewed in
+ * its host page), the earlier one's declarations win.
+ *
+ * Pure. `undefined` when nothing declares any, so a resolution with none is
+ * byte-identical to one from before this existed.
+ */
+export function previewParamsOf(
+  docs: Doc | readonly (Doc | undefined)[],
+  schema: SchemaIndex,
+): Record<string, Json> | undefined {
+  // The common case, and the one the editor asks per keystroke: nothing declares any.
+  if (!Object.values(schema).some((def) => def.previewParams)) return undefined;
+  const out: Record<string, Json> = {};
+  let seen = new Set<string>();
+  const walk = (doc: Doc, uid: string) => {
+    const blok = doc.bloks[uid];
+    if (!blok || seen.has(uid)) return;
+    seen.add(uid);
+    const def = schema[blok.type];
+    for (const [key, value] of Object.entries(def?.previewParams ?? {})) {
+      if (!Object.hasOwn(out, key)) out[key] = value;
+    }
+    for (const [slot] of slotsOf(def)) {
+      for (const kid of childrenOf(doc, uid, slot)) walk(doc, kid.uid);
+    }
+  };
+  for (const doc of Array.isArray(docs) ? docs : [docs as Doc]) {
+    if (!doc) continue;
+    seen = new Set();
+    walk(doc, doc.root);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

@@ -10,7 +10,7 @@ import type { ReactElement } from "react";
 import { renderToReadableStream } from "react-dom/server.edge";
 import { NO_STORE } from "../core/cache-tags";
 import { recordResolution } from "../core/resolution-merge";
-import { buildResolution } from "../core/resolve";
+import { buildResolution, previewParamsOf } from "../core/resolve";
 import { wrapPreview } from "../core/render-wrap";
 import type { Registry as SiteRegistry } from "../core/sites";
 import type { StoryMeta } from "../core/story";
@@ -274,6 +274,13 @@ export async function previewPage(
     editingName && editingDoc
       ? { global: editingName, mount: `[data-folio-global="${editingName}"]` }
       : undefined;
+
+  // The parameters this preview's blocks declare (`BlockDef.previewParams`), set on
+  // the resolution after any merge so no merge can drop them, and in the bootstrap
+  // so the client's first render matches this markup. The page's own declarations
+  // come first, then the record's, then an edited global's.
+  const params = previewParamsOf([doc, recordDoc, editingDoc], brand.schema);
+  if (params) resolution = { ...resolution, params };
 
   /**
    * The page's own document, and the one line in this file where the split

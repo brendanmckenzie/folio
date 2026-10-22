@@ -8,7 +8,7 @@
  * Durable Object alarm, which has no request to derive bindings from.
  */
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from "../core/block";
-import { type Doc, newUid } from "../core/doc";
+import { type Doc, type Json, newUid } from "../core/doc";
 import { isBareLayer, mergeLayers } from "../core/layers";
 import { indexedFieldNames } from "../core/index-projection";
 import {
@@ -136,6 +136,13 @@ export interface ResolveOptions {
    * `filterable` already has.
    */
   search?: string;
+  /**
+   * Host-supplied render parameters, carried on `Resolution.params` for every
+   * block's `render`. Opaque to Folio: never read by `cacheTags`, so a page whose
+   * output depends on them is the host's to keep out of a shared cache
+   * (`FolioPageOptions.cacheable`).
+   */
+  params?: Record<string, Json>;
   /**
    * The story being rendered. Two things need it: its ancestors join the
    * resolution (a breadcrumb has to resolve), and in `draft` mode its draft values
@@ -1265,6 +1272,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       const localeField = active ? { locale: active } : {};
       const pageField = opts?.page !== undefined ? { page: opts.page } : {};
       const searchField = opts?.search !== undefined ? { search: opts.search } : {};
+      const paramsField = opts?.params !== undefined ? { params: opts.params } : {};
       // The documents this render loads as globals, and each one's layer ids in the
       // chain, most general first (`multi-site.md` decision 8). With no `sites` the
       // chain is `['default']` and `layerId` is `sng_<type>`, so this is the list,
@@ -1592,6 +1600,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         ...localeField,
         ...pageField,
         ...searchField,
+        ...paramsField,
         // Absent rather than `{}` when there is nothing to pull in, so a document
         // with no references bootstraps the byte-identical payload it always did.
         ...(Object.keys(docs).length > 0 ? { docs } : {}),

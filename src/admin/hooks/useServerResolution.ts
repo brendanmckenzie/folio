@@ -3,7 +3,7 @@ import type { Doc } from "../../core/doc";
 import type { LocaleContext } from "../../core/locales";
 import { collectionQueries } from "../../core/query";
 import { formIds, linkedIds, referencedIdsAllLocales } from "../../core/refs";
-import type { Resolution } from "../../core/resolve";
+import { previewParamsOf, type Resolution } from "../../core/resolve";
 import type { SchemaIndex } from "../../core/schema";
 
 /** How long the id set has to hold still before it is asked about. Long enough that
@@ -44,6 +44,8 @@ export function resolutionSignature(
       .join("|"),
     extra.locale?.code ?? "",
     extra.place ?? "",
+    // Block types come and go as an editor adds them, and each may declare params.
+    JSON.stringify(previewParamsOf(doc, schema) ?? null),
   ].join(";");
 }
 

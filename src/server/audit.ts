@@ -869,6 +869,39 @@ const groupSplit: SchemaCheck = (schema) => {
   return out;
 };
 
+/**
+ * Two block types that declare the same `previewParams` key with different values.
+ * `previewParamsOf` lets the first block in document order win, so which value the
+ * preview shows depends on which block an editor happened to place first. Not an
+ * error, and the only information a developer needs is the key and the blocks: one
+ * finding per key, on the first block that declares it, with the key as the field.
+ */
+const previewParamsConflict: SchemaCheck = (schema) => {
+  const first = new Map<string, { block: string; value: string }>();
+  const reported = new Set<string>();
+  const out: SchemaFinding[] = [];
+  for (const def of Object.values(schema)) {
+    for (const [key, value] of Object.entries(def.previewParams ?? {})) {
+      const seen = first.get(key);
+      const encoded = JSON.stringify(value);
+      if (!seen) {
+        first.set(key, { block: def.name, value: encoded });
+        continue;
+      }
+      if (seen.value === encoded || reported.has(key)) continue;
+      reported.add(key);
+      out.push({
+        check: "preview-params-conflict",
+        block: seen.block,
+        field: key,
+        note: `'${key}'`,
+        detail: `previewParams key '${key}' is ${seen.value} on '${seen.block}' and ${encoded} on '${def.name}' — the preview shows whichever block comes first in the document`,
+      });
+    }
+  }
+  return out;
+};
+
 /** See "Adding a check" in the file header. */
 export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
   unknownConditionField,
@@ -876,6 +909,7 @@ export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
   untranslatableText,
   unusableIndex,
   groupSplit,
+  previewParamsConflict,
 ];
 
 /**

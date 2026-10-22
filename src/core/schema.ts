@@ -35,6 +35,15 @@ export interface BlockSchema {
   presets?: readonly BlockPreset[];
   /** Hides the bare block from the add menu; only its presets are offered there. */
   presetsOnly?: boolean;
+  /**
+   * Render parameters the editor's preview gives a document containing this block,
+   * as `resolution.params`, so a block that reads them draws a representative state
+   * instead of its empty one (a "related posts" block that needs `params.tag`).
+   * Plain JSON, so it reaches the admin through the manifest. Merged across a
+   * document by `previewParamsOf`: root first, depth first, first declaration of a
+   * key wins. Only the preview sees them; a live page gets the host's own.
+   */
+  previewParams?: Record<string, Json>;
 }
 
 export type SchemaIndex = Record<string, BlockSchema>;
