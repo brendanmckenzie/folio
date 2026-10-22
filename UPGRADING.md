@@ -752,6 +752,9 @@ kind that stores `YYYY-MM-DD`, or with `time: true` a UTC instant
   which is a compile error rather than a silent miss.
 - **An indexed `date` fills both `content_index` columns**, so `order`, `gte` and `lte` agree.
   An `indexed` ISO `text` field already projected both, so switching it needs no reindex.
+- **A `date` field is not search text.** Full-text search indexes `text`, `textarea` and
+  `richtext` only, so a field switched from ISO `text` to `date` leaves the search index at
+  the next publish, and a search excerpt stops quoting the stamp.
 
 Every field also accepts `group`, a heading the inspector draws over consecutive fields that
 share it. It is presentational and changes nothing stored or rendered. The audit's `group-split`
