@@ -53,9 +53,15 @@ import { isBareLayer, mergeLayers } from "../core/layers";
 import { isTranslatable, type LocaleConfig } from "../core/locales";
 import { dateError } from "../core/nested";
 import { docBytes, MAX_DOC_BYTES, utf8Bytes } from "../core/protocol";
-import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from "../core/schema";
+import {
+  type BlockSchema,
+  type DocumentType,
+  type SchemaIndex,
+  slotsOf,
+  uniqueFieldsOf,
+} from "../core/schema";
 import { chain, layerId, layerSeed, type Registry, singletonTypeOf } from "../core/sites";
-import { publishedDocsAfter, publishedDocsByIds } from "./stories";
+import { duplicateUniqueValues, publishedDocsAfter, publishedDocsByIds } from "./stories";
 import type { FolioDb } from "./db";
 
 /**
@@ -872,6 +878,45 @@ export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
   groupSplit,
 ];
 
+/**
+ * `unique-duplicate`: published records that share a value of a `unique` field.
+ *
+ * Not a `STORY_CHECKS` entry, because those see one batch of documents and a
+ * duplicate is a property of *two* documents that may sit in different batches: it is
+ * one group-by per `unique` field over `content_index`, run on the first call of a
+ * walk only (`continueFrom` null), so a merged report names each pair once. A finding
+ * names every story in a group, so each can be opened.
+ *
+ * What it catches is the case publish cannot: two publishes of one value racing, and
+ * `unique` newly declared over content that already held a duplicate (the publish
+ * check only looks at what is being published). Run it before adding `unique`.
+ */
+async function uniqueDuplicates(
+  db: FolioDb,
+  schema: SchemaIndex,
+  ctx: AuditContext,
+  scopes: readonly string[] | undefined,
+): Promise<StoryFinding[]> {
+  const out: StoryFinding[] = [];
+  for (const type of ctx.types ?? []) {
+    for (const [field, label] of uniqueFieldsOf(schema[type.root])) {
+      for (const group of await duplicateUniqueValues(db, type.name, field, scopes)) {
+        for (const story of group.ids) {
+          const others = group.ids.filter((id) => id !== story);
+          out.push({
+            check: "unique-duplicate",
+            story,
+            type: type.name,
+            detail: `'${label}' is '${group.value}' on this ${type.name} and on ${others.length} other published ${others.length === 1 ? "record" : "records"} (${others.join(", ")}) in the same scope${group.locale ? ` (${group.locale})` : ""}, so a lookup by it is ambiguous`,
+            note: `'${group.value}'`,
+          });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------- the walk --- */
 
 /** The schema half on its own: pure, and worth calling from a test directly. */
@@ -991,7 +1036,12 @@ export async function audit(
     // `runMigrations` makes, and it costs one comparison rather than a count.
     continueFrom: docs.length === size ? (docs[docs.length - 1]?.id ?? null) : null,
     content,
-    stories: auditStories(docs, ctx),
+    stories: [
+      ...auditStories(docs, ctx),
+      ...((opts.continueFrom ?? null) === null
+        ? await uniqueDuplicates(db, schema, ctx, brand?.scopes)
+        : []),
+    ],
     schema: auditSchema(schema, ctx),
     orphanKeys: named("orphan-key").map((f) => ({
       type: f.type,

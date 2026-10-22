@@ -12,7 +12,12 @@ import { draftState, type StoryMeta } from "../core/story";
 import { clearIndexStatements, type ContentProjection, indexStatements } from "./content-index";
 import { FolioError } from "./errors";
 import type { HookRunner } from "./hooks";
-import { publishStoryStatement, storyById, unpublishStoryStatement } from "./stories";
+import {
+  publishStoryStatement,
+  storyById,
+  type UniqueConflict,
+  unpublishStoryStatement,
+} from "./stories";
 import { buildVersionWrite, type VersionMeta, writeVersion } from "./versions";
 import type { FolioDb } from "./db";
 
@@ -65,6 +70,19 @@ export interface PublishDeps<Env = unknown> {
    * where a wrong cached title could not.
    */
   projection?: (story: StoryMeta, doc: Doc) => ContentProjection;
+  /**
+   * The `unique` check (`text({ indexed: true, unique: true })`): the first value in
+   * the projection about to go live that another published record of the same type
+   * and scope already holds, or null. Run by `publish()` before its batch, so every
+   * caller — the admin route, the v1 API, bulk and the scheduler — inherits it from
+   * the one place, and `FolioRuntime.publishDeps` is the one place it is built.
+   * Absent on a brand that declares no `unique` field. `label` is the field's label,
+   * for the message.
+   */
+  uniqueness?: (
+    story: StoryMeta,
+    projection: ContentProjection,
+  ) => Promise<(UniqueConflict & { label: string }) | null>;
   /**
    * Fires the after-commit lifecycle hooks (`publish-hooks.md`). Absent only in
    * tests that exercise a workflow directly with no `createRuntime` behind it —
@@ -152,6 +170,16 @@ export async function publish(
   // neither. Delete-then-insert, because the row set shrinks when a field is
   // cleared or a locale is dropped.
   const projection = deps.projection?.(meta, doc);
+  // Before the batch, so a refused publish writes nothing: no version, no live
+  // snapshot. The race it cannot close (two publishes of one value at once) is the
+  // audit's `unique-duplicate`.
+  const duplicate = projection && (await deps.uniqueness?.(meta, projection));
+  if (duplicate) {
+    throw new FolioError(
+      "conflict",
+      `“${duplicate.label}” is already “${duplicate.value}” on “${duplicate.other.title}” (${duplicate.other.id}); change it before publishing`,
+    );
+  }
   await deps.db.batch([
     versionStatement,
     publishStatement,

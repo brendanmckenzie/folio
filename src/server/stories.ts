@@ -7,7 +7,12 @@ import {
   paginate,
   windowOf,
 } from "../core/pagination";
-import { DRAFT_STRING_MAX, draftIndexedValues, type IndexedCell } from "../core/index-projection";
+import {
+  DRAFT_STRING_MAX,
+  draftIndexedValues,
+  type IndexedCell,
+  type IndexRow,
+} from "../core/index-projection";
 import {
   canNest,
   type DocumentType,
@@ -1658,6 +1663,184 @@ export async function pageAt(
     doc: serving?.published_doc ? (JSON.parse(serving.published_doc) as Doc) : null,
     editing: withState(metaOf(editing)),
   };
+}
+
+/** What `recordByField` and `recordDraftCandidates` look for. */
+export interface RecordLookup {
+  type: string;
+  /** A `unique` indexed text field of the type's root. */
+  field: string;
+  /** `''` for the source locale, as `content_index` keys it. */
+  locale: string;
+  value: string;
+  /** The locale's fallback chain, nearest first (`localeContext`), so a draft is matched
+   * on any value `fieldValue` could read for the locale. */
+  fallbacks?: readonly string[];
+}
+
+/** Nearest scope first, then id, so two rows a race let through still answer the same way. */
+function inChainOrder<R extends { site?: string | undefined; id: string }>(
+  chain: readonly string[],
+  rows: readonly R[],
+): R[] {
+  const rank = (row: R) => chain.indexOf(row.site ?? DEFAULT_SITE);
+  return [...rows].sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * The published record whose `unique` field holds `value`: one statement, through
+ * `content_index_lookup (field, locale, text_value)`, fenced to `chain` and to the
+ * type. The nearest scope wins, as `pickServing` has it for a path.
+ *
+ * `published_at is not null` is belt and braces: an unpublish clears the index rows
+ * in the same batch, so a row can only match while it is live.
+ */
+export async function recordByField(
+  db: FolioDb,
+  chain: readonly string[],
+  q: RecordLookup,
+): Promise<{ story: StoryMeta; doc: Doc | null } | null> {
+  if (chain.length === 0) return null;
+  const scope = chainClause(chain);
+  const { results } = await db
+    .prepare(
+      `select ${COLS}, published_doc from stories
+        where type = ? and ${scope.sql} and published_at is not null
+          and id in (select story_id from content_index
+                      where field = ? and locale = ? and text_value = ?)`,
+    )
+    .bind(q.type, ...scope.binds, q.field, q.locale, q.value)
+    .all<PathRow>();
+  const row = inChainOrder(chain, results)[0];
+  if (!row) return null;
+  return {
+    story: withState(metaOf(row)),
+    doc: row.published_doc ? (JSON.parse(row.published_doc) as Doc) : null,
+  };
+}
+
+/**
+ * The records an editor's draft may be addressed by `value`, nearest scope first.
+ *
+ * Two kinds, in one batch. A story with a `draft_data` mirror (`0015`) is matched on
+ * the mirror alone: the draft is authoritative, so a record whose slug was changed
+ * in its draft is found at the new slug and **not** at the published one. A story with
+ * no mirror yet (never edited since `0015`) falls back to its published value.
+ *
+ * The mirror cuts a string at `DRAFT_STRING_MAX`, so a value that long is matched on
+ * its stored prefix, and the caller confirms each candidate against the draft document
+ * it reads. One limit remains: a root block whose scalars exceed the mirror's whole
+ * budget (`DRAFT_DATA_MAX`) before this field is reached drops it from the mirror, and
+ * an editor then cannot find that record by its draft value until it is published.
+ */
+export async function recordDraftCandidates(
+  db: FolioDb,
+  chain: readonly string[],
+  q: RecordLookup,
+): Promise<StoryMeta[]> {
+  if (chain.length === 0) return [];
+  const scope = chainClause(chain);
+  const quote = (name: string) => `"${name.replaceAll('"', "")}"`;
+  const paths = [`$.data.${quote(q.field)}`];
+  if (q.locale !== "") paths.push(`$.i18n.${quote(q.locale)}.${quote(q.field)}`);
+  for (const code of q.fallbacks ?? []) paths.push(`$.i18n.${quote(code)}.${quote(q.field)}`);
+  // The mirror holds a string cut at `DRAFT_STRING_MAX`, so a longer value is matched on
+  // its stored prefix and the caller's confirmation against the draft document decides.
+  const needle = q.value.slice(0, DRAFT_STRING_MAX);
+  const mirrored = db
+    .prepare(
+      `select ${COLS} from stories
+        where type = ? and ${scope.sql} and draft_data is not null
+          and (${paths.map(() => "(json_type(draft_data, ?) = 'text' and json_extract(draft_data, ?) = ?)").join(" or ")})`,
+    )
+    .bind(q.type, ...scope.binds, ...paths.flatMap((p) => [p, p, needle]));
+  const published = db
+    .prepare(
+      `select ${COLS} from stories
+        where type = ? and ${scope.sql} and published_at is not null and draft_data is null
+          and id in (select story_id from content_index
+                      where field = ? and locale = ? and text_value = ?)`,
+    )
+    .bind(q.type, ...scope.binds, q.field, q.locale, q.value);
+  const answers = await db.batch([mirrored, published]);
+  const rows = answers.flatMap((a) => (a.results ?? []) as StoryRow[]);
+  return inChainOrder(chain, rows).map(withState);
+}
+
+/** A published record that already holds a `unique` value the story being published carries. */
+export interface UniqueConflict {
+  field: string;
+  locale: string;
+  value: string;
+  other: { id: string; title: string };
+}
+
+/**
+ * The first `unique` value in `rows` — the projection a publish is about to write —
+ * that another **published** story of the same type and owning scope already holds,
+ * or null. One indexed lookup per unique row, in one batch, over
+ * `content_index_lookup`; the story itself is excluded, so republishing is no
+ * conflict. A row with no value is no row (`projectValue`), so a cleared field is
+ * never a duplicate of another cleared one.
+ */
+export async function uniqueConflict(
+  db: FolioDb,
+  story: Pick<StoryMeta, "id" | "type" | "site">,
+  rows: readonly IndexRow[],
+  fields: ReadonlySet<string>,
+): Promise<UniqueConflict | null> {
+  const checked = rows.filter((r) => fields.has(r.field) && r.text !== null);
+  if (checked.length === 0) return null;
+  const statements = checked.map((r) =>
+    db
+      .prepare(
+        `select s.id, s.title from content_index ci join stories s on s.id = ci.story_id
+          where ci.field = ? and ci.locale = ? and ci.text_value = ?
+            and s.type = ? and s.site_id = ? and s.id != ? and s.published_at is not null
+          order by s.id limit 1`,
+      )
+      .bind(r.field, r.locale, r.text, story.type, story.site ?? DEFAULT_SITE, story.id),
+  );
+  const answers = await db.batch(statements);
+  for (const [i, answer] of answers.entries()) {
+    const other = answer?.results?.[0] as { id: string; title: string } | undefined;
+    const r = checked[i];
+    if (other && r) return { field: r.field, locale: r.locale, value: r.text ?? "", other };
+  }
+  return null;
+}
+
+/** The most duplicate groups one `unique` field reports: a handful is the signal, thousands the same bug. */
+const MAX_DUPLICATE_GROUPS = 100;
+
+/**
+ * Every value of one `unique` field that more than one published story of the type
+ * holds in the same owning scope and locale: what the publish check cannot see
+ * (two publishes racing, or a field marked `unique` over content that already had
+ * duplicates). One group-by over `content_index_lookup`, `ids` sorted. `scopes`
+ * is a brand's, as `publishedDocsAfter` takes it.
+ */
+export async function duplicateUniqueValues(
+  db: FolioDb,
+  type: string,
+  field: string,
+  scopes?: readonly string[],
+): Promise<{ value: string; locale: string; site: string; ids: string[] }[]> {
+  const within = inScopes(scopes);
+  const { results } = await db
+    .prepare(
+      `select ci.text_value as value, ci.locale as locale, s.site_id as site,
+              json_group_array(s.id) as ids
+         from content_index ci join stories s on s.id = ci.story_id
+        where ci.field = ? and s.type = ? and s.published_at is not null${within.sql.replaceAll("site_id", "s.site_id")}
+        group by s.site_id, ci.locale, ci.text_value
+       having count(*) > 1
+        order by s.site_id, ci.locale, ci.text_value
+        limit ${MAX_DUPLICATE_GROUPS}`,
+    )
+    .bind(field, type, ...within.binds)
+    .all<{ value: string; locale: string; site: string; ids: string }>();
+  return results.map((r) => ({ ...r, ids: (JSON.parse(r.ids) as string[]).sort() }));
 }
 
 export async function publishedDoc(

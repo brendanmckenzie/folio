@@ -476,6 +476,33 @@ export interface FolioReader {
    * `FolioPage`. This is what a page route should call.
    */
   page: (path: string, opts?: FolioPageOptions) => Promise<FolioPage | null>;
+  /**
+   * `page()` for a **record**, addressed by one of its `unique` indexed fields
+   * (`text({ indexed: true, unique: true })`) rather than a path: a host's
+   * `/illustrator/:slug` route calls `recordBy('illustrator', 'slug', slug)`. Answers
+   * a `FolioPage` with exactly `page()`'s authority, redaction and `headers` (one
+   * implementation of the tail, so the cache rule cannot differ), or null for a miss.
+   *
+   * **Throws** when `type` is not a `record` type of this reader's brand or `field` is
+   * not a `unique` indexed field of its root: a programming error, not a miss. A reader
+   * with no site, or a request admitted only by a share, answers null.
+   *
+   * **A draft is the editor's alone.** With a draft cookie and a session that may read
+   * drafts the lookup matches the draft's value, so an unpublished record, or one whose
+   * slug changed in its draft, is found; a share link never admits a record, and
+   * neither does a request with no editor. Fenced to the reader's chain and brand,
+   * like every read, and issued on the reader's session.
+   *
+   * **Answer a miss `no-store`.** A record's publish emits no `path:` cache tag, so a
+   * record-URL 404 cached with `reader.miss`'s headers would outlive the publish that
+   * creates the record. Only a hit carries cache headers.
+   */
+  recordBy: (
+    type: string,
+    field: string,
+    value: string,
+    opts?: FolioPageOptions,
+  ) => Promise<FolioPage | null>;
   draftAt: (path: string, locale?: string) => Promise<Doc | null>;
   resolve: (doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>;
   status: (path: string) => Promise<"live" | "unpublished" | "unknown">;
