@@ -209,3 +209,54 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------------------- groups --- */
+
+/*
+ * A `group` heading over consecutive fields (`core/fields.ts`'s `Common.group`).
+ * The section is one child of `.fields`, so it takes the fieldset's rhythm between
+ * groups, and the body restates the same gap between its own fields.
+ */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.groupHeading {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+/* The disclosure is the shared subtle `Button`, so it carries the one focus
+   treatment. Left-aligned and full width: the whole heading is the hit target. */
+.groupHeading button {
+  justify-content: flex-start;
+  width: 100%;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.groupChevron {
+  display: inline-block;
+  width: 1em;
+}
+
+.groupBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* `display: flex` above beats the user agent's `[hidden]`, so say it again. */
+.groupBody[hidden] {
+  display: none;
+}
+
+.panelForm .groupBody {
+  gap: var(--space-5);
+}

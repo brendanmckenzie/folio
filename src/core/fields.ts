@@ -9,6 +9,15 @@ import type { LinkKind } from "./values";
 
 interface Common {
   label?: string;
+  /**
+   * A heading this field sits under in the block's form. Presentational only:
+   * the inspector draws consecutive fields with the same `group` beneath one
+   * collapsible heading, and nothing else reads it. Stored data, the content API
+   * and the renderer are untouched. Declare a group's fields next to each other:
+   * a group split across other fields draws as two headings, and `/folio/audit`
+   * reports it (`group-split`).
+   */
+  group?: string;
   help?: string;
   required?: boolean;
   /**
@@ -108,6 +117,15 @@ export type Field =
   | ({ kind: "textarea"; rows?: number; placeholder?: string } & Common & Indexable & Searchable)
   | ({ kind: "number"; min?: number; max?: number } & Common & Indexable)
   | ({ kind: "boolean" } & Common & Indexable)
+  /**
+   * An ISO 8601 date, or with `time` a UTC instant. Stored as a string either
+   * way (`YYYY-MM-DD`, or `YYYY-MM-DDTHH:mm:ssZ`), so it resolves to that string
+   * and switching an ISO `text` field to `date` is a change to the builder and
+   * nothing else. The admin input shows an instant in the editor's local time and
+   * stores it in UTC; the content API refuses a value that is not the field's
+   * exact form or not a real calendar date (`dateError`).
+   */
+  | ({ kind: "date"; time?: boolean } & Common & Indexable)
   | ({ kind: "select"; options: readonly SelectOption[] } & Common & Indexable)
   /** `accept` is passed to the file picker, e.g. `'image/*'` or `'.pdf'`. */
   | ({ kind: "asset"; accept?: string } & Common)
@@ -255,6 +273,7 @@ type Defaulted<K extends Field["kind"], V> = Omit<Opts<K>, "default"> & { defaul
 export const text = (o: Defaulted<"text", string> = {}) => ({ kind: "text" as const, ...o });
 export const textarea = (o: Opts<"textarea"> = {}) => ({ kind: "textarea" as const, ...o });
 export const number = (o: Defaulted<"number", number> = {}) => ({ kind: "number" as const, ...o });
+export const date = (o: Defaulted<"date", string> = {}) => ({ kind: "date" as const, ...o });
 export const boolean = (o: Defaulted<"boolean", boolean> = {}) => ({
   kind: "boolean" as const,
   ...o,

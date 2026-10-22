@@ -387,6 +387,8 @@ function fieldDetail(field: Field): string {
   switch (field.kind) {
     case "number":
       return range(field.min, field.max);
+    case "date":
+      return field.time ? "date and time" : "date";
     case "select":
       return field.options.map((o) => o.value).join(", ");
     case "asset":

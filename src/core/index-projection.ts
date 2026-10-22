@@ -46,16 +46,17 @@ export function isIndexableKind(field: Field): field is IndexableField {
     case "number":
     case "boolean":
     case "select":
+    case "date":
       return true;
     default:
       return false;
   }
 }
 
-/** The five kinds that can carry `indexed`, narrowed off `Field`. */
+/** The six kinds that can carry `indexed`, narrowed off `Field`. */
 export type IndexableField = Extract<
   Field,
-  { kind: "text" | "textarea" | "number" | "boolean" | "select" }
+  { kind: "text" | "textarea" | "number" | "boolean" | "select" | "date" }
 >;
 
 /** True when this field is declared queryable. Total over every field kind, so a

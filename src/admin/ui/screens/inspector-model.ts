@@ -59,6 +59,43 @@ export function visibleEntries(
   );
 }
 
+/**
+ * A run of consecutive fields that share a `group`, or one ungrouped field
+ * (`group: null`). `empty` is true when every field in a grouped run is blank by
+ * `isBlank`, the one per-kind emptiness the inspector has, and is what makes a
+ * run collapse by default. An ungrouped run is never `empty`: it has no heading to
+ * collapse under.
+ */
+export interface FieldRun {
+  group: string | null;
+  entries: [string, Field][];
+  empty: boolean;
+}
+
+/**
+ * Splits the fields `visibleEntries` kept into runs. Computed **after** that
+ * filter, so a group whose fields are all hidden or `showIf`-false draws no
+ * heading, and **consecutive only**: the same `group` split by another field is
+ * two runs, which is what the audit's `group-split` warns about. Ungrouped
+ * fields each become a run of one, which keeps the consumer one flat loop.
+ * Emptiness reads the source value (`blok.data`) in every locale, so a group a
+ * translator needs to translate is open whenever the source has content.
+ */
+export function groupRuns(entries: [string, Field][], data: Record<string, Json>): FieldRun[] {
+  const runs: FieldRun[] = [];
+  for (const entry of entries) {
+    const group = entry[1].group ?? null;
+    const last = runs[runs.length - 1];
+    if (group !== null && last && last.group === group) last.entries.push(entry);
+    else runs.push({ group, entries: [entry], empty: false });
+  }
+  for (const run of runs) {
+    run.empty =
+      run.group !== null && run.entries.every(([name, f]) => isBlank(f, data[name] ?? null));
+  }
+  return runs;
+}
+
 /* ------------------------------------------------------------------ locales --- */
 
 /**
@@ -181,6 +218,7 @@ export type ControlKind =
   | "text"
   | "textarea"
   | "number"
+  | "date"
   | "checkbox"
   | "select"
   | "asset"
@@ -199,6 +237,7 @@ const CONTROLS: { readonly [K in Field["kind"]]: ControlKind } = {
   text: "text",
   textarea: "textarea",
   number: "number",
+  date: "date",
   boolean: "checkbox",
   select: "select",
   asset: "asset",
@@ -219,6 +258,38 @@ const CONTROLS: { readonly [K in Field["kind"]]: ControlKind } = {
 
 export function controlFor(kind: Field["kind"]): ControlKind {
   return CONTROLS[kind];
+}
+
+/**
+ * A `date` field's stored string as its input's value. A date-only field is
+ * already what `<input type="date">` wants. With `time` the store is a UTC
+ * instant and `<input type="datetime-local">` wants the editor's own wall clock
+ * (`YYYY-MM-DDTHH:mm`), so the instant is read through `Date`'s local getters.
+ * Anything that is not a parseable value shows as an empty input rather than as
+ * a lie: the audit's `date-invalid` is where a bad stored value gets reported.
+ */
+export function dateInputValue(value: Json | undefined, time: boolean | undefined): string {
+  if (typeof value !== "string" || value === "") return "";
+  if (!time) return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime())) return "";
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${p(at.getFullYear(), 4)}-${p(at.getMonth() + 1)}-${p(at.getDate())}T${p(at.getHours())}:${p(at.getMinutes())}`;
+}
+
+/**
+ * The inverse: what an input's value becomes in storage. A date-only value passes
+ * through. A local `datetime-local` value becomes a UTC instant with no
+ * fractional seconds, `YYYY-MM-DDTHH:mm:ssZ`, which is the one form
+ * `dateError` accepts. A cleared or half-typed input is `""`, never an invalid
+ * string, so the control cannot produce a value the API would refuse.
+ */
+export function dateStoredValue(input: string, time: boolean | undefined): string {
+  if (input === "") return "";
+  if (!time) return /^\d{4}-\d{2}-\d{2}$/.test(input) ? input : "";
+  const at = new Date(input);
+  if (Number.isNaN(at.getTime())) return "";
+  return at.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 /**

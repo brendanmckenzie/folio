@@ -499,6 +499,9 @@ export function resolveValue(
     case "text":
     case "textarea":
     case "select":
+    // The stored string, passed through as written: a value that is not a valid
+    // date is the audit's finding (`date-invalid`), not a render-time failure.
+    case "date":
       return value ?? "";
     default: {
       const unhandled: never = field;

@@ -29,6 +29,7 @@ const EVERY_KIND: Field["kind"][] = [
   "text",
   "textarea",
   "number",
+  "date",
   "boolean",
   "select",
   "asset",
@@ -57,7 +58,7 @@ describe("controlFor", () => {
   /**
    * The list above has to *be* every kind, or the assertion above proves nothing.
    * `core/fields.ts` exports one builder per kind, so the builders are the census —
-   * and the count is checked too, so a fourteenth kind fails here rather than
+   * and the count is checked too, so a fifteenth kind fails here rather than
    * quietly rendering as a text box.
    */
   it("is checked against every builder core/fields.ts exports", () => {
@@ -65,6 +66,7 @@ describe("controlFor", () => {
       fields.text(),
       fields.textarea(),
       fields.number(),
+      fields.date(),
       fields.boolean(),
       fields.select({ options: [{ label: "A", value: "a" }] }),
       fields.asset(),

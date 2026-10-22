@@ -4,6 +4,7 @@ import {
   blocks,
   boolean,
   collection,
+  date,
   defineBlock,
   multilink,
   reference,
@@ -37,7 +38,9 @@ const insightRoot = defineBlock({
   fields: {
     title: text({ indexed: true, translatable: true }),
     topic: select({ options: TOPICS, indexed: true, translatable: true }),
-    published: text({ indexed: true }),
+    // A `date`, not a `text`: switching an ISO text field is a builder change only, and
+    // every order and range assertion below must read the same.
+    published: date({ indexed: true }),
     featured: boolean({ indexed: true }),
     body: richtext({ translatable: true }),
     author: reference({ types: ["colPerson"] }),

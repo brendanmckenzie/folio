@@ -877,6 +877,35 @@ function longestIncreasing(keys: readonly (string | undefined)[]): Set<number> {
 
 /* ------------------------------------------------------------ field shape --- */
 
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DATE_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/;
+
+/** Whether y-m-d is a real calendar day: `Date` rolls 2026-02-30 over to March, so compare back. */
+function realDay(y: number, m: number, d: number): boolean {
+  const at = new Date(Date.UTC(2000, m - 1, d));
+  // `setUTCFullYear` rather than the constructor: a year below 100 must not be read as 19xx.
+  at.setUTCFullYear(y, m - 1, d);
+  return at.getUTCFullYear() === y && at.getUTCMonth() === m - 1 && at.getUTCDate() === d;
+}
+
+/**
+ * Why a stored `date` value is not valid, or null. The empty string is valid
+ * (the field's own empty value); anything else must be the field's exact form,
+ * `YYYY-MM-DD` or, with `time`, `YYYY-MM-DDTHH:mm:ssZ`, and a real calendar
+ * date and time. Pure, so the API, the audit and the admin agree.
+ */
+export function dateError(time: boolean | undefined, value: unknown): string | null {
+  if (value === "") return null;
+  const form = time ? "YYYY-MM-DDTHH:mm:ssZ (UTC)" : "YYYY-MM-DD";
+  if (typeof value !== "string") return `must be a date string, ${form}`;
+  const m = (time ? DATE_INSTANT : DATE_ONLY).exec(value);
+  if (!m) return `must be ${form}`;
+  const [y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0] = m.slice(1).map(Number);
+  if (!realDay(y, mo, d)) return "must be a real calendar date";
+  if (h > 23 || mi > 59 || s > 59) return "must be a real time of day";
+  return null;
+}
+
 /**
  * Why a value cannot be this field's, or null.
  *
@@ -908,6 +937,8 @@ export function fieldShapeError(field: Field, value: unknown): string | null {
       return `must be one of: ${field.options.map((o) => o.value).join(", ")}`;
     case "number":
       return typeof value === "number" ? null : "must be a number";
+    case "date":
+      return dateError(field.time, value);
     case "boolean":
       return typeof value === "boolean" ? null : "must be true or false";
     // The richer stored shapes (`AssetValue`, `LinkValue`, `RichtextDoc`), each
