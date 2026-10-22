@@ -16,16 +16,17 @@
  * (`GET {base}/api/documents`). That is the shape of this port: half the file was
  * doing work a route should have been doing.
  */
-import type { IndexedValue } from "../../../server/content-index";
-import { indexedFields } from "../../../core/index-projection";
+import { type IndexedCell, indexedFields } from "../../../core/index-projection";
 import type { DocumentType, SchemaIndex } from "../../../core/schema";
 import type { DocumentSort, StoryFilter, StoryMeta, StoryState } from "../../../core/story";
 
 /* -------------------------------------------------------------------- rows --- */
 
 /**
- * A row as `GET {base}/api/documents` answers it: the story, plus the **published**
- * values of its type's `indexed` fields.
+ * A row as `GET {base}/api/documents` answers it: the story, plus the values of its
+ * type's `indexed` fields. Published ones, except that a caller who may read drafts
+ * gets the draft's where it differs, each such cell marked `draft`
+ * (`server/stories.ts`'s `DocumentRow`).
  *
  * The values are on the row rather than in a sibling map keyed by id, which is
  * what the unpaged route used to answer with. `server/stories.ts`'s `DocumentRow`
@@ -33,7 +34,7 @@ import type { DocumentSort, StoryFilter, StoryMeta, StoryState } from "../../../
  * nothing has to be zipped.
  */
 export interface DocumentRow extends StoryMeta {
-  indexed: Record<string, IndexedValue>;
+  indexed: Record<string, IndexedCell>;
 }
 
 /* ----------------------------------------------------------------- columns --- */
@@ -53,18 +54,13 @@ export interface DocumentColumn {
 }
 
 /**
- * Which columns can be sorted, and it is **not** the `field` ones.
+ * Which columns can be sorted: the title, last edited, and **every `field` column**
+ * (`field:<name>`, issue #82), which the server orders by the value the cell shows,
+ * draft or published, nulls last (`core/story.ts`'s `DocumentSort`). This was every
+ * column but the `field` ones until draft values made the sort worth having.
  *
- * Every sort here is a real column on `stories`; `core/story.ts`'s `DocumentSort`
- * carries the argument and the two shapes it beat, of which the short version is
- * that an `indexed` value lives in another table, is two columns wide, and is null
- * for anything unpublished. A keyset over it is possible and costs more machinery
- * than it returns.
- *
- * The consequence is smaller than it sounds, and it is why the trade is worth
- * taking: `documentColumns` skips the type's `titleField` as a field column,
- * because its value *is* the title column. So "sort people by name" — the one sort
- * anybody reaches for on a record list — is `title`, and it sorts.
+ * `documentColumns` still skips the type's `titleField` as a field column, because
+ * its value *is* the title column, so "sort people by name" is `title`.
  *
  * `ord` is deliberately **not** offered by the screen even though the route
  * accepts it. It is a real ordering (`createStory` appends, so it reads as the
@@ -97,7 +93,11 @@ export function documentColumns(
   ];
   for (const [name, field] of indexedFields(schema, type.root)) {
     if (name === type.titleField) continue;
-    columns.push({ ...column(`f:${name}`, field.label ?? name, "field"), field: name });
+    columns.push({
+      ...column(`f:${name}`, field.label ?? name, "field"),
+      field: name,
+      sort: `field:${name}`,
+    });
   }
   columns.push(column("state", "Status", "state"));
   columns.push(column("updated", "Last edited", "updated"));
@@ -114,10 +114,11 @@ function column(key: string, label: string, kind: ColumnKind): DocumentColumn {
  * a badge and a relative timestamp, which are the component's business rather than
  * a string's.
  *
- * `''` for a value nobody has published. The screen turns that into a dash and the
- * row's `changed` badge is what explains it, which is the replacement for the
- * footer note `DataTable.tsx` carried on every page ("Columns show published
- * values…"). A per-row explanation beats a standing apology.
+ * `''` for a field with no value, published or (where the caller may read drafts)
+ * in the draft. The screen turns that into a dash. A value from the draft that the
+ * published copy does not have is marked by `isDraftCell`; for a caller who may not
+ * read drafts the cells are published values only, and the row's `changed` badge
+ * is what says they may disagree with the document.
  */
 export function cellText(row: DocumentRow, column: DocumentColumn): string {
   if (column.kind === "title") return row.title;
@@ -128,11 +129,11 @@ export function cellText(row: DocumentRow, column: DocumentColumn): string {
 /**
  * Does this row's published snapshot disagree with its draft?
  *
- * The whole reason the `changed` state matters *on this screen* rather than just as
- * a badge: the cells beside it are published values, so a `changed` row is one
- * where what you are reading is **not** what the document currently says. That is
- * a different claim from Content's badge, which only tells you there is something
- * to publish.
+ * On this screen a `changed` row is one where a cell may not say what the document
+ * currently says: a caller who may read drafts sees the draft values marked
+ * `draft`, and one who may not sees published ones, so the badge is the only hint.
+ * A stronger claim than Content's badge, which only says there is something to
+ * publish.
  */
 export function isStale(row: Pick<DocumentRow, "state">): boolean {
   return row.state === "changed";
@@ -254,7 +255,28 @@ export function documentsParams(
 }
 
 function isDocumentSort(raw: string | undefined): raw is DocumentSort {
-  return raw === "ord" || raw === "title" || raw === "edited";
+  return (
+    raw === "ord" || raw === "title" || raw === "edited" || (raw?.startsWith("field:") ?? false)
+  );
+}
+
+/**
+ * The URL, with a `field:` sort that names no column of this type put back to the
+ * default. A stale or hand-typed `?sort=field:gone` would otherwise be a 400 and an
+ * error screen for a list that is perfectly readable in its default order.
+ */
+export function knownSort(url: DocumentsUrl, columns: readonly DocumentColumn[]): DocumentsUrl {
+  if (!url.sort.startsWith("field:") || columns.some((c) => c.sort === url.sort)) return url;
+  return { ...url, sort: "title", dir: undefined };
+}
+
+/**
+ * Whether a cell's value is the draft's, so the screen can mark it. Absent for any
+ * column that is not a field, and for a value the published copy already agrees
+ * with: the server sets `draft` only where the two differ.
+ */
+export function isDraftCell(row: DocumentRow, column: DocumentColumn): boolean {
+  return column.kind === "field" && row.indexed[column.field ?? ""]?.draft === true;
 }
 
 function isStateFilter(raw: string | undefined): raw is StateFilter {

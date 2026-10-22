@@ -1,5 +1,13 @@
 import { compareSiblings, type Doc, keyAtIndex } from "../core/doc";
-import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type Page,
+  paginate,
+  windowOf,
+} from "../core/pagination";
+import { draftIndexedValues, type IndexedCell } from "../core/index-projection";
 import {
   canNest,
   type DocumentType,
@@ -15,6 +23,7 @@ import {
   DEFAULT_SEARCH_SORT,
   derivePaths,
   descendants,
+  type ColumnSort,
   type DocumentSort,
   draftState,
   type FlatSort,
@@ -23,6 +32,7 @@ import {
   newStoryId,
   MAX_SLUG,
   slugify,
+  sortFieldOf,
   storyState,
   type StoryFilter,
   type StoryMeta,
@@ -40,7 +50,6 @@ import {
   clearIndexStatements,
   clearInboundRefStatements,
   countReferencesTo,
-  type IndexedValue,
   indexedValuesFor,
   referencesTo,
 } from "./content-index";
@@ -450,7 +459,7 @@ export interface StoryLevelRow extends StoryMeta {
 
 /**
  * Every ordering a story list can be read in, as keysets — flat mode's three
- * (`FlatSort`) and the Documents screen's three (`DocumentSort`), which overlap
+ * (`FlatSort`) and the Documents screen's three (`ColumnSort`), which overlap
  * in two.
  *
  * One table rather than one per reader, because `edited` is a **rule** and not
@@ -471,7 +480,7 @@ const ORDERS = {
   edited: { columns: ["coalesce(draft_updated_at, updated_at)", "id"], direction: "desc" },
   title: { columns: ["title", "id"], direction: "asc" },
   path: { columns: ["path", "id"], direction: "asc" },
-} satisfies Record<FlatSort | DocumentSort, Keyset>;
+} satisfies Record<FlatSort | ColumnSort, Keyset>;
 
 /**
  * The sort key of a row, component for component with `ORDERS`. The
@@ -707,7 +716,7 @@ export async function listStoriesFlat(
 
 /**
  * One document row as the Documents screen's table wants it: the story, plus the
- * **published** values of its type's `indexed` fields.
+ * values of its type's `indexed` fields.
  *
  * On the row rather than in a sibling map keyed by id, which is what the unpaged
  * route answered with. `StoryLevelRow`'s `childCount` set the precedent one phase
@@ -716,15 +725,18 @@ export async function listStoriesFlat(
  * over from the *previous* page would quietly supply values for rows no longer on
  * screen. A self-describing row cannot do that.
  *
- * Two honest limits, both inherited from `indexedValuesFor` and both visible in
- * the UI rather than hidden. Values are **published**, because `content_index` is
- * written inside the publish batch — so a draft document's cells are blank, and
- * the screen's `changed` badge is what explains a cell that disagrees with the
- * document. And they are the **source locale** only: a column per locale is a
- * second dimension nobody asked for.
+ * **Draft-or-published, per caller** (issue #82). For a caller who may read drafts
+ * (`DocumentPageOptions.drafts`) a story that has a `draft_data` mirror shows the
+ * *draft's* values, and a cell whose value is the draft's and differs from the
+ * published one is marked `draft`; everyone else gets `content_index`'s published
+ * values and the `draft_data` column is never even selected. A cleared field is
+ * blank in the draft and the published value is not borrowed to fill it. A story
+ * with no mirror (never seeded, or written before `0015`) reads as published.
+ * Values are the **source locale** only: a column per locale is a second dimension
+ * nobody asked for.
  */
 export interface DocumentRow extends StoryMeta {
-  indexed: Record<string, IndexedValue>;
+  indexed: Record<string, IndexedCell>;
 }
 
 export interface DocumentPageOptions extends StoryPageOptions {
@@ -732,9 +744,25 @@ export interface DocumentPageOptions extends StoryPageOptions {
    * where the query would be one round trip for an empty answer. */
   indexed?: boolean;
   /**
+   * Whether the caller may read drafts in this scope (`READ_DRAFT`). **Decides
+   * what the caller is shown**, so it is the route's to set from `allows`, and
+   * absent means no: a list of drafts is never the default.
+   */
+  drafts?: boolean;
+  /** The names of the fields a draft's values are projected for: every field the
+   * brand marks `indexed`. Needed with `drafts`, ignored without. */
+  indexedNames?: ReadonlySet<string>;
+  /**
+   * What a `field:<name>` sort sorts by, resolved by the route from the schema
+   * (`core/story.ts`'s `DocumentSort`). Required for such a sort, because the
+   * kind decides the key: a number, boolean or date sorts as its projected
+   * `num_value` and anything else as text.
+   */
+  sortField?: { name: string; kind: "text" | "number" | "boolean" | "date" };
+  /**
    * Reverses the ordering. Absent means each sort's natural direction — `title`
-   * ascending, `edited` newest first — which is what a column header shows on its
-   * first click.
+   * ascending, `edited` newest first, a field ascending — which is what a column
+   * header shows on its first click.
    *
    * Free to support and worth supporting: `keysetWhere` and `orderBy` both read
    * the direction off the `Keyset`, so flipping one flips the comparison and the
@@ -745,19 +773,43 @@ export interface DocumentPageOptions extends StoryPageOptions {
   dir?: Direction;
 }
 
+/** A `stories` row plus the draft mirror, which only a caller who may read drafts
+ * ever selects and which never leaves this file. */
+type DocumentSqlRow = StoryRow & { _draftData?: string | null };
+
 /**
  * One type's documents, paged — the Documents screen's list
  * (`ui-architecture.md` port phase 3), and the last unbounded read the admin had.
  *
- * `sort` is one of three `stories` columns and never an `indexed` field;
- * `core/story.ts`'s `DocumentSort` carries that argument and the two shapes it
- * beat. `ord` rides the `stories_type (type, ord)` index that already exists,
- * which is the ordering this listing had before it was paged.
+ * Two kinds of `sort`, paged differently on purpose.
+ *
+ * **`ord`, `title`, `edited`: a keyset over `(column, id)`.** They are `stories`
+ * columns, `core/story.ts`'s `DocumentSort` has the history, and `ord` rides the
+ * `stories_type (type, ord)` index that already exists, which is the ordering this
+ * listing had before it was paged.
+ *
+ * **`field:<name>`: offset paging, over a computed key.** Chosen over a keyset for
+ * three reasons that compound. The key is an *expression* (the draft's value when
+ * the caller may read drafts and the story has one, else `content_index`'s), so it
+ * rides no index and a keyset buys no index walk, which is all a keyset is for.
+ * It is **nullable** (a story with no value, or an unpublished one with no draft),
+ * and `CursorPart` is non-nullable because a cursor cannot express "resume after
+ * null" in a way that agrees with SQL's own null ordering; making it do so means a
+ * three-part cursor and a hand-written `or` chain per direction. And it is
+ * **mutable between requests** in the way no `stories` column is: editors change it
+ * with every keystroke, so a keyset on it drifts exactly as an offset does. What
+ * offset costs is a row repeated or skipped when someone edits across a page
+ * boundary mid-read, in a live admin table of hundreds to low thousands of rows
+ * that is one reload from correct. The key is ordered nulls last in both
+ * directions, with `id` ascending as the tiebreak so two rows with equal keys
+ * never swap between pages. The cursor is the next offset, a one-number
+ * `CursorPart[]`, so the envelope is the same and the client's cursor stack needs
+ * no second shape.
  *
  * With a `type`, that type's rows **whether they are routed or not**, so a page
  * type's flat listing is reachable too. With no `type`, every *unrouted* document
  * across every type — records and singletons, which is what "not in the tree"
- * means.
+ * means. A field sort needs the type (a field belongs to one root block).
  *
  * **It no longer ensures singletons.** That moved to `listSingletons`, because
  * ensuring is a write and a write must not depend on which page was asked for:
@@ -773,8 +825,6 @@ export async function listDocumentPage(
 ): Promise<Page<DocumentRow>> {
   const limit = clampLimit(opts.limit, 50, 200);
   const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
-  const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort];
-  const resume = keysetWhere(keyset, cursor);
   // `type` is the positional argument and not `filter.type`, for the same reason
   // `parentId` is on the level reader: it is the list's identity rather than a
   // narrowing of it, and its absence means something specific (every unrouted
@@ -785,14 +835,54 @@ export async function listDocumentPage(
     : ["site_id = ?", "path is null", ...filters.sql];
   const scope = opts.scope ?? DEFAULT_SITE;
   const narrowBinds = type ? [scope, type, ...filters.binds] : [scope, ...filters.binds];
+  // Selected only for a caller who may read drafts: the mirror is draft content.
+  const columns = opts.drafts ? `${COLS}, draft_data as _draftData` : COLS;
 
-  const [rows, total] = await Promise.all([
-    db
+  const field = sortFieldOf(sort);
+  let fetched: Promise<{ results: DocumentSqlRow[] }>;
+  let cursorOf: (rows: StoryMeta[]) => string | null;
+  if (field === null) {
+    const keyset: Keyset = opts.dir
+      ? { ...ORDERS[sort as ColumnSort], direction: opts.dir }
+      : ORDERS[sort as ColumnSort];
+    const resume = keysetWhere(keyset, cursor);
+    fetched = db
       .prepare(
-        `select ${COLS} from stories ${whereOf(...narrow, resume.sql)} ${orderBy(keyset)} limit ?`,
+        `select ${columns} from stories ${whereOf(...narrow, resume.sql)} ${orderBy(keyset)} limit ?`,
       )
       .bind(...narrowBinds, ...resume.binds, limit + 1)
-      .all<StoryRow>(),
+      .all<DocumentSqlRow>();
+    cursorOf = (rows) => {
+      const last = rows.at(-1);
+      return last ? encodeCursor(keyOf(sort as ColumnSort, last)) : null;
+    };
+  } else {
+    if (!opts.sortField || opts.sortField.name !== field) {
+      throw new FolioError("bad_request", `sort field '${field}' is not an indexed field here`);
+    }
+    // A cursor from another ordering is a different width or not a number; either
+    // reads as the first page, as `keysetWhere` does for a keyset.
+    const at = cursor?.length === 1 && Number.isInteger(cursor[0]) ? Number(cursor[0]) : 0;
+    const offset = Math.max(0, at);
+    const key = fieldSortKey(opts.sortField, opts.drafts === true);
+    const dir = opts.dir ?? "asc";
+    // The key is computed once, in the select list, and named in `order by`: a
+    // second copy would be a second set of binds that has to agree with the first.
+    // `nocase` for text so "ada" does not sort after "Zed"; numbers ignore it.
+    const collate = opts.sortField.kind === "text" ? " collate nocase" : "";
+    fetched = db
+      .prepare(
+        `select ${columns}, ${key.sql} as _sort from stories ${whereOf(...narrow)}
+         order by _sort is null, _sort${collate} ${dir === "desc" ? "desc" : "asc"}, id
+         limit ? offset ?`,
+      )
+      .bind(...key.binds, ...narrowBinds, limit + 1, offset)
+      .all<DocumentSqlRow>();
+    cursorOf = () => encodeCursor([offset + limit]);
+  }
+
+  const [rows, total] = await Promise.all([
+    fetched,
     opts.count
       ? db
           .prepare(`select count(*) as n from stories ${whereOf(...narrow)}`)
@@ -801,7 +891,17 @@ export async function listDocumentPage(
       : null,
   ]);
 
-  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row));
+  const drafts = new Map<string, string | null>();
+  const metas = rows.results.map((row) => {
+    const { _draftData, _sort, ...rest } = row as DocumentSqlRow & { _sort?: unknown };
+    if (_draftData !== undefined) drafts.set(row.id, _draftData);
+    return withState(rest);
+  });
+  const { rows: windowed, hasMore } = windowOf(metas, limit);
+  const page: Page<StoryMeta> = {
+    rows: windowed,
+    cursor: hasMore ? cursorOf(windowed) : null,
+  };
   // Over the page's ids only, and *after* the window has been cut rather than
   // over the over-fetched row too: the extra row exists to answer "is there
   // more" and is never shown, so fetching its values would be work for a cell
@@ -812,10 +912,79 @@ export async function listDocumentPage(
         page.rows.map((row) => row.id),
       )
     : {};
-  const rowsWithValues = page.rows.map((row) => ({ ...row, indexed: indexed[row.id] ?? {} }));
+  const rowsWithValues: DocumentRow[] = page.rows.map((row) => ({
+    ...row,
+    indexed: cellsOf(
+      indexed[row.id] ?? {},
+      opts.drafts ? draftIndexedValues(drafts.get(row.id) ?? null, opts.indexedNames ?? []) : null,
+    ),
+  }));
   return total
     ? { ...page, rows: rowsWithValues, total: total.n }
     : { ...page, rows: rowsWithValues };
+}
+
+/**
+ * The cells for one row: the published values, or, when the story has a draft
+ * mirror, the draft's with `draft` set on any cell that says something the
+ * published copy does not. A field the draft lacks is blank. Pure.
+ */
+export function cellsOf(
+  published: Record<string, { text: string; num: number | null }>,
+  draft: Record<string, { text: string; num: number | null }> | null,
+): Record<string, IndexedCell> {
+  if (draft === null) return published;
+  const out: Record<string, IndexedCell> = {};
+  for (const [name, value] of Object.entries(draft)) {
+    const was = published[name];
+    const same = was !== undefined && was.text === value.text && was.num === value.num;
+    out[name] = same ? value : { ...value, draft: true };
+  }
+  return out;
+}
+
+/**
+ * The sort key of a `field:` sort as one SQL expression and its binds, over the
+ * value the table shows: the draft mirror's when the caller may read drafts and the
+ * story has one (even if that value is absent, because the draft is authoritative),
+ * else the published `content_index` value for the source locale.
+ *
+ * The kind picks the column, as `projectValue` does at publish: number, boolean and
+ * date sort as numbers (a date as epoch milliseconds, which `julianday` reproduces
+ * to well under a millisecond for ISO input and answers null for anything it
+ * cannot read, which sorts last), anything else as text. The field name only ever
+ * reaches SQL as a bound parameter, as a JSON path or a column value.
+ */
+function fieldSortKey(
+  field: { name: string; kind: "text" | "number" | "boolean" | "date" },
+  drafts: boolean,
+): { sql: string; binds: string[] } {
+  const numeric = field.kind !== "text";
+  const published = `(select ci.${numeric ? "num_value" : "text_value"} from content_index ci
+      where ci.story_id = stories.id and ci.locale = '' and ci.field = ?)`;
+  if (!drafts) return { sql: published, binds: [field.name] };
+  const path = `$.data."${field.name.replaceAll('"', "")}"`;
+  let draft: string;
+  switch (field.kind) {
+    case "number":
+      draft =
+        "case when json_type(draft_data, ?) in ('integer', 'real') then json_extract(draft_data, ?) end";
+      break;
+    case "boolean":
+      draft = "case json_type(draft_data, ?) when 'true' then 1 when 'false' then 0 end";
+      break;
+    case "date":
+      draft =
+        "case when json_type(draft_data, ?) = 'text' then (julianday(json_extract(draft_data, ?)) - 2440587.5) * 86400000.0 end";
+      break;
+    default:
+      draft = "case when json_type(draft_data, ?) = 'text' then json_extract(draft_data, ?) end";
+  }
+  const pathBinds = draft.split("?").length - 1;
+  return {
+    sql: `case when draft_data is not null then ${draft} else ${published} end`,
+    binds: [...Array.from({ length: pathBinds }, () => path), field.name],
+  };
 }
 
 /**
@@ -1681,6 +1850,26 @@ export async function publishedDocsAfter(
     type: row.type,
     doc: JSON.parse(row.published_doc) as Doc,
   }));
+}
+
+/**
+ * One batch of stories of any state, in `id` order, starting after `after` —
+ * `POST /folio/reindex?drafts=1`'s resumable read. Every story, published or not,
+ * because the draft mirror is exactly what an unpublished one has and a published
+ * one may not. Cursor by `id` rather than OFFSET for `publishedDocsAfter`'s reason.
+ */
+export async function storiesAfter(
+  db: FolioDb,
+  after: string | null,
+  limit: number,
+  scopes?: readonly string[],
+): Promise<StoryMeta[]> {
+  const within = inScopes(scopes);
+  const { results } = await db
+    .prepare(`select ${COLS} from stories where id > ?${within.sql} order by id limit ?`)
+    .bind(after ?? "", ...within.binds, limit)
+    .all<StoryRow>();
+  return results.map(withState);
 }
 
 /**

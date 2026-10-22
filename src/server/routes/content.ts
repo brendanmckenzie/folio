@@ -14,10 +14,10 @@ import { isRangeOp, isTextOp, MAX_PER_PAGE, WHERE_OPS } from "../../core/query";
 import { actorString, ADMIN, READ } from "../auth/roles";
 import { FolioError } from "../errors";
 import { brandIdOf, hookCtx, requestChain, requestSite, requireAccess } from "../middleware";
-import { reindex } from "../reindex";
+import { reindex, reindexDrafts } from "../reindex";
 import type { FolioRuntime } from "../runtime";
 import type { FolioEnv } from "../types";
-import { brandOf, sweepOf } from "./stories";
+import { brandOf, draftOf, sweepOf } from "./stories";
 import { parseOptionalBody, ReindexBody, typeNameQuery } from "../validate";
 
 /** How many `where=` clauses one request may carry. Each is an index seek; a
@@ -194,12 +194,30 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * new rows. Batched and resumable for the same reason `POST /folio/migrate` is —
    * it walks every published document inside a request that has a CPU limit.
    *
+   * `?drafts=1` is the other sweep: it backfills `stories.draft_data` (migration
+   * `0015`, the Data table's draft values) for every story, published or not, and
+   * touches none of the tables above. Same batch and `continueFrom` shape. The
+   * Durable Object mirrors a draft itself from then on; this is for documents last
+   * edited before that release.
+   *
    * `ADMIN`: it rewrites a derived table across the whole site.
    */
   app.post("/reindex", requireAccess<Env>(rt, ADMIN), async (c) => {
     const body = await parseOptionalBody(c.req, ReindexBody);
     const brand = brandOf(c);
     const sweep = await sweepOf(c, rt);
+    if (c.req.query("drafts") === "1") {
+      const report = await reindexDrafts(
+        {
+          db: c.var.bindings().db,
+          draftFor: draftOf(c, rt),
+          ...(sweep ? { scopes: sweep.scopes } : {}),
+        },
+        body,
+        (story, err) => rt.logger.error(`reindex: could not read the draft of ${story.id}`, err),
+      );
+      return c.json(sweep ? { ...report, brand: sweep.id } : report);
+    }
     const report = await reindex(
       {
         db: c.var.bindings().db,

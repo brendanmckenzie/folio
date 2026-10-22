@@ -111,6 +111,14 @@
   color: var(--fg-subtle);
 }
 
+/* A value from the draft that is not published yet: italic, with a dotted underline
+   so it reads as "pending" without a colour the table has no token for. */
+.draftValue {
+  font-style: italic;
+  text-decoration: underline dotted var(--border-strong);
+  text-underline-offset: 3px;
+}
+
 .untitled {
   color: var(--fg-subtle);
   font-style: italic;

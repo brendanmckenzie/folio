@@ -19,11 +19,14 @@
  * rows for the same document, delete-then-insert, so the worst case is a row
  * written twice.
  */
+import type { Doc } from "../core/doc";
+import { draftDataOf } from "../core/index-projection";
 import type { LocaleConfig } from "../core/locales";
 import type { DocumentType, SchemaIndex } from "../core/schema";
+import type { StoryMeta } from "../core/story";
 import { contentProjection, indexStatements } from "./content-index";
 import type { HookRunner } from "./hooks";
-import { publishedDocsAfter } from "./stories";
+import { publishedDocsAfter, storiesAfter } from "./stories";
 import type { FolioDb } from "./db";
 
 const DEFAULT_BATCH = 50;
@@ -153,6 +156,90 @@ export async function reindex(
     // A short batch means the walk reached the end. A full one might have, and
     // costs one more empty call to find out — the same trade `runMigrations` makes.
     continueFrom: docs.length < batch ? null : (docs[docs.length - 1]?.id ?? null),
+    dryRun,
+  };
+}
+
+export interface DraftReindexDeps {
+  db: FolioDb;
+  /**
+   * A story's current draft, **through `initDraft`** (`runtime.ts`'s `draftFor`):
+   * a warm object answers with what it holds and a cold one seeds from the
+   * published copy, else the newest version. Never a direct `getOrInit`, which on
+   * an existing id freezes a blank document into the object (#28).
+   */
+  draftFor: (story: StoryMeta) => Promise<Doc>;
+  /** As `ReindexDeps.scopes`. */
+  scopes?: readonly string[];
+}
+
+export interface DraftReindexReport {
+  /** Stories examined in this call. */
+  documents: number;
+  /** Stories whose `draft_data` was written (or would be, on a dry run). */
+  written: number;
+  /** Stories whose draft could not be read: logged by the caller's `onError`, and
+   * left as they were so a re-run can try them again. */
+  failed: number;
+  continueFrom: string | null;
+  dryRun: boolean;
+}
+
+/**
+ * Backfills `stories.draft_data` (migration `0015`) for stories nobody has edited
+ * since it landed: `POST {base}/api/reindex?drafts=1`.
+ *
+ * The Durable Object mirrors a draft on its debounced alarm and when it seeds, so
+ * this is only for what neither has reached: a document last edited before the
+ * release that carries `0015`. Same batch and `continueFrom` shape as `reindex`,
+ * and idempotent for the same reason, which also makes racing an editor harmless:
+ * the next alarm writes the newer draft over whatever this wrote.
+ *
+ * The mirror is written from the draft `draftFor` returns rather than by asking
+ * each object to rewrite its own, because that read is already the one sanctioned
+ * door to a draft and the column is a derived copy, not the document. Never reads
+ * `published_doc` and never touches `content_index`, `content_refs` or
+ * `content_text`: those are `reindex`'s.
+ */
+export async function reindexDrafts(
+  deps: DraftReindexDeps,
+  opts: ReindexOptions = {},
+  onError: (story: StoryMeta, err: unknown) => void = () => {},
+): Promise<DraftReindexReport> {
+  const batch = Math.min(Math.max(Math.trunc(opts.batch ?? DEFAULT_BATCH), 1), MAX_BATCH);
+  const dryRun = opts.dryRun === true;
+  const stories = await storiesAfter(deps.db, opts.continueFrom ?? null, batch, deps.scopes);
+
+  const statements: D1PreparedStatement[] = [];
+  let failed = 0;
+  // Concurrent: each is an independent object, and a sequential walk of fifty is
+  // fifty round trips to fifty places.
+  // **A dry run never calls `draftFor`.** It cannot be told to skip a cold object:
+  // `initDraft` seeds one the moment it is asked, and a dry run writes nothing at
+  // all, so it only counts the stories a real run would visit (`written` is 0).
+  await Promise.all(
+    stories.map(async (story) => {
+      if (dryRun) return;
+      try {
+        const doc = await deps.draftFor(story);
+        statements.push(
+          deps.db
+            .prepare("update stories set draft_data = ? where id = ?")
+            .bind(draftDataOf(doc), story.id),
+        );
+      } catch (err) {
+        failed++;
+        onError(story, err);
+      }
+    }),
+  );
+  if (!dryRun && statements.length > 0) await deps.db.batch(statements);
+
+  return {
+    documents: stories.length,
+    written: statements.length,
+    failed,
+    continueFrom: stories.length < batch ? null : (stories[stories.length - 1]?.id ?? null),
     dryRun,
   };
 }

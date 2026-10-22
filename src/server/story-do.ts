@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import type { Doc } from "../core/doc";
+import { draftDataOf } from "../core/index-projection";
 import { apply, type Mutation, mutationError } from "../core/mutations";
 import {
   type ActivityEntry,
@@ -290,7 +291,16 @@ export function createStoryDO<Env>(
 
     /** Creates the document on first touch. Returns the current draft. */
     async getOrInit(seed: Doc, baseline = 0): Promise<Doc> {
-      return (await this.getOrInitWithSyncId(seed, baseline)).doc;
+      const held = this.read();
+      if (held) return held.doc;
+      const seeded = this.seedFrom(seed, baseline);
+      // `getOrInit` with content is a write path (an id created in this request,
+      // an API import), and such a document may never be edited through a socket,
+      // so no alarm would mirror it: once, here. **Not** in `getOrInitWithSyncId`,
+      // which is what `initDraft` seeds a cold object through on a *read*; a read
+      // must not write to D1, and `reindex?drafts=1` covers those rows.
+      await this.mirrorDraftData(seeded.doc);
+      return seeded.doc;
     }
 
     /**
@@ -315,6 +325,10 @@ export function createStoryDO<Env>(
     async getOrInitWithSyncId(seed: Doc, baseline = 0): Promise<{ doc: Doc; syncId: number }> {
       const row = this.read();
       if (row) return row;
+      return this.seedFrom(seed, baseline);
+    }
+
+    private seedFrom(seed: Doc, baseline: number): { doc: Doc; syncId: number } {
       if (baseline <= 0) {
         this.sql.exec("insert into doc (id, json, sync_id) values (1, ?, 0)", JSON.stringify(seed));
         return { doc: seed, syncId: 0 };
@@ -421,6 +435,34 @@ export function createStoryDO<Env>(
         } catch {
           // Best-effort; the next transaction reschedules anyway.
         }
+        return;
+      }
+      await this.mirrorDraftData(row.doc);
+    }
+
+    /**
+     * Mirrors the root block's scalar values into `stories.draft_data` (migration
+     * `0015`), so the Data table can show what an unpublished record says without
+     * opening an object per row.
+     *
+     * **A statement of its own, never part of the watermark's.** A Worker deployed
+     * before `0015` has no such column, and one `update` naming it would fail whole
+     * and take the unpublished-changes badge with it. Separate, it fails alone:
+     * logged, not retried (a missing column would retry forever, and the next edit
+     * writes it anyway). Still schema-blind: `draftDataOf` keeps every scalar and
+     * the reader picks the indexed ones.
+     */
+    private async mirrorDraftData(doc: Doc): Promise<void> {
+      const name = this.ctx.id.name;
+      if (!name) return;
+      try {
+        await config
+          .db(this.env)
+          .prepare("update stories set draft_data = ? where id = ?")
+          .bind(draftDataOf(doc), name)
+          .run();
+      } catch (err) {
+        console.error(`story-do: failed to mirror the draft values for ${name}`, err);
       }
     }
 

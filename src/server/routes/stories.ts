@@ -18,7 +18,9 @@ import {
   sitesUnder,
 } from "../../core/sites";
 import { ancestorPaths, type StoryMeta } from "../../core/story";
-import { type Actor, actorString, mayPreviewDrafts } from "../auth/roles";
+import { isIndexed } from "../../core/index-projection";
+import { sortFieldOf } from "../../core/story";
+import { type Actor, actorString, allows, mayPreviewDrafts } from "../auth/roles";
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from "../documents";
 import { FolioError, rethrow } from "../errors";
@@ -361,9 +363,12 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    *                      *Asking is what creates a singleton* now lives here.
    *   `?type=&sort=`     one type's documents, keyset over `(ord, id)`,
    *                      `(title, id)` or `(coalesce(draft_updated_at,
-   *                      updated_at), id)`. Every row carries the published values
-   *                      of its type's `indexed` fields, on the row rather than in
-   *                      a sibling map — see `DocumentRow`.
+   *                      updated_at), id)`, or `sort=field:<name>` for an `indexed`
+   *                      field's shown value, offset-paged (`listDocumentPage`).
+   *                      Every row carries the values of its type's `indexed`
+   *                      fields, on the row rather than in a sibling map: the
+   *                      draft's for a caller holding `READ_DRAFT`, the published
+   *                      ones for everyone else — see `DocumentRow`.
    *
    * A singleton type asked for by `?type=` is ensured too, so the one document
    * exists whichever way you arrive at it. No `?type` is every unrouted document
@@ -389,22 +394,47 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     const cursor = c.req.query("cursor");
     requireCursor(cursor);
-    const page = await listDocumentPage(
-      bindings.db,
-      wanted?.name,
-      documentSortQuery(c.req.query("sort")),
-      {
-        limit: limitParam(c.req.query("limit"), 50, 200),
-        cursor,
-        filter: storyFilterQuery(c.req),
-        count: c.req.query("count") === "1",
-        scope,
-        dir: sortDirQuery(c.req.query("dir")),
-        // Skipped on a site that marks nothing `indexed`, where the query would
-        // be a round trip for an empty answer.
-        indexed: brand.indexedFields.size > 0,
-      },
-    );
+    const sort = documentSortQuery(c.req.query("sort"));
+    // `?sort=field:<name>` names an `indexed` field of the *requested type's* root
+    // block, and its kind picks the sort key. Anything else is a 400 that says so,
+    // rather than an empty ordering that looks like a result.
+    const sortName = sortFieldOf(sort);
+    let sortField: { name: string; kind: "text" | "number" | "boolean" | "date" } | undefined;
+    if (sortName !== null) {
+      const def = wanted ? brand.schema[wanted.root]?.fields[sortName] : undefined;
+      if (!def || !isIndexed(def)) {
+        throw new FolioError(
+          "bad_request",
+          `sort '${sortName}' is not an indexed field of ${wanted ? `'${wanted.name}'` : "any one type (pass ?type=)"}`,
+        );
+      }
+      sortField = {
+        name: sortName,
+        kind:
+          def.kind === "number" || def.kind === "boolean" || def.kind === "date"
+            ? def.kind
+            : "text",
+      };
+    }
+    const page = await listDocumentPage(bindings.db, wanted?.name, sort, {
+      limit: limitParam(c.req.query("limit"), 50, 200),
+      cursor,
+      filter: storyFilterQuery(c.req),
+      count: c.req.query("count") === "1",
+      scope,
+      dir: sortDirQuery(c.req.query("dir")),
+      ...(sortField ? { sortField } : {}),
+      // Skipped on a site that marks nothing `indexed`, where the query would
+      // be a round trip for an empty answer.
+      indexed: brand.indexedFields.size > 0,
+      // This route is `READ`, and a draft is `READ_DRAFT`: a token holding
+      // `content:read` alone must be shown published values and nothing of the
+      // draft mirror, so the permission is decided here and the reader does not
+      // even select the column without it. `open` auth has no actors and no
+      // notion of draft access to withhold.
+      drafts: rt.auth.mode !== "session" || allows(c.var.actor, READ_DRAFT),
+      indexedNames: brand.indexedFields,
+    });
     return c.json(decorated(await requestUrls(c, rt), page));
   });
 

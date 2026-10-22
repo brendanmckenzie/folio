@@ -45,7 +45,9 @@ import {
   documentsParams,
   documentsQuery,
   filterOf,
+  isDraftCell,
   isNarrowed,
+  knownSort,
   isStale,
   naturalDir,
   parseDocumentsUrl,
@@ -160,18 +162,20 @@ describe("documentColumns", () => {
   });
 
   /**
-   * The load-bearing half of the sort decision, and the reason it is a test rather
-   * than a comment: which headers are buttons is *derived* from the column kind, so
-   * a `field` column that quietly gained a `sort` would render an `aria-sort` on a
-   * header the route cannot honour — a control that looks live and does nothing.
+   * Which headers are buttons is *derived* from the column, so the sort a header
+   * asks for has to be one the route honours: `field:<name>` for every indexed
+   * column (issue #82), and never for the state badge, which has no value to order.
    */
-  it("makes only title and updated sortable — never an indexed field column", () => {
+  it("makes the title, every indexed field column and updated sortable, but not status", () => {
     const columns = documentColumns(schema, personType);
     expect(columns.filter((c) => c.sort).map((c) => [c.key, c.sort])).toEqual([
       ["title", "title"],
+      ["f:role", "field:role"],
+      ["f:years", "field:years"],
+      ["f:lead", "field:lead"],
       ["updated", "edited"],
     ]);
-    expect(columns.filter((c) => c.kind === "field").every((c) => c.sort === undefined)).toBe(true);
+    expect(columns.find((c) => c.kind === "state")?.sort).toBeUndefined();
   });
 });
 
@@ -264,6 +268,41 @@ describe("the sort model", () => {
     expect([ascEdited.sort, dirOf(ascEdited)]).toEqual(["edited", "asc"]);
     // Back to `title`, which is ascending on its own terms rather than inheriting.
     expect(dirOf(withSort(ascEdited, "title"))).toBe("asc");
+  });
+});
+
+describe("sorting by an indexed field", () => {
+  const columns = documentColumns(schema, personType);
+
+  it("starts a field column ascending, and flips it on the second click", () => {
+    const once = withSort(parseDocumentsUrl({}), "field:years");
+    expect([once.sort, dirOf(once)]).toEqual(["field:years", "asc"]);
+    expect(dirOf(withSort(once, "field:years"))).toBe("desc");
+  });
+
+  it("round-trips through the URL and onto the request", () => {
+    const url = withSort(withSort(parseDocumentsUrl({}), "field:years"), "field:years");
+    const query = documentsQuery(url) as Record<string, string>;
+    expect(query).toMatchObject({ sort: "field:years", dir: "desc" });
+    expect(parseDocumentsUrl(query)).toEqual(url);
+    const params = documentsParams(url, "person", { limit: 50 });
+    expect([params.get("sort"), params.get("dir")]).toEqual(["field:years", "desc"]);
+  });
+
+  it("puts a field sort this type has no column for back to the default", () => {
+    const stale = parseDocumentsUrl({ sort: "field:gone", dir: "desc" });
+    expect(knownSort(stale, columns)).toMatchObject({ sort: "title", dir: undefined });
+    const real = parseDocumentsUrl({ sort: "field:role" });
+    expect(knownSort(real, columns)).toBe(real);
+  });
+
+  it("marks only a cell the server flagged as the draft's", () => {
+    const role = columns.find((c) => c.field === "role")!;
+    const title = columns.find((c) => c.kind === "title")!;
+    const flagged = row({ id: "a" }, { role: { text: "Lead", num: null, draft: true } });
+    expect(isDraftCell(flagged, role)).toBe(true);
+    expect(isDraftCell(row({ id: "a" }, { role: { text: "Lead", num: null } }), role)).toBe(false);
+    expect(isDraftCell(flagged, title)).toBe(false);
   });
 });
 
