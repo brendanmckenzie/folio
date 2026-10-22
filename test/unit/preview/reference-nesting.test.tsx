@@ -72,7 +72,7 @@ const render = (page: Doc, resolution: Resolution) => {
 const count = (markup: string, needle: string) => markup.split(needle).length - 1;
 
 describe("reference.content resolves the target's own references", () => {
-  it("renders a second-hop target inside the first", () => {
+  it("resolves a second-hop target's data inside the first, with no content of its own", () => {
     const resolution: Resolution = {
       ...buildResolution([story("b"), story("c")]),
       docs: {
@@ -82,11 +82,12 @@ describe("reference.content resolves the target's own references", () => {
     };
     const markup = render(doc("pp", { name: "A", friends: ["b"] }), resolution);
     expect(markup).toContain('data-name="B"');
-    // C is B's friend: present only because B's own `friends` resolved.
-    expect(markup).toContain('data-name="C"');
+    // C is B's friend: present only because B's own `friends` resolved, and as data.
+    expect(markup).toContain('<span class="f">C</span>');
+    expect(markup).not.toContain('data-name="C"');
   });
 
-  it("stops a cycle (A, B, A) instead of recursing, and renders each document once per path", () => {
+  it("stops a cycle (A, B, A): the page is not rendered inside the record", () => {
     const resolution: Resolution = {
       ...buildResolution([story("a"), story("b")]),
       docs: {
@@ -94,10 +95,9 @@ describe("reference.content resolves the target's own references", () => {
         b: doc("bb", { name: "B", friends: ["a"] }),
       },
     };
-    // The page is A itself, reached again as B's friend.
     const markup = render(doc("aa", { name: "A", friends: ["b"] }), resolution);
     expect(count(markup, 'data-name="B"')).toBe(1);
-    expect(count(markup, 'data-name="A"')).toBe(2);
+    expect(count(markup, 'data-name="A"')).toBe(1);
   });
 
   it("stops a document that references itself", () => {
@@ -118,7 +118,20 @@ describe("reference.content resolves the target's own references", () => {
       },
     };
     const markup = render(doc("pp", { name: "A", friends: ["b"] }), resolution);
-    expect(markup).toContain('data-name="C"');
-    expect(markup).not.toContain('data-name="D"');
+    expect(markup).toContain(">C<");
+    expect(markup).not.toContain(">D<");
+  });
+
+  it("renders a number of records that all reference each other linearly, not factorially", () => {
+    const ids = Array.from({ length: 8 }, (_, i) => `r${i}`);
+    const resolution: Resolution = {
+      ...buildResolution(ids.map(story)),
+      docs: Object.fromEntries(
+        ids.map((id) => [id, doc(`${id}b`, { name: id, friends: ids.filter((o) => o !== id) })]),
+      ),
+    };
+    render(doc("pp", { name: "P", friends: ids }), resolution);
+    // One render per first-hop record, plus the page. Unbounded nesting measured 109,601 here.
+    expect(renders).toBe(ids.length + 1);
   });
 });

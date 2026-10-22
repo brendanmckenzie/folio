@@ -242,12 +242,11 @@ export function RenderBlok({
  * block of a document the caller is not looking at.
  *
  * **`docs` is not emptied on the way down**, so the target's own `reference` and
- * `references` fields resolve and carry a `content` of their own. The bound is
+ * `references` fields resolve (`id`, `title`, `data`, `url`). The bound is
  * two-part: `resolve()` loads two hops (the page's references, and what those
- * documents reference) and nothing past them, so a field naming a third hop
- * resolves to nothing; and `trail` holds the ids of the documents already being
- * rendered, so a document that is reached again through a cycle (A, B, A) answers
- * `content: null` instead of recursing. The entry itself (`id`, `data`, `title`)
+ * documents reference) and nothing past them, and **`content` nests exactly one
+ * level**: a reference met inside a `content` render has `content: null`, as does
+ * a document already in `trail` (a cycle). The entry itself (`id`, `data`, `title`)
  * still resolves, so a block can label the link; only the nested render is cut.
  */
 function referenceContent(
@@ -259,6 +258,13 @@ function referenceContent(
   const { doc } = target;
   const root = doc.bloks[doc.root];
   if (!root || !registry[root.type]?.render) return null;
+  // **One nested level, whatever `docs` holds.** `docs` is a flat map of two hops,
+  // so records that reference each other would otherwise nest along every path
+  // through them, which grows factorially (eight mutually-related records rendered
+  // 109,601 times). A reference met inside a `content` render still resolves as
+  // data (`id`, `title`, `data`) but carries `content: null`. The trail is then
+  // only the cycle guard for a document reached again at the top.
+  if (trail.length >= 1) return null;
   if (trail.includes(target.id)) return null;
   return (
     <RenderBlok

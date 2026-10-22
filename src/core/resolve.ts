@@ -73,8 +73,10 @@ export interface Resolution {
    * for the ids a document actually points at, and **two hops deep**: the page's
    * own references, and the documents those reference, so a referenced record's
    * own `reference`/`references` fields resolve inside `content`. Nothing past the
-   * second hop is loaded. What stops a story that references itself (or a cycle)
-   * from rendering forever is `RenderBlok`'s trail of ids, not the shape of this map.
+   * second hop is loaded. `content` nests one level, so the
+   * flat map cannot make a render recurse: a reference inside a `content` render
+   * resolves as data with `content: null`. A second-hop document is never a gated
+   * page, never the page itself, and at most 50 are loaded.
    */
   docs?: Record<string, Doc>;
   /**

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { defineBlock, reference, text } from "../../src/core";
+import { defineBlock, reference, references, select, text } from "../../src/core";
 import { cacheTags } from "../../src/core/cache-tags";
 import type { Doc } from "../../src/core/doc";
 import { createFolio } from "../../src/server";
@@ -20,6 +20,14 @@ const page = defineBlock({
   fields: {
     title: text({ label: "Title", required: true }),
     related: reference({ label: "Related", types: ["page"] }),
+    more: references({ label: "More", types: ["page"] }),
+    access: select({
+      options: [
+        { label: "Everyone", value: "public" },
+        { label: "Members", value: "members" },
+      ],
+      indexed: true,
+    }),
   },
   render: () => null,
 });
@@ -42,8 +50,11 @@ function watchedNamespace(ns: DurableObjectNamespace): DurableObjectNamespace {
   });
 }
 
-function makeFolio(db?: D1Database) {
+function makeFolio(db?: D1Database, gated = false) {
   return createFolio<Cloudflare.Env>({
+    ...(gated
+      ? { gate: { field: "access", public: "public", visitor: () => null, allows: () => false } }
+      : {}),
     blocks: [page],
     types: [{ name: "page", label: "Page", kind: "page", root: "page" }],
     bindings: (e): FolioBindings => ({
@@ -59,7 +70,11 @@ function makeFolio(db?: D1Database) {
   });
 }
 
-function pageDoc(title: string, related?: string): Doc {
+function pageDoc(
+  title: string,
+  related?: string,
+  extra: Record<string, string | string[]> = {},
+): Doc {
   return {
     root: "root0000",
     bloks: {
@@ -69,19 +84,34 @@ function pageDoc(title: string, related?: string): Doc {
         parent: null,
         slot: null,
         order: "a0",
-        data: { title, ...(related ? { related } : {}) },
+        data: { title, ...(related ? { related } : {}), ...extra },
       },
     },
   };
 }
 
-async function insertPage(id: string, title: string, related?: string, site = "default") {
+async function insertPage(
+  id: string,
+  title: string,
+  related?: string,
+  site = "default",
+  extra: Record<string, string | string[]> = {},
+) {
   await env.DB.prepare(
     `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at,
                           published_doc, published_at, site_id)
      values (?, 'page', null, ?, ?, 'a0', ?, ?, ?, ?, ?)`,
   )
-    .bind(id, id, id, title, Date.now(), JSON.stringify(pageDoc(title, related)), Date.now(), site)
+    .bind(
+      id,
+      id,
+      id,
+      title,
+      Date.now(),
+      JSON.stringify(pageDoc(title, related, extra)),
+      Date.now(),
+      site,
+    )
     .run();
 }
 
@@ -212,5 +242,57 @@ describe("resolve(): the second hop", () => {
     const spy = counting(env.DB);
     await makeFolio(spy.db).resolve(env, pageDoc("A", "sty_hn_b"));
     expect(spy.state.prepares).toBe(2);
+  });
+
+  it("published: never loads a gated page as a second-hop document", async () => {
+    await insertPage("sty_hg_g", "Gated", undefined, "default", { access: "members" });
+    await insertPage("sty_hg_o", "Open", undefined, "default", { access: "public" });
+    await insertPage("sty_hg_b", "B", "sty_hg_g", "default", {
+      access: "public",
+      more: ["sty_hg_o"],
+    });
+    const resolution = await makeFolio(undefined, true).resolve(env, pageDoc("A", "sty_hg_b"));
+    // The ungated sibling still loads, so this is the gate and not a dead read.
+    expect(Object.keys(resolution.docs ?? {}).sort()).toEqual(["sty_hg_b", "sty_hg_o"]);
+  });
+
+  it("draft: never hands a gated page back as a second-hop document", async () => {
+    await insertPage("sty_hh_g", "Gated", undefined, "default", { access: "members" });
+    await insertPage("sty_hh_b", "B", "sty_hh_g", "default", { access: "public" });
+    const resolution = await makeFolio(undefined, true).resolve(env, pageDoc("A", "sty_hh_b"), {
+      draft: true,
+    });
+    expect(Object.keys(resolution.docs ?? {})).toEqual(["sty_hh_b"]);
+  });
+
+  it("caps the second hop at 50 documents, published", async () => {
+    const ids = Array.from({ length: 55 }, (_, i) => `sty_hk_${String(i).padStart(2, "0")}`);
+    for (const id of ids) await insertPage(id, id);
+    await insertPage("sty_hk_b", "B", undefined, "default", { more: ids });
+    const resolution = await makeFolio().resolve(env, pageDoc("A", "sty_hk_b"));
+    expect(Object.keys(resolution.docs ?? {})).toHaveLength(1 + 50);
+  });
+
+  it("caps the second hop at 50 documents, draft: no object past the cap", async () => {
+    const ids = Array.from({ length: 55 }, (_, i) => `sty_hl_${String(i).padStart(2, "0")}`);
+    for (const id of ids) await insertPage(id, id);
+    await insertPage("sty_hl_b", "B", undefined, "default", { more: ids });
+    touched.length = 0;
+    const resolution = await makeFolio().resolve(env, pageDoc("A", "sty_hl_b"), { draft: true });
+    expect(Object.keys(resolution.docs ?? {})).toHaveLength(1 + 50);
+    expect(touched.filter((n) => n.startsWith("sty_hl_") && n !== "sty_hl_b")).toHaveLength(50);
+  });
+
+  it("never loads the page itself as a second-hop document", async () => {
+    await insertPage("sty_hs_a", "A", "sty_hs_b");
+    await insertPage("sty_hs_b", "B", "sty_hs_a");
+    const own = { id: "sty_hs_a" } as never;
+    const published = await makeFolio().resolve(env, pageDoc("A", "sty_hs_b"), { story: own });
+    expect(Object.keys(published.docs ?? {})).toEqual(["sty_hs_b"]);
+    const draft = await makeFolio().resolve(env, pageDoc("A", "sty_hs_b"), {
+      story: own,
+      draft: true,
+    });
+    expect(Object.keys(draft.docs ?? {})).toEqual(["sty_hs_b"]);
   });
 });
