@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Registry, SiteRef } from "../../../src/core/sites";
 import { FolioError } from "../../../src/server/errors";
 import {
@@ -10,6 +10,7 @@ import {
   readRegistry,
   registrySnapshot,
   routeRequest,
+  SNAPSHOT_MAX_STALE_MS,
   SNAPSHOT_TTL_MS,
   validateSiteId,
 } from "../../../src/server/sites";
@@ -219,6 +220,70 @@ describe("registrySnapshot", () => {
     clock += 1;
     await snap.get(db);
     expect(reads).toBe(2);
+  });
+
+  describe("when a refresh fails", () => {
+    const boom = new Error("D1 unavailable");
+    const failing = (clock: { t: number }, opts: { maxStale?: number } = {}) => {
+      let reads = 0;
+      let fail = false;
+      const snap = registrySnapshot({
+        now: () => clock.t,
+        ...opts,
+        read: async () => {
+          reads++;
+          if (fail) throw boom;
+          return registry;
+        },
+      });
+      return { snap, reads: () => reads, failNow: () => (fail = true) };
+    };
+
+    it("serves the held copy, warns, and reads again on the next call", async () => {
+      const clock = { t: 0 };
+      const f = failing(clock);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await f.snap.get(db);
+      f.failNow();
+      clock.t = SNAPSHOT_TTL_MS;
+      expect(await f.snap.get(db)).toBe(registry);
+      expect(warn).toHaveBeenCalledWith(expect.any(String), boom);
+      expect(f.reads()).toBe(2);
+      // held.at was not moved, so the next request retries rather than trusting it.
+      await f.snap.get(db);
+      expect(f.reads()).toBe(3);
+      warn.mockRestore();
+    });
+
+    it("retries once with nothing held, then rejects", async () => {
+      const f = failing({ t: 0 });
+      f.failNow();
+      await expect(f.snap.get(db)).rejects.toBe(boom);
+      expect(f.reads()).toBe(2);
+    });
+
+    it("rejects once the held copy is past the staleness ceiling", async () => {
+      const clock = { t: 0 };
+      const f = failing(clock);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await f.snap.get(db);
+      f.failNow();
+      clock.t = SNAPSHOT_MAX_STALE_MS - 1;
+      expect(await f.snap.get(db)).toBe(registry);
+      clock.t = SNAPSHOT_MAX_STALE_MS;
+      await expect(f.snap.get(db)).rejects.toBe(boom);
+      warn.mockRestore();
+    });
+
+    it("never resurrects a dropped copy", async () => {
+      const clock = { t: 0 };
+      const f = failing(clock);
+      await f.snap.get(db);
+      f.snap.drop();
+      f.failNow();
+      clock.t = SNAPSHOT_TTL_MS;
+      await expect(f.snap.get(db)).rejects.toBe(boom);
+    });
   });
 
   it("drops at once for the isolate that wrote", async () => {
