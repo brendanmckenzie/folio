@@ -9,9 +9,16 @@ import type { Doc } from "../../core/doc";
 import { isKnownLocale, translationStatus } from "../../core/locales";
 import type { Page } from "../../core/pagination";
 import type { DocumentType } from "../../core/schema";
-import { DEFAULT_SITE, type Registry as SiteRegistry } from "../../core/sites";
+import { NO_STORE } from "../../core/cache-tags";
+import {
+  chain,
+  DEFAULT_SITE,
+  type Registry as SiteRegistry,
+  SHARED_SCOPE,
+  sitesUnder,
+} from "../../core/sites";
 import { ancestorPaths, type StoryMeta } from "../../core/story";
-import { actorString } from "../auth/roles";
+import { type Actor, actorString, mayPreviewDrafts } from "../auth/roles";
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from "../documents";
 import { FolioError, rethrow } from "../errors";
@@ -29,7 +36,7 @@ import {
   requireAccess,
 } from "../middleware";
 import { publish, unpublish } from "../publish";
-import type { BrandRuntime, FolioRuntime } from "../runtime";
+import type { BrandRuntime, FolioRuntime, SiteRender } from "../runtime";
 import {
   countStories,
   createStory,
@@ -147,6 +154,62 @@ export async function sweepOf<Env>(
     .filter((row) => row.brand === id)
     .map((row) => row.id);
   return { id, scopes, registry };
+}
+
+/**
+ * The render a draft preview resolves on, for the request's scope, optionally *as*
+ * another site (`?site=`, the site the editor's pane previews).
+ *
+ * **The named site is authorised the way `site/start` authorises it, and then resolved
+ * on its full chain.** The pane's iframe already renders that site's whole chain with
+ * a preview grant minted under `mayPreviewDrafts`, so the admin's resolution must
+ * agree with it: narrowing the chain below that made a group editor's preview swap
+ * alpha's layers for north's, and a shared-only caller's lose them. `mayPreviewDrafts`
+ * is the one rule for who sees a site's drafts, for a person and for a token alike, so
+ * it also keeps `?site=` from revealing a site's name, status or hosts to a caller who
+ * could not otherwise see it.
+ *
+ * A site that is unknown, cannot show the story (`sitesUnder` its owner), is another
+ * brand's, or is one the caller may not preview all answer **identically**, so the
+ * parameter is no oracle for site ids.
+ *
+ * With no site named: a site as itself, a group as a host-less stand-in on its own
+ * chain (`routes/editor.ts`' `scopeRender`, which this mirrors), and `shared` as a
+ * stand-in on `shared`'s — it is in neither list, and resolving it on no site at all
+ * would answer an empty resolution. Null for a scope the snapshot does not hold.
+ */
+function previewRender(
+  registry: SiteRegistry,
+  scope: string | null,
+  actor: Actor | null,
+  authed: boolean,
+  named: { site: string; owner: string; brand: string | null } | undefined,
+): SiteRender | null {
+  if (scope === null) return null;
+  if (named) {
+    const site = registry.sites.find((s) => s.id === named.site);
+    if (
+      !site ||
+      !sitesUnder(registry, named.owner).includes(site.id) ||
+      (named.brand !== null && site.brand !== named.brand) ||
+      // Under `auth: 'open'` there is no caller to ask, and every route is open; the
+      // other call sites of this rule gate the same way.
+      (authed && !mayPreviewDrafts(actor, registry, site.id))
+    ) {
+      throw new FolioError("not_found", "Unknown site");
+    }
+    return { site, surface: "preview", chain: chain(registry, site.id) };
+  }
+  const site = registry.sites.find((s) => s.id === scope);
+  if (site) return { site, surface: "preview", chain: chain(registry, site.id) };
+  const group = registry.groups.find((g) => g.id === scope);
+  const standIn = (id: string, name: string, brand: string | null): SiteRender => ({
+    site: { id, name, group: null, status: "preview", hosts: [], preview: null, brand },
+    surface: "preview",
+    chain: chain(registry, id),
+  });
+  if (group) return standIn(group.id, group.name, group.brand);
+  return scope === SHARED_SCOPE && registry.shared ? standIn(scope, "Shared", null) : null;
 }
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -680,6 +743,63 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     requireAccess<Env>(rt, READ_DRAFT),
     loadStory<Env>(rt, "read"),
     async (c) => c.json({ doc: await draftOf(c, rt)(c.var.story) }),
+  );
+
+  /**
+   * The resolution the server's own preview page would bootstrap for this story:
+   * the editor's preview is given this and not a hand-built copy
+   * (`useServerResolution`), so a pass-three link, a breadcrumb, a form inside a
+   * referenced card and `site`/`path` never vanish on the first frame.
+   *
+   * **It is `brand.resolve` over the draft, exactly as `previewPage` calls it**, which
+   * is the point: any second assembly of a `Resolution` is a second place for it to
+   * differ. Fetched when the document's *set* of ids changes, never per keystroke;
+   * a field edit reaches the preview through the mutation stream, not through here.
+   *
+   * Same gate and fence as `/document`: `READ_DRAFT`, and `loadStory` 404s a story
+   * outside the chain *before* `draftOf` runs, because asking a deleted story for its
+   * draft creates a Durable Object for it. A preview never writes: on a multi-site
+   * deployment `resolve` reads layers without `ensureSingleton` when it is given a
+   * site, and it always is here. The admin asks on its **own** mount and names the
+   * site its pane previews as `?site=`; that site is context only, and the chain
+   * resolved on is that site's full chain, but only for a caller who may preview it
+   * (`previewRender`, `mayPreviewDrafts`). (Asking on the pane site's own mount
+   * instead refused a caller whose only role is on `shared`, who may nonetheless
+   * preview there.)
+   */
+  app.get(
+    "/story/:id/resolution",
+    requireAccess<Env>(rt, READ_DRAFT),
+    loadStory<Env>(rt, "read"),
+    async (c) => {
+      const story = c.var.story;
+      const locale = c.req.query("locale");
+      if (locale !== undefined && !isKnownLocale(rt.locales, locale)) {
+        throw new FolioError("unsupported", `Unknown locale: ${locale}`);
+      }
+      const brand = brandOf(c);
+      const registry = rt.sites ? await rt.sites.registry(c.env) : undefined;
+      const named = c.req.query("site");
+      const render = registry
+        ? previewRender(
+            registry,
+            c.var.scope,
+            c.var.actor,
+            rt.auth.mode === "session",
+            named
+              ? { site: named, owner: story.site ?? DEFAULT_SITE, brand: brand.brand?.id ?? null }
+              : undefined,
+          )
+        : undefined;
+      const doc = await draftOf(c, rt)(story);
+      const resolution = await brand.resolve(c.var.bindings(), doc, {
+        draft: true,
+        story,
+        ...(locale !== undefined ? { locale } : {}),
+        ...(render !== undefined ? { site: render } : {}),
+      });
+      return c.json(resolution, 200, { "cache-control": NO_STORE });
+    },
   );
 
   /**

@@ -499,7 +499,7 @@ describe("the preview pane", () => {
     expect(open.getAttribute("target")).toBe("_blank");
   });
 
-  it("hands the pane the unscoped asset route, which is the only one a preview origin serves", async () => {
+  it("posts the pane no resolution of the admin's own: the server's bootstrap stands until one is built", async () => {
     await mountAt("/folio/~alpha/edit/sty_home", PLATFORM);
     const win = frame()?.contentWindow as Window;
     // happy-dom refuses a cross-origin target, so the spy swallows the call.
@@ -513,12 +513,12 @@ describe("the preview pane", () => {
         }),
       );
     });
-    const resolved = post.mock.calls
-      .map(([m]) => m as { type?: string; resolution?: { assetBase: string } })
-      .filter((m) => m.type === "resolve");
-    expect(resolved.length).toBeGreaterThan(0);
-    // `{base}/~alpha/asset/<key>` is a 404 on a site's host (`servesOnSite`).
-    for (const m of resolved) expect(m.resolution?.assetBase).toBe("/folio/asset");
+    const types = post.mock.calls.map(([m]) => (m as { type?: string }).type);
+    // A client-built resolution here is what dropped pass-three links, ancestors and
+    // `site`/`path` from the first frame (#77). Its asset base was the admin's to guess,
+    // which is why this test used to pin it; the server's own resolution carries it now.
+    expect(types).not.toContain("resolve");
+    expect(types).toContain("select");
   });
 
   it("ignores the same message from any other origin", async () => {

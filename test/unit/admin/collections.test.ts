@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { select, text } from "../../../src/core/fields";
-import type { ContentPage } from "../../../src/core/query";
 import { queryToParams } from "../../../src/core/query";
 import type { SchemaIndex } from "../../../src/core/schema";
-import {
-  keysToFetch,
-  loadCollections,
-  mergeCollections,
-  NO_COLLECTIONS,
-} from "../../../src/admin/hooks/useCollections";
 import {
   filterField,
   filterValue,
@@ -19,10 +12,9 @@ import {
 /**
  * The admin half of collections (`collections.md` decision 5, phase 3 and 4).
  *
- * The property that matters and is easiest to lose: nothing here may fetch per
- * render. `useCollections` keys off the *set* of queries, so the tests below are of
- * the pure pieces that make that possible — which keys are outstanding, and what a
- * load's outcome folds into.
+ * The pure pieces of the admin's collection field: filter helpers and the query's
+ * wire encoding. (The fetching hook went when the server began building the
+ * editor's resolution, `useServerResolution`.)
  *
  * The three filter helpers moved with the field: `admin/CollectionInput.tsx` became
  * `admin/ui/screens/fields/CollectionField.tsx` in port phase 7b, which carried them
@@ -121,57 +113,5 @@ describe("queryToParams", () => {
     ).toEqual(["t:in:a,b"]);
     expect(queryToParams({ parent: null }).get("parent")).toBe("");
     expect(queryToParams({}).has("parent")).toBe(false);
-  });
-});
-
-describe("useCollections: the pure pieces", () => {
-  it("asks only for keys that are not already settled either way", () => {
-    const known = {
-      answers: { a: { items: [], total: 0, page: 1, perPage: 6, pages: 0 } },
-      failed: new Set(["b"]),
-    };
-    expect(keysToFetch(["a", "b", "c"], known)).toEqual(["c"]);
-  });
-
-  it("remembers a refused query, so the effect cannot retry it forever", async () => {
-    const result = await loadCollections(
-      "/folio/api",
-      [["k", { type: "insight" }]],
-      async () => new Response('{"error":{}}', { status: 400 }),
-    );
-    expect(result.failed).toEqual(["k"]);
-    expect(result.answers).toEqual({});
-  });
-
-  it("does NOT remember a transport failure, which is no answer about the query", async () => {
-    const result = await loadCollections("/folio/api", [["k", { type: "insight" }]], async () => {
-      throw new Error("offline");
-    });
-    expect(result.failed).toEqual([]);
-    expect(result.answers).toEqual({});
-    // Folding nothing in returns the same object, which is what stops the effect
-    // looping on its own state.
-    expect(mergeCollections(NO_COLLECTIONS, result)).toBe(NO_COLLECTIONS);
-  });
-
-  it("marks every answer stale: the admin reads PUBLISHED content", async () => {
-    const page: ContentPage = { items: [], total: 3, page: 1, perPage: 6, pages: 1 };
-    const result = await loadCollections(
-      "/folio/api",
-      [["k", { type: "insight" }]],
-      async () => new Response(JSON.stringify(page), { status: 200 }),
-    );
-    expect(result.answers.k).toEqual({ ...page, stale: true });
-  });
-
-  it("sends the query to the content route, encoded", async () => {
-    let seen = "";
-    await loadCollections("/folio/api", [["k", { type: "insight", perPage: 4 }]], async (url) => {
-      seen = String(url);
-      return new Response('{"items":[],"total":0,"page":1,"perPage":4,"pages":0}');
-    });
-    expect(seen).toContain("/folio/api/content?");
-    expect(seen).toContain("type=insight");
-    expect(seen).toContain("perPage=4");
   });
 });

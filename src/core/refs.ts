@@ -137,7 +137,7 @@ export function linkedIds(doc: Doc, schema: SchemaIndex): string[] {
  * every locale.
  *
  * `referencedIds` in resolve.ts is the public, source-locale-only form that
- * predates this file and is what `useReferencedDocs` keys off. This is the same
+ * predates this file and is what the editor once keyed its fetches off. This is the same
  * walk widened to `i18n`, for the two callers that must not miss a translated
  * target: the narrowed resolution, and `content_refs`.
  *

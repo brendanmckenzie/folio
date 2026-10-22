@@ -31,8 +31,8 @@ import { messageOf } from "../useContent";
  *    server. A site with more forms than one page holds is told so rather than
  *    quietly filtering a subset.
  *  - **What is picked is drawn from that same list, not from the resolution.**
- *    `Resolution.forms` does carry the descriptor — `useResolvedForms` fetches
- *    it for the preview — but a descriptor is what a *visitor* gets, and it has
+ *    `Resolution.forms` does carry the descriptor — the server-built resolution
+ *    (`useServerResolution`) carries it for the preview — but a descriptor is what a *visitor* gets, and it has
  *    no `label`: an editor picked "Contact enquiry" and must not then be shown
  *    `contact-enquiry`. Holding the rows also means a pick renders immediately
  *    instead of flashing "not found" until the descriptor lands.
