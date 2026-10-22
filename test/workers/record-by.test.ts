@@ -278,7 +278,7 @@ describe("an editor in draft mode", () => {
    * The mirror cuts a string at 512 characters, so a stored prefix must never be
    * mistaken for a longer value: the candidate is confirmed against the draft itself.
    */
-  it("does not match a value on the mirror's truncated prefix", async () => {
+  it("matches a long value on the mirror's stored prefix, confirmed against the draft", async () => {
     const long = "x".repeat(600);
     await seed({ id: "rb_long", name: "Long", slug: long, published: false, mirror: false });
     await env.DB.prepare("update stories set draft_data = ? where id = 'rb_long'")
@@ -286,8 +286,17 @@ describe("an editor in draft mode", () => {
       .run();
     const cookie = await editorCookie();
     const reader = folio.reader(env, req(`${cookie}; ${DRAFT}`));
+    // The prefix alone is another value: the draft document says so.
     expect(await reader.recordBy("rbArtistType", "slug", long.slice(0, 512))).toBeNull();
-    expect(await reader.recordBy("rbArtistType", "slug", long)).toBeNull();
+    expect((await reader.recordBy("rbArtistType", "slug", long))?.story.id).toBe("rb_long");
+  });
+
+  it("finds a slug that is exactly the mirror's cut length", async () => {
+    const exact = "y".repeat(512);
+    await seed({ id: "rb_exact", name: "Exact", slug: exact, published: false, mirror: true });
+    const cookie = await editorCookie();
+    const reader = folio.reader(env, req(`${cookie}; ${DRAFT}`));
+    expect((await reader.recordBy("rbArtistType", "slug", exact))?.story.id).toBe("rb_exact");
   });
 });
 

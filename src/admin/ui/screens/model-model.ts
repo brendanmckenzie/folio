@@ -517,6 +517,10 @@ const CHECKS: Record<string, { title: string; body: string }> = {
     title: "Documents approaching the size cap",
     body: "The transaction that crosses the document cap is refused whole, so the edit that crosses it is the one that is lost. There is no soft landing: split the page, retire a locale, or move a block off it while there is still room.",
   },
+  "unique-duplicate": {
+    title: "Published records sharing a unique value",
+    body: "A field declared unique is held by more than one published record of the same type in the same scope, so looking a record up by it is ambiguous and only one of them is served. The publish check cannot see this: it arrives from two publishes at the same moment, or from declaring unique over content that already had duplicates. Change the value on all but one of them and republish.",
+  },
   "unknown-condition-field": {
     title: "A showIf naming a field that does not exist",
     body: "Condition matching is total, so an unknown field name evaluates false and never throws — the input is simply never drawn, and nothing anywhere says why.",

@@ -1673,6 +1673,9 @@ export interface RecordLookup {
   /** `''` for the source locale, as `content_index` keys it. */
   locale: string;
   value: string;
+  /** The locale's fallback chain, nearest first (`localeContext`), so a draft is matched
+   * on any value `fieldValue` could read for the locale. */
+  fallbacks?: readonly string[];
 }
 
 /** Nearest scope first, then id, so two rows a race let through still answer the same way. */
@@ -1724,9 +1727,11 @@ export async function recordByField(
  * in its draft is found at the new slug and **not** at the published one. A story with
  * no mirror yet (never edited since `0015`) falls back to its published value.
  *
- * The mirror cuts a string at `DRAFT_STRING_MAX`, so a value that long is never
- * matched on it (it could equal the stored prefix of a longer one), and the caller
- * confirms each candidate against the draft document it reads.
+ * The mirror cuts a string at `DRAFT_STRING_MAX`, so a value that long is matched on
+ * its stored prefix, and the caller confirms each candidate against the draft document
+ * it reads. One limit remains: a root block whose scalars exceed the mirror's whole
+ * budget (`DRAFT_DATA_MAX`) before this field is reached drops it from the mirror, and
+ * an editor then cannot find that record by its draft value until it is published.
  */
 export async function recordDraftCandidates(
   db: FolioDb,
@@ -1738,16 +1743,17 @@ export async function recordDraftCandidates(
   const quote = (name: string) => `"${name.replaceAll('"', "")}"`;
   const paths = [`$.data.${quote(q.field)}`];
   if (q.locale !== "") paths.push(`$.i18n.${quote(q.locale)}.${quote(q.field)}`);
-  const mirrored =
-    q.value.length >= DRAFT_STRING_MAX
-      ? null
-      : db
-          .prepare(
-            `select ${COLS} from stories
-              where type = ? and ${scope.sql} and draft_data is not null
-                and (${paths.map(() => "(json_type(draft_data, ?) = 'text' and json_extract(draft_data, ?) = ?)").join(" or ")})`,
-          )
-          .bind(q.type, ...scope.binds, ...paths.flatMap((p) => [p, p, q.value]));
+  for (const code of q.fallbacks ?? []) paths.push(`$.i18n.${quote(code)}.${quote(q.field)}`);
+  // The mirror holds a string cut at `DRAFT_STRING_MAX`, so a longer value is matched on
+  // its stored prefix and the caller's confirmation against the draft document decides.
+  const needle = q.value.slice(0, DRAFT_STRING_MAX);
+  const mirrored = db
+    .prepare(
+      `select ${COLS} from stories
+        where type = ? and ${scope.sql} and draft_data is not null
+          and (${paths.map(() => "(json_type(draft_data, ?) = 'text' and json_extract(draft_data, ?) = ?)").join(" or ")})`,
+    )
+    .bind(q.type, ...scope.binds, ...paths.flatMap((p) => [p, p, needle]));
   const published = db
     .prepare(
       `select ${COLS} from stories
@@ -1756,7 +1762,7 @@ export async function recordDraftCandidates(
                       where field = ? and locale = ? and text_value = ?)`,
     )
     .bind(q.type, ...scope.binds, q.field, q.locale, q.value);
-  const answers = await db.batch(mirrored ? [mirrored, published] : [published]);
+  const answers = await db.batch([mirrored, published]);
   const rows = answers.flatMap((a) => (a.results ?? []) as StoryRow[]);
   return inChainOrder(chain, rows).map(withState);
 }

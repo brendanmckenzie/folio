@@ -1,4 +1,4 @@
-import { cacheHeaders, cacheTags, NO_STORE } from "../core/cache-tags";
+import { cacheHeaders, cacheTags, NO_STORE, scopedTypeTag } from "../core/cache-tags";
 import { type Blok, childrenOf, type Doc, type Json } from "../core/doc";
 import { gateValue, isUngated, type PageAccess, redactDoc } from "../core/gate";
 import { mergeLayers } from "../core/layers";
@@ -1491,7 +1491,13 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         }
 
         const ctx = localeContext(rt.locales, locale);
-        const lookup = { type: typeName, field, locale: ctx?.code ?? "", value };
+        const lookup = {
+          type: typeName,
+          field,
+          locale: ctx?.code ?? "",
+          value,
+          ...(ctx ? { fallbacks: ctx.fallbacks } : {}),
+        };
 
         if (wantsDraft() && (await draftAdmitted(within))) {
           for (const candidate of await recordDraftCandidates(db, within.chain, lookup)) {
@@ -1508,7 +1514,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
         const found = await recordByField(db, within.chain, lookup);
         if (!found?.doc) return null;
-        return pageOf(within, brand, found.story, found.doc, false, opts);
+        const hit = await pageOf(within, brand, found.story, found.doc, false, opts);
+        // On a chain the nearest scope's record wins, so a publish of this type in any
+        // nearer scope can change what this URL answers, and the page carries no tag for
+        // it: a record has no path and is in nobody's resolution. Depend on the type at
+        // every scope the chain reaches, which is what that publish purges.
+        const tag = hit.headers["cache-tag"];
+        if (tag === undefined || !within.render) return hit;
+        const scoped = within.render.chain.map((scope) => scopedTypeTag(typeName, scope));
+        return { ...hit, headers: { ...hit.headers, "cache-tag": [tag, ...scoped].join(",") } };
       },
       resolve: async (doc, opts) =>
         (await requireBrand()).resolve(bindings, doc, {

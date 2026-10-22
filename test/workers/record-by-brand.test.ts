@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { defineBlock, defineRecord, text } from "../../src/core";
+import { scopedTypeTag } from "../../src/core/cache-tags";
 import type { Doc } from "../../src/core/doc";
 import type { DocumentType } from "../../src/core/schema";
 import type { FolioBindings, FolioBrand, FolioConfig } from "../../src/server";
@@ -137,6 +138,23 @@ describe("recordBy on a deployment with sites and brands", () => {
     );
     // Control: its own brand declares it, so a miss is null and not a throw.
     expect(await reader("kenya.example").recordBy("venue", "slug", "x")).toBeNull();
+  });
+
+  /**
+   * The nearest scope's record wins, so a publish of the type at kenya must purge the
+   * page kenya serves from east's record. That publish purges `type:artist@kenya`
+   * (`scopedTagsFor`), and a record page carries no tag of its own type, so the hit
+   * has to.
+   */
+  it("tags a hit with its type at every scope of the chain, so a nearer publish purges it", async () => {
+    const hit = await reader("kenya.example").recordBy("artist", "slug", "ada");
+    expect(hit?.story.id).toBe("rb2_east");
+    const tags = hit!.headers["cache-tag"]!.split(",");
+    expect(tags).toContain(scopedTypeTag("artist", "kenya"));
+    expect(tags).toContain(scopedTypeTag("artist", "east"));
+    expect(tags).toContain("story:rb2_east");
+    // Another brand's scope is not in this chain.
+    expect(tags).not.toContain(scopedTypeTag("artist", "beta-site"));
   });
 
   it("answers null for a host that is no site", async () => {
