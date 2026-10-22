@@ -19,6 +19,7 @@
  */
 import * as v from "valibot";
 import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from "../core/assets";
+import { MAX_SLUG } from "../core/story";
 import { conditionRefusal, type FieldCondition } from "../core/conditions";
 import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
@@ -161,14 +162,14 @@ export function clampText(raw: unknown, max: number): string | undefined {
 const OBJECT = "must be a JSON object";
 
 /**
- * `slug` is capped before slugify, which then truncates to 64 (core/story.ts):
- * the cap exists so an unbounded string is never parsed or slugified, not to
- * describe the stored value.
+ * `slug` is capped at `MAX_SLUG` (core/story.ts), and a supplied slug keeps its
+ * length up to that; only one derived from the title is cut to 64. The cap is
+ * also what keeps an unbounded string from ever being slugified.
  */
 export const StoryCreateBody = v.object(
   {
     title: required(300),
-    slug: v.optional(bounded(200)),
+    slug: v.optional(bounded(MAX_SLUG)),
     parentId: v.nullish(ID),
     /**
      * Document type name (`document-types.md`). Absent means the default page
@@ -197,7 +198,7 @@ export const StoryCreateBody = v.object(
 export const StoryPatchBody = v.object(
   {
     title: v.optional(required(300)),
-    slug: v.optional(bounded(200)),
+    slug: v.optional(bounded(MAX_SLUG)),
     parentId: v.nullish(ID),
     /**
      * Accepted so a client that round-trips a whole story object is not
@@ -300,7 +301,7 @@ export const AssetTagBody = v.object({ name: required(60) }, OBJECT);
  * slash-joined chain of *slugified* ancestor names that `asset-folders.ts`
  * derives from it. So this bounds the typed string and nothing more: 120 is the
  * cap on what a person types, and `slugify` truncates its own output to 64 for
- * the segment.
+ * the segment (a folder name is always derived, never supplied).
  *
  * `parentId` is optional **and** nullable, and the two mean different things:
  * absent is "the top level" on a create and "leave the parent alone" on a patch,
@@ -536,7 +537,7 @@ export const FieldsPatchBody = v.object(
 export const DocumentCreateBody = v.object(
   {
     title: required(300),
-    slug: v.optional(bounded(200)),
+    slug: v.optional(bounded(MAX_SLUG)),
     parentId: v.nullish(ID),
     type: v.optional(TYPE_NAME),
     /** As `StoryCreateBody.root`: the scope's home page. */
@@ -573,7 +574,7 @@ export function idempotencyKeyHeader(raw: string | undefined): string | undefine
  * mistake.
  */
 export function storyPathParam(raw: string | undefined): string {
-  return parseOrThrow(bounded(500), raw ?? "", "path");
+  return parseOrThrow(bounded(1024), raw ?? "", "path");
 }
 
 /* ------------------------------------------------- identity and access --- */

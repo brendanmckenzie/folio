@@ -565,14 +565,22 @@ export function liveDescendants(rows: readonly StoryMeta[], id: string): StoryMe
   return rows.filter((r) => ids.has(r.id) && isLive(r.state));
 }
 
-export function slugify(input: string): string {
+/**
+ * The most a slug may be when somebody **supplies** one. A slug derived from a
+ * title is still cut at `slugify`'s default 64, which keeps a long headline from
+ * becoming a long URL; one a person or a script chose is theirs to keep, up to
+ * this. 200 is the bound the request bodies already screen a slug to.
+ */
+export const MAX_SLUG = 200;
+
+export function slugify(input: string, max = 64): string {
   return (
     input
       .toLowerCase()
       .normalize("NFKD")
       .replace(/[^\p{Letter}\p{Number}]+/gu, "-")
       .replace(/^-+|-+$/g, "")
-      .slice(0, 64) || "untitled"
+      .slice(0, max) || "untitled"
   );
 }
 
