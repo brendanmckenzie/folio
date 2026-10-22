@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  resolutionApiBase,
-  resolutionSignature,
-} from "../../../src/admin/hooks/useServerResolution";
+import { resolutionSignature, resolutionUrl } from "../../../src/admin/hooks/useServerResolution";
 import type { Doc } from "../../../src/core/doc";
 import type { BlockSchema, SchemaIndex } from "../../../src/core/schema";
 
@@ -67,15 +64,11 @@ describe("resolutionSignature", () => {
   });
 });
 
-describe("resolutionApiBase", () => {
-  it("is the admin's own api base with no pane or a single-site pane", () => {
-    expect(resolutionApiBase("/folio/api", "/folio", undefined)).toBe("/folio/api");
-    expect(resolutionApiBase("/folio/api", "/folio", { kind: "none" })).toBe("/folio/api");
-  });
-
-  it("is the pane site's mount on a multi-site deployment, not the scope being shown", () => {
-    const pane = { kind: "site", site: { id: "bravo" } };
-    expect(resolutionApiBase("/folio/~alpha/api", "/folio/~alpha", pane)).toBe("/folio/~bravo/api");
-    expect(resolutionApiBase("/folio/api", "/folio", pane)).toBe("/folio/~bravo/api");
+describe("resolutionUrl", () => {
+  it("is the admin's own mount, with the pane site and locale as query", () => {
+    expect(resolutionUrl("/folio/api", "sty_1")).toBe("/folio/api/story/sty_1/resolution");
+    expect(resolutionUrl("/folio/~alpha/api", "sty_1", { site: "bravo", locale: "fr" })).toBe(
+      "/folio/~alpha/api/story/sty_1/resolution?locale=fr&site=bravo",
+    );
   });
 });

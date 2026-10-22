@@ -12,10 +12,9 @@ import {
 /**
  * The admin half of collections (`collections.md` decision 5, phase 3 and 4).
  *
- * The property that matters and is easiest to lose: nothing here may fetch per
- * render. `useCollections` keys off the *set* of queries, so the tests below are of
- * the pure pieces that make that possible — which keys are outstanding, and what a
- * load's outcome folds into.
+ * The pure pieces of the admin's collection field: filter helpers and the query's
+ * wire encoding. (The fetching hook went when the server began building the
+ * editor's resolution, `useServerResolution`.)
  *
  * The three filter helpers moved with the field: `admin/CollectionInput.tsx` became
  * `admin/ui/screens/fields/CollectionField.tsx` in port phase 7b, which carried them

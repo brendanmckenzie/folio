@@ -15,7 +15,7 @@ import { useMigrations } from "../../hooks/useMigrations";
 import { usePreviewBridge } from "../../hooks/usePreviewBridge";
 import { usePublish } from "../../hooks/usePublish";
 import { usePublishedDoc } from "../../hooks/usePublishedDoc";
-import { resolutionApiBase, useServerResolution } from "../../hooks/useServerResolution";
+import { useServerResolution } from "../../hooks/useServerResolution";
 import { useUndoShortcut } from "../../hooks/useUndoShortcut";
 import { useVersions, useVersionsList } from "../../hooks/useVersions";
 import { canEditIn, type Me } from "../../me";
@@ -208,13 +208,12 @@ export function useEditor(opts: EditorOptions): EditorApi {
 
   /* ------------------------------------------------------------ resolution --- */
 
-  // The pane site's mount on a deployment with `sites`: a shared page is resolved as
-  // the site being previewed would serve it, and `loadStory`'s fence on that mount
-  // decides whether the caller may. Off it (a refusal, say) the preview simply keeps
-  // the server's own bootstrap.
-  const resolutionBase = resolutionApiBase(apiBase, base, opts.pane);
   const serverResolution = useServerResolution({
-    apiBase: resolutionBase,
+    apiBase,
+    // The site the pane previews, as context: the server answers on this admin's own
+    // scope and never widens the caller's reach to that site (`previewRender`).
+    site: opts.pane?.kind === "site" ? opts.pane.site.id : undefined,
+    idle: state.inflight === 0,
     storyId,
     doc: state.doc,
     schema,

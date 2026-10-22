@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Doc } from "../../core/doc";
 import type { LocaleContext } from "../../core/locales";
 import { collectionQueries } from "../../core/query";
 import { formIds, linkedIds, referencedIdsAllLocales } from "../../core/refs";
 import type { Resolution } from "../../core/resolve";
 import type { SchemaIndex } from "../../core/schema";
-import { bareMount } from "../ui/route";
 
 /** How long the id set has to hold still before it is asked about. Long enough that
  * the server's draft has taken the edit that changed it (the socket and this fetch are
@@ -46,20 +45,22 @@ export function resolutionSignature(
 }
 
 /**
- * The JSON base the resolution is fetched from: the pane site's own mount
- * (`{base}/~<site>/api`) when the pane previews a site, else the admin's `apiBase`.
- * The fence on that mount decides whether the caller may read the story as that site
- * would serve it, and a refusal leaves the preview on its bootstrap. Pure and exported
- * so the URL is a test and not a network tab.
+ * The URL the resolution is fetched from. Always the admin's **own** mount, with the
+ * site the pane previews named as `?site=`: asking on the pane site's mount instead
+ * refuses a caller whose only role is on `shared`, who may preview there all the same.
+ * The server treats the site as context and narrows the chain to what the caller's
+ * own scope may read. Pure and exported so the URL is a test and not a network tab.
  */
-export function resolutionApiBase(
+export function resolutionUrl(
   apiBase: string,
-  base: string,
-  pane: { kind: string; site?: { id: string } } | undefined,
+  storyId: string,
+  opts: { locale?: string; site?: string } = {},
 ): string {
-  return pane?.kind === "site" && pane.site
-    ? `${bareMount(base)}/~${encodeURIComponent(pane.site.id)}/api`
-    : apiBase;
+  const query = new URLSearchParams();
+  if (opts.locale) query.set("locale", opts.locale);
+  if (opts.site) query.set("site", opts.site);
+  const tail = query.size > 0 ? `?${query}` : "";
+  return `${apiBase}/story/${encodeURIComponent(storyId)}/resolution${tail}`;
 }
 
 /**
@@ -74,13 +75,21 @@ export function resolutionApiBase(
  * server's.
  *
  * Refetched when `resolutionSignature` changes, after it has held still for
- * `SETTLE_MS`; never per keystroke. A failed fetch keeps what was held. A held
+ * `SETTLE_MS` **and the server has every edit this client sent** (`idle`). The server
+ * resolves its own copy of the draft, so a link picked while the socket is slow or
+ * reconnecting would otherwise be asked about before the server could know it, and
+ * nothing would ask again. A signature already answered is not asked twice, so the
+ * idle flag flickering on each keystroke fetches nothing; never per keystroke. A failed fetch keeps what was held. A held
  * resolution belongs to the story and locale it was fetched for, and is not handed
  * out for any other.
  */
 export function useServerResolution(opts: {
-  /** `{base}/api` on the mount of the site the pane previews. */
+  /** `{base}/api` on the admin's own mount. */
   apiBase: string;
+  /** The site the pane previews, on a deployment with `sites`. */
+  site: string | undefined;
+  /** The store has no unacknowledged transactions: the server's draft is current. */
+  idle: boolean;
   storyId: string;
   doc: Doc | null;
   schema: SchemaIndex;
@@ -90,7 +99,7 @@ export function useServerResolution(opts: {
   /** Moves when the story's place in the tree does (its path). */
   place: string | undefined;
 }): Resolution | null {
-  const { apiBase, storyId, doc, schema, locale, localeCtx, place } = opts;
+  const { apiBase, site, idle, storyId, doc, schema, locale, localeCtx, place } = opts;
   const [held, setHeld] = useState<{ key: string; resolution: Resolution } | null>(null);
   const signature = useMemo(
     () => resolutionSignature(doc, schema, { locale: localeCtx, place }),
@@ -99,22 +108,26 @@ export function useServerResolution(opts: {
   // Whether there is a document at all is the one thing `signature` cannot say for a
   // document with no ids: an empty one is a signature of separators.
   const loaded = doc !== null;
-  const key = `${apiBase}|${storyId}|${locale ?? ""}`;
+  const key = `${apiBase}|${storyId}|${locale ?? ""}|${site ?? ""}`;
+  // What the held answer was fetched for: the key and the signature, so an unchanged
+  // pair is not asked again however often `idle` flips.
+  const answered = useRef<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the dependency that matters; it is what changes when the answer may have
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !idle) return;
+    const asked = `${key}#${signature}`;
+    if (answered.current === asked) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      const query = locale ? `?${new URLSearchParams({ locale })}` : "";
-      fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/resolution${query}`, {
-        signal: controller.signal,
-      })
+      fetch(resolutionUrl(apiBase, storyId, { locale, site }), { signal: controller.signal })
         .then((res) => (res.ok ? (res.json() as Promise<Resolution>) : null))
         .then((resolution) => {
           // A refusal or a transport failure is not an answer about the document:
           // keep what was held rather than blank the preview.
-          if (resolution && !controller.signal.aborted) setHeld({ key, resolution });
+          if (!resolution || controller.signal.aborted) return;
+          answered.current = asked;
+          setHeld({ key, resolution });
         })
         .catch(() => {});
     }, SETTLE_MS);
@@ -122,7 +135,7 @@ export function useServerResolution(opts: {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [apiBase, storyId, locale, loaded, signature, key]);
+  }, [apiBase, site, idle, storyId, locale, loaded, signature, key]);
 
   return held && held.key === key ? held.resolution : null;
 }

@@ -10,7 +10,13 @@ import { isKnownLocale, translationStatus } from "../../core/locales";
 import type { Page } from "../../core/pagination";
 import type { DocumentType } from "../../core/schema";
 import { NO_STORE } from "../../core/cache-tags";
-import { chain, DEFAULT_SITE, type Registry as SiteRegistry } from "../../core/sites";
+import {
+  chain,
+  DEFAULT_SITE,
+  type Registry as SiteRegistry,
+  SHARED_SCOPE,
+  sitesUnder,
+} from "../../core/sites";
 import { ancestorPaths, type StoryMeta } from "../../core/story";
 import { actorString } from "../auth/roles";
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
@@ -151,29 +157,54 @@ export async function sweepOf<Env>(
 }
 
 /**
- * The render a scope's draft preview resolves on: a site as itself, and a group as a
- * host-less stand-in on its own chain (`routes/editor.ts`' `scopeRender`, which this
- * mirrors). Null for a scope the snapshot does not hold, which resolves nothing.
+ * The render a draft preview resolves on, for the request's scope, optionally *as*
+ * another site (`?site=`, the site the editor's pane previews).
+ *
+ * **The named site supplies the context and never the authority.** Its `site`/`path`
+ * data and surface are what the page would render with, but the chain resolved on is
+ * `chain(site)` narrowed to what the request's own scope may already read (`readable`,
+ * the fence `loadStory` just applied). A caller whose only role is on `shared` can
+ * therefore preview a shared page as `alpha` and sees exactly the shared content they
+ * could already read, and nothing of alpha's own. The site must be one that can show
+ * the story (`sitesUnder` its owner), the same rule a share's render site obeys.
+ *
+ * With no site named: a site as itself, a group as a host-less stand-in on its own
+ * chain (`routes/editor.ts`' `scopeRender`, which this mirrors), and `shared` as a
+ * stand-in on `shared`'s — it is in neither list, and resolving it on no site at all
+ * would answer an empty resolution. Null for a scope the snapshot does not hold.
  */
-function previewRender(registry: SiteRegistry, scope: string | null): SiteRender | null {
+function previewRender(
+  registry: SiteRegistry,
+  scope: string | null,
+  readable: readonly string[],
+  named: { site: string; owner: string; brand: string | null } | undefined,
+): SiteRender | null {
   if (scope === null) return null;
+  if (named) {
+    const site = registry.sites.find((s) => s.id === named.site);
+    if (
+      !site ||
+      !sitesUnder(registry, named.owner).includes(site.id) ||
+      (named.brand !== null && site.brand !== named.brand)
+    ) {
+      throw new FolioError("bad_request", `${named.site} is not a site that shows this page`);
+    }
+    return {
+      site,
+      surface: "preview",
+      chain: chain(registry, site.id).filter((id) => readable.includes(id)),
+    };
+  }
   const site = registry.sites.find((s) => s.id === scope);
   if (site) return { site, surface: "preview", chain: chain(registry, site.id) };
   const group = registry.groups.find((g) => g.id === scope);
-  if (!group) return null;
-  return {
-    site: {
-      id: group.id,
-      name: group.name,
-      group: null,
-      status: "preview",
-      hosts: [],
-      preview: null,
-      brand: group.brand,
-    },
+  const standIn = (id: string, name: string, brand: string | null): SiteRender => ({
+    site: { id, name, group: null, status: "preview", hosts: [], preview: null, brand },
     surface: "preview",
-    chain: chain(registry, group.id),
-  };
+    chain: chain(registry, id),
+  });
+  if (group) return standIn(group.id, group.name, group.brand);
+  return scope === SHARED_SCOPE && registry.shared ? standIn(scope, "Shared", null) : null;
 }
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -724,10 +755,12 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * outside the chain *before* `draftOf` runs, because asking a deleted story for its
    * draft creates a Durable Object for it. A preview never writes: on a multi-site
    * deployment `resolve` reads layers without `ensureSingleton` when it is given a
-   * site, and it always is here. The site is the request's own scope, so the chain
-   * resolved on is the chain the fence just checked — the admin asks on the pane
-   * site's mount (`~<site>`), which is how a shared page is resolved as that site
-   * would serve it.
+   * site, and it always is here. The admin asks on its **own** mount and names the
+   * site its pane previews as `?site=`; that site is context only, and the chain
+   * resolved on is narrowed to what this request's scope may already read
+   * (`previewRender`), so a caller is never shown more than `/document` would give
+   * them. (Asking on the pane site's own mount instead refused a caller whose only
+   * role is on `shared`, who may nonetheless preview there.)
    */
   app.get(
     "/story/:id/resolution",
@@ -741,7 +774,17 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       }
       const brand = brandOf(c);
       const registry = rt.sites ? await rt.sites.registry(c.env) : undefined;
-      const render = registry ? previewRender(registry, c.var.scope) : undefined;
+      const named = c.req.query("site");
+      const render = registry
+        ? previewRender(
+            registry,
+            c.var.scope,
+            await requestChain(c, rt),
+            named
+              ? { site: named, owner: story.site ?? DEFAULT_SITE, brand: brand.brand?.id ?? null }
+              : undefined,
+          )
+        : undefined;
       const doc = await draftOf(c, rt)(story);
       const resolution = await brand.resolve(c.var.bindings(), doc, {
         draft: true,

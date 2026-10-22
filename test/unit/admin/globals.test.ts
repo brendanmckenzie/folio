@@ -8,7 +8,7 @@ import type { StoryMeta } from "../../../src/core/story";
  * previewed in context. It lives in `ui/useStory.ts`, beside the `usePreviewHost` that
  * supplies its candidate. The candidate list is a `StoryMeta[]` rather than the old
  * `StoryNode[]` because the search is the server's now, so nothing here has children.
- * (`globalTypes` went with `useGlobalDocs`, once the server built the resolution.)
+ * (The `globalTypes` helper went once the server built the editor's resolution.)
  */
 
 const type = (overrides: Partial<DocumentType> = {}): DocumentType => ({
