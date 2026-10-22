@@ -46,6 +46,13 @@ export const INTERNAL_HEADERS: readonly string[] = [SCOPE_HEADER, SITE_HEADER, S
 /** How long an isolate trusts its registry before the next request re-reads it. */
 export const SNAPSHOT_TTL_MS = 10_000;
 
+/**
+ * How old a held registry may be and still answer a request whose refresh failed.
+ * Past this the failure is the request's, because a copy that stale may predate a
+ * registry write this isolate never heard about.
+ */
+export const SNAPSHOT_MAX_STALE_MS = 60_000;
+
 type SiteRow = {
   id: string;
   kind: "site" | "group";
@@ -136,11 +143,26 @@ export interface RegistrySnapshot {
  * settled `Registry`, a plain value, is held for later requests. A `drop()` that
  * lands while a read is in flight wins: that read's answer may predate the write, so
  * it goes to the request that issued it and is not kept.
+ *
+ * **A failed refresh is not the request's failure while a good copy is held**
+ * (stale-if-error). A transient D1 error after the ttl would otherwise 500 every
+ * request through `handle` and `cacheProps` with a usable registry in hand. The
+ * settled held value answers instead, with a `console.warn`, and `held.at` is left
+ * alone so the next request retries the read. That copy is served only while it is
+ * younger than `SNAPSHOT_MAX_STALE_MS`, and `drop()` clears it, so a registry write
+ * is never answered from a copy that predates it. With nothing servable (a cold
+ * isolate, a dropped or too-old copy) the read is retried once, then rejects.
  */
 export function registrySnapshot(
-  opts: { ttl?: number; now?: () => number; read?: (db: D1Database) => Promise<Registry> } = {},
+  opts: {
+    ttl?: number;
+    maxStale?: number;
+    now?: () => number;
+    read?: (db: D1Database) => Promise<Registry>;
+  } = {},
 ): RegistrySnapshot {
   const ttl = opts.ttl ?? SNAPSHOT_TTL_MS;
+  const maxStale = opts.maxStale ?? SNAPSHOT_MAX_STALE_MS;
   const now = opts.now ?? Date.now;
   const read = opts.read ?? readRegistry;
   let held: { registry: Registry; at: number } | null = null;
@@ -151,9 +173,16 @@ export function registrySnapshot(
       if (held && now() - held.at < ttl) return Promise.resolve(held.registry);
       const started = generation;
       const at = now();
-      return read(db).then((registry) => {
+      const keep = (registry: Registry) => {
         if (generation === started) held = { registry, at };
         return registry;
+      };
+      return read(db).then(keep, (err: unknown) => {
+        if (held && now() - held.at < maxStale) {
+          console.warn("registry refresh failed, serving the held copy", err);
+          return held.registry;
+        }
+        return read(db).then(keep);
       });
     },
     drop: () => {

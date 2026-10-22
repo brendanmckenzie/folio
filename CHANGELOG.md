@@ -8,6 +8,19 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.2.2
+
+A patch release: nothing to run or edit.
+
+### Fixed
+
+- **A transient D1 error refreshing the site registry no longer fails the request.**
+  When the 10 s re-read rejects, the isolate answers from the registry it already holds
+  (with a `console.warn`) while that copy is under 60 s old, and retries the read on the
+  next request. With no usable copy the read is retried once before the error surfaces.
+  A registry write still drops the held copy, so it is never served past the write.
+  Seen as a 500 on `GET /` through `folio.cacheProps()` (#102).
+
 ## 1.2.1
 
 A patch release: nothing to run or edit.
