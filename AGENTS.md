@@ -157,6 +157,14 @@ shell instead of your page.
 It costs an ordinary visitor nothing: the credential is a cookie, so the test is
 a header read before any query.
 
+**A record is read by a value with `reader.recordBy`.** `recordBy('illustrator', 'slug', slug)`
+is `page()` for a record whose type declares `text({ indexed: true, unique: true })`: same
+`FolioPage`, same `headers`. Do not build its headers by hand, and **answer its miss
+`Cache-Control: no-store`, never with `reader.miss()`'s headers**, which would cache a 404 past
+the publish that creates the record. A draft is the editor's alone and a share never reaches
+one. `unique` is enforced at publish (`409 conflict`), not on a keystroke. Folio writes no
+redirect when a slug changes.
+
 **A record is previewed through a page of yours, if its type names one.** A `record`
 type (a person, an office) has no URL, so with no `previewPath` the editor opens it
 as a form with no preview. Give the type `previewPath: 'team/member'` (the path of a

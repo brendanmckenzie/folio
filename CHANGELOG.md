@@ -24,6 +24,9 @@ nothing.
   resolves its own references (it nests one level, deeper ones arrive as data). At
   most 50 second-hop documents load per resolve, and a gated one is dropped
   ([UPGRADING](UPGRADING.md#referenced-documents-resolve-two-hops-deep-v120)).
+- **A `unique` field refuses a duplicate publish.** Opt-in per field, but declaring it over
+  content that already holds duplicates blocks the first publish of each one until it changes
+  ([UPGRADING](UPGRADING.md#readerrecordby-and-unique-fields-v120)).
 - **`Field['kind']` gains `'date'`.** A host with an exhaustive switch over it needs a
   case ([UPGRADING](UPGRADING.md#date-fields-and-field-groups-v120)).
 - **Admin search boxes bound their term and match `%`, `_` and `\` literally.** A term
@@ -47,6 +50,11 @@ nothing.
   draft's value. **Apply `0015_draft_data.sql` before deploying**, then run
   `POST {base}/api/reindex?drafts=1` once
   ([UPGRADING](UPGRADING.md#draft-values-in-the-data-table-v120)).
+- **`unique` text fields and `reader.recordBy`.** `text({ indexed: true, unique: true })` is
+  enforced at publish on every path (`409 conflict`), with a `unique-duplicate` audit check, and
+  `reader.recordBy(type, field, value)` is `page()` for a record, with the editor's draft and no
+  share access. A miss must be answered `no-store`
+  ([UPGRADING](UPGRADING.md#readerrecordby-and-unique-fields-v120)).
 - **`RenderRichtext` from `folio/render`** renders a richtext value you hold outside a
   block, such as a reference's `data.body`, with the field's limits and link resolution.
 - **`MAX_SLUG`** from `folio/core`, and `slugify(input, max = 64)`.

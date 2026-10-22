@@ -1395,6 +1395,75 @@ them ever depended on there being a preview. A record whose root has a `blocks` 
 shows the block tree, so "a person with a list of accreditations" works exactly
 like a page's body.
 
+### Reading a record by a unique field
+
+A record has no path, so a host route like `/illustrator/:slug` cannot use `reader.page()`.
+Mark the field the URL carries `unique` and look the record up by it:
+
+```ts
+// the type's root block
+slug: text({ indexed: true, unique: true }),
+
+// the host's route
+const page = await reader.recordBy('illustrator', 'slug', params.slug)
+if (!page) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } })
+return render(page, { headers: page.headers })
+```
+
+`reader.recordBy(type, field, value, opts?)` answers a `FolioPage` exactly as `reader.page()`
+does: the same access decision, redaction, resolve and `headers`, from one shared tail, so the
+cache rule exists once. A miss is `null`. It **throws** for a programming error, as
+`folio.reader(env)` with no site does: a `type` that is not a `record` of the reader's brand, or
+a `field` that is not a `unique` indexed field of that type's root.
+
+**`unique` is `text` only**, and construction refuses it without `indexed`, on any other kind,
+or on a block that is no document type's root. No two *published* records of one type, in one
+owning scope and locale, may hold the same value. It is **enforced at publish only**, on every
+path that publishes: the admin, `POST {base}/api/v1/documents/:id/publish`, bulk publish and the
+scheduler. A publish that would duplicate another published record's value is refused
+`409 conflict` before anything is written, naming the field, the value and the other record's
+title and id. Bulk reports it against the item, and the scheduler records a failed attempt and
+leaves the story unpublished. Republishing a record is not a conflict with itself, and an empty
+value is not a duplicate (it has no index row). Drafts can hold duplicates, because a draft is a
+Durable Object the Worker never sees change; the check is made at the moment a value would go
+live.
+
+**The check is not atomic.** Two publishes of one value in the same instant can both pass.
+`GET {base}/api/audit` reports the result as `unique-duplicate`, one finding per record in a
+group, naming the others. It is computed by one group-by over `content_index` on the first call
+of a walk, for the fields now declared `unique`: it cannot list duplicates for a field you have
+not yet declared, so deploy the flag and run the audit, and expect the first publish of any
+record in a duplicate group to be refused until one of them changes.
+
+**Authority.**
+- A visitor reads the published record; an unpublished one is a miss.
+- **A draft is the editor's alone.** With the draft cookie and a session that may read drafts
+  (on a multi-site deployment, the preview origin and `mayPreviewDrafts`), the lookup matches
+  the **draft's** value, so an unpublished record, or one whose slug was changed in its draft,
+  is found, and the published slug of a record whose draft moved off it is a miss.
+- **A share link never admits a record**, because a record is looked up by a value anyone can
+  guess and a share covers one story. A request a share admitted to a draft site answers `null`.
+- The lookup is fenced to the reader's chain and brand like every read, and runs on the
+  reader's D1 session.
+
+**The draft lookup reads `stories.draft_data`** (migration `0015`), so apply `0015` before a
+Worker that calls `recordBy` in draft mode is deployed. The published half reads `content_index`
+and needs nothing new. The mirror cuts a string at 512 characters, so a longer value is matched
+on its prefix and each candidate is confirmed against the draft document. One limit remains: a
+root block whose scalars overrun the mirror's whole 32 KB budget before the field is reached
+drops it, and an editor cannot then find that record by its draft value until it is published.
+
+**Answer a `recordBy` miss `no-store`.** A record's publish purges `story:<id>` and `type:<t>`,
+so a cached hit is purged by its own publish and unpublish, but it emits no `path:` tag. The
+headers from `reader.miss()` carry `path:` and `site:` tags on a multi-site deployment, so a
+record-URL 404 cached with them would keep being served after the record is published. Only a
+hit carries cache headers (`page.headers`). On a multi-site deployment a hit also carries the
+type's tag scoped to every scope in the chain, because a publish of that type in a nearer scope
+can change which record the URL answers.
+
+**A slug change writes no redirect.** The old URL 404s once the new slug is published. A host
+that needs a redirect keeps its own map; Folio does not generate one for a record.
+
 ### Deleting one
 
 ```

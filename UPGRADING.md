@@ -631,6 +631,30 @@ Durable Object writes the mirror as a statement of its own, so a missing column 
 logged and costs nothing else. If you roll the Worker back the column is unread and
 harmless.
 
+### `reader.recordBy` and `unique` fields (v1.2.0)
+
+**No action; opt-in.** `text({ indexed: true, unique: true })` marks a root field no two
+published records of one type hold in common (per owning scope and locale), and
+`reader.recordBy(type, field, value)` answers a `FolioPage` for the record that holds a value,
+for a route like `/illustrator/:slug`. Nothing changes for a site that does not use the flag. No
+migration and no `PROTOCOL_VERSION` bump.
+
+- **Declaring `unique` over content that already has duplicates does not break the deploy, but
+  the first publish of any record in a duplicate group is refused (`409 conflict`) until one of
+  them changes.** The publish check only looks at the record being published. The audit
+  reports `unique-duplicate` for fields that are already declared, so it cannot warn you
+  first: deploy, run `GET {base}/api/audit`, and fix each group it names.
+- **Enforcement is at publish only**, on the admin, the v1 publish route, bulk publish and the
+  scheduler. A draft may hold a duplicate. Two publishes of one value in the same instant can
+  both pass; the audit finds the result.
+- **Answer a `recordBy` miss `Cache-Control: no-store`.** A record's publish purges by
+  `story:<id>` and `type:<t>` and emits no `path:` tag, so a 404 cached with `reader.miss()`'s
+  headers outlives the publish that creates the record. Send only a hit's `page.headers`.
+- **The draft half reads `stories.draft_data`**, so apply `0015` before deploying a Worker that
+  calls `recordBy` in draft mode. A draft is found only for an editor; a share link never
+  admits a record.
+- **A slug change writes no redirect.** Keep your own map if a record's old URL must forward.
+
 ### Previewing a record through a host page (v1.2.0)
 
 **No action; opt-in per type.** A `record` type may now declare `previewPath`, the
