@@ -121,13 +121,13 @@ export function useServerResolution(opts: {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       fetch(resolutionUrl(apiBase, storyId, { locale, site }), { signal: controller.signal })
-        .then((res) => (res.ok ? (res.json() as Promise<Resolution>) : null))
-        .then((resolution) => {
-          // A refusal or a transport failure is not an answer about the document:
-          // keep what was held rather than blank the preview.
-          if (!resolution || controller.signal.aborted) return;
+        .then(async (res) => {
+          if (controller.signal.aborted) return;
+          // A refusal is an answer about this signature, so it is not asked again
+          // until the signature moves (a pause in typing must not retry it); it is
+          // not an answer about the document, so what was held stays.
           answered.current = asked;
-          setHeld({ key, resolution });
+          if (res.ok) setHeld({ key, resolution: (await res.json()) as Resolution });
         })
         .catch(() => {});
     }, SETTLE_MS);

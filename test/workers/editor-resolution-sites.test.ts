@@ -8,22 +8,26 @@ import { createFolio, magicLink } from "../../src/server";
 import { SECURE_COOKIE } from "../../src/server/auth/cookie";
 import type { Grants } from "../../src/server/auth/roles";
 import { createSession } from "../../src/server/auth/session";
+import { createToken } from "../../src/server/auth/tokens";
 import { createUser } from "../../src/server/auth/users";
 
 /**
  * `GET {base}/api/story/:id/resolution?site=` on a deployment with `sites` (#77).
  *
  * The admin asks on its **own** mount and names the site its pane previews. The site is
- * context, never authority: the chain resolved on is narrowed to what the request's own
- * scope may already read. Three things follow and each has a case here:
+ * authorised the way `site/start` authorises it (`mayPreviewDrafts`) and is then
+ * resolved on its **full** chain, because the pane's iframe already renders that chain
+ * and the two must agree. Each case is one way that has gone wrong:
  *
- * - a caller whose only role is `shared` (who `previewEligible` lets preview on any site)
- *   gets an answer, where asking on the pane site's own mount is a 403;
- * - a named site that cannot show the story is refused;
- * - naming a site never reveals content outside the caller's own chain.
+ * - a group editor's preview must show the pane site's layers, not the group's;
+ * - a caller whose only role is `shared` (`previewEligible` on any site) gets an answer
+ *   where asking on the pane site's own mount is a 403;
+ * - a site the caller may not preview is refused, and **indistinguishably from one that
+ *   does not exist**, so `?site=` is neither a metadata leak nor an id oracle.
  *
- * The registry: group `north`; `alpha` (in north); `bravo`. Stories: a shared page, an
- * alpha page and a bravo page; the shared page links to the alpha page.
+ * The registry: group `north`; `alpha` and draft site `gamma` (both in north); `bravo`.
+ * The global `ersHeader` has a layer on `shared`, `north` and `alpha`, each titled for
+ * where it lives, so the title says which chain a resolution was built on.
  */
 
 const ADMIN = "https://cms.example";
@@ -36,9 +40,20 @@ const hPage = defineBlock({
   render: () => null,
 });
 
+const headerRoot = defineBlock({
+  name: "ersHeaderRoot",
+  label: "Header",
+  fields: { title: text() },
+  render: () => null,
+});
+
 const folio = createFolio<Cloudflare.Env>({
-  blocks: [hPage],
-  types: [{ name: "ersPage", label: "Page", kind: "page", root: "ersPage", default: true }],
+  blocks: [hPage, headerRoot],
+  types: [
+    { name: "ersPage", label: "Page", kind: "page", root: "ersPage", default: true },
+    { name: "ersHeader", label: "Header", kind: "singleton", root: "ersHeaderRoot" },
+  ],
+  globals: ["ersHeader"],
   bindings: (e): FolioBindings => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
   basePath: "/folio",
   assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
@@ -77,20 +92,56 @@ async function story(id: string, site: string, path: string, doc: Doc) {
   );
 }
 
+/** A published layer of the global, so a cold object seeds from it. */
+async function layer(scope: string, title: string) {
+  const doc: Doc = {
+    root: "h0",
+    bloks: {
+      h0: {
+        uid: "h0",
+        type: "ersHeaderRoot",
+        parent: null,
+        slot: null,
+        order: "a0",
+        data: { title },
+      },
+    },
+  };
+  await env.DB.prepare(
+    `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id,
+                          published_doc, published_at)
+     values (?, 'ersHeader', null, 'ersHeader', null, 'a0', 'Header', 1, ?, ?, 2)`,
+  )
+    .bind(`sng_ersHeader:${scope}`, scope, JSON.stringify(doc))
+    .run();
+}
+
 async function cookieFor(email: string, grants: Grants) {
   const user = await createUser(env.DB, { email, grants });
   const session = await createSession(env.DB, user.id);
   return { cookie: `${SECURE_COOKIE}=${session.token}` };
 }
 
+async function bearer(site: string) {
+  const { token } = await createToken(env.DB, {
+    name: `ers-${site}`,
+    scopes: ["content:read", "content:read:draft"],
+    site,
+  });
+  return { authorization: `Bearer ${token}` };
+}
+
 const get = (path: string, headers: Record<string, string>) =>
   folio.handle(new Request(`${ADMIN}${path}`, { headers }), env, createExecutionContext());
 
 const ids = (r: Resolution) => Object.keys(r.stories);
+const headerOf = (r: Resolution) =>
+  (r.globals?.ersHeader?.bloks.h0?.data as { title?: string } | undefined)?.title;
 
 let N: Record<string, string>; // {shared: publisher}
 let E: Record<string, string>; // {alpha: editor}
-let B: Record<string, string>; // {bravo: editor}
+let R: Record<string, string>; // {north: editor}
+let T: Record<string, string>; // token bound to alpha
 
 beforeAll(async () => {
   await env.DB.batch([
@@ -98,6 +149,7 @@ beforeAll(async () => {
       `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
          ('north', 'group', 'North', null, null, null, 0, 0),
          ('alpha', 'site', 'Alpha', 'north', 'live', 'https://preview.alpha.example', 0, 0),
+         ('gamma', 'site', 'Secret Gamma Launch', 'north', 'draft', 'https://preview.gamma.example', 0, 0),
          ('bravo', 'site', 'Bravo', null, 'live', 'https://preview.bravo.example', 0, 0)`,
     ),
     env.DB.prepare(
@@ -105,23 +157,34 @@ beforeAll(async () => {
     ),
   ]);
   await story("sty_ers_alpha", "alpha", "alpha-page", docOf("Alpha page"));
-  await story("sty_ers_bravo", "bravo", "bravo-page", docOf("Bravo page"));
+  await story("sty_ers_north", "north", "north-page", docOf("North page"));
   await story("sty_ers_shared", "shared", "shared-page", docOf("Shared page", "sty_ers_alpha"));
-  await story("sty_ers_shared_b", "shared", "shared-b", docOf("Shared B", "sty_ers_shared"));
+  await layer("shared", "SHARED HEADER");
+  await layer("north", "NORTH HEADER");
+  await layer("alpha", "ALPHA HEADER");
   N = await cookieFor("ers-n@example.com", { shared: "publisher" });
   E = await cookieFor("ers-e@example.com", { alpha: "editor" });
-  B = await cookieFor("ers-b@example.com", { bravo: "editor" });
+  R = await cookieFor("ers-r@example.com", { north: "editor" });
+  T = await bearer("alpha");
 });
 
 describe("resolution on a deployment with sites", () => {
+  it("resolves a group editor's preview on the pane site's chain, not the group's", async () => {
+    const res = await get("/folio/~north/api/story/sty_ers_north/resolution?site=alpha", R);
+    expect(res?.status).toBe(200);
+    const resolution = (await res!.json()) as Resolution;
+    expect(resolution.site?.id).toBe("alpha");
+    expect(headerOf(resolution)).toBe("ALPHA HEADER");
+  });
+
   it("answers a shared-only caller on their own mount, as the pane site", async () => {
     const res = await get("/folio/~shared/api/story/sty_ers_shared/resolution?site=alpha", N);
     expect(res?.status).toBe(200);
     const resolution = (await res!.json()) as Resolution;
     expect(resolution.site?.id).toBe("alpha");
-    // Alpha's own page is outside what a `shared` caller may read: the named site is
-    // context, not authority.
-    expect(ids(resolution)).not.toContain("sty_ers_alpha");
+    // The same chain the iframe's own bootstrap was rendered on.
+    expect(headerOf(resolution)).toBe("ALPHA HEADER");
+    expect(ids(resolution)).toContain("sty_ers_alpha");
   });
 
   it("is a 403 on the pane site's own mount for that caller, which is why it is not used", async () => {
@@ -129,37 +192,48 @@ describe("resolution on a deployment with sites", () => {
     expect(res?.status).toBe(403);
   });
 
-  it("resolves a shared page's link to alpha's page for an alpha editor previewing as alpha", async () => {
+  it("resolves an alpha editor previewing as alpha", async () => {
     const res = await get("/folio/~alpha/api/story/sty_ers_shared/resolution?site=alpha", E);
     expect(res?.status).toBe(200);
-    expect(ids((await res!.json()) as Resolution)).toContain("sty_ers_alpha");
+    expect(headerOf((await res!.json()) as Resolution)).toBe("ALPHA HEADER");
   });
 
-  it("does not let an alpha editor previewing as bravo read past their own chain", async () => {
-    // Bravo shows shared pages, so the site is allowed; the link to alpha's page
-    // resolves against alpha's chain and against nobody else's.
-    const res = await get("/folio/~alpha/api/story/sty_ers_shared/resolution?site=bravo", E);
-    expect(res?.status).toBe(200);
-    const resolution = (await res!.json()) as Resolution;
-    expect(resolution.site?.id).toBe("bravo");
-    expect(ids(resolution)).not.toContain("sty_ers_alpha");
-    expect(ids(resolution)).not.toContain("sty_ers_bravo");
+  /** The body and status of a refused site, which must not depend on why. */
+  async function refusal(path: string, who: Record<string, string>) {
+    const res = await get(path, who);
+    return { status: res?.status, body: await res?.text() };
+  }
+
+  it("refuses a site the token's binding does not reach, as it does one that does not exist", async () => {
+    const bravo = await refusal("/folio/api/story/sty_ers_shared/resolution?site=bravo", T);
+    const unknown = await refusal("/folio/api/story/sty_ers_shared/resolution?site=nowhere", T);
+    expect(bravo.status).toBe(404);
+    expect(bravo).toEqual(unknown);
+    expect(bravo.body).not.toContain("Bravo");
+  });
+
+  it("refuses a draft site the caller may not preview, as it does one that does not exist", async () => {
+    const alphaEditor = await refusal(
+      "/folio/~alpha/api/story/sty_ers_shared/resolution?site=gamma",
+      E,
+    );
+    const alphaUnknown = await refusal(
+      "/folio/~alpha/api/story/sty_ers_shared/resolution?site=nowhere",
+      E,
+    );
+    expect(alphaEditor.status).toBe(404);
+    expect(alphaEditor).toEqual(alphaUnknown);
+    expect(alphaEditor.body).not.toContain("Secret");
   });
 
   it("refuses a site that cannot show the story", async () => {
     const res = await get("/folio/~alpha/api/story/sty_ers_alpha/resolution?site=bravo", E);
-    expect(res?.status).toBe(400);
-  });
-
-  it("404s another site's story on the caller's own mount", async () => {
-    const res = await get("/folio/~bravo/api/story/sty_ers_alpha/resolution?site=bravo", B);
     expect(res?.status).toBe(404);
   });
 
   it("answers for the shared scope with no site named, rather than an empty resolution", async () => {
-    const res = await get("/folio/~shared/api/story/sty_ers_shared_b/resolution", N);
+    const res = await get("/folio/~shared/api/story/sty_ers_shared/resolution", N);
     expect(res?.status).toBe(200);
-    const resolution = (await res!.json()) as Resolution;
-    expect(ids(resolution)).toContain("sty_ers_shared");
+    expect(headerOf((await res!.json()) as Resolution)).toBe("SHARED HEADER");
   });
 });

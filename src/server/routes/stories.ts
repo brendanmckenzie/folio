@@ -18,7 +18,7 @@ import {
   sitesUnder,
 } from "../../core/sites";
 import { ancestorPaths, type StoryMeta } from "../../core/story";
-import { actorString } from "../auth/roles";
+import { type Actor, actorString, mayPreviewDrafts } from "../auth/roles";
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from "../auth/roles";
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from "../documents";
 import { FolioError, rethrow } from "../errors";
@@ -160,13 +160,18 @@ export async function sweepOf<Env>(
  * The render a draft preview resolves on, for the request's scope, optionally *as*
  * another site (`?site=`, the site the editor's pane previews).
  *
- * **The named site supplies the context and never the authority.** Its `site`/`path`
- * data and surface are what the page would render with, but the chain resolved on is
- * `chain(site)` narrowed to what the request's own scope may already read (`readable`,
- * the fence `loadStory` just applied). A caller whose only role is on `shared` can
- * therefore preview a shared page as `alpha` and sees exactly the shared content they
- * could already read, and nothing of alpha's own. The site must be one that can show
- * the story (`sitesUnder` its owner), the same rule a share's render site obeys.
+ * **The named site is authorised the way `site/start` authorises it, and then resolved
+ * on its full chain.** The pane's iframe already renders that site's whole chain with
+ * a preview grant minted under `mayPreviewDrafts`, so the admin's resolution must
+ * agree with it: narrowing the chain below that made a group editor's preview swap
+ * alpha's layers for north's, and a shared-only caller's lose them. `mayPreviewDrafts`
+ * is the one rule for who sees a site's drafts, for a person and for a token alike, so
+ * it also keeps `?site=` from revealing a site's name, status or hosts to a caller who
+ * could not otherwise see it.
+ *
+ * A site that is unknown, cannot show the story (`sitesUnder` its owner), is another
+ * brand's, or is one the caller may not preview all answer **identically**, so the
+ * parameter is no oracle for site ids.
  *
  * With no site named: a site as itself, a group as a host-less stand-in on its own
  * chain (`routes/editor.ts`' `scopeRender`, which this mirrors), and `shared` as a
@@ -176,7 +181,7 @@ export async function sweepOf<Env>(
 function previewRender(
   registry: SiteRegistry,
   scope: string | null,
-  readable: readonly string[],
+  actor: Actor | null,
   named: { site: string; owner: string; brand: string | null } | undefined,
 ): SiteRender | null {
   if (scope === null) return null;
@@ -185,15 +190,12 @@ function previewRender(
     if (
       !site ||
       !sitesUnder(registry, named.owner).includes(site.id) ||
-      (named.brand !== null && site.brand !== named.brand)
+      (named.brand !== null && site.brand !== named.brand) ||
+      !mayPreviewDrafts(actor, registry, site.id)
     ) {
-      throw new FolioError("bad_request", `${named.site} is not a site that shows this page`);
+      throw new FolioError("not_found", "Unknown site");
     }
-    return {
-      site,
-      surface: "preview",
-      chain: chain(registry, site.id).filter((id) => readable.includes(id)),
-    };
+    return { site, surface: "preview", chain: chain(registry, site.id) };
   }
   const site = registry.sites.find((s) => s.id === scope);
   if (site) return { site, surface: "preview", chain: chain(registry, site.id) };
@@ -757,10 +759,10 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * deployment `resolve` reads layers without `ensureSingleton` when it is given a
    * site, and it always is here. The admin asks on its **own** mount and names the
    * site its pane previews as `?site=`; that site is context only, and the chain
-   * resolved on is narrowed to what this request's scope may already read
-   * (`previewRender`), so a caller is never shown more than `/document` would give
-   * them. (Asking on the pane site's own mount instead refused a caller whose only
-   * role is on `shared`, who may nonetheless preview there.)
+   * resolved on is that site's full chain, but only for a caller who may preview it
+   * (`previewRender`, `mayPreviewDrafts`). (Asking on the pane site's own mount
+   * instead refused a caller whose only role is on `shared`, who may nonetheless
+   * preview there.)
    */
   app.get(
     "/story/:id/resolution",
@@ -779,7 +781,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ? previewRender(
             registry,
             c.var.scope,
-            await requestChain(c, rt),
+            c.var.actor,
             named
               ? { site: named, owner: story.site ?? DEFAULT_SITE, brand: brand.brand?.id ?? null }
               : undefined,

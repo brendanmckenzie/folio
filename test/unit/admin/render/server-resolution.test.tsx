@@ -99,4 +99,17 @@ describe("useServerResolution", () => {
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("does not retry a refusal at the next pause, only when the signature moves", async () => {
+    const fetchMock = vi.fn(async (_url: string) => new Response("{}", { status: 404 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = renderHook((p) => useServerResolution(p), { initialProps: props() });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    rerender(props({ idle: false }));
+    rerender(props({ idle: true }));
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    rerender(props({ doc: docWith({ title: "a", author: "sty_2" }) }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
 });
