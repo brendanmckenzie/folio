@@ -14,6 +14,7 @@
 import type { AssetValue } from "../core/values";
 import type { AssetTransform } from "../core/resolve";
 import { FolioError } from "./errors";
+import { LIKE_ESCAPE, likePattern } from "./like";
 import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from "./validate";
 import { type AssetFilter, type AssetSort, DEFAULT_ASSET_SORT } from "../core/assets";
 import { folderSiteOf, subtreeWhere } from "./asset-folders";
@@ -154,15 +155,15 @@ export function assetFilterSql(
 
   if (filter.q) {
     clauses.push(
-      `(filename like ? or alt like ? or alt_auto like ?
-        or description like ? or description_auto like ?)`,
+      `(filename like ? ${LIKE_ESCAPE} or alt like ? ${LIKE_ESCAPE} or alt_auto like ? ${LIKE_ESCAPE}
+        or description like ? ${LIKE_ESCAPE} or description_auto like ? ${LIKE_ESCAPE})`,
     );
-    const like = `%${filter.q}%`;
+    const like = likePattern(filter.q);
     binds.push(like, like, like, like, like);
   }
   if (filter.kind) {
-    clauses.push("content_type like ?");
-    binds.push(`${filter.kind}%`);
+    clauses.push(`content_type like ? ${LIKE_ESCAPE}`);
+    binds.push(likePattern(filter.kind, { leading: false }));
   }
   if (filter.folder) {
     // A folder filter includes the folder's descendants (checkpoint 10), which

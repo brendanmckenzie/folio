@@ -58,6 +58,7 @@ import { hashToken } from "./auth/secrets";
 import { bindChunks, type FolioDb } from "./db";
 import { chainClause } from "./stories";
 import { FolioError, rethrow } from "./errors";
+import { LIKE_ESCAPE, likePattern } from "./like";
 import {
   deleteUploads,
   fileCap,
@@ -1388,9 +1389,9 @@ const RESPONSES_ORDER: Keyset = { columns: ["created_at", "id"], direction: "des
  *
  * **`q` is a substring scan and says so** (decision 16's sibling reasoning): no
  * index serves a leading-wildcard `like`, so this reads the form's rows and
- * matches the stored JSON text. Unescaped, like every other `q` in this codebase
- * (`listRedirects`, `assetFilterSql`): a `%` or a `_` in a search term widens the
- * match rather than narrowing it, which is the harmless direction on a read.
+ * matches the stored JSON text. Built by `likePattern`, like every other `q` in
+ * this codebase: bounded to D1's 50-byte pattern limit, and `%` or `_` in a term
+ * match themselves.
  *
  * Scanning `data` as text rather than through `json_each` is deliberate — the
  * question the box asks is "does this response mention Ferguson", and a scan over
@@ -1419,8 +1420,8 @@ function responseFilterSql(
     binds.push(filter.to);
   }
   if (filter.q) {
-    clauses.push("data like ?");
-    binds.push(`%${filter.q}%`);
+    clauses.push(`data like ? ${LIKE_ESCAPE}`);
+    binds.push(likePattern(filter.q));
   }
   return { clauses, binds };
 }
