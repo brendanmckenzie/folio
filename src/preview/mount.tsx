@@ -1,5 +1,5 @@
 import "./preview.css";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { toRegistry, toSchemaIndex, type AnyBlockDef, type Registry } from "../core/block";
 import type { Doc } from "../core/doc";
@@ -12,6 +12,7 @@ import {
   type PreviewToAdminMsg,
 } from "../core/protocol";
 import { EMPTY_RESOLUTION, type Resolution } from "../core/resolve";
+import { recordResolution } from "../core/resolution-merge";
 import { type PreviewWrap, wrapPreview } from "../core/render-wrap";
 import { FolioDoc } from "./Render";
 
@@ -28,7 +29,7 @@ declare global {
        * — the same markup in both modes, so hydrating into it is a plain
        * `hydrateRoot`, not a rebuild. `#folio-root` stays static in this mode.
        */
-      editing?: { global: string; mount: string };
+      editing?: { global: string; mount: string } | { record: string; page: Doc };
       /**
        * `sites.admin`, on a deployment with `sites`
        * (`../../docs/specs/foundation/multi-site.md` decision 13): the preview is on
@@ -69,14 +70,33 @@ function PreviewApp({
   initialResolution,
   registry,
   wrap,
+  record,
 }: {
   initial: Doc;
   initialResolution: Resolution;
   registry: Registry;
   wrap?: PreviewWrap;
+  /** A record in context: `initial` is its draft and `page` is what is drawn. */
+  record?: { id: string; page: Doc };
 }) {
   const [doc, setDoc] = useState(initial);
   const [resolution, setResolution] = useState(initialResolution);
+  // In record mode a posted resolution is the **record's** and is merged over the
+  // page's, never in place of it, so no frame can wipe what the page itself holds
+  // (its links, collections and globals). `initialResolution` stays the base.
+  const posted = record ? resolution : undefined;
+  const merged = useMemo(
+    () =>
+      record
+        ? recordResolution(
+            initialResolution,
+            posted === initialResolution ? undefined : posted,
+            record.id,
+            doc,
+          )
+        : resolution,
+    [record, initialResolution, posted, doc, resolution],
+  );
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -124,9 +144,17 @@ function PreviewApp({
   // (`../../docs/specs/platform/mcp-server.md` decision 5) never reaches this
   // file at all — that page ships no client entry and no `__FOLIO__`, so nothing
   // here runs for it and no bridge is attached.
+  //
+  // A record in context draws the *page* in `off` mode, exactly as the server did: no
+  // uids, so `select` frames are inert, and the record reaches the host block through
+  // `resolution.record` and `docs[id]`.
   return wrapPreview(
     wrap,
-    <FolioDoc doc={doc} registry={registry} mode="edit" resolution={resolution} />,
+    record ? (
+      <FolioDoc doc={record.page} registry={registry} mode="off" resolution={merged} />
+    ) : (
+      <FolioDoc doc={doc} registry={registry} mode="edit" resolution={resolution} />
+    ),
   );
 }
 
@@ -225,9 +253,11 @@ export function mountPreview(
   // Editing a global in context (`editing.mount`) hydrates its own wrapper
   // instead of `#folio-root`; the page around it stays static server-rendered
   // markup with no React root of its own (`globals.md` decision 4).
-  const root = boot.editing
-    ? document.querySelector(boot.editing.mount)
-    : document.getElementById("folio-root");
+  const editing = boot.editing;
+  const root =
+    editing && "mount" in editing
+      ? document.querySelector(editing.mount)
+      : document.getElementById("folio-root");
   if (!root) return;
   const registry = toRegistry(blocks);
   // Every mounted preview is edit mode: the chrome-free draft page ships no entry.
@@ -244,6 +274,9 @@ export function mountPreview(
       initialResolution={boot.resolution ?? EMPTY_RESOLUTION}
       registry={registry}
       wrap={opts?.wrap}
+      {...(editing && "record" in editing
+        ? { record: { id: editing.record, page: editing.page } }
+        : {})}
     />,
   );
   attachBridge();

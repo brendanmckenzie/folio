@@ -9,6 +9,8 @@
 import type { ReactElement } from "react";
 import { renderToReadableStream } from "react-dom/server.edge";
 import { NO_STORE } from "../core/cache-tags";
+import { recordResolution } from "../core/resolution-merge";
+import { buildResolution } from "../core/resolve";
 import { wrapPreview } from "../core/render-wrap";
 import type { Registry as SiteRegistry } from "../core/sites";
 import type { StoryMeta } from "../core/story";
@@ -178,6 +180,17 @@ export async function previewPage(
   story: StoryMeta,
   opts: {
     as?: string;
+    /**
+     * A `record` previewed in the context of this page (`DocumentType.previewPath` on
+     * a record, `?record=`). The page renders in `off` mode as context, with the
+     * record's **draft** at `resolution.docs[id]` and `resolution.record` set, and
+     * the bootstrap points the preview client at the record: its mutations are the
+     * ones applied, and it re-renders the whole page, because a record is drawn by a
+     * host block reading data and has no Folio wrapper to hydrate on its own. The
+     * caller has already checked that it exists, is a record of this brand and is in
+     * the render's chain.
+     */
+    record?: StoryMeta;
     bare?: boolean;
     locale?: string;
     mode?: PreviewMode;
@@ -224,12 +237,35 @@ export async function previewPage(
   // breadcrumb still has to resolve) and what lets a collection listing this very
   // document show its **draft** title rather than its published one
   // (`../../docs/specs/content-model/collections.md` decision 3).
-  const resolution = await brand.resolve(bindings, doc, {
+  const siteField = opts.site !== undefined ? { site: opts.site } : {};
+  const pageResolution = await brand.resolve(bindings, doc, {
     draft: true,
     locale: opts?.locale,
     story,
-    ...(opts.site !== undefined ? { site: opts.site } : {}),
+    ...siteField,
   });
+  // The record's draft is read through `draftFor` (never a bare `getOrInit`) and
+  // resolved on the same site, so its own links and references resolve for the host
+  // block that draws it. `recordResolution` is the one merge, shared with the client.
+  const recordDoc = opts.record ? await brand.draftFor(bindings, opts.record) : undefined;
+  let resolution = pageResolution;
+  if (opts.record && recordDoc) {
+    const own = await brand.resolve(bindings, recordDoc, {
+      draft: true,
+      locale: opts?.locale,
+      story: opts.record,
+      ...siteField,
+    });
+    // The record is unrouted, so nothing else puts it in `stories`, and
+    // `resolveReference` answers null for an id with no ref.
+    const ref = buildResolution([opts.record]).stories[opts.record.id]!;
+    resolution = recordResolution(
+      pageResolution,
+      { ...own, stories: { [opts.record.id]: ref, ...own.stories } },
+      opts.record.id,
+      recordDoc,
+    );
+  }
   const { entries, stylesheets } = brand.page("preview");
 
   const editingName = opts?.as;
@@ -249,11 +285,15 @@ export async function previewPage(
    * the global's own overlay renders `edit` below. Reading the `!` as a bug and
    * removing it breaks that flow.
    *
+   * A `record` in context renders the same way for the same reason: the page is the
+   * context, and the editable document is the record, which the client re-renders
+   * the whole page for (`recordResolution`).
+   *
    * `draft` has no third case to answer: `handle()` refuses `?as=` in that mode,
    * because swapping in a global's draft is an editing act and a draft page has
    * no editor. So it is `mark` throughout.
    */
-  const pageMode: RenderMode = draft ? "mark" : editing ? "off" : "edit";
+  const pageMode: RenderMode = draft ? "mark" : editing || opts.record ? "off" : "edit";
 
   // Every configured global, in declared order, above the page itself: Folio's
   // own preview shell knows nothing of the host's real layout (checkpoint 2),
@@ -289,7 +329,14 @@ export async function previewPage(
             <Bootstrap
               global="__FOLIO__"
               value={{
-                ...(editing ? { doc: editingDoc, resolution, editing } : { doc, resolution }),
+                ...(editing
+                  ? { doc: editingDoc, resolution, editing }
+                  : opts.record && recordDoc
+                    ? // The record is the document being edited, and the page is context:
+                      // `resolution` already holds both, merged by the function the
+                      // client re-runs on every frame.
+                      { doc: recordDoc, resolution, editing: { record: opts.record.id, page: doc } }
+                    : { doc, resolution }),
                 ...(opts?.admin ? { admin: opts.admin } : {}),
                 // The server's blocks, for `mountPreview` to compare against the
                 // bundle it was built from (`multi-brand.md` decision 11). Not a

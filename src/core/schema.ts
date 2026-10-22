@@ -95,7 +95,14 @@ export interface DocumentType {
    * so the singleton's draft renders on top of a real page instead of a blank
    * background. `''` means the root story. Undefined gets a bare preview — the
    * singleton alone, on the host's stylesheet, with a note that no host page
-   * was configured. `singleton` kinds only.
+   * was configured.
+   *
+   * A `record` may declare one too, and is then previewed in the context of the
+   * host page at that path: the page renders with `resolution.record` set to the
+   * record's id and the record's **draft** at `resolution.docs[id]`, which the
+   * page's own block reads with `resolveReference(resolution.record, resolution)`.
+   * A record with none is edited as a form, with no preview. A page has a URL of its
+   * own, so the key means nothing on one.
    */
   previewPath?: string;
 }

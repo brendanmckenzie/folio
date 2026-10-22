@@ -72,7 +72,7 @@ import { type Bindings, SAVE_NOTICE, useShortcuts } from "./shortcuts";
 import { Toast } from "./Toast";
 import { useRouter } from "./useRouter";
 import { useSearch } from "./useSearch";
-import { globalPreviewUrl, usePreviewHost, useStory } from "./useStory";
+import { globalPreviewUrl, recordPreviewUrl, usePreviewHost, useStory } from "./useStory";
 
 /**
  * The two strings the server-rendered shell hands the client, and nothing else.
@@ -651,7 +651,9 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
     open && !open.previewUrl ? types.find((t) => t.name === open.type) : undefined;
   const previewHost = usePreviewHost(
     boot.apiBase,
-    previewType?.kind === "singleton" ? previewType.previewPath : undefined,
+    previewType?.kind === "singleton" || previewType?.kind === "record"
+      ? previewType.previewPath
+      : undefined,
   );
 
   return (
@@ -1190,7 +1192,9 @@ function usePaletteActions({
  *   draft on top of a real host page via `&as=<name>`, falling back to the bare
  *   `/preview/global/:name` route. Reused rather than reimplemented — it is
  *   already pure and already tested.
- * - A **record** has neither, and the editor says so instead of showing a frame.
+ * - A **record** has neither, unless its type declares a `previewPath`: then
+ *   `recordPreviewUrl` puts its draft in the context of that host page via
+ *   `&record=<id>`. Without one the editor is a form, not a frame.
  *
  * The host page is now passed in as one row rather than found in a whole tree
  * (`usePreviewHost`), which is why `globalPreviewUrl` gets a one-element list: its
@@ -1212,6 +1216,8 @@ function previewFor(
 ): string | undefined {
   if (!story) return undefined;
   if (story.previewUrl) return story.previewUrl;
+  // A record has a preview only through a host page, and none otherwise (form mode).
+  if (type?.kind === "record") return recordPreviewUrl(type, host, story.id);
   if (type?.kind !== "singleton") return undefined;
   if (multi && !host?.previewUrl) return undefined;
   return globalPreviewUrl(type, host ? [host] : [], base);
