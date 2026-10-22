@@ -18,7 +18,7 @@
 // Without any of the three this behaves exactly as it always has.
 //
 // **This is a tool, not a test, and it can never gate CI.** Workers Cache is not
-// simulated by miniflare — `wrangler dev`, vitest-pool-workers and every
+// simulated by miniflare — `wrangler dev`, @cloudflare/vitest-plugin and every
 // `scripts/*-test.mjs` see no cache at all — so a hit, a purge and the time
 // between them are only observable against a deployed Worker with
 // `"cache": { "enabled": true }` in its wrangler config. Everything that *can*

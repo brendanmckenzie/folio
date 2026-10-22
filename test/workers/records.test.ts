@@ -14,7 +14,7 @@ import type { FolioBindings } from "../../src/server";
  * version / delete lifecycle, and the fact that no path resolves to one.
  *
  * Own `createFolio` rather than the shared `worker.ts` fixture, per the trap
- * `publish-hooks.md` recorded: vitest-pool-workers cannot carry a plain array
+ * `publish-hooks.md` recorded: @cloudflare/vitest-plugin cannot carry a plain array
  * back over the pool's RPC boundary. Ids are prefixed `rec_` because D1 state is
  * isolated per *file*, not per test.
  */

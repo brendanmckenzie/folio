@@ -97,7 +97,7 @@ uncomputable cases stop being lookups.
   `WorkerEntrypointExport.properties.cache`.
 - `miniflare@4.20260722.0` — **zero occurrences** of `purge`, `purgeEverything`,
   `pathPrefixes` or `CacheContext` in `dist/`. Workers Cache is **not simulated
-  locally**, so `wrangler dev`, vitest-pool-workers and `scripts/*-test.mjs`
+  locally**, so `wrangler dev`, @cloudflare/vitest-plugin and `scripts/*-test.mjs`
   cannot exercise a hit or a purge.
 - Cache API (`caches.default`) deletes are **per-colo**: *"the `cache.delete`
   method only purges content of the cache in the data center that the Worker was

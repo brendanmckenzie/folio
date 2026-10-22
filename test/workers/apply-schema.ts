@@ -11,7 +11,7 @@ import { compareMigrationFilenames, splitSqlStatements } from "./sql-split";
  * this, and normally pairs with a `readD1Migrations(path)` that reads the
  * directory from disk on the Node side and hands the array across as a
  * binding. That doesn't fit here: `readD1Migrations` is documented as living
- * at `@cloudflare/vitest-pool-workers/config`, but this pool version (0.18)
+ * at `@cloudflare/vitest-plugin/config`, but this version (1.x)
  * doesn't publish that subpath — it exports straight off the package root,
  * which is a Node/Vite-config module that pulls in workerd's own binary and
  * cannot be imported from code that gets bundled *into* the worker, which
