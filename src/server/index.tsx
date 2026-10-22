@@ -2,9 +2,15 @@ import { cacheHeaders, cacheTags, NO_STORE } from "../core/cache-tags";
 import { type Blok, childrenOf, type Doc, type Json } from "../core/doc";
 import { gateValue, isUngated, type PageAccess, redactDoc } from "../core/gate";
 import { mergeLayers } from "../core/layers";
-import { dataOf, isKnownLocale, type LocaleContext } from "../core/locales";
+import {
+  dataOf,
+  fieldValue,
+  isKnownLocale,
+  type LocaleContext,
+  localeContext,
+} from "../core/locales";
 import type { Resolution } from "../core/resolve";
-import type { SchemaIndex } from "../core/schema";
+import { type SchemaIndex, uniqueFieldsOf } from "../core/schema";
 import { buildTree, type StoryMeta } from "../core/story";
 import {
   chain as chainOf,
@@ -61,6 +67,8 @@ import {
   pickServing,
   publishedDoc,
   publishedDocsByIds,
+  recordByField,
+  recordDraftCandidates,
   storyByPath,
   storyById,
   storyStatus,
@@ -72,6 +80,8 @@ import type {
   Folio,
   FolioConfig,
   FolioGateContext,
+  FolioPage,
+  FolioPageOptions,
   FolioReader,
   GatedReaderFrom,
   PreviewMode,
@@ -1144,12 +1154,34 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       // `mayPreviewDrafts`; there is no cookie to ask about (`GatedReaderFrom`).
       if (gatedFrom) return gatedFrom.draft && story.path !== null ? draftOf(story) : null;
       if (!req || story.path === null) return null;
-      // On a multi-site deployment drafts are served only on a site's preview
-      // origin (decision 13), so a live host never reads one whatever the cookie
-      // says.
       const within = await scopeOnce();
-      if (rt.sites && within.render?.surface !== "preview") return null;
-      const header = req.headers.get("cookie");
+      if (!onDraftSurface(within)) return null;
+      if (await editorAdmits(within, req)) return draftOf(story);
+
+      const shared = shareCookieTokens(req.headers.get("cookie"));
+      if (
+        shared.length > 0 &&
+        (await claimShare(db, shared, story.id, undefined, within.render?.site.id))
+      ) {
+        return draftOf(story);
+      }
+      return null;
+    };
+
+    /**
+     * On a multi-site deployment drafts are served only on a site's preview
+     * origin (decision 13), so a live host never reads one whatever the cookie says.
+     */
+    const onDraftSurface = (within: Scoped): boolean =>
+      !rt.sites || within.render?.surface === "preview";
+
+    /**
+     * The editor half of draft authority, split from `draftFor` so a **record**, which
+     * a share may never admit, asks exactly this and nothing else (`recordBy`). A
+     * caller has already checked `onDraftSurface`.
+     */
+    const editorAdmits = async (within: Scoped, request: Request): Promise<boolean> => {
+      const header = request.headers.get("cookie");
       const wants = hasDraftCookie(header);
 
       if ((wants || asksByCredential()) && rt.auth.mode === "session") {
@@ -1159,27 +1191,30 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           within.render && within.registry
             ? previewSite(env, { render: within.render, registry: within.registry })
             : undefined;
-        const actor = await resolveActor(() => db, rt.auth, credentialOf(req), { preview });
+        const actor = await resolveActor(() => db, rt.auth, credentialOf(request), { preview });
         const mayDraft =
           within.render && within.registry
             ? mayPreviewDrafts(actor, within.registry, within.render.site.id)
             : allows(actor, READ_DRAFT);
-        if (mayDraft) return draftOf(story);
+        if (mayDraft) return true;
       }
       // `auth: 'open'` has no actor to resolve and no role to check, so the
       // draft cookie alone is the authority — the same authority `handle()`'s
       // preview branch grants there, on a site that has declared it has no
       // editors to distinguish.
-      if (wants && rt.auth.mode !== "session") return draftOf(story);
+      return wants && rt.auth.mode !== "session";
+    };
 
-      const shared = shareCookieTokens(header);
-      if (
-        shared.length > 0 &&
-        (await claimShare(db, shared, story.id, undefined, within.render?.site.id))
-      ) {
-        return draftOf(story);
-      }
-      return null;
+    /**
+     * May this request read a **record's** draft: the editor half of `draftFor` with
+     * the share branch left out, because a share link covers one story and a record
+     * is looked up by a value anyone can guess. The caller that gated the site has
+     * already decided with `mayPreviewDrafts` (`GatedReaderFrom`).
+     */
+    const draftAdmitted = async (within: Scoped): Promise<boolean> => {
+      if (gatedFrom) return gatedFrom.draft;
+      if (!req || !onDraftSurface(within)) return false;
+      return editorAdmits(within, req);
     };
 
     /**
@@ -1267,6 +1302,81 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       }
     };
 
+    /**
+     * The tail `page()` and `recordBy()` share: access, redaction, resolve, headers.
+     * One function so the header rule (`no-store` for a draft or a non-public page,
+     * else `cacheHeaders`) exists once, and `opts` reaches it whole so an option a
+     * later change adds to `FolioPageOptions` is read in one place.
+     *
+     * Decided before the resolve, because a denied visitor's resolution must be built
+     * from the *redacted* document: resolving the full one and swapping the doc
+     * afterwards would hand back the titles and URLs of everything the withheld body
+     * points at.
+     */
+    const pageOf = async (
+      within: Scoped,
+      brand: BrandRuntime,
+      story: StoryMeta,
+      doc: Doc,
+      drafted: boolean,
+      opts: FolioPageOptions | undefined,
+    ): Promise<FolioPage> => {
+      const locale = opts?.locale;
+      const access = await accessFor(brand, story, doc, drafted, locale);
+      const shown = access === "denied" ? redactDoc(doc, brand.schema) : doc;
+
+      const resolution = await brand.resolve(bindings, shown, {
+        ...(locale !== undefined ? { locale } : {}),
+        ...(opts?.page !== undefined ? { page: opts.page } : {}),
+        story,
+        // A drafted page resolves its targets from their drafts too, or it
+        // links to and pulls in published copies of everything else and is
+        // internally inconsistent.
+        ...(drafted ? { draft: true } : {}),
+        ...siteOption(within),
+      });
+
+      return {
+        doc: shown,
+        story,
+        resolution,
+        draft: drafted,
+        access,
+        /**
+         * **The reason this method returns headers at all.** `cacheHeaders`
+         * and `noStore` look interchangeable and only one of them keeps
+         * unpublished content off the edge, and `Cache-Control` without
+         * `Cache-Tag` is a page cached for a week with no purge path — the
+         * half-configured state `caching.md` decision 2 calls worse than no
+         * caching. Both are now impossible to get wrong from here.
+         *
+         * **`access !== 'public'` is the whole of visitor access's security
+         * property** (`visitor-access.md` decision 5). `cacheVerdictFor`
+         * answers `null` for a host's own path — Folio has no opinion there —
+         * so this value is the only thing keeping a members-only page out of a
+         * shared cache under its real URL. `'denied'` is `no-store` too, and
+         * that is the half that looks wrong: a teaser is visitor-independent
+         * and therefore *looks* cacheable, but Workers Caching has no way to
+         * answer it to a stranger and not to the member who signed in a second
+         * later. The cost is stated in the spec: a gated page is uncacheable
+         * at the edge, for everyone, forever.
+         */
+        headers: {
+          ...(drafted || access !== "public"
+            ? { "cache-control": NO_STORE }
+            : cacheHeaders(resolution, { story: story.id })),
+          // On a site's preview origin the admin is the one page that may frame
+          // this, exactly as `framedBy` says of Folio's own responses (decision
+          // 13). Here because a host's page never passes through `framedBy`,
+          // and never on the live surface, where it would break every embed.
+          // `cacheHeaders` and `NO_STORE` set no policy, so nothing is replaced.
+          ...(rt.sites && within.render?.surface === "preview"
+            ? { "content-security-policy": `frame-ancestors ${rt.sites.admin}` }
+            : {}),
+        },
+      };
+    };
+
     return {
       published: async (path, locale) => {
         if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null;
@@ -1341,59 +1451,64 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // brand — exists whenever anything was found.
         const brand = one ?? within.brand;
         if (!brand) throw new Error(NO_BRAND);
-        const access = await accessFor(brand, story, doc, drafted !== null, locale);
-        const shown = access === "denied" ? redactDoc(doc, brand.schema) : doc;
+        return pageOf(within, brand, story, doc, drafted !== null, opts);
+      },
+      /**
+       * `page()` for a record, by one of its `unique` indexed fields. See
+       * `FolioReader.recordBy`; the three decisions that are easy to get wrong:
+       *
+       * **Authority is the editor's alone.** A draft is read only when `wantsDraft()`
+       * *and* `editorAdmits` says so, and never on a share: `draftFor`'s share branch
+       * is exactly what this does not call, so a reviewer holding a link to one record
+       * cannot reach another by guessing its slug. A request a share admitted to a
+       * draft site (`shareOnly`) has an empty chain and is refused outright.
+       *
+       * **The draft is authoritative once it has a mirror** (`recordDraftCandidates`):
+       * an editor who changed a slug in the draft finds the record at the new one, and
+       * the published slug is a miss for them. Each candidate is confirmed against the
+       * draft document itself, which also covers the mirror's string cut and a locale.
+       *
+       * **The fences are the chain and the brand**, as for any read: the lookup is
+       * `site_id in (chain)` and `type = ?`, and the brand is the scope's, so another
+       * brand's record, or another site's, is a miss and never a leak.
+       */
+      recordBy: async (typeName, field, value, opts) => {
+        const locale = opts?.locale;
+        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null;
 
-        const resolution = await brand.resolve(bindings, shown, {
-          ...(locale !== undefined ? { locale } : {}),
-          ...(opts?.page !== undefined ? { page: opts.page } : {}),
-          story,
-          // A drafted page resolves its targets from their drafts too, or it
-          // links to and pulls in published copies of everything else and is
-          // internally inconsistent.
-          ...(drafted ? { draft: true } : {}),
-          ...siteOption(within),
-        });
+        const within = await scopeOnce();
+        if (within.shareOnly) return null;
+        const brand = one ?? within.brand;
+        if (!brand) return null;
+        const type = brand.typeOf(typeName);
+        if (type?.kind !== "record") {
+          throw new Error(`folio: recordBy('${typeName}'): not a record type of this brand`);
+        }
+        if (!uniqueFieldsOf(brand.schema[type.root]).some(([name]) => name === field)) {
+          throw new Error(
+            `folio: recordBy('${typeName}', '${field}'): '${field}' is not a text({ indexed: true, unique: true }) field of '${type.root}'`,
+          );
+        }
 
-        return {
-          doc: shown,
-          story,
-          resolution,
-          draft: drafted !== null,
-          access,
-          /**
-           * **The reason this method returns headers at all.** `cacheHeaders`
-           * and `noStore` look interchangeable and only one of them keeps
-           * unpublished content off the edge, and `Cache-Control` without
-           * `Cache-Tag` is a page cached for a week with no purge path — the
-           * half-configured state `caching.md` decision 2 calls worse than no
-           * caching. Both are now impossible to get wrong from here.
-           *
-           * **`access !== 'public'` is the whole of visitor access's security
-           * property** (`visitor-access.md` decision 5). `cacheVerdictFor`
-           * answers `null` for a host's own path — Folio has no opinion there —
-           * so this value is the only thing keeping a members-only page out of a
-           * shared cache under its real URL. `'denied'` is `no-store` too, and
-           * that is the half that looks wrong: a teaser is visitor-independent
-           * and therefore *looks* cacheable, but Workers Caching has no way to
-           * answer it to a stranger and not to the member who signed in a second
-           * later. The cost is stated in the spec: a gated page is uncacheable
-           * at the edge, for everyone, forever.
-           */
-          headers: {
-            ...(drafted || access !== "public"
-              ? { "cache-control": NO_STORE }
-              : cacheHeaders(resolution, { story: story.id })),
-            // On a site's preview origin the admin is the one page that may frame
-            // this, exactly as `framedBy` says of Folio's own responses (decision
-            // 13). Here because a host's page never passes through `framedBy`,
-            // and never on the live surface, where it would break every embed.
-            // `cacheHeaders` and `NO_STORE` set no policy, so nothing is replaced.
-            ...(rt.sites && within.render?.surface === "preview"
-              ? { "content-security-policy": `frame-ancestors ${rt.sites.admin}` }
-              : {}),
-          },
-        };
+        const ctx = localeContext(rt.locales, locale);
+        const lookup = { type: typeName, field, locale: ctx?.code ?? "", value };
+
+        if (wantsDraft() && (await draftAdmitted(within))) {
+          for (const candidate of await recordDraftCandidates(db, within.chain, lookup)) {
+            const draft = await draftOf(candidate);
+            const root = draft.bloks[draft.root];
+            if (root && fieldValue(root, field, ctx) === value) {
+              return pageOf(within, brand, candidate, draft, true, opts);
+            }
+          }
+          // The draft is authoritative: an editor is never shown the published copy
+          // of a record whose draft has moved off this value.
+          return null;
+        }
+
+        const found = await recordByField(db, within.chain, lookup);
+        if (!found?.doc) return null;
+        return pageOf(within, brand, found.story, found.doc, false, opts);
       },
       resolve: async (doc, opts) =>
         (await requireBrand()).resolve(bindings, doc, {

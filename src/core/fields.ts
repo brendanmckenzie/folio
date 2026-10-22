@@ -113,7 +113,19 @@ export interface SelectOption {
 }
 
 export type Field =
-  | ({ kind: "text"; placeholder?: string } & Common & Indexable & Searchable)
+  /**
+   * `unique` (with `indexed`, on a document type's root): no two published
+   * documents of one type, in one owning scope, hold the same value per locale. What a
+   * record's slug is, and what `reader.recordBy()` looks a record up by.
+   *
+   * **Enforced at publish, not on a keystroke.** A draft lives in a Durable Object
+   * the Worker never sees change, so two drafts can hold one value; the publish
+   * that would make it live is refused with `409 conflict` naming the other record,
+   * on every path that publishes (admin, v1 API, bulk, scheduler). Two publishes
+   * racing can both pass, which is what `/folio/audit`'s `unique-duplicate` reports.
+   * Refused at construction without `indexed` or off a root block (`validateTypes`).
+   */
+  | ({ kind: "text"; placeholder?: string; unique?: boolean } & Common & Indexable & Searchable)
   | ({ kind: "textarea"; rows?: number; placeholder?: string } & Common & Indexable & Searchable)
   | ({ kind: "number"; min?: number; max?: number } & Common & Indexable)
   | ({ kind: "boolean" } & Common & Indexable)

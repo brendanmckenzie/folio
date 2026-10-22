@@ -385,6 +385,25 @@ export function validateTypes(types: readonly DocumentType[], schema: SchemaInde
       }
     }
   }
+  // `unique` is a promise the publish check keeps by reading `content_index`, so it
+  // needs the field to be projected there, and only a root block's fields are. A flag
+  // that can never be enforced is refused rather than left reading as a constraint.
+  const roots = new Set(types.map((t) => t.root));
+  for (const [block, def] of Object.entries(schema)) {
+    for (const [name, field] of Object.entries(def.fields)) {
+      if (!("unique" in field) || field.unique !== true) continue;
+      if (field.kind !== "text" || field.indexed !== true) {
+        throw new Error(
+          `folio: field '${name}' on '${block}' is 'unique' but not an 'indexed' text field; declare it text({ indexed: true, unique: true })`,
+        );
+      }
+      if (!roots.has(block)) {
+        throw new Error(
+          `folio: field '${name}' on '${block}' is 'unique', but '${block}' is no document type's root block; only a root block's fields are indexed, so move the field to the root`,
+        );
+      }
+    }
+  }
   // Every `under` chain has to reach a type that can sit at the top level, or
   // no document of that type could ever be created at all. Walks the config,
   // never a document — the same shape `validatePreset`'s cycle check has.
@@ -395,6 +414,19 @@ export function validateTypes(types: readonly DocumentType[], schema: SchemaInde
       );
     }
   }
+}
+
+/**
+ * The `unique` text fields of a root block, as `[name, label]` in declaration
+ * order. Only an `indexed` text field counts, which is what `validateTypes`
+ * guarantees of every `unique` one; the filter keeps a hand-built schema honest.
+ */
+export function uniqueFieldsOf(def: BlockSchema | undefined): [string, string][] {
+  return Object.entries(def?.fields ?? {}).flatMap(([name, field]) =>
+    field.kind === "text" && field.indexed === true && field.unique === true
+      ? [[name, field.label ?? name] as [string, string]]
+      : [],
+  );
 }
 
 function grounded(

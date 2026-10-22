@@ -37,6 +37,7 @@ import {
   titleFieldOf,
   titleOf,
   typeByName,
+  uniqueFieldsOf,
   validateGlobals,
   validatePresets,
   validateTypes,
@@ -83,6 +84,7 @@ import {
   publishedDocsByIds,
   storiesFor,
   storyById,
+  uniqueConflict,
 } from "./stories";
 import type {
   BrandRef,
@@ -1728,11 +1730,38 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     const registryFor = async (story: StoryMeta, env: unknown) =>
       branded && sites && singletonTypeOf(story.id) ? sites.registry(env) : undefined;
 
+    /**
+     * Each document type's `unique` fields (`text({ indexed: true, unique: true })`),
+     * name to label. Empty for a brand that declares none, and then `publishDeps`
+     * carries no `uniqueness` at all, so a publish costs what it always did.
+     */
+    const uniqueByType = new Map(
+      types.flatMap((t) => {
+        const fields = uniqueFieldsOf(schema[t.root]);
+        return fields.length > 0 ? [[t.name, new Map(fields)] as const] : [];
+      }),
+    );
+
     const publishDeps = (
       bindings: ReadBindings,
       hookCtx: HookRunnerCtx,
     ): PublishDeps & { logger: FolioLogger } => ({
       db: bindings.db,
+      ...(uniqueByType.size > 0
+        ? {
+            uniqueness: async (story: StoryMeta, projection: ContentProjection) => {
+              const fields = uniqueByType.get(story.type);
+              if (!fields) return null;
+              const found = await uniqueConflict(
+                bindings.db,
+                story,
+                projection.index,
+                new Set(fields.keys()),
+              );
+              return found && { ...found, label: fields.get(found.field) ?? found.field };
+            },
+          }
+        : {}),
       draft: async (story) => draftFor(bindings, story, await registryFor(story, hookCtx.env)),
       draftWithSyncId: async (story) =>
         draftForWithSyncId(bindings, story, await registryFor(story, hookCtx.env)),
