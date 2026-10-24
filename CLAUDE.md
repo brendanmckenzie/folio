@@ -64,7 +64,7 @@ the installed package (including a boot of the starter under `vite dev`). `.gith
 build, test) on every pull request, and `gate` is the status the `main` ruleset
 requires. See "Releasing" below.
 
-Setup: Node 24.18.0 (`.nvmrc`), pnpm from `package.json` `packageManager`
+Setup: Node 26.12.0 (`.nvmrc`), pnpm from `package.json` `packageManager`
 (`corepack enable`). On a fresh clone run `pnpm --filter demo cf-typegen` once: the
 demo's `worker-configuration.d.ts` is gitignored and `pnpm typecheck` needs it. `pnpm install` also installs the git hooks (lefthook):
 Biome and gitleaks on commit, commitlint on the message, and a refusal to push
