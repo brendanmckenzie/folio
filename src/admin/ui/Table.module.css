@@ -132,6 +132,51 @@
 }
 
 /*
+ * **A cell that is too long truncates; it does not widen the table** (#117).
+ *
+ * `nowrap` sizes every column to its longest loaded value, so a table of records is as
+ * wide as its worst title and slug. On the screen's 1400px box that was 1696px of table
+ * in a 1400px scroller: a horizontal scrollbar, and a width that changed with the sort
+ * because a different fifty rows were loaded. Nothing measured the viewport; the
+ * overflow was there at 1456px too, whenever one title was long enough.
+ *
+ * Two rules, both on `td` only (a header label is short and is the click target):
+ *
+ * - **Every cell is capped**, so a long slug or category cannot take the width. The cap
+ *   is `ch`, not px, so it follows the UI font.
+ * - **The first column is capped at zero and floored at `min-width`.** In auto layout a
+ *   cell's `max-width` feeds its *min-content* contribution, so `max-width: 0` is what
+ *   lets `width: 100%` mean "whatever is left" instead of "at least my longest title".
+ *   `min-width` is the floor, so a table whose other columns are wide still leaves the
+ *   title something to show.
+ *
+ * Both sit inside `:where()` so they have the specificity of `.table td` and a screen
+ * that wants wrapped prose (`Settings.module.css`) overrides them with one ordinary
+ * selector, the way it already overrides `white-space`. The select and actions cells
+ * are excluded: the first holds a checkbox, and the second must not clip the focus ring
+ * of the buttons it reveals.
+ */
+.table td:where(:not(.select, .actions)) {
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table td:where(:first-child:not(.select), .select + td) {
+  max-width: 0;
+  min-width: 16ch;
+}
+
+/* The button wrapping the first cell is inline-block by default, and `text-overflow`
+   on the cell only ellipsises inline text, not the box of an inline-block. */
+.open {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
  * A table that declares its own column widths (`Column.width`), which is the
  * only mechanism that actually apportions them — see that field for the
  * measurements.

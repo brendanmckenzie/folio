@@ -21,6 +21,7 @@
      schema and a document type carries eight, and this screen is read rather than
      scanned, so the extra width goes into columns nobody has to scroll to. */
   max-width: 1600px;
+  margin-inline: auto;
 }
 
 /* The same box as Documents', because it is the same control. Copied rather than
@@ -183,6 +184,10 @@
   padding-block: var(--space-1);
   white-space: normal;
   vertical-align: baseline;
+  /* Undo the shared table's truncation (#117): these cells are prose and wrap. */
+  max-width: none;
+  min-width: 0;
+  overflow: visible;
 }
 
 /*
