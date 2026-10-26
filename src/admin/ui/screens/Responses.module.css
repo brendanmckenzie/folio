@@ -16,6 +16,8 @@
   flex-direction: column;
   gap: var(--space-3);
   max-width: 1400px;
+  /* Centred, so a viewport wider than the cap leaves an even margin, not a void on the right (#117). */
+  margin-inline: auto;
 }
 
 /* ---------------------------------------------------------------- header --- */
