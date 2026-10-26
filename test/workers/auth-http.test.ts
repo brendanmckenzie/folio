@@ -361,6 +361,53 @@ describe("role gates", () => {
     expect(res.status).toBe(200);
   });
 
+  /** A rename owes nothing a role change does: the target stays signed in. */
+  it("renames a user without revoking their sessions", async () => {
+    const admin = await signIn("admin");
+    const target = await signIn("editor");
+    const res = await call(`/folio/api/users/${target.user.id}`, {
+      method: "PATCH",
+      headers: { cookie: admin.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "New Name" }),
+    });
+    expect(res.status).toBe(200);
+    const me = (await (await call("/folio/api/me", {
+      headers: { cookie: target.cookie },
+    }))!.json()) as { actor: { name: string } | null };
+    expect(me.actor?.name).toBe("New Name");
+  });
+
+  it("lets any signed-in person rename themselves, a viewer included", async () => {
+    const viewer = await signIn("viewer");
+    const res = await call("/folio/api/me", {
+      method: "PATCH",
+      headers: { cookie: viewer.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ name: "  Vera V  " }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ name: "Vera V" });
+    const me = (await (await call("/folio/api/me", {
+      headers: { cookie: viewer.cookie },
+    }))!.json()) as { actor: { name: string; role: string } | null };
+    expect(me.actor).toMatchObject({ name: "Vera V", role: "viewer" });
+  });
+
+  it("refuses a blank or missing name, an anonymous caller and a token on PATCH /me", async () => {
+    const editor = await signIn("editor");
+    const patch = (body: unknown, headers: Record<string, string>) =>
+      call("/folio/api/me", {
+        method: "PATCH",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await patch({ name: "   " }, { cookie: editor.cookie }))!.status).toBe(400);
+    expect((await patch({}, { cookie: editor.cookie }))!.status).toBe(400);
+    expect((await patch({ name: "x" }, {}))!.status).toBe(401);
+    const { token } = await createToken(env.DB, { name: "ci", scopes: ["content:read"] });
+    const viaToken = await patch({ name: "x" }, { authorization: `Bearer ${token}` });
+    expect(viaToken!.status).toBe(403);
+  });
+
   /**
    * A role an identity provider's claims placed is not Folio's to edit
    * (`docs/specs/foundation/auth-providers.md` decision 5, checkpoint 2).

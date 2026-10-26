@@ -32,6 +32,9 @@ interface Props {
   apiBase: string;
   me: Me;
   onNotice: (message: string) => void;
+  /** Tells the shell the signed-in person's name changed, so the user menu and
+   * this screen follow without a reload. */
+  onRenamed?: (id: string, name: string) => void;
   /**
    * The shell's boot is still in flight, so `me` is still the optimistic `OPEN`
    * guess — see `Access.tsx`'s identical prop for the fuller argument. Here the
@@ -70,7 +73,7 @@ const SKELETON = ["s1", "s2", "s3"];
  * 4. **Recent sign-ins** — `GET {base}/api/me/events`, spec 28 phase 4's route,
  *    read-only.
  */
-export function Account({ apiBase, me, onNotice, loading }: Props) {
+export function Account({ apiBase, me, onNotice, onRenamed, loading }: Props) {
   const gate = accountGate(me);
   const availability = passkeyAvailability(me);
   const data = useAccount(
@@ -83,6 +86,8 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
   const [renaming, setRenaming] = useState<PasskeyRow | null>(null);
   const [draftName, setDraftName] = useState("");
   const [removing, setRemoving] = useState<PasskeyRow | null>(null);
+  const [renamingSelf, setRenamingSelf] = useState(false);
+  const [selfName, setSelfName] = useState("");
 
   const send = useCallback(
     async (path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) => {
@@ -129,6 +134,18 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
       setRenaming(null);
       return `Renamed to "${name}".`;
     }, data.passkeys.reload);
+
+  const confirmRenameSelf = () =>
+    void run(
+      async () => {
+        const res = await send("/me", "PATCH", { name: selfName.trim() });
+        const answer = (await res.json()) as { name: string };
+        if (gate.kind === "ok") onRenamed?.(gate.self.id, answer.name);
+        setRenamingSelf(false);
+        return `Your name is now "${answer.name}".`;
+      },
+      () => {},
+    );
 
   const confirmRemove = () =>
     void run(async () => {
@@ -304,7 +321,21 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
         <dl className={css.identity}>
           <div className={css.identityRow}>
             <dt>Name</dt>
-            <dd>{self.name}</dd>
+            <dd className={css.roleValue}>
+              {self.name}
+              <Button
+                size="sm"
+                variant="subtle"
+                disabled={busy}
+                reason="A write is in flight"
+                onClick={() => {
+                  setSelfName(self.name);
+                  setRenamingSelf(true);
+                }}
+              >
+                Edit
+              </Button>
+            </dd>
           </div>
           {self.email ? (
             <div className={css.identityRow}>
@@ -465,6 +496,36 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
             data.passkeys.reload();
           }}
         />
+      ) : null}
+
+      {renamingSelf ? (
+        <Dialog
+          title="Edit your name"
+          onClose={() => setRenamingSelf(false)}
+          actions={
+            <>
+              <Button onClick={() => setRenamingSelf(false)}>Cancel</Button>
+              <Button
+                variant="primary"
+                disabled={busy || !selfName.trim()}
+                onClick={confirmRenameSelf}
+              >
+                Save
+              </Button>
+            </>
+          }
+        >
+          <Field label="Name">
+            {(id) => (
+              <Input
+                id={id}
+                value={selfName}
+                maxLength={120}
+                onChange={(e) => setSelfName(e.target.value)}
+              />
+            )}
+          </Field>
+        </Dialog>
       ) : null}
 
       {renaming ? (

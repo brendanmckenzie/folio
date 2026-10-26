@@ -8,7 +8,7 @@ import { Badge } from "../Badge";
 import { Button } from "../Button";
 import { Dialog } from "../Dialog";
 import { EmptyState } from "../EmptyState";
-import { Select } from "../Field";
+import { Field, Input, Select } from "../Field";
 import { ListHeader } from "../List";
 import { scopeOptionGroups } from "../nav";
 import { type Column, Table } from "../Table";
@@ -53,6 +53,9 @@ interface Props {
    * a person and the screen behind it. */
   onQuery: (next: Record<string, string | undefined>) => void;
   onNotice: (message: string) => void;
+  /** Tells the shell a user's name changed; it applies it when that user is the
+   * signed-in one, so the user menu follows an admin renaming themselves. */
+  onRenamed?: (id: string, name: string) => void;
   /**
    * The shell's boot is still in flight, so `me` is a guess rather than an answer.
    *
@@ -117,7 +120,7 @@ const SKELETON = ["s1", "s2", "s3", "s4"];
  *    unreachable by keyboard" — and rather than have the two tables disagree, both
  *    put it in a named column.
  */
-export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props) {
+export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loading }: Props) {
   const gate = accessGate(me);
   const url = parseAccessUrl(query);
   const data = useAccess(apiBase, !loading && gate.kind === "ok");
@@ -125,6 +128,8 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
   const [busy, setBusy] = useState(false);
   const [minted, setMinted] = useState<Minted | null>(null);
   const [removing, setRemoving] = useState<AccessUser | null>(null);
+  const [renaming, setRenaming] = useState<AccessUser | null>(null);
+  const [draftName, setDraftName] = useState("");
   const [revoking, setRevoking] = useState<TokenRow | null>(null);
   const [removingPasskeys, setRemovingPasskeys] = useState<AccessUser | null>(null);
   // Multi-site: whose grants are open in the editor. Always null with no `sites`.
@@ -202,6 +207,17 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
       // to somebody.
       return `${user.name} is now a ${role}. They will need to sign in again.`;
     }, data.users.reload);
+
+  const rename = async (user: AccessUser, name: string) => {
+    const ok = await run(async () => {
+      await send(`/users/${encodeURIComponent(user.id)}`, "PATCH", { name });
+      // Unlike a role change this drops nobody's sessions, so there is no
+      // sign-in warning to give.
+      onRenamed?.(user.id, name);
+      return `${user.name} is now ${name}.`;
+    }, data.users.reload);
+    if (ok) setRenaming(null);
+  };
 
   const remove = (user: AccessUser) =>
     void run(async () => {
@@ -389,6 +405,17 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         const passkeysRefusal = removePasskeysRefusal(user);
         return (
           <span className={css.rowActions}>
+            <Button
+              size="sm"
+              disabled={busy}
+              reason="A write is in flight"
+              onClick={() => {
+                setDraftName(user.name);
+                setRenaming(user);
+              }}
+            >
+              Rename
+            </Button>
             <Button
               size="sm"
               disabled={busy || passkeysRefusal !== undefined}
@@ -626,6 +653,36 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         />
       ) : null}
       {minted ? <MintedTokenDialog minted={minted} onClose={() => setMinted(null)} /> : null}
+
+      {renaming ? (
+        <Dialog
+          title={`Rename ${renaming.name}`}
+          onClose={() => setRenaming(null)}
+          actions={
+            <>
+              <Button onClick={() => setRenaming(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                disabled={busy || !draftName.trim()}
+                onClick={() => void rename(renaming, draftName.trim())}
+              >
+                Save
+              </Button>
+            </>
+          }
+        >
+          <Field label="Name">
+            {(id) => (
+              <Input
+                id={id}
+                value={draftName}
+                maxLength={120}
+                onChange={(e) => setDraftName(e.target.value)}
+              />
+            )}
+          </Field>
+        </Dialog>
+      ) : null}
 
       {removing ? (
         <Dialog
