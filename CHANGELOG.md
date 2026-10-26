@@ -8,6 +8,20 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.2.3
+
+A patch release: nothing to run or edit.
+
+### Fixed
+
+- **A display name can be edited.** Account has an Edit control beside the signed-in
+  user's name (any role, a viewer included, through a new internal `PATCH {base}/api/me`),
+  and Access has a Rename action on every user row. A rename signs nobody out (#116).
+- **List screens no longer overflow on wide viewports.** Table cells other than the
+  first are capped at 32ch with an ellipsis and the first column takes the remaining
+  width, so a long title or slug no longer widens the table past its screen or changes
+  its width when the sort changes. Capped screens are centred (#117).
+
 ## 1.2.2
 
 A patch release: nothing to run or edit.
