@@ -698,6 +698,14 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           blockRail,
           inspector,
           notify: setNotice,
+          // The signed-in person renamed themselves (Account, or their own row on
+          // Access): patch the shell's copy so the user menu follows without a reload.
+          renamed: (id: string, name: string) =>
+            setMe((m) =>
+              m.actor?.kind === "user" && m.actor.id === id
+                ? { ...m, actor: { ...m.actor, name } }
+                : m,
+            ),
           contentView,
           contentSort,
           assetView,
@@ -765,6 +773,7 @@ interface ScreenArgs {
   blockRail: ReturnType<typeof useRemembered>;
   inspector: ReturnType<typeof useRemembered>;
   notify: (message: string) => void;
+  renamed: (id: string, name: string) => void;
   contentView: ReturnType<typeof useRememberedString<ViewMode>>;
   contentSort: ReturnType<typeof useRememberedString<FlatSort>>;
   assetView: ReturnType<typeof useRememberedString<AssetView>>;
@@ -1055,6 +1064,7 @@ function screenFor(a: ScreenArgs) {
           query={route.query}
           onQuery={(next) => a.replace({ name: "access" }, { ...route.query, ...next })}
           onNotice={a.notify}
+          onRenamed={a.renamed}
         />
       );
 
@@ -1096,7 +1106,15 @@ function screenFor(a: ScreenArgs) {
       );
 
     case "account":
-      return <Account apiBase={boot.apiBase} me={a.me} loading={a.loading} onNotice={a.notify} />;
+      return (
+        <Account
+          apiBase={boot.apiBase}
+          me={a.me}
+          loading={a.loading}
+          onNotice={a.notify}
+          onRenamed={a.renamed}
+        />
+      );
 
     case "sites":
       return (

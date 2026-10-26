@@ -50,13 +50,19 @@ import { ADMIN, type UserActor } from "../auth/roles";
 import { mintSecret } from "../auth/secrets";
 import { listUserSessions, revokeOtherSessions } from "../auth/session";
 import { domainOf, type SessionAuth } from "../auth/sign-in";
-import { userById } from "../auth/users";
+import { updateUser, userById } from "../auth/users";
 import { creationOptions, verifyRegistration } from "../auth/webauthn";
 import { envelope, FolioError } from "../errors";
 import { requireAccess, requireAuthConfigured, requirePasskeys } from "../middleware";
 import type { FolioRuntime } from "../runtime";
 import type { FolioEnv } from "../types";
-import { idParam, parseBody, PasskeyPatchBody, PasskeyRegisterBody } from "../validate";
+import {
+  idParam,
+  MePatchBody,
+  parseBody,
+  PasskeyPatchBody,
+  PasskeyRegisterBody,
+} from "../validate";
 
 /**
  * The one message every refusal of `POST {base}/login/passkey` carries, and the
@@ -216,6 +222,27 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   // account screen would otherwise be blank for most hosts.
   app.use("/me/sessions", requireAuthConfigured<Env>(rt));
   app.use("/me/sessions/*", requireAuthConfigured<Env>(rt));
+
+  /**
+   * Renames the caller. Any signed-in person may, a viewer included: it edits the
+   * caller's own row and nothing else, and the id comes from the session, never
+   * the path, so there is no one else's row to reach.
+   *
+   * No session revoke and no event, unlike a role change: nothing here changes
+   * what anybody may do. The name is read through `readSession`'s join on every
+   * request, so the activity trail and every new socket's `hello` see it at once;
+   * a socket already open keeps the name its presence attachment was minted with
+   * until it reconnects.
+   */
+  // Gated here rather than by `app.use("/me", ...)`: that would also gate `GET
+  // /me`, which must keep answering under `auth: 'open'`.
+  app.patch("/me", requireAuthConfigured<Env>(rt), async (c) => {
+    const actor = person(c, "name");
+    const body = await parseBody(c.req, MePatchBody);
+    const row = await updateUser(c.var.bindings().db, actor.id, { name: body.name });
+    if (!row) throw new FolioError("not_found", "Unknown user");
+    return c.json({ name: row.name });
+  });
 
   /* --------------------------------------------------------- enrolment --- */
 

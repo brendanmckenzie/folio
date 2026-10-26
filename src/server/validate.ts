@@ -616,6 +616,10 @@ export const UserPatchBody = v.object(
   OBJECT,
 );
 
+/** `PATCH {base}/api/me`. The caller's own display name, bounded as
+ * `UserPatchBody.name` is: the only self-service edit of the user row. */
+export const MePatchBody = v.object({ name: required(120) }, OBJECT);
+
 /**
  * `POST /folio/tokens`. `scopes` is checked against the picklist here rather
  * than silently filtered, so asking for a scope that does not exist is a 400
