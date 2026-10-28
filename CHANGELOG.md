@@ -8,6 +8,17 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.2.4
+
+A patch release: nothing to run or edit.
+
+### Fixed
+
+- **"Last seen" moves for editors who stay signed in.** A session renewal now stamps
+  `users.last_seen_at` as well as extending the session, so the Access screen is at most
+  about half a session's life out of date for an active account, rather than showing its
+  last sign-in indefinitely. The "Signs in with" column is unchanged by a renewal (#121).
+
 ## 1.2.3
 
 A patch release: nothing to run or edit.
