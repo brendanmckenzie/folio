@@ -422,9 +422,11 @@ export async function deleteUser(db: FolioDb, id: string): Promise<boolean> {
 }
 
 /**
- * Stamped on sign-in: `last_seen_at`, which answers "is this account still in
- * use" for whoever is pruning the list, and `provider`, which answers "how did
- * they last get in".
+ * Stamped on sign-in and on session renewal: `last_seen_at`, which answers "is
+ * this account still in use" for whoever is pruning the list, and `provider`,
+ * which answers "how did they last get in". Renewal (`readSession`, past the halfway mark) stamps
+ * `last_seen_at` only, so it is at most about half a session's life stale for
+ * someone who is signed in and active.
  *
  * **The provider stamp lives here and not at a call site**, which is the point.
  * It used to be written by `createUser` on the OIDC callback and nowhere else,
