@@ -311,6 +311,33 @@ describe("sessions", () => {
     expect(renewed).toBe(later + 30 * DAY);
   });
 
+  it("stamps last_seen_at on the user when a session renews", async () => {
+    const user = await seedUser();
+    const { token } = await createSession(env.DB, user.id, { days: 30 });
+    const later = Date.now() + 20 * DAY;
+    await readSession(env.DB, token, { days: 30, now: later });
+    expect((await userById(env.DB, user.id))?.lastSeenAt).toBe(later);
+  });
+
+  it("leaves last_seen_at alone on a read before the renewal point", async () => {
+    const user = await seedUser();
+    const { token } = await createSession(env.DB, user.id, { days: 30 });
+    const before = (await userById(env.DB, user.id))?.lastSeenAt;
+    await readSession(env.DB, token, { days: 30, now: Date.now() + 3 * DAY });
+    expect((await userById(env.DB, user.id))?.lastSeenAt).toBe(before);
+  });
+
+  it("leaves users.provider alone when a session renews", async () => {
+    const user = await seedUser();
+    await env.DB.prepare("update users set provider = ? where id = ?").bind("oidc", user.id).run();
+    const { token } = await createSession(env.DB, user.id, { days: 30 });
+    await readSession(env.DB, token, { days: 30, now: Date.now() + 20 * DAY });
+    const row = await env.DB.prepare("select provider from users where id = ?")
+      .bind(user.id)
+      .first<{ provider: string | null }>();
+    expect(row?.provider).toBe("oidc");
+  });
+
   it("revocation is a delete, and takes effect on the next read", async () => {
     const user = await seedUser();
     const { token } = await createSession(env.DB, user.id);

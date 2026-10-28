@@ -180,10 +180,16 @@ export async function readSession(
   let expiresAt = row.expires_at;
   if (now - row.created_at > life * RENEW_AFTER) {
     expiresAt = now + life;
-    await db
-      .prepare("update sessions set created_at = ?, expires_at = ? where id = ?")
-      .bind(now, expiresAt, id)
-      .run();
+    // Batched with the user stamp: this is the only write an active editor's
+    // session makes, so it is where "last seen" has to move or the Access screen
+    // shows their original sign-in forever. No provider, so `users.provider`
+    // keeps answering how they last signed in.
+    await db.batch([
+      db
+        .prepare("update sessions set created_at = ?, expires_at = ? where id = ?")
+        .bind(now, expiresAt, id),
+      touchUserStatement(db, row.user_id, now),
+    ]);
   }
 
   const user: UserRow = {
