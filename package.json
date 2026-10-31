@@ -87,23 +87,23 @@
     "valibot": "^1.5.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.5",
-    "@cloudflare/vitest-plugin": "^1.4.5",
-    "@cloudflare/workers-types": "^5.20260727.1",
-    "@commitlint/cli": "^21.2.3",
-    "@commitlint/config-conventional": "^21.2.3",
-    "@testing-library/dom": "^10.4.1",
+    "@biomejs/biome": "^2.6.3",
+    "@cloudflare/vitest-plugin": "^1.4.10",
+    "@cloudflare/workers-types": "^5.20261028.1",
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
-    "@types/node": "^26.1.1",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "esbuild": "^0.28.1",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "esbuild": "^0.28.2",
     "happy-dom": "^20.14.0",
     "lefthook": "^2.2.2",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
-    "vite": "^8.1.5",
-    "vitest": "^4.1.10"
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12"
   }
 }
