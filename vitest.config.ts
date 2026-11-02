@@ -73,6 +73,8 @@ export default defineConfig({
           environment: "happy-dom",
           include: ["test/unit/admin/render/**/*.test.{ts,tsx}"],
           setupFiles: ["./test/unit/admin/render/setup.ts"],
+          // happy-dom 21 no longer loads iframe pages by default; the multi-site preview pane needs `contentWindow`.
+          environmentOptions: { happyDOM: { settings: { enableIframePageLoading: true } } },
         },
       },
       {
