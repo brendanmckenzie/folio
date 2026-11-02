@@ -117,6 +117,8 @@ describe("renderGlobalNode", () => {
 // The edit marker, and what a block's `render` returns
 // ---------------------------------------------------------------------------
 
+const Heading = ({ title }: { title: string }) => <h2>{title}</h2>;
+
 /**
  * `RenderBlok` derives the edit marker so a block cannot forget to be editable
  * — which only holds if the marker actually reaches the DOM for every shape a
@@ -131,8 +133,6 @@ describe("renderGlobalNode", () => {
  * exactly the shape that opted out.
  */
 describe("the edit marker survives every shape of render", () => {
-  const Heading = ({ title }: { title: string }) => <h2>{title}</h2>;
-
   const blocks = [
     defineBlock({
       name: "hostEl",

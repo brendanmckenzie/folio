@@ -3,6 +3,11 @@ import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { wrapPreview } from "../../../src/core/render-wrap";
 
+function Wrap({ children }: { children: React.ReactNode }) {
+  const [id] = useState("held");
+  return <div data-wrap={id}>{children}</div>;
+}
+
 /**
  * The host's preview wrapper is a **component**, and this is the test that says
  * so.
@@ -34,10 +39,6 @@ describe("wrapPreview", () => {
 
   /** The whole point. A wrapper holding a router, a theme or a store has state. */
   it("lets the wrapper use hooks", () => {
-    function Wrap({ children }: { children: React.ReactNode }) {
-      const [id] = useState("held");
-      return <div data-wrap={id}>{children}</div>;
-    }
     expect(renderToStaticMarkup(<>{wrapPreview(Wrap, <p>hi</p>)}</>)).toBe(
       '<div data-wrap="held"><p>hi</p></div>',
     );

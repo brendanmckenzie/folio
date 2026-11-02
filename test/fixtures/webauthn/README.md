@@ -2,8 +2,8 @@
 
 **This directory is empty of fixtures, and that is the open half of phase 1.**
 
-`test/workers/passkey-verify.test.ts` proves the verifier's *logic* against
-`test/lib/synthetic-authenticator.ts`. It cannot prove the verifier's *parsing*,
+`test/workers/passkey-verify.test.ts` proves the verifier's _logic_ against
+`test/lib/synthetic-authenticator.ts`. It cannot prove the verifier's _parsing_,
 because the synthetic authenticator encodes CBOR the way `webauthn.ts` decodes
 it and pads the way `webauthn.ts` unpads. The two halves agree with each other by
 construction, which is exactly the agreement a real device does not owe us.
@@ -109,7 +109,7 @@ none of it can be recovered from them afterwards.
 - **`userId`** is the `users.id` whose base64url the browser echoes as
   `userHandle`. Needed even when `userHandle` is absent: the verifier is handed
   it as `stored.userId` either way.
-- **`storedCounter`** is what `passkeys.counter` held *before* this assertion —
+- **`storedCounter`** is what `passkeys.counter` held _before_ this assertion —
   `0` for a freshly enrolled credential. The test feeds it in so the counter rule
   is exercised against a real device's numbering.
 - **`assertion.credential.response.userHandle`** — omit the key entirely if the
@@ -127,7 +127,7 @@ the challenge cookie is single-use and cleared by the response that reads it, so
 replaying a fixture against a live deployment gets a generic 401. Nothing here
 signs anything new: the private key never left the device and was never sent.
 
-The one judgement call is the *account*: capture against a throwaway seeded
+The one judgement call is the _account_: capture against a throwaway seeded
 account (`demo@example.com` from `examples/demo/seed.sql`), not a real one, so
 the `userId` and the email inside `clientDataJSON` are demo data. Nothing else in
 these files identifies a person. They are checked in on purpose — a fixture that
