@@ -219,7 +219,8 @@ it must be applied before that Worker is deployed.
 `0015_draft_data.sql` (issue #82) landed 2026-10-22: one nullable column, `stories.draft_data`, a JSON mirror
 of the draft's root scalars written by the story Durable Object, selected by the Data list of the release
 that carries it, so it must be applied before that Worker is deployed.
-Next free is `0016`.
+`0016_option_sources.sql` (spec 37) and `0017_form_actions.sql` (spec 36) are claimed and ship
+together in v1.3.0 (roll-forward only, see `UPGRADING.md` once written). Next free is `0018`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a
@@ -558,6 +559,8 @@ Specs 1–17 are **done** and restamped in place with an `## Implementation note
 section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
+
+Specs 36 (form actions) and 37 (form option sources) are approved (2026-11-03) and being built, 37 then 36.
 
 **Specs 1–22 and 24–34 are done** — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and
