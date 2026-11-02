@@ -1,3 +1,32 @@
+const ABBREVIATIONS = new Set(["st", "dr", "mt", "ave", "rd", "mr", "mrs", "ms", "no", "vs", "e.g", "i.e", "etc"]);
+
+/**
+ * Splits text into sentences. `!` and `?` always end one; a full stop ends one
+ * only when the next word is capitalised and the token before it is not a
+ * short abbreviation ("St.", "e.g.").
+ *
+ * @param {string} text
+ */
+export function sentencesOf(text) {
+  const out = [];
+  let start = 0;
+  for (const m of text.matchAll(/([.!?]+)(\s+|$)/g)) {
+    const end = m.index + m[0].length;
+    if (/[!?]/.test(m[1])) {
+      out.push(text.slice(start, end));
+      start = end;
+      continue;
+    }
+    const token = (text.slice(start, m.index).match(/[\p{L}.]+$/u)?.[0] ?? "").toLowerCase();
+    const atEnd = end === text.length;
+    if (!atEnd && (!/^\p{Lu}/u.test(text.slice(end)) || ABBREVIATIONS.has(token))) continue;
+    out.push(text.slice(start, end));
+    start = end;
+  }
+  if (start < text.length) out.push(text.slice(start));
+  return out.filter((s) => s.trim() !== "");
+}
+
 /**
  * Scores one `media.describe` answer against its gold. Pure: no I/O, so the
  * unit tests and the harness call the same function.
@@ -37,7 +66,7 @@ export function score(output, expected, input) {
   const factRecall =
     groups.length === 0 ? 1 : groups.filter((g) => g.some((w) => text.includes(norm(w)))).length / groups.length;
 
-  const sentences = alt.split(/[.!?]+(?:\s+|$)/).filter((s) => s.trim() !== "");
+  const sentences = sentencesOf(alt);
   const wellFormed = sentences.length <= 1 && !/^(image|photo|picture) of\b/i.test(alt);
   const altOk = expected.decorative ? (alt === "" || wellFormed) : alt !== "" && wellFormed;
 
