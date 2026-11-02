@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # The e2e sweep is 22 fresh dev servers and databases, minutes each at worst.
     timeout-minutes: 60
     permissions:
