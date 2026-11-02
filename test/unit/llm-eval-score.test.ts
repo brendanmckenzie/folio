@@ -55,6 +55,21 @@ describe("media.describe score", () => {
     expect(score({ alt: "A kitchen.", tags: ["Food"] }, none).pass).toBe(false);
   });
 
+  it("counts sentences without splitting on abbreviations", () => {
+    const one = (alt: string) =>
+      score({ alt, tags: ["Dogs", "Animals"] }, { ...expected, mustMention: [] }, input).metrics
+        .altOk;
+    expect(
+      one(
+        "Downtown street corner with a red traffic light, a One Way sign pointing left, and a green Madison St. street sign on a dark lamppost, with tall stone office buildings and Nordstrom Rack banners behind.",
+      ),
+    ).toBe(1);
+    expect(one("A dog. A cat.")).toBe(0);
+    expect(one("A dog! A cat?")).toBe(0);
+    expect(one("A scene, e.g. a dog in a park.")).toBe(1);
+    expect(one("Dr. Smith walks a dog on Mt. Hood Rd. near town.")).toBe(1);
+  });
+
   it("does not require alt text for a decorative image", () => {
     const decorative = { tags: [], mustMention: [], decorative: true };
     expect(score({ tags: [] }, decorative).pass).toBe(true);
