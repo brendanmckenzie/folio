@@ -74,6 +74,18 @@ export function matchesForm(row: Pick<FormRow, "label" | "name">, q: string): bo
   return row.label.toLowerCase().includes(needle) || row.name.toLowerCase().includes(needle);
 }
 
+/** The "Needs attention" mark's title (`form-actions.md` decision 13): an action on
+ *  this form no longer fits its questions or settings, and a checking one refuses
+ *  every visitor until it is fixed. `attention` is absent from a summary read off a
+ *  server that predates spec 36, which reads as false. */
+export const ATTENTION_LABEL = "Needs attention";
+export const ATTENTION_HINT =
+  "An action on this form is incomplete. A checking action refuses every visitor until it is fixed. Open the form to see which.";
+
+export function needsAttention(row: Partial<Pick<FormRow, "attention">>): boolean {
+  return row.attention === true;
+}
+
 export function questionsLabel(row: Pick<FormRow, "questions">): string {
   return `${row.questions} ${row.questions === 1 ? "question" : "questions"}`;
 }

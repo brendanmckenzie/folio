@@ -124,3 +124,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The status badge and, when an action has drifted, "Needs attention" beside it. */
+.statusCell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+}

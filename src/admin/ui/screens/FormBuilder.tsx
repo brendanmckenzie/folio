@@ -10,6 +10,7 @@ import {
   MAX_FORM_SECTIONS,
   shapeOf,
 } from "../../../core/forms";
+import type { FormActionInfo } from "../../../core/form-actions";
 import type { LocaleConfig } from "../../../core/locales";
 import {
   type DocumentType,
@@ -18,7 +19,7 @@ import {
   type SchemaIndex,
 } from "../../../core/schema";
 import type { Form } from "../../../server/forms";
-import { canDeleteForms, canEdit, type Me } from "../../me";
+import { canDeleteForms, canEdit, canReadResponses, type Me } from "../../me";
 import { Badge } from "../Badge";
 import { Button } from "../Button";
 import { EmptyState } from "../EmptyState";
@@ -26,13 +27,18 @@ import { Field, Input, Select, Textarea } from "../Field";
 import { ListHeader } from "../List";
 import { Menu, type MenuItem } from "../Menu";
 import { ConditionEditor } from "./ConditionEditor";
+import { ActionsEditor } from "./ActionsEditor";
 import { OptionSourceEditor } from "./OptionSourceEditor";
 import { FormDeleteDialog } from "./FormDeleteDialog";
 import css from "./FormBuilder.module.css";
 import { blankCondition, formConditionText, sourcesFor } from "./condition-model";
 import {
+  type ActionContext,
+  actionReaders,
+  addedActionProblems,
   addField,
   addOption,
+  changeRefusal,
   endSectionAfter,
   logicRefusal,
   optionRefusal,
@@ -138,6 +144,7 @@ export function FormBuilder({
       }
       return { ...prev, [name]: options };
     });
+  const infos = useMemo(() => new Map(registry.actions.map((a) => [a.id, a])), [registry.actions]);
   const [draft, setDraft] = useState<Form | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
@@ -208,6 +215,10 @@ export function FormBuilder({
   }
 
   const editable = canEdit(me);
+  // Only a publisher decides where responses go (decision 8); an editor sees the
+  // section and cannot change it, nor rename a question an action reads.
+  const mayConfigure = editable && canReadResponses(me);
+  const actionCtx: ActionContext = { attachments: draft.actions ?? [], infos };
   const source = locales?.default ?? "";
   const showLocales = showLocaleSwitcher(locales);
   const hasResponses = (data.usage?.responses ?? 0) > 0;
@@ -223,6 +234,18 @@ export function FormBuilder({
   // The same refusal the server would send (`checkFormLogic`), shown before Save
   // rather than after a round trip, and Save is disabled while there is one.
   const logicProblem = logicRefusal(draft.fields, draft.layout);
+  // A save may not make an attachment worse (decision 13), but an attachment that was
+  // already incomplete does not hold the form hostage: it can still be closed or renamed.
+  const actionProblems = data.form
+    ? addedActionProblems(
+        { fields: data.form.fields, layout: data.form.layout, actions: data.form.actions ?? [] },
+        { fields: draft.fields, layout: draft.layout, actions: draft.actions ?? [] },
+        infos,
+      )
+    : [];
+  const saveProblem = logicProblem ?? actionProblems[0] ?? null;
+  const actionsChanged =
+    JSON.stringify(draft.actions ?? []) !== JSON.stringify(data.form?.actions ?? []);
   const selectedSectionDef = draft.layout.sections?.find((s) => s.name === selectedSection) ?? null;
   // The list's own row grouping (`form-model.ts`'s `fieldRows`), and whether
   // `beside` on the selected question could do anything at all — the first
@@ -256,20 +279,33 @@ export function FormBuilder({
   const onFieldChange = (name: string, next: FormField) => {
     // A rename goes through `renameField`, which also repoints every rule that
     // names the question; the rest of the edit is then applied on top of it.
+    // Retyping, or making a question an action reads optional or conditional, is
+    // refused with the action named (decision 5), as a removal is.
+    const refusal =
+      next.name === name
+        ? changeRefusal(draft.fields, draft.layout, name, next, actionCtx)
+        : actionReaders(actionCtx, name).length > 0 && !mayConfigure
+          ? `${actionReaders(actionCtx, name)[0]?.label} reads this question, so only a publisher can rename it.`
+          : null;
+    if (refusal) {
+      onNotice(refusal);
+      return;
+    }
     const renamed =
       next.name === name
-        ? { fields: draft.fields, layout: draft.layout }
-        : renameField(draft.fields, draft.layout, name, next.name);
+        ? { fields: draft.fields, layout: draft.layout, actions: draft.actions ?? [] }
+        : renameField(draft.fields, draft.layout, name, next.name, draft.actions ?? []);
     setDraft({
       ...draft,
       fields: updateField(renamed.fields, next.name, next),
       layout: renamed.layout,
+      actions: renamed.actions,
     });
     if (selected === name) setSelected(next.name);
   };
 
   const onRemoveField = (name: string) => {
-    const fields = removeField(draft.fields, name, draft.layout);
+    const fields = removeField(draft.fields, name, draft.layout, actionCtx);
     setDraft({ ...draft, fields, layout: pruneSections(fields, draft.layout) });
     if (selected === name) select(null);
   };
@@ -295,6 +331,8 @@ export function FormBuilder({
       closedMessage: draft.closedMessage,
       submitLabel: draft.submitLabel,
       redirectTo: draft.redirectTo,
+      // Only when changed: an editor's save then never carries the publisher's field.
+      ...(actionsChanged ? { actions: draft.actions ?? [] } : {}),
     });
     setSaving(false);
     onNotice(
@@ -358,8 +396,8 @@ export function FormBuilder({
             <Button
               size="sm"
               variant="primary"
-              disabled={!editable || saving || logicProblem !== null}
-              reason={!editable ? "Your role may not edit forms" : (logicProblem ?? undefined)}
+              disabled={!editable || saving || saveProblem !== null}
+              reason={!editable ? "Your role may not edit forms" : (saveProblem ?? undefined)}
               onClick={() => void save()}
             >
               {saving ? "Saving…" : "Save"}
@@ -404,6 +442,11 @@ export function FormBuilder({
           {logicProblem}
         </p>
       ) : null}
+      {actionProblems.length > 0 ? (
+        <p className={css.structuralNote} role="alert">
+          {actionProblems.join(" ")}
+        </p>
+      ) : null}
 
       <div className={css.body}>
         <div className={css.fields}>
@@ -412,7 +455,7 @@ export function FormBuilder({
               const section = draft.layout.sections?.find((s) => s.name === field.section);
               const opensSection =
                 section !== undefined && draft.fields[i - 1]?.section !== field.section;
-              const removal = removeRefusal(draft.fields, draft.layout, field.name);
+              const removal = removeRefusal(draft.fields, draft.layout, field.name, actionCtx);
               const shownWhen = field.showIf ? formConditionText(field.showIf, draft.fields) : null;
               const requiredWhen = field.requireIf
                 ? formConditionText(field.requireIf, draft.fields)
@@ -568,6 +611,11 @@ export function FormBuilder({
               source={source}
               editable={editable}
               showRenameWarning={hasResponses}
+              renameLock={
+                mayConfigure
+                  ? null
+                  : (actionReaders(actionCtx, selectedField.name)[0]?.label ?? null)
+              }
               canJoinPrevious={joinable}
               onChange={(next) => onFieldChange(selectedField.name, next)}
             />
@@ -576,6 +624,11 @@ export function FormBuilder({
               form={draft}
               editable={editable}
               onChange={(next) => setDraft(next)}
+              actions={registry.actions}
+              registryError={registry.error}
+              mayConfigure={mayConfigure}
+              locale={locale || source}
+              source={source}
             />
           )}
         </div>
@@ -621,6 +674,7 @@ function FieldPanel({
   source,
   editable,
   showRenameWarning,
+  renameLock,
   canJoinPrevious,
   onChange,
 }: {
@@ -647,6 +701,9 @@ function FieldPanel({
   source: string;
   editable: boolean;
   showRenameWarning: boolean;
+  /** The action that reads this question, when an editor below publisher may not
+   *  rename it (the mapping rewrite would change `actions`; decision 8). */
+  renameLock: string | null;
   /** Whether `beside` on this question could do anything at all — false for
    *  the form's first real question and for one right after a `statement`. */
   canJoinPrevious: boolean;
@@ -714,7 +771,12 @@ function FieldPanel({
             <Input
               id={id}
               value={nameDraft}
-              disabled={!editable}
+              disabled={!editable || renameLock !== null}
+              title={
+                renameLock
+                  ? `${renameLock} reads this question, so only a publisher can rename it.`
+                  : undefined
+              }
               spellCheck={false}
               onChange={(e) => setNameDraft(e.target.value)}
               onBlur={commitName}
@@ -1350,10 +1412,20 @@ function FormSettingsPanel({
   form,
   editable,
   onChange,
+  actions,
+  registryError,
+  mayConfigure,
+  locale,
+  source,
 }: {
   form: Form;
   editable: boolean;
   onChange: (next: Form) => void;
+  actions: readonly FormActionInfo[];
+  registryError: string | undefined;
+  mayConfigure: boolean;
+  locale: string;
+  source: string;
 }) {
   return (
     <div className={css.fieldPanel}>
@@ -1452,6 +1524,18 @@ function FormSettingsPanel({
           />
         )}
       </Field>
+
+      <ActionsEditor
+        attachments={form.actions ?? []}
+        actions={actions}
+        registryError={registryError}
+        fields={form.fields}
+        layout={form.layout}
+        mayConfigure={mayConfigure}
+        locale={locale}
+        source={source}
+        onChange={(next) => onChange({ ...form, actions: next })}
+      />
     </div>
   );
 }

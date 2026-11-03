@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ResponsePage } from "../../../server/form-responses";
 import type { Form } from "../../../server/forms";
-import { type ResponsesUrl, responsesParams } from "./responses-model";
+import { type DeliveryRow, type ResponsesUrl, responsesParams, retryHref } from "./responses-model";
 import { messageOf } from "./useContent";
 
 /**
@@ -35,7 +35,10 @@ export interface ResponsesData {
   form: Form | null;
   formError?: string;
   formLoading: boolean;
-  page: ResponsePage & { loading: boolean; error?: string };
+  page: ResponsePage & {
+    loading: boolean;
+    error?: string;
+  };
   canGoBack: boolean;
   nextPage: () => void;
   prevPage: () => void;
@@ -154,4 +157,35 @@ function useDebounced(value: string): string {
     return () => clearTimeout(timer);
   }, [value]);
   return settled;
+}
+
+/**
+ * One response's deliveries, in full: the list row carries only a status per
+ * delivery, and the drawer shows the category, the action's own words, the reference
+ * and when the next attempt is due (`GET .../responses/:rid`, decision 21).
+ */
+export async function fetchDeliveries(
+  apiBase: string,
+  formId: string,
+  responseId: string,
+): Promise<DeliveryRow[]> {
+  const res = await fetch(
+    `${apiBase}/forms/${encodeURIComponent(formId)}/responses/${encodeURIComponent(responseId)}`,
+  );
+  if (!res.ok) throw new Error(await messageOf(res));
+  const body = (await res.json()) as { deliveries?: DeliveryRow[] };
+  return Array.isArray(body.deliveries) ? body.deliveries : [];
+}
+
+/** Retry one delivery. The server runs one attempt inline and answers the row as it
+ *  now stands; a refusal (409) carries its reason in `message`. */
+export async function retryDelivery(
+  apiBase: string,
+  formId: string,
+  responseId: string,
+  action: string,
+): Promise<DeliveryRow> {
+  const res = await fetch(retryHref(apiBase, formId, responseId, action), { method: "POST" });
+  if (!res.ok) throw new Error(await messageOf(res));
+  return ((await res.json()) as { delivery: DeliveryRow }).delivery;
 }

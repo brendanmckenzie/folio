@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { BulkFailure, BulkRefusal, BulkReport } from "../../../core/bulk";
-import type { ResponseRow } from "../../../server/form-responses";
-import { canDeleteForms, type Me } from "../../me";
+import type { FormActionInfo } from "../../../core/form-actions";
+import type { DeliverySummary, ResponseRow } from "../../../server/form-responses";
+import { canDeleteForms, canReadResponses, type Me } from "../../me";
 import { Badge } from "../Badge";
 import { Button } from "../Button";
 import { Dialog } from "../Dialog";
@@ -15,20 +16,34 @@ import {
   ABSENT,
   type AnswerLine,
   answerLines,
+  canRetryDelivery,
   cellText,
   csvHref,
+  DELIVERY_FILTER_LABELS,
+  DELIVERY_FILTERS,
+  type DeliveryFilter,
+  type DeliveryRow,
   deleteConfirmation,
   deleteOneWarning,
   deleteRefusal,
+  deliveryBadges,
+  deliveryDetail,
+  deliveryStatusText,
+  deliveryTone,
+  failureText,
   fileHref,
   isNarrowed,
   isTicked,
+  attentionLines,
+  nextAttemptText,
   NOTHING,
   parseResponsesUrl,
   type ResponsesUrl,
+  responsesBanners,
   responsesQuery,
   retentionNote,
   retryLabel,
+  retryNotice,
   runReport,
   selectAll,
   selectionBody,
@@ -43,7 +58,8 @@ import {
   toggleTick,
 } from "./responses-model";
 import { messageOf } from "./useContent";
-import { useResponses } from "./useResponses";
+import { useFormRegistry } from "./useFormRegistry";
+import { fetchDeliveries, retryDelivery, useResponses } from "./useResponses";
 
 interface Props {
   apiBase: string;
@@ -93,6 +109,12 @@ export function Responses({
 }: Props) {
   const url = parseResponsesUrl(query);
   const data = useResponses(apiBase, id, url);
+  // Labels for the Delivery column and the drawer. A failed read is not fatal: an
+  // action is then named by its id.
+  const registry = useFormRegistry(apiBase);
+  const infos = new Map(registry.actions.map((info) => [info.id, info]));
+  const labelOf = (action: string) => infos.get(action)?.label ?? action;
+  const mayRetry = canReadResponses(me);
   const go = (next: ResponsesUrl) => onQuery(responsesQuery(next));
 
   const [ticked, setTicked] = useState<Ticked>(NOTHING);
@@ -224,6 +246,14 @@ export function Responses({
   const narrowed = isNarrowed(url);
   const note = retentionNote(data.page.oldest);
 
+  const delivering = (form?.actions ?? []).some((a) => a.delivers === true);
+  const banners = responsesBanners({
+    failedDeliveries: data.page.failedDeliveries,
+    overdueDeliveries: data.page.overdueDeliveries,
+    filter: url.delivery,
+    attention: form ? attentionLines(form.actions ?? [], infos, form.fields, form.layout) : [],
+  });
+
   const tableColumnsFor: Column<ResponseRow>[] = [
     {
       key: "_submitted",
@@ -249,6 +279,23 @@ export function Responses({
         );
       },
     })),
+    ...(delivering || url.delivery
+      ? [
+          {
+            key: "_delivery",
+            label: "Delivery",
+            cell: (row: ResponseRow) => (
+              <span className={css.deliveryCell}>
+                {deliveryBadges(row.deliveries, labelOf).map((badge) => (
+                  <Badge key={badge.key} tone={badge.tone} title={badge.title}>
+                    {badge.text}
+                  </Badge>
+                ))}
+              </span>
+            ),
+          } satisfies Column<ResponseRow>,
+        ]
+      : []),
   ];
 
   return (
@@ -303,12 +350,57 @@ export function Responses({
             />
           </label>
         </fieldset>
+        {delivering || url.delivery ? (
+          <label className={css.date}>
+            Delivery
+            <select
+              className={css.dateInput}
+              value={url.delivery ?? ""}
+              onChange={(e) => {
+                const { delivery: _drop, ...rest } = url;
+                const next = DELIVERY_FILTERS.find((one) => one === e.target.value);
+                go(next ? { ...rest, delivery: next } : rest);
+              }}
+            >
+              <option value="">All</option>
+              {DELIVERY_FILTERS.map((one) => (
+                <option key={one} value={one}>
+                  {DELIVERY_FILTER_LABELS[one]}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         {narrowed ? (
           <Button size="sm" variant="subtle" onClick={() => go({ from: "", to: "", q: "" })}>
             Clear filters
           </Button>
         ) : null}
       </div>
+
+      {banners.map((banner) => (
+        <p
+          key={`${banner.kind}:${banner.kind === "attention" ? banner.action : ""}`}
+          className={css.banner}
+          role={banner.kind === "attention" ? "alert" : "status"}
+        >
+          <span>{banner.text}</span>
+          {banner.kind === "failed" ? (
+            <Button
+              size="sm"
+              variant="subtle"
+              onClick={() => go({ ...url, delivery: "failed" as DeliveryFilter })}
+            >
+              Show them
+            </Button>
+          ) : null}
+          {banner.kind === "attention" ? (
+            <Button size="sm" variant="subtle" onClick={onOpenBuilder}>
+              Open the builder
+            </Button>
+          ) : null}
+        </p>
+      ))}
 
       {mayDelete ? (
         <div className={css.bulkBar}>
@@ -474,6 +566,11 @@ export function Responses({
           response={open}
           lines={answerLines(open, form?.fields ?? [])}
           canDelete={mayDelete}
+          mayRetry={mayRetry}
+          labelOf={labelOf}
+          infos={infos}
+          onNotice={onNotice}
+          onRetried={data.reload}
           onClose={() => setOpen(null)}
           onDelete={() => {
             const row = open;
@@ -544,6 +641,11 @@ function ResponseDrawer({
   response,
   lines,
   canDelete,
+  mayRetry,
+  labelOf,
+  infos,
+  onNotice,
+  onRetried,
   onClose,
   onDelete,
 }: {
@@ -552,9 +654,51 @@ function ResponseDrawer({
   response: ResponseRow;
   lines: readonly AnswerLine[];
   canDelete: boolean;
+  /** Retry is `FORMS`, the same rung that reads the response (decision 8). */
+  mayRetry: boolean;
+  labelOf: (action: string) => string;
+  infos: ReadonlyMap<string, FormActionInfo>;
+  onNotice: (message: string) => void;
+  /** After a Retry answers: the list's compact status is now stale. */
+  onRetried: () => void;
   onClose: () => void;
   onDelete: () => void;
 }) {
+  const summary = response.deliveries ?? [];
+  const [full, setFull] = useState<DeliveryRow[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const owes = summary.length > 0;
+
+  const load = useCallback(async () => {
+    try {
+      setFull(await fetchDeliveries(apiBase, formId, response.id));
+      setLoadError(null);
+    } catch (e) {
+      setLoadError((e as Error).message);
+    }
+  }, [apiBase, formId, response.id]);
+
+  useEffect(() => {
+    if (owes) void load();
+  }, [owes, load]);
+
+  const retry = async (action: string) => {
+    setRetrying(action);
+    try {
+      const row = await retryDelivery(apiBase, formId, response.id, action);
+      setFull((prev) => (prev ? prev.map((d) => (d.action === row.action ? row : d)) : [row]));
+      onNotice(retryNotice(labelOf(action), row));
+    } catch (e) {
+      // A refusal (409) says why in its own words; the row may have moved under us.
+      onNotice((e as Error).message);
+      void load();
+    } finally {
+      setRetrying(null);
+      onRetried();
+    }
+  };
+
   return (
     <Dialog
       title="Response"
@@ -612,6 +756,25 @@ function ResponseDrawer({
         ))}
       </dl>
 
+      {owes ? (
+        <section className={css.deliveries} aria-label="Deliveries">
+          <h3 className={css.deliveriesHeading}>Deliveries</h3>
+          {loadError ? <p className={css.absent}>{loadError}</p> : null}
+          {(full ?? summary.map(toRow)).map((d) => (
+            <DeliveryLine
+              key={d.action}
+              delivery={d}
+              label={labelOf(d.action)}
+              known={infos.has(d.action)}
+              detailsLoaded={full !== null}
+              retrying={retrying === d.action}
+              canRetry={mayRetry && full !== null && canRetryDelivery(d)}
+              onRetry={() => void retry(d.action)}
+            />
+          ))}
+        </section>
+      ) : null}
+
       <dl className={css.meta}>
         <div className={css.answer}>
           <dt className={css.term}>Page</dt>
@@ -633,6 +796,92 @@ function ResponseDrawer({
         </div>
       </dl>
     </Dialog>
+  );
+}
+
+/** A list row's compact delivery as a full row with the unknowns blank, so the drawer
+ *  has something to draw before `GET .../responses/:rid` answers. */
+function toRow(d: DeliverySummary): DeliveryRow {
+  return {
+    action: d.action,
+    status: d.status,
+    attempts: d.attempts,
+    nextAt: null,
+    reference: null,
+    failure: null,
+    detail: null,
+    createdAt: 0,
+    updatedAt: 0,
+  };
+}
+
+function DeliveryLine({
+  delivery,
+  label,
+  known,
+  detailsLoaded,
+  retrying,
+  canRetry,
+  onRetry,
+}: {
+  delivery: DeliveryRow;
+  label: string;
+  known: boolean;
+  detailsLoaded: boolean;
+  retrying: boolean;
+  canRetry: boolean;
+  onRetry: () => void;
+}) {
+  const category = failureText(delivery.failure);
+  const detail = deliveryDetail(delivery);
+  const next = nextAttemptText(delivery);
+  return (
+    <div className={css.delivery}>
+      <div className={css.deliveryHead}>
+        <span className={css.deliveryName}>{label}</span>
+        <Badge tone={deliveryTone(delivery.status)}>{deliveryStatusText(delivery)}</Badge>
+        {!known ? <Badge tone="warn">No longer registered</Badge> : null}
+        {canRetry ? (
+          <Button size="sm" disabled={retrying} reason="Working…" onClick={onRetry}>
+            {retrying ? "Retrying…" : "Retry"}
+          </Button>
+        ) : null}
+      </div>
+      {detailsLoaded ? (
+        <dl className={css.deliveryFacts}>
+          <div>
+            <dt>Attempts</dt>
+            <dd>{delivery.attempts}</dd>
+          </div>
+          {category ? (
+            <div>
+              <dt>Why</dt>
+              <dd>{category}</dd>
+            </div>
+          ) : null}
+          {detail ? (
+            <div>
+              <dt>Said</dt>
+              <dd>{detail}</dd>
+            </div>
+          ) : null}
+          {delivery.reference ? (
+            <div>
+              <dt>Reference</dt>
+              <dd>
+                <code className={css.mono}>{delivery.reference}</code>
+              </dd>
+            </div>
+          ) : null}
+          {next ? (
+            <div>
+              <dt>Next attempt</dt>
+              <dd>{next}</dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+    </div>
   );
 }
 
