@@ -63,6 +63,7 @@ import {
   formMeta,
   formSiteOf,
   formsByIds,
+  materialiseForm,
   deleteUploads,
   formUsage,
   hasFileQuestion,
@@ -246,15 +247,44 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     // Within the request's chain: a form outside it is absent from the answer, exactly
     // as a deleted one is (`multi-site.md` decision 3).
-    const forms = await formsByIds(c.var.bindings().db, ids, rt.logger, await requestChain(c, rt));
+    const bindings = c.var.bindings();
+    const chain = await requestChain(c, rt);
+    const forms = await formsByIds(bindings.db, ids, rt.logger, chain);
     const locale = rt.localeOf(c.req.query("locale"));
     const page = c.req.query("page");
-    const ctx = {
-      base: rt.base,
+    // Sourced questions carry the list the page will: rows read, nothing loaded
+    // (`refresh: 'never'`), on the request's scope (`form-option-sources.md`
+    // decision 14). The brand is the request's (`site_required` when unscoped on a
+    // branded deployment), and the site is its scope, for the query's URLs.
+    const brand = brandOf(c);
+    const site =
+      rt.sites && c.var.scope !== null
+        ? (await rt.sites.registry(c.env)).sites.find((s) => s.id === c.var.scope)
+        : undefined;
+    const lists = await brand.optionLists(bindings, forms, {
+      chain,
+      ...(site ? { site } : {}),
       ...(locale ? { locale } : {}),
-      ...(page ? { page: formPageQuery(page) } : {}),
-    };
-    return c.json(Object.fromEntries(forms.map((form) => [form.id, compileForm(form, ctx)])));
+      refresh: "never",
+      env: c.env,
+    });
+    const collate = locale?.code ?? rt.locales?.default;
+    return c.json(
+      Object.fromEntries(
+        forms.map((form) => {
+          const sourced = materialiseForm(form, lists.get(form.id), collate);
+          return [
+            form.id,
+            compileForm(sourced.form, {
+              base: rt.base,
+              ...(locale ? { locale } : {}),
+              ...(page ? { page: formPageQuery(page) } : {}),
+              sources: sourced.sources,
+            }),
+          ];
+        }),
+      ),
+    );
   });
 
   app.get("/forms/:id", requireAccess<Env>(rt, READ), fenceForm("read"), async (c) => {

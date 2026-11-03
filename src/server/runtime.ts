@@ -69,7 +69,7 @@ import type { AuditContext } from "./audit";
 import { type ContentProjection, contentProjection } from "./content-index";
 import { type ResolvedDescribe, validateDescribe } from "./describe";
 import { type ResolvedForms, validateForms } from "./form-responses";
-import { compileForm, type Form, formsByIds } from "./forms";
+import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
 import {
   type ListRef,
   listId,
@@ -1643,15 +1643,63 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
        */
       const formPage =
         opts?.story?.path != null ? route(opts.story.path, active?.code, render?.site) : undefined;
-      const forms = Object.fromEntries(
-        [...(await formRows), ...nestedFormRows].map((form) => [
-          form.id,
-          compileForm(form, {
-            base,
+      const formList = [...(await formRows), ...nestedFormRows];
+
+      /** Pass four: the collection queries this document contains, run once each. */
+      const queries = doc
+        ? collectionQueries(doc, schema, opts?.page, active, opts?.search)
+        : new Map<string, ContentQuery>();
+
+      /**
+       * Option lists for every sourced question on the forms above — the document's
+       * own and the nested ones — **in the same `Promise.all` as pass four's
+       * collection queries** (`form-option-sources.md` decision 5). A page with a
+       * collection pays no extra round trip for a content-sourced form, and a page
+       * with no sourced form issues nothing and awaits nothing. `refresh: 'never'`:
+       * a render only reads rows and never calls a host's `load` (decision 6).
+       *
+       * **The forms compile after this, so the early return that used to sit above
+       * pass four cannot.** A page with a sourced form and no collection must still
+       * reach the lists. Draft mode needs nothing different: lists read published
+       * content and `option_lists` rows, and neither opens a Durable Object.
+       */
+      const listsOf = formList.some((form) => form.fields.some((f) => f.optionsFrom))
+        ? optionLists(bindings, formList, {
+            chain,
+            ...(render?.site ? { site: render.site } : {}),
             ...(active ? { locale: active } : {}),
-            ...(formPage !== undefined ? { page: formPage } : {}),
-          }),
-        ]),
+            refresh: "never",
+            env: undefined,
+          })
+        : undefined;
+
+      const [answers, lists] = await Promise.all([
+        Promise.all(
+          [...queries].map(
+            async ([key, q]) =>
+              [
+                key,
+                await runQuery(queryDeps(db, chain, render?.site), q, { locale: active }),
+              ] as const,
+          ),
+        ),
+        listsOf,
+      ]);
+
+      const collate = active?.code ?? locales?.default;
+      const forms = Object.fromEntries(
+        formList.map((form) => {
+          const sourced = materialiseForm(form, lists?.get(form.id), collate);
+          return [
+            form.id,
+            compileForm(sourced.form, {
+              base,
+              ...(active ? { locale: active } : {}),
+              ...(formPage !== undefined ? { page: formPage } : {}),
+              sources: sourced.sources,
+            }),
+          ];
+        }),
       );
 
       const resolution: Resolution = {
@@ -1670,22 +1718,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         ...(render ? { site: siteContext(render) } : {}),
         ...(render && opts?.story?.path != null ? { path: opts.story.path } : {}),
       };
-
-      /** Pass four: the collection queries this document contains, run once each. */
-      const queries = doc
-        ? collectionQueries(doc, schema, opts?.page, active, opts?.search)
-        : new Map<string, ContentQuery>();
       if (queries.size === 0) return resolution;
 
-      const answers = await Promise.all(
-        [...queries].map(
-          async ([key, q]) =>
-            [
-              key,
-              await runQuery(queryDeps(db, chain, render?.site), q, { locale: active }),
-            ] as const,
-        ),
-      );
       const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers);
 
       // Decision 3: a preview resolves collections against **published** content.
