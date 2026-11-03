@@ -58,6 +58,8 @@ import { DEFAULT_SITE } from "../core/sites";
 import { readCappedBody, safeFilename, sniffContentType } from "./assets";
 import { hashToken } from "./auth/secrets";
 import { bindChunks, type FolioDb } from "./db";
+import { type FormAction, validateActions } from "./form-actions";
+import type { FormActionInfo } from "../core/form-actions";
 import { chainClause } from "./stories";
 import { FolioError, rethrow } from "./errors";
 import { LIKE_ESCAPE, likePattern } from "./like";
@@ -2419,6 +2421,13 @@ export interface FolioForms<Env> {
    * `load` (decision 6).
    */
   sources?: Readonly<Record<string, FolioOptionSource<Env>>>;
+  /**
+   * Submission actions an editor may attach to a form, by their own `id`
+   * (`docs/specs/content-model/form-actions.md` decision 1). Per brand, because
+   * `forms` is; the array's order is the builder's picker order. Define each with
+   * `formAction()`.
+   */
+  actions?: readonly FormAction<Env>[];
 }
 
 /** The field kinds a source's `settings` may use: the ones the builder can draw. */
@@ -2477,9 +2486,13 @@ export interface ResolvedForms {
   ratePerHour: number;
   /** `config.sources`, defaulted, keyed by id. Empty when the host registers none. */
   sources: ReadonlyMap<string, ResolvedOptionSource>;
+  /** `config.actions`, keyed by id, methods bound. Empty when the host registers none. */
+  actions: ReadonlyMap<string, FormAction<unknown>>;
+  /** The JSON half of each action, for the builder (`actionInfoOf`). Never functions. */
+  infos: ReadonlyMap<string, FormActionInfo>;
 }
 
-const FORMS_KEYS = ["verify", "ratePerHour", "sources"];
+const FORMS_KEYS = ["verify", "ratePerHour", "sources", "actions"];
 
 export const DEFAULT_SOURCE_TTL = 3600;
 export const MIN_SOURCE_TTL = 60;
@@ -2523,10 +2536,13 @@ export function validateForms<Env>(forms: FolioForms<Env> | undefined): Resolved
     );
   }
 
+  const { actions, infos } = validateActions(forms.actions);
   return {
     config: forms as FolioForms<unknown>,
     ratePerHour,
     sources: validateSources(forms.sources),
+    actions,
+    infos,
   };
 }
 

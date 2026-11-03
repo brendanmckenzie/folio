@@ -189,6 +189,23 @@ export { countReferencesTo, referencesTo } from "./content-index";
  */
 export { documentUsage } from "./stories";
 export type { DocumentUsage, UsageRef } from "./stories";
+/**
+ * Form actions (`../../docs/specs/content-model/form-actions.md` decision 19): the
+ * definition helper and the types a host's `check` and `deliver` are written against.
+ */
+export { formAction } from "./form-actions";
+export type {
+  ActionCodeDef,
+  ActionInputDef,
+  ActionQuestion,
+  CheckContext,
+  CheckResult,
+  DeliverContext,
+  DeliverResult,
+  FormAction,
+  InputsOf,
+  SettingsOf,
+} from "./form-actions";
 export type {
   CheckpointedHookPayload,
   CreatedHookPayload,

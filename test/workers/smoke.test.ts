@@ -84,6 +84,9 @@ describe("workers harness: D1", () => {
       // 0010: forms and their responses (content-model/forms.md). Two tables,
       // no foreign keys. Shapes are asserted in migrations.test.ts; this list
       // only says they exist.
+      // 0017: per-action delivery rows and the refused-attempt throttle (form-actions.md).
+      "form_deliveries",
+      "form_refusals",
       "form_responses",
       "forms",
       "login_challenges",
