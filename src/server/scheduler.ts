@@ -46,6 +46,7 @@ import type { FolioRuntime } from "./runtime";
 import { FolioError } from "./errors";
 import { publish, type PublishDeps, type StorySelector, unpublish } from "./publish";
 import type { FolioDb } from "./db";
+import type { DeliveryRunReport } from "./form-actions";
 import {
   completeScheduleStatement,
   countDue,
@@ -154,6 +155,13 @@ export interface ScheduleRunReport {
   /** Pass back as `continueFrom` to sweep the next batch. Null when this call
    * reached the end of what was due. */
   continueFrom: string | null;
+  /**
+   * The form delivery pass (`form-actions.md` decision 12). Present only on
+   * `folio.runSchedules`'s answer for a call whose own `continueFrom` came back null,
+   * so a host looping on the cursor runs deliveries once per tick, after every due
+   * schedule has been published. Never on `POST {base}/api/schedules/run`.
+   */
+  deliveries?: DeliveryRunReport;
   /**
    * How many schedules are still pending and due, asked directly after the run.
    *

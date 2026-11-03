@@ -170,6 +170,80 @@ export function formAction<
   return def;
 }
 
+/* -------------------------------------------------------------- deliveries --- */
+
+export type DeliveryStatus = "pending" | "delivered" | "skipped" | "failed" | "cancelled";
+
+/**
+ * Why a delivery is not delivered (decision 15). **A category, never a thrown
+ * message**: the editor's screen shows these and the action's own `detail`.
+ */
+export type DeliveryFailureCategory =
+  | "threw"
+  | "timeout"
+  | "malformed"
+  | "refused"
+  | "not_registered"
+  | "incomplete"
+  | "predates_mapping"
+  | "no_brand"
+  | "gave_up";
+
+/** One `form_deliveries` row as the admin reads it. */
+export interface DeliveryRow {
+  action: string;
+  status: DeliveryStatus;
+  attempts: number;
+  nextAt: number | null;
+  reference: string | null;
+  failure: DeliveryFailureCategory | null;
+  detail: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface DeliveryFailure {
+  responseId: string;
+  formId: string;
+  action: string;
+  attempts: number;
+  failure: DeliveryFailureCategory;
+  /** True once the row is `failed`: nothing will attempt it again until a Retry. */
+  givenUp: boolean;
+}
+
+export interface DeliveryRunReport {
+  /** Rows selected as due by this pass (not those left behind by the budget). */
+  due: number;
+  delivered: number;
+  skipped: number;
+  /** Every attempt that did not end delivered or skipped, retryable or not. */
+  failed: DeliveryFailure[];
+  /** Rows whose response was already gone, deleted. */
+  dropped: number;
+}
+
+export const MAX_DELIVERY_ATTEMPTS = 8;
+/**
+ * Wait after a failed attempt, by attempt number (decision 12). Exactly
+ * `MAX_DELIVERY_ATTEMPTS - 1` entries: the last attempt gives up, so the table is
+ * never indexed past its end.
+ */
+export const DELIVERY_BACKOFF_MS: readonly number[] = [
+  60_000, // after attempt 1: 1 minute
+  300_000, // 2: 5 minutes
+  900_000, // 3: 15 minutes
+  3_600_000, // 4: 1 hour
+  10_800_000, // 5: 3 hours
+  21_600_000, // 6: 6 hours
+  43_200_000, // 7: 12 hours
+];
+export const DELIVERY_LEASE_MS = 120_000;
+export const DELIVERY_BUDGET_MS = 30_000;
+export const CHECK_TIMEOUT_MS = 10_000;
+export const DELIVER_TIMEOUT_MS = 20_000;
+export const DEFAULT_DELIVERY_BATCH = 25;
+
 /* ---------------------------------------------------------------- the info --- */
 
 /**

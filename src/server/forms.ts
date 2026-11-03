@@ -1430,7 +1430,11 @@ export async function deleteForm(
     }
     await purgeFormUploads(db, bucket, id);
   }
-  const [, , removed] = await db.batch([
+  // The deliveries and the refusals first (decision 20): neither has a foreign key, so a
+  // form's delete that forgot them would leave rows no screen can reach.
+  const [, , , , removed] = await db.batch([
+    db.prepare("delete from form_deliveries where form_id = ?").bind(id),
+    db.prepare("delete from form_refusals where form_id = ?").bind(id),
     db.prepare("delete from form_responses where form_id = ?").bind(id),
     db.prepare("delete from content_refs where to_id = ? and kind = ?").bind(id, "form"),
     db.prepare("delete from forms where id = ? and site_id = ?").bind(id, site),
@@ -1459,4 +1463,6 @@ export interface ResponseFilter {
    *  serves a leading-wildcard `like`, and decision 16's sibling reasoning is
    *  that a form's responses are read by a person on one screen. */
   q?: string;
+  /** Only the responses with a delivery in this state (`form_deliveries`). */
+  delivery?: "failed" | "pending" | "skipped";
 }

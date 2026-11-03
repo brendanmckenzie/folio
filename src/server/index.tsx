@@ -50,6 +50,7 @@ import {
   type SiteRender,
 } from "./runtime";
 import { refreshOptionSources } from "./option-sources";
+import { runDeliveries } from "./deliveries";
 import { runSchedules, scheduleDeps } from "./scheduler";
 import {
   candidateFor,
@@ -202,10 +203,23 @@ export type {
   CheckResult,
   DeliverContext,
   DeliverResult,
+  DeliveryFailure,
+  DeliveryFailureCategory,
+  DeliveryRow,
+  DeliveryRunReport,
+  DeliveryStatus,
   FormAction,
   InputsOf,
   SettingsOf,
 } from "./form-actions";
+// The payload types a host had to redefine or could not name (decision 19).
+export type {
+  FolioForms,
+  FormResponse,
+  ResponseValue,
+  SubmittedFile,
+} from "./form-responses";
+export type { FormMeta } from "./forms";
 export type {
   CheckpointedHookPayload,
   CreatedHookPayload,
@@ -1927,8 +1941,24 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      */
     // With `brands`, each due story is published with its scope's brand's deps
     // (decision 6); `scheduleDeps` says how.
-    runSchedules: (env, opts) =>
-      runSchedules(scheduleDeps(rt, config.bindings(env), alarmHookCtx(env, rt.logger)), opts),
+    runSchedules: async (env, opts) => {
+      const bindings = config.bindings(env);
+      const report = await runSchedules(
+        scheduleDeps(rt, bindings, alarmHookCtx(env, rt.logger)),
+        opts,
+      );
+      // **Only on the call that finishes the sweep** (`form-actions.md` decision 12): a
+      // host looping on `continueFrom` runs one delivery pass per tick, after every due
+      // schedule has been published, and needs no code change. A call with a cursor
+      // left runs none, because a late page is the worse failure. `POST
+      // {base}/api/schedules/run` calls `runSchedules` itself and never gets here.
+      if (report.continueFrom !== null) return report;
+      const deliveries = await runDeliveries(rt, env, bindings.db, {
+        ...(opts?.now === undefined ? {} : { now: opts.now }),
+        ...(opts?.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
+      });
+      return { ...report, deliveries };
+    },
     /**
      * The auth housekeeping sweep (`../../docs/specs/foundation/
      * auth-providers.md` decision 8). Assembled from bindings alone, exactly as

@@ -22,7 +22,7 @@ import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from "../core/assets";
 import { MAX_SLUG } from "../core/story";
 import { conditionRefusal, type FieldCondition } from "../core/conditions";
 import type { Json } from "../core/doc";
-import { MAX_FORM_ACTIONS, MAX_REFUSAL_MESSAGE } from "../core/form-actions";
+import { ACTION_ID, MAX_FORM_ACTIONS, MAX_REFUSAL_MESSAGE } from "../core/form-actions";
 import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
 import type { DocumentType } from "../core/schema";
@@ -1809,6 +1809,20 @@ export function responseIdParam(raw: string | undefined): string {
 }
 
 /**
+ * The `:action` in the delivery retry route: a registered action's id, anchored to
+ * `ACTION_ID` the way `formIdParam` is to the form mint format, so a parameter that
+ * reaches a statement is screened by shape rather than by charset.
+ */
+const ACTION_ID_PARAM = v.pipe(
+  v.string("must be a string"),
+  v.regex(ACTION_ID, "must be a form action id"),
+);
+
+export function actionIdParam(raw: string | undefined): string {
+  return parseOrThrow(ACTION_ID_PARAM, raw, "action");
+}
+
+/**
  * A form field's slug from a path param — the `:name` in the gated download
  * route, which names the *question* rather than the object, because one question
  * holds one file (`../../docs/specs/content-model/forms.md` decision 15).
@@ -2103,6 +2117,12 @@ export const FormOptionPreviewBody = v.strictObject(
 export type FormCreateInput = v.InferOutput<typeof FormCreateBody>;
 export type FormPatchInput = v.InferOutput<typeof FormPatchBody>;
 
+/** `?delivery=` on the responses table, the CSV and the bulk delete's captured filter. */
+const DELIVERY_FILTER = v.picklist(
+  ["failed", "pending", "skipped"],
+  "must be failed, pending or skipped",
+);
+
 /** An epoch-millisecond bound off a query string. */
 const TIMESTAMP = v.pipe(v.string(), v.transform(Number), v.number(), v.finite());
 
@@ -2121,6 +2141,10 @@ export function responseFilterQuery(req: {
   const from = req.query("from");
   const to = req.query("to");
   const q = req.query("q");
+  const delivery = req.query("delivery");
+  if (delivery !== undefined && delivery !== "") {
+    filter.delivery = parseOrThrow(DELIVERY_FILTER, delivery, "delivery");
+  }
   if (from !== undefined && from !== "") filter.from = parseOrThrow(TIMESTAMP, from, "from");
   if (to !== undefined && to !== "") filter.to = parseOrThrow(TIMESTAMP, to, "to");
   // Trimmed and bounded rather than refused, the `limit` side of this file's
@@ -2149,6 +2173,7 @@ const CAPTURED_RESPONSE_FILTER = v.object(
     from: v.optional(v.pipe(v.number("must be a number"), v.finite())),
     to: v.optional(v.pipe(v.number("must be a number"), v.finite())),
     q: v.optional(bounded(200)),
+    delivery: v.optional(DELIVERY_FILTER),
   },
   OBJECT,
 );

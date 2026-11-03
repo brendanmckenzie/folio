@@ -39,9 +39,22 @@ import {
   type SiteRef,
   sitesUnder,
 } from "../../core/sites";
+import { attachmentProblems, refusalsOf } from "../../core/form-actions";
+import type { LocaleContext } from "../../core/locales";
 import { actorString, allows, EDIT, FORMS, READ, SCOPE_ADMIN } from "../auth/roles";
 import { purgeFormLayout } from "../cache-purge";
+import {
+  attemptNew,
+  type DeliveryDeps,
+  mappingSnapshot,
+  questionsOf,
+  resolveInputs,
+  retryDelivery,
+  runWithDeadline,
+  settingsOf,
+} from "../deliveries";
 import { FolioError } from "../errors";
+import { CHECK_TIMEOUT_MS } from "../form-actions";
 import {
   type AnswerRefusal,
   bodyHash,
@@ -58,16 +71,20 @@ import {
   newResponseId,
   optionLabelsOf,
   type PreparedUpload,
+  type NewDelivery,
   prepareUploads,
   putUploads,
   rawBodyOf,
   readSubmission,
   recentSubmissionCount,
+  recordRefusal,
   responseById,
   responseCsv,
   responseFileOf,
+  type ResponseValue,
   storedFilesOf,
   type SubmissionBody,
+  type SubmittedFile,
   throttleHashes,
   validateSubmission,
 } from "../form-responses";
@@ -116,6 +133,7 @@ import type { FolioEnv, FolioLogger } from "../types";
 import { brandOf } from "./stories";
 import type { MiddlewareHandler } from "hono";
 import {
+  actionIdParam,
   DOWNLOAD_CONTENT_TYPE,
   fieldNameParam,
   FormCreateBody,
@@ -785,6 +803,45 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   );
 
   /**
+   * Retry one delivery (`../../../docs/specs/content-model/form-actions.md` decision
+   * 15). **`FORMS`**: the person who can read a response is the person who can resend
+   * it to where it was already configured to go. The response is read through
+   * `sitesOf`, so a reader below the form's scope can retry only deliveries of
+   * responses it can already see; an unknown response or delivery is a 404 and a
+   * delivery that cannot be retried now is a 409 with the reason.
+   *
+   * One attempt runs **inline**: the person pressing the button is looking at the row
+   * and wants to know whether it worked. The attempt is bounded by the same deadline
+   * as any other.
+   */
+  app.post(
+    "/forms/:id/responses/:rid/deliveries/:action/retry",
+    requireAccess<Env>(rt, FORMS),
+    fenceForm("read"),
+    async (c) => {
+      const { db } = c.var.bindings();
+      const id = formIdParam(c.req.param("id"));
+      const rid = responseIdParam(c.req.param("rid"));
+      const action = actionIdParam(c.req.param("action"));
+      if (!(await responseById(db, id, rid, await sitesOf(c, id)))) {
+        throw new FolioError("not_found", "Unknown response");
+      }
+      const form = await formById(db, id, rt.logger);
+      if (!form) throw new FolioError("not_found", "Unknown form");
+      const brand = brandOf(c);
+      const result = await retryDelivery(
+        { rt, env: c.env, db, brandFor: async () => brand, clock: Date.now },
+        form,
+        rid,
+        action,
+      );
+      if (result.kind === "missing") throw new FolioError("not_found", "Unknown delivery");
+      if (result.kind === "conflict") throw new FolioError("conflict", result.message);
+      return c.json({ delivery: result.delivery });
+    },
+  );
+
+  /**
    * One response's uploaded file, streamed from R2
    * (`../../../docs/specs/content-model/forms.md` decision 15).
    *
@@ -865,7 +922,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * visitor behind a shared NAT that their message was "invalid" is the one wrong
  * answer available.
  */
-type SubmitStatus = "ok" | "invalid" | "closed" | "rate" | "verify" | "error";
+type SubmitStatus = "ok" | "invalid" | "closed" | "rate" | "verify" | "refused" | "error";
 
 interface Reply {
   json: boolean;
@@ -887,6 +944,11 @@ interface Reply {
   code?: string;
   message?: string;
   httpStatus?: number;
+  /** `refused` only: `<action>.<code>`, two identifiers from code (decision 1). */
+  reason?: string;
+  /** Success only: what checks that passed answered beside `ok`, by action
+   *  (decision 17). Never stored, never in a URL. */
+  actions?: Record<string, Record<string, string | number>>;
 }
 
 /**
@@ -904,6 +966,11 @@ function locationFor(reply: Reply): string {
   url.searchParams.set("folio_status", reply.status);
   if (reply.form) url.searchParams.set("folio_form", reply.form.name);
   if (reply.invalid?.length) url.searchParams.set("folio_invalid", reply.invalid.join(","));
+  // The reason is identifiers from code, never text or a per-submission value, so a
+  // refused page stays as cacheable as `?folio_status=ok` (decision 1).
+  if (reply.status === "refused" && reply.reason) {
+    url.searchParams.set("folio_reason", reply.reason);
+  }
   return url.toString();
 }
 
@@ -926,10 +993,18 @@ function replyTo(reply: Reply): Response {
 
   const body =
     reply.status === "ok"
-      ? { ok: true, status: reply.status, id: reply.responseId }
+      ? {
+          ok: true,
+          status: reply.status,
+          id: reply.responseId,
+          ...(reply.actions && Object.keys(reply.actions).length > 0
+            ? { actions: reply.actions }
+            : {}),
+        }
       : {
           error: { code: reply.code ?? reply.status, message: reply.message ?? "Refused" },
           status: reply.status,
+          ...(reply.reason ? { reason: reply.reason } : {}),
           ...(reply.fields ? { fields: reply.fields } : {}),
         };
 
@@ -1015,8 +1090,10 @@ function refererPath(req: Request): string {
  *     checks → insert (option labels + delivery rows, one batch) → spec 36
  *     deliveries + hooks.submitted
  *
- * Spec 36's steps are named here and not yet built: its refusal counting, its
- * checks and its delivery rows.
+ * Spec 36's steps: a refusal at the validation step, at a check and at an unavailable
+ * list is recorded for the rate limit (`recordRefusal`, decision 23); `checked` runs
+ * the attached checks, failing closed; the delivery rows ride the insert's batch and
+ * their first attempts run from `waitUntil`, registered before the host's hook.
  *
  * Nothing about the answer distinguishes a stored row from a collapsed duplicate
  * or from a caught honeypot: all three answer `ok` with a minted id. That is
@@ -1142,9 +1219,14 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const rate = brand.forms?.ratePerHour ?? DEFAULT_RATE_PER_HOUR;
     const ip = clientIp(req);
     let hash: string | null = null;
+    // The hash a refusal is recorded under (decision 23). Null when the request has no
+    // address or the brand's limit is off: such a request is unthrottled, so a refusal
+    // records nothing, exactly as it counts nothing.
+    let throttle: string | null = null;
     if (ip && rate > 0) {
       const hashes = await throttleHashes(ip, form.id, now);
       hash = hashes[0];
+      throttle = hashes[0];
       if ((await recentSubmissionCount(db, hashes, now)) >= rate) {
         return replyTo({
           ...reply,
@@ -1221,8 +1303,13 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         list.options === null ? [name] : [],
       ),
     );
+    // Every refusal from here on counts against the rate limit (decision 23).
+    const refuse = async (answer: Reply): Promise<Response> => {
+      if (throttle) await recordRefusal(db, throttle, form.id, now);
+      return replyTo(answer);
+    };
     if (invalid.some((name) => unavailable.has(name))) {
-      return replyTo({
+      return refuse({
         ...reply,
         status: "error",
         code: "source_unavailable",
@@ -1231,7 +1318,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       });
     }
     if (invalid.length > 0) {
-      return replyTo({
+      return refuse({
         ...reply,
         status: "invalid",
         invalid,
@@ -1249,12 +1336,47 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // A double-click on a 5MB application: knowably a duplicate, so nothing is
     // written. The single-statement collapse inside `insertResponse` is still the
     // arbiter — this only saves the megabytes, and only when there are megabytes.
+    //
+    // **Also when a check is attached, and before it** (decision 17, step 9): a check
+    // like "is this trip code already booked" would otherwise refuse the second click
+    // of a double-click whose first click it had just let through, and the browser
+    // shows the second answer.
+    const host = new URL(req.url).hostname;
+    const checking = form.actions.some(
+      (a) => typeof brand.forms?.actions.get(a.action)?.check === "function",
+    );
     if (
-      uploads.files.length > 0 &&
+      (uploads.files.length > 0 || checking) &&
       (await isDuplicateSubmission(db, form.id, hashed, now, submitting))
     ) {
       return replyTo({ ...reply, responseId: newResponseId(), ...successTarget(form, target) });
     }
+
+    // The form's checks, in attachment order, stopping at the first refusal (step 10).
+    // Reads only (decision 24): nothing has been stored and may yet not be.
+    const checks = await checked(rt, brand, c.env, {
+      req,
+      form,
+      body,
+      values,
+      files: storedFilesOf(uploads.files),
+      site: submitting,
+      host,
+      locale,
+      page,
+    });
+    if (checks.refusal) {
+      return refuse({
+        ...reply,
+        status: "refused",
+        code: "refused",
+        reason: checks.refusal.reason,
+        message: checks.refusal.message,
+        httpStatus: 422,
+      });
+    }
+
+    const deliveries = deliveriesFor(form, brand.forms, host, now);
 
     // R2 first, then the row: a row naming an object that never landed is a
     // download button that 404s for a publisher with no way to explain it, while
@@ -1278,6 +1400,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ipHash: hash,
         bodyHash: hashed,
         files: storedFilesOf(uploads.files),
+        deliveries,
         now,
         site: submitting,
       });
@@ -1291,6 +1414,22 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // will, so they go now (decision 15: *"a compensating `bucket.delete` if the
     // insert throws **or the duplicate guard fires**"*).
     if (!inserted.stored) await compensate(media, uploads.files, rt.logger);
+
+    // The deliveries' first attempts, registered **before** the host's hook so an awaited
+    // hook never delays them (step 12). Concurrent, and the visitor never waits.
+    const attempts = inserted.stored
+      ? deliveries.filter((d) => d.status === "pending").map((d) => d.action)
+      : [];
+    if (attempts.length > 0) {
+      const deps: DeliveryDeps = {
+        rt,
+        env: c.env,
+        db,
+        brandFor: async () => brand,
+        clock: Date.now,
+      };
+      hookCtx(c).waitUntil(attemptNew(deps, inserted.response.id, attempts, { form }));
+    }
 
     if (inserted.stored) {
       await rt.hookRunner(hookCtx(c), brandIdOf(c)).run("submitted", {
@@ -1311,6 +1450,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       ...reply,
       responseId: inserted.response.id,
       ...successTarget(form, target),
+      ...(Object.keys(checks.replies).length > 0 ? { actions: checks.replies } : {}),
     });
   });
 
@@ -1378,4 +1518,228 @@ async function verified<Env>(
     rt.logger.error("folio: form verify failed", err);
     return false;
   }
+}
+
+/* ------------------------------------------------------------------ checks --- */
+
+interface CheckInput {
+  req: Request;
+  form: Form;
+  body: SubmissionBody;
+  /** The validated answers: what the mapping reads. */
+  values: Record<string, ResponseValue>;
+  files: readonly SubmittedFile[];
+  site: string;
+  host: string;
+  locale: LocaleContext | undefined;
+  page: string;
+}
+
+interface CheckVerdict {
+  refusal: { reason: string; message: string } | null;
+  /** What each passing check answered beside `ok`, screened, by action. */
+  replies: Record<string, Record<string, string | number>>;
+}
+
+const REPLY_KEY = /^[a-z][a-zA-Z0-9_]{0,31}$/;
+const MAX_REPLY_KEYS = 8;
+const MAX_REPLY_TEXT = 200;
+
+/**
+ * The reply values a passing check returned, screened (decision 17): at most 8 keys
+ * matching `REPLY_KEY`, each a string of at most 200 characters or a finite number.
+ * Anything else is dropped with one `warn` line, never a refusal of a check that passed.
+ */
+function screenReply(
+  raw: unknown,
+  logger: FolioLogger,
+  action: string,
+): Record<string, string | number> {
+  if (raw === undefined) return {};
+  const out: Record<string, string | number> = {};
+  let dropped = false;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    dropped = true;
+  } else {
+    for (const [key, value] of Object.entries(raw)) {
+      const fits =
+        REPLY_KEY.test(key) &&
+        Object.keys(out).length < MAX_REPLY_KEYS &&
+        ((typeof value === "string" && value.length <= MAX_REPLY_TEXT) ||
+          (typeof value === "number" && Number.isFinite(value)));
+      if (fits) out[key] = value as string | number;
+      else dropped = true;
+    }
+  }
+  if (dropped) logger.warn(`folio: form action "${action}" check reply values were dropped`);
+  return out;
+}
+
+/**
+ * The form's checks (decisions 2, 13, 16, 17 and 24): each attachment's `check`, in
+ * order, stopping at the first refusal, **failing closed**. A throw, a timeout, a
+ * malformed answer, an undeclared code and an attachment that no longer satisfies its
+ * action all refuse as `<action>.error`, with one logged line naming the action; a
+ * gate that opens on error is decorative (`verified`'s reason). An attachment whose
+ * action is no longer registered is the one thing that does not refuse: Folio cannot
+ * run a rule the code no longer declares, so it warns once and moves on.
+ *
+ * The refusal's text is the editor's, resolved in the submission's locale
+ * (`refusalsOf`); the action never supplies text.
+ */
+async function checked<Env>(
+  rt: FolioRuntime,
+  brand: BrandRuntime,
+  env: Env,
+  input: CheckInput,
+): Promise<CheckVerdict> {
+  const { form, locale } = input;
+  const forms = brand.forms;
+  const replies: CheckVerdict["replies"] = {};
+  for (const attachment of form.actions) {
+    const info = forms?.infos.get(attachment.action);
+    const def = forms?.actions.get(attachment.action);
+    if (!info || !def) {
+      rt.logger.warn(
+        `folio: form "${form.name}" names action "${attachment.action}", which is not registered; its check was not run`,
+      );
+      continue;
+    }
+    if (typeof def.check !== "function") continue;
+
+    const refuse = (code: string): CheckVerdict => {
+      const reason = `${attachment.action}.${code}`;
+      const message = refusalsOf([attachment], forms!.infos, locale)[reason] ?? "";
+      return { refusal: { reason, message }, replies: {} };
+    };
+
+    const problems = attachmentProblems(attachment, info, form.fields, form.layout);
+    if (problems.length > 0) {
+      rt.logger.error(
+        `folio: form "${form.name}" action "${attachment.action}" no longer satisfies its action, so its check refuses: ${problems.join("; ")}`,
+      );
+      return refuse("error");
+    }
+    const { values, missing } = resolveInputs(
+      info.inputs,
+      mappingSnapshot(
+        attachment,
+        info.inputs.map((i) => i.name),
+      ),
+      input.values,
+      input.files,
+    );
+    if (missing.length > 0) {
+      rt.logger.error(
+        `folio: form action "${attachment.action}" check could not read its required input(s) ${missing.join(", ")}`,
+      );
+      return refuse("error");
+    }
+
+    const settled = await runWithDeadline(CHECK_TIMEOUT_MS, (signal) =>
+      (def.check as (c: unknown, env: unknown) => unknown)(
+        {
+          form: formMeta(form),
+          inputs: values,
+          settings: settingsOf(attachment),
+          questions: questionsOf(form),
+          site: input.site,
+          brand: brand.brand?.id ?? null,
+          host: input.host,
+          locale: locale?.code ?? "",
+          page: input.page,
+          signal,
+          req: input.req,
+          raw: rawBodyOf(input.body),
+        },
+        env,
+      ),
+    );
+    if (settled.kind === "timeout") {
+      rt.logger.error(`folio: form action "${attachment.action}" check timed out`);
+      return refuse("error");
+    }
+    if (settled.kind === "threw") {
+      rt.logger.error(`folio: form action "${attachment.action}" check threw`, settled.error);
+      return refuse("error");
+    }
+    const answer = settled.value as Record<string, unknown> | null | undefined;
+    if (answer && typeof answer === "object" && answer.ok === true) {
+      const reply = screenReply(answer.reply, rt.logger, attachment.action);
+      if (Object.keys(reply).length > 0) replies[attachment.action] = reply;
+      continue;
+    }
+    if (
+      answer &&
+      typeof answer === "object" &&
+      answer.ok === false &&
+      typeof answer.code === "string" &&
+      info.codes.some((c) => c.code === answer.code)
+    ) {
+      return refuse(answer.code);
+    }
+    rt.logger.error(
+      `folio: form action "${attachment.action}" check answered an unexpected shape or an undeclared code`,
+    );
+    return refuse("error");
+  }
+  return { refusal: null, replies };
+}
+
+/**
+ * The delivery rows a stored response owes (decision 9), for its batch. A registered
+ * action that delivers owes a `pending` row carrying the mapping as it stands now
+ * (decision 11), or a `failed` one with category `incomplete` when the attachment no
+ * longer satisfies it. An attachment stored with `delivers` whose action the code no
+ * longer registers owes a `failed` `not_registered` row, so the gap is visible and a
+ * redeploy can be followed by a Retry (decision 13); one without `delivers` owes
+ * nothing.
+ */
+function deliveriesFor(
+  form: Form,
+  forms: BrandRuntime["forms"],
+  host: string,
+  now: number,
+): NewDelivery[] {
+  const owed: NewDelivery[] = [];
+  for (const attachment of form.actions) {
+    const info = forms?.infos.get(attachment.action);
+    if (!info) {
+      if (attachment.delivers) {
+        owed.push({
+          action: attachment.action,
+          status: "failed",
+          nextAt: null,
+          host,
+          inputsMap: null,
+          failure: "not_registered",
+        });
+      }
+      continue;
+    }
+    if (!info.deliver) continue;
+    if (attachmentProblems(attachment, info, form.fields, form.layout).length > 0) {
+      owed.push({
+        action: attachment.action,
+        status: "failed",
+        nextAt: null,
+        host,
+        inputsMap: null,
+        failure: "incomplete",
+      });
+      continue;
+    }
+    owed.push({
+      action: attachment.action,
+      status: "pending",
+      nextAt: now,
+      host,
+      inputsMap: mappingSnapshot(
+        attachment,
+        info.inputs.map((i) => i.name),
+      ),
+      failure: null,
+    });
+  }
+  return owed;
 }
