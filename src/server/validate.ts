@@ -23,7 +23,8 @@ import { MAX_SLUG } from "../core/story";
 import { conditionRefusal, type FieldCondition } from "../core/conditions";
 import type { Json } from "../core/doc";
 import { ACTION_ID, MAX_FORM_ACTIONS, MAX_REFUSAL_MESSAGE } from "../core/form-actions";
-import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
+import { PRINTABLE } from "../core/form-answers";
+import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS, MAX_FORM_STEPS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
 import type { DocumentType } from "../core/schema";
 import {
@@ -102,21 +103,6 @@ const LOCALE_CODE = v.pipe(
 export function localeQuery(raw: string): string {
   return parseOrThrow(LOCALE_CODE, raw, "locale");
 }
-
-/**
- * What a person can type into a CMS: everything except the characters that make
- * a stored string lie about itself.
- *
- * `Cc` is the C0/C1 controls, `Cs` a lone surrogate (a well-formed pair is a
- * single non-Cs code point under `/u`, so astral characters pass and a broken
- * half does not), and the two explicit ranges are the bidi overrides and
- * isolates, which can reorder a rendered title away from what was stored.
- *
- * `\p{C}` as a whole would be wrong: it includes `Cf`, and U+200D ZERO WIDTH
- * JOINER is what holds together every multi-codepoint emoji ("👨‍💻", "🏳️‍🌈"), plus
- * `Cn`, which would make the screen tighten with each Unicode release.
- */
-const PRINTABLE = /^[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]*$/u;
 
 const bounded = (max: number) =>
   v.pipe(
@@ -1949,6 +1935,7 @@ const FORM_FIELD = v.object(
     showIf: v.optional(FORM_CONDITION),
     requireIf: v.optional(FORM_CONDITION),
     section: v.optional(FIELD_NAME),
+    step: v.optional(FIELD_NAME),
     hold: v.optional(v.literal(true)),
     prefill: v.optional(v.literal("query")),
     // Option sources (`docs/specs/content-model/form-option-sources.md` decision 1).
@@ -2004,12 +1991,35 @@ const FORM_SECTION = v.object(
   OBJECT,
 );
 
+/** One step of `forms.layout`: a section's shape, a page rather than a heading. */
+const FORM_STEP = v.object(
+  {
+    name: FIELD_NAME,
+    label: required(200),
+    help: v.optional(bounded(500)),
+    showIf: v.optional(FORM_CONDITION),
+    i18n: v.optional(
+      v.record(
+        LOCALE_CODE,
+        v.object({ label: v.optional(bounded(200)), help: v.optional(bounded(500)) }, OBJECT),
+      ),
+    ),
+  },
+  OBJECT,
+);
+
 const FORM_LAYOUT = v.object(
   {
     sections: v.optional(
       v.pipe(
         v.array(FORM_SECTION, "must be an array of sections"),
         v.maxLength(MAX_FORM_SECTIONS, `must be ${MAX_FORM_SECTIONS} sections or fewer`),
+      ),
+    ),
+    steps: v.optional(
+      v.pipe(
+        v.array(FORM_STEP, "must be an array of steps"),
+        v.maxLength(MAX_FORM_STEPS, `must be ${MAX_FORM_STEPS} steps or fewer`),
       ),
     ),
   },
@@ -2262,40 +2272,6 @@ export type ResponseBulkInput = v.InferOutput<typeof ResponseBulkBody>;
  * map built from it is sized by whoever posted.
  */
 export const MAX_SUBMISSION_KEYS = 200;
-
-/**
- * The ceiling on one answer's characters, whatever `max` the builder set on the
- * question.
- *
- * Two caps rather than one, deliberately: the question's own `max` is what an
- * editor promised a visitor, and this is what the column will take from a
- * stranger. A question with no `max` is bounded by this; a question whose `max`
- * is larger does not raise it.
- */
-export const MAX_ANSWER_CHARS = 10_000;
-
-/**
- * `PRINTABLE`'s screen with the three whitespace controls a `textarea` carries
- * legitimately allowed back in.
- *
- * Written as an alternation rather than by subtracting from the negated class,
- * because there is no subtraction to write: `[^\p{Cc}\n]` still excludes every
- * control including the newline, so the three have to be admitted by a second
- * branch rather than carved out of the first.
- */
-const PRINTABLE_MULTILINE = /^(?:[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]|[\n\r\t])*$/u;
-
-/**
- * Whether one submitted answer holds only characters a stored string may hold.
- *
- * The same screen every other typed value in this file gets, with one difference
- * that has to be made per question rather than per file: a `textarea` answer with
- * newlines in it is a paragraph, and the identical string under a `text` question
- * is somebody trying to make one stored value look like two.
- */
-export function isPrintableAnswer(raw: string, multiline: boolean): boolean {
-  return (multiline ? PRINTABLE_MULTILINE : PRINTABLE).test(raw);
-}
 
 /**
  * Whether this request wants JSON rather than a browser's redirect.

@@ -570,7 +570,7 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-Specs 36 (form actions) and 37 (form option sources) are approved (2026-11-03) and being built, 37 then 36.
+Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) are built (2026-11-03/04) and ship together as v1.3.0; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
 
 **Specs 1–22 and 24–34 are done** — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and

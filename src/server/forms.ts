@@ -36,6 +36,7 @@ import {
   type FormFieldOption,
   type FormLayout,
   type FormSection,
+  type FormStep,
   formSlug,
   honeypotName,
   readFormLayout,
@@ -43,6 +44,7 @@ import {
   type ResolvedFormField,
   type ResolvedOptionsFrom,
   type ResolvedFormSection,
+  type ResolvedFormStep,
   rowsOf,
   shapeOf,
   validateFormFields,
@@ -597,6 +599,7 @@ function compileField(
   row: number,
   sectionShowIf: FieldCondition | undefined,
   sourced: ResolvedOptionsFrom | undefined,
+  stepShowIf?: FieldCondition,
 ): ResolvedFormField {
   // Spec 35 decision 6: `required` on the descriptor is "required unconditionally".
   // A question stored as required that may not be asked (its own or its section's
@@ -605,7 +608,10 @@ function compileField(
   // `required` on something that might not apply, and `formState` reads the same
   // answer off the descriptor that it reads off the stored row.
   const conditional =
-    field.showIf !== undefined || sectionShowIf !== undefined || field.requireIf !== undefined;
+    field.showIf !== undefined ||
+    sectionShowIf !== undefined ||
+    stepShowIf !== undefined ||
+    field.requireIf !== undefined;
   const always = field.required === true && !conditional;
   const out: ResolvedFormField = {
     name: field.name,
@@ -643,6 +649,7 @@ function compileField(
   if (field.value !== undefined) out.value = field.value;
   if (field.text !== undefined) out.text = field.text;
   if (field.section !== undefined) out.section = field.section;
+  // Emitted by `compileForm` on every question of a stepped form, and only there.
   if (field.showIf !== undefined) out.showIf = field.showIf;
   if (field.required === true && conditional) out.requireIf = { all: [] };
   else if (field.requireIf !== undefined) out.requireIf = field.requireIf;
@@ -651,25 +658,51 @@ function compileField(
   return out;
 }
 
-/** A section as a host renders it: label and help through the locale chain (the
- *  `translate` rule one level up), the condition verbatim, `i18n` never shipped. */
+/** A section's or step's label and help through the locale chain (the `translate`
+ *  rule one level up). `i18n` is never shipped. */
+function pickLayoutText(
+  item: {
+    label: string;
+    help?: string;
+    i18n?: Record<string, { label?: string; help?: string }>;
+  },
+  key: "label" | "help",
+  locale: LocaleContext | undefined,
+): string | undefined {
+  if (locale) {
+    for (const code of [locale.code, ...locale.fallbacks]) {
+      const candidate = item.i18n?.[code]?.[key];
+      if (candidate !== undefined) return candidate;
+    }
+  }
+  return item[key];
+}
+
+/** A section as a host renders it: label and help through the locale chain, the
+ *  condition verbatim, `i18n` never shipped. */
 function compileSection(
   section: FormSection,
   locale: LocaleContext | undefined,
 ): ResolvedFormSection {
-  const pick = (key: "label" | "help"): string | undefined => {
-    if (locale) {
-      for (const code of [locale.code, ...locale.fallbacks]) {
-        const candidate = section.i18n?.[code]?.[key];
-        if (candidate !== undefined) return candidate;
-      }
-    }
-    return section[key];
+  const out: ResolvedFormSection = {
+    name: section.name,
+    label: pickLayoutText(section, "label", locale) ?? section.label,
   };
-  const out: ResolvedFormSection = { name: section.name, label: pick("label") ?? section.label };
-  const help = pick("help");
+  const help = pickLayoutText(section, "help", locale);
   if (help !== undefined) out.help = help;
   if (section.showIf !== undefined) out.showIf = section.showIf;
+  return out;
+}
+
+/** A step as a host renders it: a section's shape and the same locale pick. */
+function compileStep(step: FormStep, locale: LocaleContext | undefined): ResolvedFormStep {
+  const out: ResolvedFormStep = {
+    name: step.name,
+    label: pickLayoutText(step, "label", locale) ?? step.label,
+  };
+  const help = pickLayoutText(step, "help", locale);
+  if (help !== undefined) out.help = help;
+  if (step.showIf !== undefined) out.showIf = step.showIf;
   return out;
 }
 
@@ -713,15 +746,20 @@ export const LOCALE_INPUT = "_folio_locale";
 export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
   const rows = rowsOf(form.fields);
   const sectionRules = new Map((form.layout.sections ?? []).map((s) => [s.name, s.showIf]));
-  const fields = form.fields.map((field, i) =>
-    compileField(
+  const stepRules = new Map((form.layout.steps ?? []).map((s) => [s.name, s.showIf]));
+  const stepped = stepRules.size > 0;
+  const fields = form.fields.map((field, i) => {
+    const out = compileField(
       field,
       ctx.locale,
       rows[i] ?? 0,
       field.section === undefined ? undefined : sectionRules.get(field.section),
       ctx.sources?.get(field.name),
-    ),
-  );
+      field.step === undefined ? undefined : stepRules.get(field.step),
+    );
+    if (stepped && field.step !== undefined) out.step = field.step;
+    return out;
+  });
   const refusals = ctx.actions ? refusalsOf(form.actions ?? [], ctx.actions, ctx.locale) : {};
   return {
     id: form.id,
@@ -735,6 +773,8 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
     open: isOpen(form, ctx.now ?? Date.now()),
     fields,
     sections: (form.layout.sections ?? []).map((s) => compileSection(s, ctx.locale)),
+    // Only a stepped form carries them, so every other descriptor is byte-identical.
+    ...(stepped ? { steps: (form.layout.steps ?? []).map((s) => compileStep(s, ctx.locale)) } : {}),
     hidden: [
       ...(ctx.page ? [{ name: PAGE_INPUT, value: ctx.page }] : []),
       ...(ctx.locale ? [{ name: LOCALE_INPUT, value: ctx.locale.code }] : []),

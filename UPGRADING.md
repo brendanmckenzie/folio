@@ -858,12 +858,40 @@ regardless:
 - **Configuring actions needs `publisher`.** An editor can still change everything else
   on a form.
 
+### Form steps and the `folio/form` hook (v1.3.0)
+
+This ships in the same v1.3.0 as form option sources and form actions, after them. It
+adds no migration and no config key: steps live in `forms.layout`, the JSON column
+`0014_form_logic.sql` added. Nothing to run. What changes in the code regardless:
+
+- **A form with no steps compiles byte-for-byte as before.**
+- **New subpath `folio/form`**: `useFolioForm`, an optional headless React hook, and the
+  types `FolioForm` and `FolioFormOptions`. A host that does not import it is
+  unaffected.
+- **New `folio/core` names**: `checkSubmission`, `stepStatus`, `readSubmitStatus`,
+  `statusLocation`, `SUBMIT_STATUSES`, `DEFAULT_STATUS_MESSAGES`, `MAX_FORM_STEPS`, and
+  the types `AnswerRefusal`, `SubmissionCheck`, `StepStatus`, `SubmitStatus`,
+  `SubmitStatusRead`, `FormStep`, `LayoutStep` and `ResolvedFormStep`.
+- **`FormLayoutView` gains `steps`** (additive; `sections` is unchanged).
+- **`ResolvedForm.steps` and `ResolvedFormField.step` appear only on a stepped form.**
+  A host that ignores them renders a stepped form as one page, which works.
+- **The submit route's status texts now come from `DEFAULT_STATUS_MESSAGES`**, with no
+  change in wording.
+- **`LayoutRow.key` is stable under conditions**, so a keyed row keeps its identity
+  as other questions appear and disappear.
+- **A required action input mapped onto a question on a conditional step is now a
+  mapping problem**, like one on a conditional section, because the question is not
+  always answered.
+
+Rolling back is covered under "v1.3.0 is roll-forward only" below, where steps add one
+item. A host importing `folio/form` must also remove that import to build against v1.2.x.
+
 ### v1.3.0 is roll-forward only
 
 **v1.3.0 cannot be rolled back to v1.2.x.** If something is wrong after the upgrade,
 deploy a v1.3.x fix. Do not redeploy a v1.2.x pin. A v1.2.x build reading a v1.3.0
 database breaks the following, and none of it is undone by redeploying v1.3.0 (spec 37's
-items come first, spec 36's after them):
+items come first, spec 36's after them, the form steps' last):
 
 - **Enquiries are lost while visitors are told they were received.** On any form
   with a sourced question that has no typed options, v1.2.x reads the whole form as
@@ -892,6 +920,13 @@ items come first, spec 36's after them):
   outlive the responses they were about, until the roll-forward's sweep finds and drops
   them one by one.
 - **Refused attempts stop counting** against the rate limit.
+- **Steps are lost, and conditional steps misapply.** A v1.2.x build shows a stepped form
+  as one page and ignores a step's `showIf`, so a required question on a conditional step
+  is required of every visitor, including those it never applied to. Any save of a
+  stepped form in the v1.2.x builder (renaming it, opening or closing it, editing its
+  success message, as much as editing a question) drops its `steps` and every `step` key
+  for good, because the older build writes the layout and the questions back on every
+  save. Before rolling back, remove the conditions from steps, or roll forward.
 
 The new tables and columns stay in the database, and an older build ignores them.
 That is the only part of this release that a rollback leaves alone.

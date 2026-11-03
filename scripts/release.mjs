@@ -284,7 +284,7 @@ function smokeTest(sha) {
      * The check above sees files, not names: it would pass a barrel that had
      * dropped everything inside it. This reads the final `export { ... }` of each
      * built entry (the server entry cannot be imported under Node, it needs
-     * `cloudflare:workers`, so the text is what is read for all four) and requires
+     * `cloudflare:workers`, so the text is what is read for all five) and requires
      * the names below, which are the ones a host cannot do without. Add to a list
      * when a name becomes part of the contract; a name vanishing from it is a major.
      */
@@ -302,6 +302,7 @@ function smokeTest(sha) {
       "dist/engine.js": ["newUid", "apply", "defineMigration", "fieldValue"],
       "dist/server.js": ["createFolio", "StoryDO", "SITE_TAG", "ANY_TYPE_TAG", "typeTag"],
       "dist/vite.js": ["folio"],
+      "dist/form.js": ["useFolioForm"],
     };
     const absent = [];
     for (const [file, names] of Object.entries(anchors)) {

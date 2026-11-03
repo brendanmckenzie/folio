@@ -141,6 +141,13 @@ describe("matches: combinators", () => {
   });
 });
 
+describe("matches: Object.prototype names", () => {
+  it("treats an unanswered question named constructor as unset", () => {
+    expect(matches({ field: "constructor", isSet: false }, {})).toBe(true);
+    expect(matches({ field: "constructor", isSet: true }, {})).toBe(false);
+  });
+});
+
 describe("matches: unknown shapes", () => {
   it("evaluates false, never throws, for a field the data does not have", () => {
     expect(() => matches({ field: "nope", eq: "x" }, { layout: "split" })).not.toThrow();

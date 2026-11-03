@@ -71,5 +71,5 @@
     "rootDir": "src",
     "outDir": "dist/types"
   },
-  "include": ["src/core", "src/server", "src/vite"]
+  "include": ["src/core", "src/server", "src/vite", "src/form"]
 }

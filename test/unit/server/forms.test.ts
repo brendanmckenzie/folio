@@ -146,6 +146,84 @@ describe("compileForm", () => {
     expect(compileForm(clashing, { base: BASE }).honeypot).not.toBe(first);
   });
 
+  describe("steps (spec 38)", () => {
+    const STEPS = [
+      { name: "you", label: "About you", help: "Who", i18n: { fr: { label: "Vous" } } },
+      {
+        name: "extra",
+        label: "Extra",
+        showIf: { field: "email", isSet: true },
+        i18n: { fr: { label: "Plus", help: "Détails" } },
+      },
+    ];
+    const stepped = (): Form =>
+      makeForm({
+        fields: [
+          { ...NAME, step: "you" },
+          { ...EMAIL, step: "you" },
+          { name: "why", kind: "text", label: "Why", required: true, step: "extra" },
+        ],
+        layout: { steps: STEPS },
+      });
+
+    it("leaves an unstepped descriptor's key sets exactly as they were", () => {
+      const out = compileForm(makeForm(), { base: BASE });
+      expect(Object.keys(out).sort()).toEqual(
+        [
+          "action",
+          "closedMessage",
+          "enctype",
+          "fields",
+          "hidden",
+          "honeypot",
+          "id",
+          "method",
+          "name",
+          "open",
+          "redirectTo",
+          "sections",
+          "submitLabel",
+          "successMessage",
+          "version",
+        ].sort(),
+      );
+      for (const f of out.fields) expect("step" in f).toBe(false);
+    });
+
+    it("emits steps, with their showIf, and a step on every question of a stepped form", () => {
+      const out = compileForm(stepped(), { base: BASE });
+      expect(out.steps).toEqual([
+        { name: "you", label: "About you", help: "Who" },
+        { name: "extra", label: "Extra", showIf: { field: "email", isSet: true } },
+      ]);
+      expect(out.fields.map((f) => f.step)).toEqual(["you", "you", "extra"]);
+      expect(JSON.stringify(out)).not.toContain("i18n");
+    });
+
+    it("compiles required to false plus requireIf when only the step is conditional", () => {
+      const why = compileForm(stepped(), { base: BASE }).fields[2];
+      expect(why?.required).toBe(false);
+      expect(why?.requireIf).toEqual({ all: [] });
+      const plain = compileForm(stepped(), { base: BASE }).fields[1];
+      expect(plain?.required).toBe(true);
+    });
+
+    it("localises step labels and help through the chain", () => {
+      const locale: LocaleContext = { code: "fr-CA", fallbacks: ["fr"] };
+      const out = compileForm(stepped(), { base: BASE, locale });
+      expect(out.steps?.map((s) => s.label)).toEqual(["Vous", "Plus"]);
+      expect(out.steps?.[0]?.help).toBe("Who");
+      expect(out.steps?.[1]?.help).toBe("Détails");
+    });
+
+    it("drives the engine: an unreachable step is unasked", () => {
+      const out = compileForm(stepped(), { base: BASE });
+      const state = formState(out, {});
+      expect(state.asked.has("why")).toBe(false);
+      expect(state.steps.has("extra")).toBe(false);
+    });
+  });
+
   it("resolves every visitor-facing string through the locale chain", () => {
     const field: FormField = {
       name: "reason",
@@ -424,6 +502,7 @@ describe("FormPatchBody keeps every FormField key", () => {
     showIf: { field: "heard", eq: "other" },
     requireIf: { field: "heard", isSet: true },
     section: "s",
+    step: "p",
     hold: true,
     prefill: "query",
     optionsFrom: { source: "countries", settings: { region: "oceania", limit: 5, all: false } },

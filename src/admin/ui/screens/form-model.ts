@@ -36,7 +36,9 @@ import {
   type FormFieldOption,
   type FormLayout,
   type FormSection,
+  type FormStep,
   honeypotName,
+  MAX_FORM_STEPS,
   MAX_ROW_CELLS,
   RESERVED_PREFIX,
 } from "../../../core/forms";
@@ -237,12 +239,18 @@ export function blankField(
 
 export const MAX_FIELDS_REACHED = (limit: number) => `A form may hold at most ${limit} questions.`;
 
+/** Appends a new question. On a stepped form it joins the last step
+ *  (`form-steps.md` decision 14), so membership stays contiguous. */
 export function addField(
   fields: readonly FormField[],
   kind: FormFieldKind,
   formId: string,
+  layout: FormLayout = {},
 ): FormField[] {
-  return [...fields, blankField(kind, { formId, existing: fields })];
+  const field = blankField(kind, { formId, existing: fields });
+  const last = layout.steps?.[layout.steps.length - 1];
+  if (last) field.step = last.name;
+  return [...fields, field];
 }
 
 /** Clears a field's own `beside`, if it has one. The one place a reorder or a
@@ -310,7 +318,7 @@ export function actionReaders(
 
 /**
  * Why `name` cannot be removed, or null. A question another question's rule (or a
- * section's) names is not removable: the rule would dangle, and `checkFormLogic`
+ * section's or step's) names is not removable: the rule would dangle, and `checkFormLogic`
  * would refuse the save. So is one an action reads (`form-actions.md` decision 5),
  * with the action named. The builder disables the button with this as the reason.
  */
@@ -330,6 +338,19 @@ export function removeRefusal(
   for (const s of layout.sections ?? []) {
     if (referencedNames(s.showIf).includes(name)) {
       return `Section "${s.label}" has a rule that depends on "${label}". Change that rule first.`;
+    }
+  }
+  for (const s of layout.steps ?? []) {
+    if (referencedNames(s.showIf).includes(name)) {
+      return `Step "${s.label}" has a rule that depends on "${label}". Change that rule first.`;
+    }
+  }
+  const own = fields.find((f) => f.name === name);
+  const step = own?.step === undefined ? undefined : layout.steps?.find((s) => s.name === own.step);
+  if (step && own && own.kind !== "hidden") {
+    const others = fields.filter((f) => f.step === step.name && f.name !== name);
+    if (!others.some((f) => f.kind !== "hidden")) {
+      return `"${label}" is the only question on step "${step.label}". Move another question onto the step, or merge the step into the one before it, first.`;
     }
   }
   const reader = actionReaders(actions, name)[0];
@@ -441,6 +462,7 @@ function rowBlocks(fields: readonly FormField[]): RowBlock[] {
   let cellsInRow = 0;
   let breaksNext = true; // the start of the form breaks a row
   let prevSection: string | undefined;
+  let prevStep: string | undefined;
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i]!;
     if (field.kind === "hidden") {
@@ -457,7 +479,8 @@ function rowBlocks(fields: readonly FormField[]): RowBlock[] {
       !breaksNext &&
       field.beside &&
       cellsInRow < MAX_ROW_CELLS &&
-      field.section === prevSection;
+      field.section === prevSection &&
+      field.step === prevStep;
     if (joins && current) {
       current.end = i;
       cellsInRow += 1;
@@ -468,6 +491,7 @@ function rowBlocks(fields: readonly FormField[]): RowBlock[] {
     }
     breaksNext = isStatement;
     prevSection = field.section;
+    prevStep = field.step;
   }
   return blocks;
 }
@@ -508,9 +532,60 @@ export function canMoveField(
   index: number,
   direction: -1 | 1,
   layout: FormLayout = {},
+  actions?: ActionContext,
 ): boolean {
-  if (!canStep(fields, index, direction)) return false;
-  return !spoilsOrder(fields, stepFields(fields, index, direction), layout);
+  return moveRefusal(fields, index, direction, layout, actions) === null;
+}
+
+/**
+ * Why the question at `index` cannot move `direction`, or null. "Already first" and
+ * "Already last" when there is nowhere to go. On a stepped form a move across a
+ * boundary is refused when it would empty a step of visible questions, carry a
+ * section member across, put a rule above what it names, or put a `requireIf` source
+ * on a later step (`form-steps.md` decision 14), with `checkFormLogic`'s own sentence
+ * for the reason. It also refuses what would make an action's attachment worse
+ * (spec 36 decision 5): a mapped question moved onto a conditional step.
+ */
+export function moveRefusal(
+  fields: readonly FormField[],
+  index: number,
+  direction: -1 | 1,
+  layout: FormLayout = {},
+  actions?: ActionContext,
+): string | null {
+  if (!canStep(fields, index, direction))
+    return direction === -1 ? "Already first" : "Already last";
+  const after = movedFields(fields, index, direction, layout);
+  if (spoilsOrder(fields, after, layout)) {
+    return (
+      logicRefusal(after, layout) ??
+      "That would put a rule above the question it depends on, or split a section."
+    );
+  }
+  const moved = fields[index]!;
+  const landed = after.find((f) => f.name === moved.name);
+  if (landed && landed.step !== moved.step) {
+    const step = layout.steps?.find((s) => s.name === landed.step);
+    const reader = step?.showIf ? requiredReader(actions, landed.name) : null;
+    if (step && reader) {
+      return `${reader} reads "${landed.label || landed.name}" and needs it answered, and step "${step.label}" is conditional. Change the mapping first.`;
+    }
+  }
+  return null;
+}
+
+/** The label of an action whose required input reads the question `name`, or null. */
+function requiredReader(actions: ActionContext | undefined, name: string): string | null {
+  for (const a of actions?.attachments ?? []) {
+    const info = actions?.infos.get(a.action);
+    if (!info) continue;
+    for (const [input, question] of Object.entries(a.map ?? {})) {
+      if (question === name && info.inputs.find((i) => i.name === input)?.required) {
+        return info.label;
+      }
+    }
+  }
+  return null;
 }
 
 function canStep(fields: readonly FormField[], index: number, direction: -1 | 1): boolean {
@@ -556,9 +631,38 @@ export function moveFieldStep(
   index: number,
   direction: -1 | 1,
   layout: FormLayout = {},
+  actions?: ActionContext,
 ): FormField[] {
-  const moved = stepFields(fields, index, direction);
-  return spoilsOrder(fields, moved, layout) ? [...fields] : moved;
+  return moveRefusal(fields, index, direction, layout, actions) === null
+    ? movedFields(fields, index, direction, layout)
+    : [...fields];
+}
+
+/** `stepFields`, and on a stepped form a question that jumped a step boundary joins
+ *  the step of the question it jumped (decision 14): the first member moving up lands
+ *  on the previous step, the last moving down on the next. Both neighbours of the
+ *  seam lose a `beside` that would now join them across it. */
+function movedFields(
+  fields: readonly FormField[],
+  index: number,
+  direction: -1 | 1,
+  layout: FormLayout,
+): FormField[] {
+  const after = stepFields(fields, index, direction);
+  if (!layout.steps?.length) return after;
+  const mover = fields[index];
+  if (!mover) return after;
+  const at = after.findIndex((f) => f.name === mover.name);
+  if (at === -1 || at === index) return after;
+  const near = after[direction === -1 ? at + 1 : at - 1];
+  if (!near || near.step === mover.step) return after;
+  const next = [...after];
+  const joined = { ...after[at]! };
+  if (near.step === undefined) delete joined.step;
+  else joined.step = near.step;
+  next[at] = detached(joined);
+  detachFirstRealAt(next, at + 1);
+  return next;
 }
 
 /** True when `after` has an ordering fault (a rule naming a later question, a
@@ -570,7 +674,15 @@ function spoilsOrder(
   after: readonly FormField[],
   layout: FormLayout,
 ): boolean {
-  return orderFaulty(after, layout) && !orderFaulty(before, layout);
+  if (orderFaulty(after, layout) && !orderFaulty(before, layout)) return true;
+  // On a stepped form the whole of `checkFormLogic` is the test: contiguity, an
+  // emptied step, a step rule above its source, a `requireIf` on a later step.
+  return (
+    layout.steps !== undefined &&
+    layout.steps.length > 0 &&
+    logicRefusal(after, layout) !== null &&
+    logicRefusal(before, layout) === null
+  );
 }
 
 function orderFaulty(fields: readonly FormField[], layout: FormLayout): boolean {
@@ -705,7 +817,10 @@ export function canJoinPrevious(fields: readonly FormField[], name: string): boo
   let previous: FormField | null = null;
   for (const field of fields) {
     if (field.kind === "hidden") continue;
-    if (field.name === name) return previous !== null && previous.kind !== "statement";
+    if (field.name === name) {
+      // A step boundary starts a fresh row (`rowsOf`), as a statement does.
+      return previous !== null && previous.kind !== "statement" && previous.step === field.step;
+    }
     previous = field;
   }
   return false;
@@ -725,6 +840,7 @@ export function fieldRows(fields: readonly FormField[]): number[][] {
   let lastReal: number[] | null = null;
   let breaksNext = true; // the start of the form breaks a row
   let prevSection: string | undefined;
+  let prevStep: string | undefined;
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i]!;
     if (field.kind === "hidden") {
@@ -738,7 +854,8 @@ export function fieldRows(fields: readonly FormField[]): number[][] {
       field.beside &&
       lastReal &&
       lastReal.length < MAX_ROW_CELLS &&
-      field.section === prevSection
+      field.section === prevSection &&
+      field.step === prevStep
     ) {
       lastReal.push(i);
     } else {
@@ -748,6 +865,7 @@ export function fieldRows(fields: readonly FormField[]): number[][] {
     }
     breaksNext = isStatement;
     prevSection = field.section;
+    prevStep = field.step;
   }
   return rows;
 }
@@ -777,6 +895,9 @@ export function renameField(
   const sections = layout.sections?.map((s) =>
     s.showIf ? { ...s, showIf: renameInCondition(s.showIf, from, to) } : s,
   );
+  const steps = layout.steps?.map((s) =>
+    s.showIf ? { ...s, showIf: renameInCondition(s.showIf, from, to) } : s,
+  );
   // An action's mapping follows the rename, in the same save (decision 5).
   const follow = (a: FormActionAttachment): FormActionAttachment => {
     if (!a.map || !Object.values(a.map).includes(from)) return a;
@@ -787,16 +908,27 @@ export function renameField(
   };
   return {
     fields: fields.map(rewrite),
-    layout: sections ? { ...layout, sections } : layout,
+    layout: { ...layout, ...(sections ? { sections } : {}), ...(steps ? { steps } : {}) },
     actions: actions.map(follow),
   };
 }
 
-/** Sections with no members dropped: what is left after a removal emptied one. */
+/** A layout of `sections` and `steps`, leaving out whichever is empty. */
+function layoutOf(sections: readonly FormSection[], steps: readonly FormStep[]): FormLayout {
+  return {
+    ...(sections.length > 0 ? { sections } : {}),
+    ...(steps.length > 0 ? { steps } : {}),
+  };
+}
+
+/** Sections and steps with no members dropped: what is left after a removal emptied one. */
 export function pruneSections(fields: readonly FormField[], layout: FormLayout): FormLayout {
   const used = new Set(fields.flatMap((f) => (f.section === undefined ? [] : [f.section])));
-  const sections = (layout.sections ?? []).filter((s) => used.has(s.name));
-  return sections.length > 0 ? { sections } : {};
+  const usedSteps = new Set(fields.flatMap((f) => (f.step === undefined ? [] : [f.step])));
+  return layoutOf(
+    (layout.sections ?? []).filter((s) => used.has(s.name)),
+    (layout.steps ?? []).filter((s) => usedSteps.has(s.name)),
+  );
 }
 
 function withoutSection(field: FormField): FormField {
@@ -806,13 +938,16 @@ function withoutSection(field: FormField): FormField {
 }
 
 /** The index range `[first, last]` of the run of questions sharing `fields[at]`'s
- *  section (or lack of one), extending both ways from `at`. */
+ *  section (or lack of one) **and step**, extending both ways from `at`: a section
+ *  lies inside one step. */
 function runAround(fields: readonly FormField[], at: number): [number, number] {
   const section = fields[at]?.section;
+  const step = fields[at]?.step;
+  const same = (f: FormField | undefined) => f?.section === section && f?.step === step;
   let first = at;
   let last = at;
-  while (first > 0 && fields[first - 1]?.section === section) first -= 1;
-  while (last < fields.length - 1 && fields[last + 1]?.section === section) last += 1;
+  while (first > 0 && same(fields[first - 1])) first -= 1;
+  while (last < fields.length - 1 && same(fields[last + 1])) last += 1;
   return [first, last];
 }
 
@@ -837,7 +972,7 @@ export function startSection(
   const created: FormSection = { name: section, label };
   return {
     fields: next,
-    layout: pruneSections(next, { sections: [...(layout.sections ?? []), created] }),
+    layout: pruneSections(next, { ...layout, sections: [...(layout.sections ?? []), created] }),
     section,
   };
 }
@@ -860,12 +995,282 @@ export function removeSection(
 ): { fields: FormField[]; layout: FormLayout } {
   const next = fields.map((f) => (f.section === name ? withoutSection(f) : f));
   const sections = (layout.sections ?? []).filter((s) => s.name !== name);
-  return { fields: next, layout: sections.length > 0 ? { sections } : {} };
+  return { fields: next, layout: layoutOf(sections, layout.steps ?? []) };
 }
 
 /** Replaces the section named `name` with `next`. */
 export function updateSection(layout: FormLayout, name: string, next: FormSection): FormLayout {
-  return { sections: (layout.sections ?? []).map((s) => (s.name === name ? next : s)) };
+  return { ...layout, sections: (layout.sections ?? []).map((s) => (s.name === name ? next : s)) };
+}
+
+/* ---------------------------------------------------------------- steps --- */
+
+/** The first free `step_N`: `uniqueFieldName`'s pattern, counted from 1. */
+function stepName(taken: readonly string[]): string {
+  for (let i = 1; ; i++) {
+    const candidate = `step_${i}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+}
+
+function withStep(field: FormField, step: string | undefined): FormField {
+  const next = { ...field };
+  if (step === undefined) delete next.step;
+  else next.step = step;
+  return next;
+}
+
+/** The first and last index of the step `name`'s members, or null. */
+function stepRange(fields: readonly FormField[], name: string): [number, number] | null {
+  const first = fields.findIndex((f) => f.step === name);
+  if (first === -1) return null;
+  let last = first;
+  while (last + 1 < fields.length && fields[last + 1]?.step === name) last += 1;
+  return [first, last];
+}
+
+/**
+ * Why a new step cannot start at index `at`, or null: the shared rules of
+ * `splitStepsAt` and `startStepAt`. `lo..hi` is the run being cut. Every refusal is
+ * a way the write path would otherwise refuse the form (a section cut in two, a step
+ * with nothing visible), then `checkFormLogic` itself over the result, which is the
+ * guarantee that a builder action never makes a form `logicRefusal` rejects: this
+ * catches a `requireIf` whose source would land on a later step.
+ */
+function cutRefusal(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  after: { fields: FormField[]; layout: FormLayout },
+  at: number,
+  [lo, hi]: [number, number],
+): string | null {
+  const above = fields[at - 1];
+  const here = fields[at]!;
+  if (above && above.section !== undefined && above.section === here.section) {
+    const section = layout.sections?.find((s) => s.name === here.section);
+    return `This would cut the section "${section?.label ?? here.section}" in two. End the section first.`;
+  }
+  const visible = (from: number, to: number) =>
+    fields.slice(from, to).some((f) => f.kind !== "hidden");
+  if (!visible(lo, at)) return "The step above would have no question a visitor can see.";
+  if (!visible(at, hi + 1)) return "The new step would have no question a visitor can see.";
+  if (logicRefusal(fields, layout) === null) return logicRefusal(after.fields, after.layout);
+  return null;
+}
+
+function splitCandidate(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  at: number,
+): { fields: FormField[]; layout: FormLayout } {
+  const steps: FormStep[] = [
+    { name: "step_1", label: "Step 1" },
+    { name: "step_2", label: "Step 2" },
+  ];
+  return {
+    fields: fields.map((f, i) => withStep(f, i < at ? "step_1" : "step_2")),
+    layout: layoutOf(layout.sections ?? [], steps),
+  };
+}
+
+/** Why `name` cannot start a step on a form with none, or null. */
+export function splitRefusal(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+): string | null {
+  if (layout.steps?.length) return "This form already has steps. Start a new step instead.";
+  const at = fields.findIndex((f) => f.name === name);
+  if (at === -1) return "That question is not on the form.";
+  if (at === 0) return "Nothing is above this question to split from.";
+  return cutRefusal(fields, layout, splitCandidate(fields, layout, at), at, [0, fields.length - 1]);
+}
+
+/**
+ * Splits an unstepped form at the question `name`: step 1 is everything above it
+ * and step 2 everything from it down (`form-steps.md` decision 14). Membership is
+ * contiguous by construction. `null` when `splitRefusal` refuses.
+ */
+export function splitStepsAt(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+): { fields: FormField[]; layout: FormLayout; step: string } | null {
+  if (splitRefusal(fields, layout, name) !== null) return null;
+  const at = fields.findIndex((f) => f.name === name);
+  return { ...splitCandidate(fields, layout, at), step: "step_2" };
+}
+
+/** Why `name` cannot start a new step, or null: not first in its step, under the cap. */
+export function startStepRefusal(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+): string | null {
+  const steps = layout.steps ?? [];
+  const at = fields.findIndex((f) => f.name === name);
+  if (at === -1) return "That question is not on the form.";
+  const own = fields[at]!.step;
+  const range = own === undefined ? null : stepRange(fields, own);
+  if (steps.length === 0 || !range) return "This form has no steps. Split it into steps instead.";
+  if (range[0] === at) return "This question already starts its step.";
+  if (steps.length >= MAX_FORM_STEPS) return `A form may hold at most ${MAX_FORM_STEPS} steps.`;
+  return cutRefusal(fields, layout, startedStep(fields, layout, at, range), at, range);
+}
+
+function startedStep(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  at: number,
+  [, hi]: [number, number],
+): { fields: FormField[]; layout: FormLayout; step: string } {
+  const steps = layout.steps ?? [];
+  const step = stepName(steps.map((s) => s.name));
+  const current = steps.findIndex((s) => s.name === fields[at]!.step);
+  const created: FormStep = { name: step, label: "New step" };
+  return {
+    fields: fields.map((f, i) => (i >= at && i <= hi ? withStep(f, step) : f)),
+    layout: layoutOf(layout.sections ?? [], [
+      ...steps.slice(0, current + 1),
+      created,
+      ...steps.slice(current + 1),
+    ]),
+    step,
+  };
+}
+
+/**
+ * A new step starting at the question `name`, running to the end of its step. The
+ * earlier part keeps the step (and its condition); the new one starts unconditional
+ * and is listed right after it, so step order stays member order. `null` when
+ * `startStepRefusal` refuses.
+ */
+export function startStepAt(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+): { fields: FormField[]; layout: FormLayout; step: string } | null {
+  if (startStepRefusal(fields, layout, name) !== null) return null;
+  const at = fields.findIndex((f) => f.name === name);
+  const range = stepRange(fields, fields[at]!.step!)!;
+  return startedStep(fields, layout, at, range);
+}
+
+/** Why step `name` cannot merge into the one before it, or null. */
+export function mergeRefusal(
+  layout: FormLayout,
+  name: string,
+  fields?: readonly FormField[],
+  actions?: ActionContext,
+): string | null {
+  const steps = layout.steps ?? [];
+  const at = steps.findIndex((s) => s.name === name);
+  if (at === -1) return "That step is not on the form.";
+  if (at === 0) return "The first step has nothing before it to merge into.";
+  // Landing on a conditional step must not leave an action's required input
+  // sometimes unanswered (decision 14), the same guard as a move.
+  const into = steps[at - 1]!;
+  if (fields && into.showIf) {
+    const after = fields.map((f) => (f.step === name ? withStep(f, into.name) : f));
+    return stepRuleRefusal(after, into.name, actions);
+  }
+  return null;
+}
+
+/**
+ * Folds step `name` into the one before it: its questions join that step and its
+ * heading and condition go. Contiguity cannot break: the two were already adjacent.
+ */
+export function mergeStepIntoPrevious(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+  actions?: ActionContext,
+): { fields: FormField[]; layout: FormLayout; step: string } | null {
+  if (mergeRefusal(layout, name, fields, actions) !== null) return null;
+  const steps = layout.steps ?? [];
+  const at = steps.findIndex((s) => s.name === name);
+  const into = steps[at - 1]!.name;
+  return {
+    fields: fields.map((f) => (f.step === name ? withStep(f, into) : f)),
+    layout: layoutOf(
+      layout.sections ?? [],
+      steps.filter((s) => s.name !== name),
+    ),
+    step: into,
+  };
+}
+
+/** Clears every step and every membership; sections and questions stay where they are. */
+export function removeSteps(
+  fields: readonly FormField[],
+  layout: FormLayout,
+): { fields: FormField[]; layout: FormLayout } {
+  return {
+    fields: fields.map((f) => (f.step === undefined ? f : withStep(f, undefined))),
+    layout: layoutOf(layout.sections ?? [], []),
+  };
+}
+
+/** Replaces the step named `name` with `next`. */
+export function updateStep(layout: FormLayout, name: string, next: FormStep): FormLayout {
+  return { ...layout, steps: (layout.steps ?? []).map((s) => (s.name === name ? next : s)) };
+}
+
+/**
+ * Why step `name` cannot be made conditional, or null: an action's required input
+ * reads a question on it, which would then sometimes have no answer (spec 36
+ * decision 5 reaches steps the way it reaches a section's condition).
+ */
+export function stepRuleRefusal(
+  fields: readonly FormField[],
+  name: string,
+  actions?: ActionContext,
+): string | null {
+  for (const f of fields) {
+    if (f.step !== name) continue;
+    const reader = requiredReader(actions, f.name);
+    if (reader) {
+      return `${reader} needs "${f.label || f.name}" answered, so this step cannot be conditional. Change the mapping first.`;
+    }
+  }
+  return null;
+}
+
+/** A group's label or help in `locale` (the source's own, or its translation). */
+export function groupText(
+  group: FormSection | FormStep,
+  key: "label" | "help",
+  locale: string,
+  source: string,
+): string {
+  return locale !== source ? (group.i18n?.[locale]?.[key] ?? "") : (group[key] ?? "");
+}
+
+/** `group` with its label or help set in `locale`: the source's own text, or a
+ *  translation, cleared when emptied. One function for sections and steps. */
+export function withGroupText<T extends FormSection | FormStep>(
+  group: T,
+  key: "label" | "help",
+  value: string,
+  locale: string,
+  source: string,
+): T {
+  if (locale === source) {
+    const next: T = { ...group, [key]: value };
+    if (key === "help" && value === "") delete next.help;
+    return next;
+  }
+  const entry: { label?: string; help?: string } = { ...group.i18n?.[locale] };
+  if (value === "") delete entry[key];
+  else entry[key] = value;
+  const i18n: Record<string, { label?: string; help?: string }> = { ...group.i18n };
+  if (Object.keys(entry).length > 0) i18n[locale] = entry;
+  else delete i18n[locale];
+  const next: T = { ...group };
+  if (Object.keys(i18n).length > 0) next.i18n = i18n;
+  else delete next.i18n;
+  return next;
 }
 
 /** The refusal `checkFormLogic` would give this form, as a string, or null. The

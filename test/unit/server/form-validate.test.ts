@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { FormField } from "../../../src/core/forms";
+import { checkSubmission } from "../../../src/core/form-answers";
+import type { FormField, FormLayout } from "../../../src/core/forms";
 import {
   bodyHash,
   capFor,
@@ -15,7 +16,7 @@ import {
   validateSubmission,
 } from "../../../src/server/form-responses";
 import type { Form } from "../../../src/server/forms";
-import { MAX_ANSWER_CHARS } from "../../../src/server/validate";
+import { MAX_ANSWER_CHARS } from "../../../src/core/form-answers";
 
 /**
  * The pure half of the one route an anonymous stranger on the internet may POST
@@ -56,6 +57,28 @@ const REASON: FormField = {
   ],
 };
 
+/**
+ * The same assertions run against the server's wrapper and the core function it
+ * wraps (spec 38 phase 1): the move changed nothing if both hold every one.
+ */
+const validators = [
+  ["validateSubmission", validateSubmission],
+  [
+    "checkSubmission",
+    (
+      fields: readonly FormField[],
+      source: SubmissionBody,
+      uploaded: ReadonlySet<string> = new Set(),
+      layout: FormLayout = {},
+    ) =>
+      checkSubmission(
+        { fields, sections: layout.sections },
+        { getAll: (n) => source.get(n) ?? [] },
+        uploaded,
+      ),
+  ],
+] as const;
+
 /** A submitted body, in the repeated-key shape a browser actually sends. */
 function body(raw: Record<string, string | string[]>): SubmissionBody {
   return new Map(Object.entries(raw).map(([k, v]) => [k, Array.isArray(v) ? v : [v]]));
@@ -81,205 +104,218 @@ function makeForm(fields: FormField[]): Form {
   };
 }
 
-describe("validateSubmission: what is stored", () => {
-  it("keeps declared questions, drops everything else the browser sent", () => {
-    const source: FormField = { name: "source", kind: "hidden", label: "Source", value: "site" };
-    const { values, errors } = validateSubmission(
-      [NAME, EMAIL, source],
-      body({
-        full_name: "Ada",
-        email: "ada@example.com",
-        // The host's markup emitted this, so it is stored — a hidden question is
-        // validated, stored and exported like any other answer (decision 13).
-        source: "newsletter",
-        // A submit button, Folio's own hidden input, the honeypot, and a
-        // campaign parameter a script appended. None is a declared question.
-        submit: "Send",
-        _folio_page: "/contact",
-        company_website: "",
-        utm_medium: "email",
-      }),
-    );
+describe.each(validators)(
+  "validateSubmission: what is stored via %s",
+  (_name, validateSubmission) => {
+    it("keeps declared questions, drops everything else the browser sent", () => {
+      const source: FormField = { name: "source", kind: "hidden", label: "Source", value: "site" };
+      const { values, errors } = validateSubmission(
+        [NAME, EMAIL, source],
+        body({
+          full_name: "Ada",
+          email: "ada@example.com",
+          // The host's markup emitted this, so it is stored — a hidden question is
+          // validated, stored and exported like any other answer (decision 13).
+          source: "newsletter",
+          // A submit button, Folio's own hidden input, the honeypot, and a
+          // campaign parameter a script appended. None is a declared question.
+          submit: "Send",
+          _folio_page: "/contact",
+          company_website: "",
+          utm_medium: "email",
+        }),
+      );
 
-    expect(errors).toEqual({});
-    expect(Object.keys(values).sort()).toEqual(["email", "full_name", "source"]);
-    expect(values.source).toBe("newsletter");
-  });
-
-  /**
-   * The screen that stops a response forging its own metadata. It is the second
-   * of two locks on the same door — `validateFormFields` refuses a field slug in
-   * the `_` namespace, so this can only fire for a row that predates that — and
-   * it is the one that holds when the first has been got around.
-   */
-  it("never stores an answer under a Folio-reserved name, even if a form declares one", () => {
-    const smuggled = { name: "_folio_page", kind: "text", label: "Page" } as FormField;
-    const { values } = validateSubmission(
-      [smuggled, NAME],
-      body({ _folio_page: "https://evil.example/", full_name: "Ada" }),
-    );
-    expect(values).toEqual({ full_name: "Ada" });
-  });
-
-  it("stores nothing for a statement, which renders no input", () => {
-    const note: FormField = { name: "note", kind: "statement", label: "Note", text: "Read this" };
-    const { values, errors } = validateSubmission([note], body({ note: "I typed here" }));
-    expect(values).toEqual({});
-    expect(errors).toEqual({});
-  });
-});
-
-describe("validateSubmission: per question", () => {
-  it("refuses a required answer that is absent or blank, and names the field", () => {
-    expect(validateSubmission([EMAIL], body({})).errors).toEqual({ email: "required" });
-    expect(validateSubmission([EMAIL], body({ email: "   " })).errors).toEqual({
-      email: "required",
-    });
-    // Not required and not given is not an error, and stores no key at all.
-    expect(validateSubmission([NAME], body({})).values).toEqual({});
-  });
-
-  it("refuses a number that is not one, rather than coercing it", () => {
-    const budget: FormField = {
-      name: "budget",
-      kind: "number",
-      label: "Budget",
-      min: 10,
-      max: 100,
-    };
-    // `Number('12abc')` is NaN and `parseInt('12abc')` is 12; neither is what the
-    // visitor meant, so the shape is screened before either runs.
-    expect(validateSubmission([budget], body({ budget: "12abc" })).errors).toEqual({
-      budget: "invalid",
-    });
-    expect(validateSubmission([budget], body({ budget: "42" })).values).toEqual({ budget: 42 });
-    expect(validateSubmission([budget], body({ budget: "9" })).errors).toEqual({
-      budget: "out_of_range",
-    });
-    expect(validateSubmission([budget], body({ budget: "101" })).errors).toEqual({
-      budget: "out_of_range",
-    });
-  });
-
-  it("refuses a date that matches the shape and is not a day", () => {
-    const when: FormField = { name: "when", kind: "date", label: "When" };
-    expect(validateSubmission([when], body({ when: "2026-09-06" })).values).toEqual({
-      when: "2026-09-06",
-    });
-    expect(validateSubmission([when], body({ when: "2026-02-31" })).errors).toEqual({
-      when: "invalid",
-    });
-    expect(validateSubmission([when], body({ when: "06/09/2026" })).errors).toEqual({
-      when: "invalid",
-    });
-  });
-
-  it("refuses an option nothing declared, for both a select and a checkboxes", () => {
-    expect(validateSubmission([REASON], body({ reason: "sales" })).values).toEqual({
-      reason: "sales",
-    });
-    // The whole point of an option list: a value outside it is a request that
-    // never came from the rendered markup.
-    expect(validateSubmission([REASON], body({ reason: "billing" })).errors).toEqual({
-      reason: "invalid",
+      expect(errors).toEqual({});
+      expect(Object.keys(values).sort()).toEqual(["email", "full_name", "source"]);
+      expect(values.source).toBe("newsletter");
     });
 
-    const topics: FormField = {
-      name: "topics",
-      kind: "checkboxes",
-      label: "Topics",
-      required: true,
-      options: [
-        { value: "a", label: "A" },
-        { value: "b", label: "B" },
-      ],
-    };
-    expect(validateSubmission([topics], body({ topics: ["a", "b"] })).values).toEqual({
-      topics: ["a", "b"],
-    });
-    expect(validateSubmission([topics], body({ topics: ["a", "z"] })).errors).toEqual({
-      topics: "invalid",
-    });
-    // Nothing ticked sends no key at all, so `required` on one can only mean
-    // "at least one".
-    expect(validateSubmission([topics], body({})).errors).toEqual({ topics: "required" });
-
-    const optional: FormField = { ...topics, required: false };
-    expect(validateSubmission([optional], body({})).values).toEqual({ topics: [] });
-  });
-
-  it("reads a checkbox by presence, which is the only thing a browser sends", () => {
-    const consent: FormField = { name: "consent", kind: "checkbox", label: "OK?", required: true };
-    expect(validateSubmission([consent], body({ consent: "on" })).values).toEqual({
-      consent: true,
-    });
-    expect(validateSubmission([consent], body({})).errors).toEqual({ consent: "required" });
-
-    const optional: FormField = { ...consent, required: false };
-    expect(validateSubmission([optional], body({})).values).toEqual({ consent: false });
-  });
-
-  it("applies the question’s own max and pattern, and a backstop above both", () => {
-    const short: FormField = { name: "code", kind: "text", label: "Code", max: 4 };
-    expect(validateSubmission([short], body({ code: "abcd" })).values).toEqual({ code: "abcd" });
-    expect(validateSubmission([short], body({ code: "abcde" })).errors).toEqual({
-      code: "too_long",
+    /**
+     * The screen that stops a response forging its own metadata. It is the second
+     * of two locks on the same door — `validateFormFields` refuses a field slug in
+     * the `_` namespace, so this can only fire for a row that predates that — and
+     * it is the one that holds when the first has been got around.
+     */
+    it("never stores an answer under a Folio-reserved name, even if a form declares one", () => {
+      const smuggled = { name: "_folio_page", kind: "text", label: "Page" } as FormField;
+      const { values } = validateSubmission(
+        [smuggled, NAME],
+        body({ _folio_page: "https://evil.example/", full_name: "Ada" }),
+      );
+      expect(values).toEqual({ full_name: "Ada" });
     });
 
-    // No `max` at all is still bounded: this is a public endpoint and the column
-    // is what gets the string.
-    const open: FormField = { name: "story", kind: "textarea", label: "Story" };
-    const long = "x".repeat(MAX_ANSWER_CHARS + 1);
-    expect(validateSubmission([open], body({ story: long })).errors).toEqual({ story: "too_long" });
+    it("stores nothing for a statement, which renders no input", () => {
+      const note: FormField = { name: "note", kind: "statement", label: "Note", text: "Read this" };
+      const { values, errors } = validateSubmission([note], body({ note: "I typed here" }));
+      expect(values).toEqual({});
+      expect(errors).toEqual({});
+    });
+  },
+);
 
-    const postcode: FormField = {
-      name: "postcode",
-      kind: "text",
-      label: "Postcode",
-      pattern: "[0-9]{4}",
-    };
-    expect(validateSubmission([postcode], body({ postcode: "3000" })).values).toEqual({
-      postcode: "3000",
-    });
-    // Anchored, the way an HTML `pattern` is: a match somewhere inside is not a
-    // match.
-    expect(validateSubmission([postcode], body({ postcode: "x3000x" })).errors).toEqual({
-      postcode: "invalid",
-    });
-  });
-
-  it("lets a textarea hold newlines and refuses one anywhere else", () => {
-    const story: FormField = { name: "story", kind: "textarea", label: "Story" };
-    expect(validateSubmission([story], body({ story: "one\r\ntwo" })).values).toEqual({
-      story: "one\ntwo",
-    });
-
-    // The identical string under a single-line question is somebody making one
-    // stored value look like two.
-    expect(validateSubmission([NAME], body({ full_name: "Ada\nLovelace" })).errors).toEqual({
-      full_name: "invalid",
-    });
-    // And a C0 control is refused whatever the question: a stored string must
-    // not be able to lie about what it is.
-    expect(validateSubmission([NAME], body({ full_name: "Ada\u0000" })).errors).toEqual({
-      full_name: "invalid",
-    });
-  });
-
-  it("refuses a url that is not http, so a stored answer is never a javascript: link", () => {
-    const site: FormField = { name: "site", kind: "url", label: "Website" };
-    expect(validateSubmission([site], body({ site: "https://example.com/x" })).values).toEqual({
-      site: "https://example.com/x",
-    });
-    // A host renders this in its own markup. `javascript:` and `data:` are not
-    // websites.
-    for (const bad of ["javascript:alert(1)", "data:text/html,<script>", "example.com"]) {
-      expect(validateSubmission([site], body({ site: bad })).errors, bad).toEqual({
-        site: "invalid",
+describe.each(validators)(
+  "validateSubmission: per question via %s",
+  (_name, validateSubmission) => {
+    it("refuses a required answer that is absent or blank, and names the field", () => {
+      expect(validateSubmission([EMAIL], body({})).errors).toEqual({ email: "required" });
+      expect(validateSubmission([EMAIL], body({ email: "   " })).errors).toEqual({
+        email: "required",
       });
-    }
-  });
-});
+      // Not required and not given is not an error, and stores no key at all.
+      expect(validateSubmission([NAME], body({})).values).toEqual({});
+    });
+
+    it("refuses a number that is not one, rather than coercing it", () => {
+      const budget: FormField = {
+        name: "budget",
+        kind: "number",
+        label: "Budget",
+        min: 10,
+        max: 100,
+      };
+      // `Number('12abc')` is NaN and `parseInt('12abc')` is 12; neither is what the
+      // visitor meant, so the shape is screened before either runs.
+      expect(validateSubmission([budget], body({ budget: "12abc" })).errors).toEqual({
+        budget: "invalid",
+      });
+      expect(validateSubmission([budget], body({ budget: "42" })).values).toEqual({ budget: 42 });
+      expect(validateSubmission([budget], body({ budget: "9" })).errors).toEqual({
+        budget: "out_of_range",
+      });
+      expect(validateSubmission([budget], body({ budget: "101" })).errors).toEqual({
+        budget: "out_of_range",
+      });
+    });
+
+    it("refuses a date that matches the shape and is not a day", () => {
+      const when: FormField = { name: "when", kind: "date", label: "When" };
+      expect(validateSubmission([when], body({ when: "2026-09-06" })).values).toEqual({
+        when: "2026-09-06",
+      });
+      expect(validateSubmission([when], body({ when: "2026-02-31" })).errors).toEqual({
+        when: "invalid",
+      });
+      expect(validateSubmission([when], body({ when: "06/09/2026" })).errors).toEqual({
+        when: "invalid",
+      });
+    });
+
+    it("refuses an option nothing declared, for both a select and a checkboxes", () => {
+      expect(validateSubmission([REASON], body({ reason: "sales" })).values).toEqual({
+        reason: "sales",
+      });
+      // The whole point of an option list: a value outside it is a request that
+      // never came from the rendered markup.
+      expect(validateSubmission([REASON], body({ reason: "billing" })).errors).toEqual({
+        reason: "invalid",
+      });
+
+      const topics: FormField = {
+        name: "topics",
+        kind: "checkboxes",
+        label: "Topics",
+        required: true,
+        options: [
+          { value: "a", label: "A" },
+          { value: "b", label: "B" },
+        ],
+      };
+      expect(validateSubmission([topics], body({ topics: ["a", "b"] })).values).toEqual({
+        topics: ["a", "b"],
+      });
+      expect(validateSubmission([topics], body({ topics: ["a", "z"] })).errors).toEqual({
+        topics: "invalid",
+      });
+      // Nothing ticked sends no key at all, so `required` on one can only mean
+      // "at least one".
+      expect(validateSubmission([topics], body({})).errors).toEqual({ topics: "required" });
+
+      const optional: FormField = { ...topics, required: false };
+      expect(validateSubmission([optional], body({})).values).toEqual({ topics: [] });
+    });
+
+    it("reads a checkbox by presence, which is the only thing a browser sends", () => {
+      const consent: FormField = {
+        name: "consent",
+        kind: "checkbox",
+        label: "OK?",
+        required: true,
+      };
+      expect(validateSubmission([consent], body({ consent: "on" })).values).toEqual({
+        consent: true,
+      });
+      expect(validateSubmission([consent], body({})).errors).toEqual({ consent: "required" });
+
+      const optional: FormField = { ...consent, required: false };
+      expect(validateSubmission([optional], body({})).values).toEqual({ consent: false });
+    });
+
+    it("applies the question’s own max and pattern, and a backstop above both", () => {
+      const short: FormField = { name: "code", kind: "text", label: "Code", max: 4 };
+      expect(validateSubmission([short], body({ code: "abcd" })).values).toEqual({ code: "abcd" });
+      expect(validateSubmission([short], body({ code: "abcde" })).errors).toEqual({
+        code: "too_long",
+      });
+
+      // No `max` at all is still bounded: this is a public endpoint and the column
+      // is what gets the string.
+      const open: FormField = { name: "story", kind: "textarea", label: "Story" };
+      const long = "x".repeat(MAX_ANSWER_CHARS + 1);
+      expect(validateSubmission([open], body({ story: long })).errors).toEqual({
+        story: "too_long",
+      });
+
+      const postcode: FormField = {
+        name: "postcode",
+        kind: "text",
+        label: "Postcode",
+        pattern: "[0-9]{4}",
+      };
+      expect(validateSubmission([postcode], body({ postcode: "3000" })).values).toEqual({
+        postcode: "3000",
+      });
+      // Anchored, the way an HTML `pattern` is: a match somewhere inside is not a
+      // match.
+      expect(validateSubmission([postcode], body({ postcode: "x3000x" })).errors).toEqual({
+        postcode: "invalid",
+      });
+    });
+
+    it("lets a textarea hold newlines and refuses one anywhere else", () => {
+      const story: FormField = { name: "story", kind: "textarea", label: "Story" };
+      expect(validateSubmission([story], body({ story: "one\r\ntwo" })).values).toEqual({
+        story: "one\ntwo",
+      });
+
+      // The identical string under a single-line question is somebody making one
+      // stored value look like two.
+      expect(validateSubmission([NAME], body({ full_name: "Ada\nLovelace" })).errors).toEqual({
+        full_name: "invalid",
+      });
+      // And a C0 control is refused whatever the question: a stored string must
+      // not be able to lie about what it is.
+      expect(validateSubmission([NAME], body({ full_name: "Ada\u0000" })).errors).toEqual({
+        full_name: "invalid",
+      });
+    });
+
+    it("refuses a url that is not http, so a stored answer is never a javascript: link", () => {
+      const site: FormField = { name: "site", kind: "url", label: "Website" };
+      expect(validateSubmission([site], body({ site: "https://example.com/x" })).values).toEqual({
+        site: "https://example.com/x",
+      });
+      // A host renders this in its own markup. `javascript:` and `data:` are not
+      // websites.
+      for (const bad of ["javascript:alert(1)", "data:text/html,<script>", "example.com"]) {
+        expect(validateSubmission([site], body({ site: bad })).errors, bad).toEqual({
+          site: "invalid",
+        });
+      }
+    });
+  },
+);
 
 describe("capFor", () => {
   it("grows with the questions the editor built, not with what a request claims", () => {
@@ -352,38 +388,41 @@ describe("capFor: a sourced question's list does not exist yet", () => {
   });
 });
 
-describe("validateSubmission over a materialised sourced question", () => {
-  const sourced: FormField = {
-    name: "trip",
-    kind: "select",
-    label: "Trip",
-    optionsFrom: { source: "content", settings: { type: "trip" } },
-    options: [
-      { value: "sty_a", label: "Alps" },
-      { value: "other", label: "Other" },
-    ],
-  };
-
-  it("accepts a listed value and refuses an unlisted one", () => {
-    expect(validateSubmission([sourced], body({ trip: "sty_a" })).values).toEqual({
-      trip: "sty_a",
-    });
-    expect(validateSubmission([sourced], body({ trip: "sty_z" })).errors).toEqual({
-      trip: "invalid",
-    });
-  });
-
-  it("refuses a value in the list of a different question", () => {
-    const other: FormField = {
-      name: "colour",
+describe.each(validators)(
+  "validateSubmission over a materialised sourced question via %s",
+  (_name, validateSubmission) => {
+    const sourced: FormField = {
+      name: "trip",
       kind: "select",
-      label: "Colour",
-      options: [{ value: "red", label: "Red" }],
+      label: "Trip",
+      optionsFrom: { source: "content", settings: { type: "trip" } },
+      options: [
+        { value: "sty_a", label: "Alps" },
+        { value: "other", label: "Other" },
+      ],
     };
-    const result = validateSubmission([sourced, other], body({ trip: "sty_a", colour: "sty_a" }));
-    expect(result.errors).toEqual({ colour: "invalid" });
-  });
-});
+
+    it("accepts a listed value and refuses an unlisted one", () => {
+      expect(validateSubmission([sourced], body({ trip: "sty_a" })).values).toEqual({
+        trip: "sty_a",
+      });
+      expect(validateSubmission([sourced], body({ trip: "sty_z" })).errors).toEqual({
+        trip: "invalid",
+      });
+    });
+
+    it("refuses a value in the list of a different question", () => {
+      const other: FormField = {
+        name: "colour",
+        kind: "select",
+        label: "Colour",
+        options: [{ value: "red", label: "Red" }],
+      };
+      const result = validateSubmission([sourced, other], body({ trip: "sty_a", colour: "sty_a" }));
+      expect(result.errors).toEqual({ colour: "invalid" });
+    });
+  },
+);
 
 describe("bodyHash", () => {
   it("is the same for the same answers in a different order, and different otherwise", async () => {
@@ -493,120 +532,122 @@ describe("validateForms", () => {
   });
 });
 
-describe("validateSubmission: conditions (spec 35)", () => {
-  const heard: FormField = {
-    name: "heard",
-    kind: "radio",
-    label: "Heard",
-    required: true,
-    options: [
-      { value: "friend", label: "Friend" },
-      { value: "other", label: "Other" },
-    ],
-  };
-  const more: FormField = {
-    name: "heard_other",
-    kind: "text",
-    label: "Tell us more",
-    required: true,
-    showIf: { field: "heard", eq: "other" },
-  };
-
-  it("does not refuse a required question that was not asked, and lists it as unasked", () => {
-    const { values, errors, unasked } = validateSubmission(
-      [heard, more],
-      body({ heard: "friend" }),
-    );
-    expect(errors).toEqual({});
-    expect(values).toEqual({ heard: "friend" });
-    expect(unasked).toEqual(["heard_other"]);
-  });
-
-  it("refuses the same question once it is asked", () => {
-    const { errors, unasked } = validateSubmission([heard, more], body({ heard: "other" }));
-    expect(errors).toEqual({ heard_other: "required" });
-    expect(unasked).toEqual([]);
-  });
-
-  it("drops an answer to a question that was not asked", () => {
-    const { values, unasked } = validateSubmission(
-      [heard, more],
-      body({ heard: "friend", heard_other: "crafted" }),
-    );
-    expect(values).toEqual({ heard: "friend" });
-    expect(unasked).toEqual(["heard_other"]);
-  });
-
-  it("never lists a statement as unasked", () => {
-    const prose: FormField = {
-      name: "prose",
-      kind: "statement",
-      label: "p",
-      text: "hi",
+describe.each(validators)(
+  "validateSubmission: conditions (spec 35) via %s",
+  (_name, validateSubmission) => {
+    const heard: FormField = {
+      name: "heard",
+      kind: "radio",
+      label: "Heard",
+      required: true,
+      options: [
+        { value: "friend", label: "Friend" },
+        { value: "other", label: "Other" },
+      ],
+    };
+    const more: FormField = {
+      name: "heard_other",
+      kind: "text",
+      label: "Tell us more",
+      required: true,
       showIf: { field: "heard", eq: "other" },
     };
-    expect(validateSubmission([heard, prose], body({ heard: "friend" })).unasked).toEqual([]);
-  });
 
-  it("applies requireIf: email or phone, at least one", () => {
-    const email: FormField = {
-      name: "email",
-      kind: "email",
-      label: "Email",
-      requireIf: { field: "phone", isSet: false },
-    };
-    const phone: FormField = {
-      name: "phone",
-      kind: "tel",
-      label: "Phone",
-      requireIf: { field: "email", isSet: false },
-    };
-    expect(validateSubmission([email, phone], body({})).errors).toEqual({
-      email: "required",
-      phone: "required",
+    it("does not refuse a required question that was not asked, and lists it as unasked", () => {
+      const { values, errors, unasked } = validateSubmission(
+        [heard, more],
+        body({ heard: "friend" }),
+      );
+      expect(errors).toEqual({});
+      expect(values).toEqual({ heard: "friend" });
+      expect(unasked).toEqual(["heard_other"]);
     });
-    expect(validateSubmission([email, phone], body({ email: "a@b.co" })).errors).toEqual({});
-    expect(validateSubmission([email, phone], body({ phone: "0400 000 000" })).errors).toEqual({});
-  });
 
-  it("hides a whole section as one, and none of its required members block", () => {
-    const differs: FormField = { name: "differs", kind: "checkbox", label: "Differs" };
-    const street: FormField = {
-      name: "street",
-      kind: "text",
-      label: "Street",
-      required: true,
-      section: "postal",
-    };
-    const city: FormField = { ...street, name: "city", label: "City" };
-    const sections = [
-      { name: "postal", label: "Postal", showIf: { field: "differs", eq: true } } as const,
-    ];
-    const off = validateSubmission([differs, street, city], body({}), new Set(), sections);
-    expect(off.errors).toEqual({});
-    expect(off.unasked).toEqual(["street", "city"]);
-    const on = validateSubmission(
-      [differs, street, city],
-      body({ differs: "1" }),
-      new Set(),
-      sections,
-    );
-    expect(on.errors).toEqual({ street: "required", city: "required" });
-  });
+    it("refuses the same question once it is asked", () => {
+      const { errors, unasked } = validateSubmission([heard, more], body({ heard: "other" }));
+      expect(errors).toEqual({ heard_other: "required" });
+      expect(unasked).toEqual([]);
+    });
 
-  it("evaluates on what was posted, so an invalid answer still drives a condition", () => {
-    const name: FormField = { name: "name", kind: "text", label: "Name", max: 3 };
-    const follow: FormField = {
-      name: "follow",
-      kind: "text",
-      label: "Follow",
-      showIf: { field: "name", isSet: true },
-    };
-    const { errors, unasked } = validateSubmission(
-      [name, follow],
-      body({ name: "far too long", follow: "x" }),
-    );
-    expect(errors).toEqual({ name: "too_long" });
-    expect(unasked).toEqual([]);
-  });
-});
+    it("drops an answer to a question that was not asked", () => {
+      const { values, unasked } = validateSubmission(
+        [heard, more],
+        body({ heard: "friend", heard_other: "crafted" }),
+      );
+      expect(values).toEqual({ heard: "friend" });
+      expect(unasked).toEqual(["heard_other"]);
+    });
+
+    it("never lists a statement as unasked", () => {
+      const prose: FormField = {
+        name: "prose",
+        kind: "statement",
+        label: "p",
+        text: "hi",
+        showIf: { field: "heard", eq: "other" },
+      };
+      expect(validateSubmission([heard, prose], body({ heard: "friend" })).unasked).toEqual([]);
+    });
+
+    it("applies requireIf: email or phone, at least one", () => {
+      const email: FormField = {
+        name: "email",
+        kind: "email",
+        label: "Email",
+        requireIf: { field: "phone", isSet: false },
+      };
+      const phone: FormField = {
+        name: "phone",
+        kind: "tel",
+        label: "Phone",
+        requireIf: { field: "email", isSet: false },
+      };
+      expect(validateSubmission([email, phone], body({})).errors).toEqual({
+        email: "required",
+        phone: "required",
+      });
+      expect(validateSubmission([email, phone], body({ email: "a@b.co" })).errors).toEqual({});
+      expect(validateSubmission([email, phone], body({ phone: "0400 000 000" })).errors).toEqual(
+        {},
+      );
+    });
+
+    it("hides a whole section as one, and none of its required members block", () => {
+      const differs: FormField = { name: "differs", kind: "checkbox", label: "Differs" };
+      const street: FormField = {
+        name: "street",
+        kind: "text",
+        label: "Street",
+        required: true,
+        section: "postal",
+      };
+      const city: FormField = { ...street, name: "city", label: "City" };
+      const sections = [
+        { name: "postal", label: "Postal", showIf: { field: "differs", eq: true } } as const,
+      ];
+      const off = validateSubmission([differs, street, city], body({}), new Set(), { sections });
+      expect(off.errors).toEqual({});
+      expect(off.unasked).toEqual(["street", "city"]);
+      const on = validateSubmission([differs, street, city], body({ differs: "1" }), new Set(), {
+        sections,
+      });
+      expect(on.errors).toEqual({ street: "required", city: "required" });
+    });
+
+    it("evaluates on what was posted, so an invalid answer still drives a condition", () => {
+      const name: FormField = { name: "name", kind: "text", label: "Name", max: 3 };
+      const follow: FormField = {
+        name: "follow",
+        kind: "text",
+        label: "Follow",
+        showIf: { field: "name", isSet: true },
+      };
+      const { errors, unasked } = validateSubmission(
+        [name, follow],
+        body({ name: "far too long", follow: "x" }),
+      );
+      expect(errors).toEqual({ name: "too_long" });
+      expect(unasked).toEqual([]);
+    });
+  },
+);

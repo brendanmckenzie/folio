@@ -165,6 +165,9 @@ export interface FormField {
   requireIf?: FieldCondition;
   /** The `FormSection` this question belongs to. Members are contiguous. */
   section?: string;
+  /** The `FormStep` this question is on (spec 38). When a form has steps every
+   *  question is on one, and members are contiguous. */
+  step?: string;
   /** Keeps a not-asked question's cell as `shown: false` so its row-mates do not
    *  widen. Layout. */
   hold?: true;
@@ -184,12 +187,28 @@ export interface FormSection {
   i18n?: Record<string, { label?: string; help?: string }>;
 }
 
-/** What `forms.layout` stores. The home for slice 3's `steps` too. */
+/**
+ * One page of a form (spec 38): a section's shape, because a step is a section the
+ * visitor sees alone. Its `showIf` is evaluated at its first member, against the
+ * answers on earlier steps.
+ */
+export interface FormStep {
+  /** Slug, unique among steps. Steps and sections are separate namespaces. */
+  name: string;
+  label: string;
+  help?: string;
+  showIf?: FieldCondition;
+  i18n?: Record<string, { label?: string; help?: string }>;
+}
+
+/** What `forms.layout` stores. */
 export interface FormLayout {
   sections?: readonly FormSection[];
+  steps?: readonly FormStep[];
 }
 
 export const MAX_FORM_SECTIONS = 20;
+export const MAX_FORM_STEPS = 20;
 
 export const MAX_FORM_FIELDS = 60;
 /** Names beginning with this are Folio's (decision 13). The builder refuses one. */
@@ -363,6 +382,7 @@ function validateOneField(raw: Record<string, unknown>, kind: FormFieldKind): Fo
     if (requireIf) field.requireIf = requireIf;
   }
   if (typeof raw.section === "string" && NAME.test(raw.section)) field.section = raw.section;
+  if (typeof raw.step === "string" && NAME.test(raw.step)) field.step = raw.step;
   if (raw.hold === true) field.hold = true;
   if (raw.prefill === "query" && kind !== "file" && kind !== "statement") field.prefill = "query";
 
@@ -455,49 +475,140 @@ function validateSectionI18n(raw: unknown): FormSection["i18n"] {
 }
 
 /**
+ * The strict half of one list in `forms.layout`, sections or steps: a section's shape
+ * either way. Names unique and well-formed, every group labelled, conditions well
+ * formed.
+ */
+function validateGroups(
+  raw: unknown,
+  noun: "section" | "step",
+  max: number,
+): FormSection[] | undefined {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) throw new Error(`forms: layout ${noun}s must be an array`);
+  if (raw.length > max) {
+    throw new Error(`forms: at most ${max} ${noun}s, got ${raw.length}`);
+  }
+  const seen = new Set<string>();
+  const groups: FormSection[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") throw new Error(`forms: a ${noun} must be an object`);
+    const s = item as Record<string, unknown>;
+    if (typeof s.name !== "string" || !NAME.test(s.name)) {
+      throw new Error(`forms: invalid ${noun} name ${JSON.stringify(s.name)}`);
+    }
+    if (seen.has(s.name)) throw new Error(`forms: duplicate ${noun} name "${s.name}"`);
+    seen.add(s.name);
+    if (typeof s.label !== "string" || s.label === "") {
+      throw new Error(`forms: ${noun} "${s.name}" needs a label`);
+    }
+    const group: FormSection = { name: s.name, label: s.label };
+    if (typeof s.help === "string") group.help = s.help;
+    if (s.showIf !== undefined) {
+      const refusal = conditionRefusal(s.showIf);
+      if (refusal) throw new Error(`forms: ${noun} "${s.name}": ${refusal}`);
+      const showIf = readCondition(s.showIf);
+      if (showIf) group.showIf = showIf;
+    }
+    const i18n = validateSectionI18n(s.i18n);
+    if (i18n) group.i18n = i18n;
+    groups.push(group);
+  }
+  return groups;
+}
+
+/**
  * The strict half for `forms.layout` (spec 35 decision 8): names unique and
- * well-formed, every section labelled, conditions well formed, at most
- * `MAX_FORM_SECTIONS`. Throws, so the PATCH route and the builder refuse a bad
- * layout. Which questions belong to which section, and whether that makes sense, is
- * `checkFormLogic`'s.
+ * well-formed, every section and step labelled, conditions well formed, at most
+ * `MAX_FORM_SECTIONS` sections and `MAX_FORM_STEPS` steps. Throws, so the PATCH route
+ * and the builder refuse a bad layout. Which questions belong to which section or
+ * step, and whether that makes sense, is `checkFormLogic`'s.
  */
 export function validateFormLayout(input: unknown, _fields: readonly FormField[]): FormLayout {
   if (input === undefined || input === null) return {};
   if (typeof input !== "object" || Array.isArray(input)) {
     throw new Error("forms: layout must be an object");
   }
-  const raw = (input as Record<string, unknown>).sections;
-  if (raw === undefined) return {};
-  if (!Array.isArray(raw)) throw new Error("forms: layout sections must be an array");
-  if (raw.length > MAX_FORM_SECTIONS) {
-    throw new Error(`forms: at most ${MAX_FORM_SECTIONS} sections, got ${raw.length}`);
-  }
-  const seen = new Set<string>();
-  const sections: FormSection[] = [];
+  const raw = input as Record<string, unknown>;
+  const sections = validateGroups(raw.sections, "section", MAX_FORM_SECTIONS);
+  const steps = validateGroups(raw.steps, "step", MAX_FORM_STEPS);
+  return {
+    ...(sections && sections.length > 0 ? { sections } : {}),
+    ...(steps && steps.length > 0 ? { steps } : {}),
+  };
+}
+
+/** One list in a stored layout, narrowed: a group that is malformed or unnamed is
+ *  dropped, an unusable `showIf` becomes never-true, and the list is capped. */
+function readGroups(raw: unknown, max: number): Map<string, FormSection> {
+  const known = new Map<string, FormSection>();
+  if (!Array.isArray(raw)) return known;
   for (const item of raw) {
-    if (!item || typeof item !== "object") throw new Error("forms: a section must be an object");
+    if (known.size >= max) break;
+    if (!item || typeof item !== "object") continue;
     const s = item as Record<string, unknown>;
-    if (typeof s.name !== "string" || !NAME.test(s.name)) {
-      throw new Error(`forms: invalid section name ${JSON.stringify(s.name)}`);
-    }
-    if (seen.has(s.name)) throw new Error(`forms: duplicate section name "${s.name}"`);
-    seen.add(s.name);
-    if (typeof s.label !== "string" || s.label === "") {
-      throw new Error(`forms: section "${s.name}" needs a label`);
-    }
-    const section: FormSection = { name: s.name, label: s.label };
-    if (typeof s.help === "string") section.help = s.help;
-    if (s.showIf !== undefined) {
-      const refusal = conditionRefusal(s.showIf);
-      if (refusal) throw new Error(`forms: section "${s.name}": ${refusal}`);
-      const showIf = readCondition(s.showIf);
-      if (showIf) section.showIf = showIf;
-    }
+    if (typeof s.name !== "string" || !NAME.test(s.name) || known.has(s.name)) continue;
+    if (typeof s.label !== "string" || s.label === "") continue;
+    const group: FormSection = { name: s.name, label: s.label };
+    if (typeof s.help === "string") group.help = s.help;
+    if (s.showIf !== undefined) group.showIf = readCondition(s.showIf) ?? { any: [] };
     const i18n = validateSectionI18n(s.i18n);
-    if (i18n) section.i18n = i18n;
-    sections.push(section);
+    if (i18n) group.i18n = i18n;
+    known.set(s.name, group);
   }
-  return sections.length > 0 ? { sections } : {};
+  return known;
+}
+
+/**
+ * Steps on the read path (spec 38 decision 1): every question ends up on exactly one
+ * known step, in contiguous runs, and `steps` comes back in member order.
+ *
+ *  1. A membership naming an unknown step is cleared.
+ *  2. A question with no step takes the nearest earlier question's, or, before any,
+ *     the nearest later one's.
+ *  3. A step that has closed does not reopen: a straggler joins the step that is open.
+ *  4. A step left with no members is dropped, and the rest are in member order.
+ *
+ * With no usable step every `step` key is cleared and there are no steps.
+ */
+function narrowSteps(
+  known: Map<string, FormStep>,
+  fields: readonly FormField[],
+): { steps: FormStep[]; fields: FormField[] } {
+  const withStep = (f: FormField, step: string | undefined): FormField => {
+    if (f.step === step) return f;
+    const { step: _dropped, ...rest } = f;
+    return step === undefined ? rest : { ...rest, step };
+  };
+  const stripped = fields.map((f) =>
+    f.step !== undefined && !known.has(f.step) ? withStep(f, undefined) : f,
+  );
+  const firstWith = stripped.findIndex((f) => f.step !== undefined);
+  if (firstWith === -1) return { steps: [], fields: stripped.map((f) => withStep(f, undefined)) };
+
+  // Fill: forwards from the nearest earlier, then the leading run from the nearest later.
+  let current = stripped[firstWith]!.step;
+  const filled = stripped.map((f, i) => {
+    if (i < firstWith) return withStep(f, current);
+    if (f.step !== undefined) current = f.step;
+    return withStep(f, current);
+  });
+
+  // Close: a step that has closed does not reopen.
+  const closed = new Set<string>();
+  const order: string[] = [];
+  let open: string | undefined;
+  const out = filled.map((f) => {
+    const name = f.step!;
+    if (name === open) return f;
+    if (closed.has(name)) return withStep(f, open);
+    if (open !== undefined) closed.add(open);
+    open = name;
+    order.push(name);
+    return f;
+  });
+
+  return { steps: order.map((name) => known.get(name)!), fields: out };
 }
 
 /**
@@ -505,38 +616,32 @@ export function validateFormLayout(input: unknown, _fields: readonly FormField[]
  * section that is malformed or unnamed is dropped; a `showIf` that is not a usable
  * condition becomes never-true (like a question's, so what it held is never asked);
  * a member whose section is unknown, or that has already closed (membership is
- * contiguous), loses its membership; a section left with no members is dropped.
- * Returns the fields too, since clearing a membership changes them.
+ * contiguous), loses its membership; a section left with no members is dropped. A
+ * section also closes at a step boundary (`narrowSteps` has already put every question
+ * on one step). Returns the fields too, since clearing a membership changes them.
  */
 export function readFormLayout(
   input: unknown,
   fields: readonly FormField[],
 ): { layout: FormLayout; fields: FormField[] } {
-  const known = new Map<string, FormSection>();
-  const raw =
+  const rawLayout =
     input && typeof input === "object" && !Array.isArray(input)
-      ? (input as Record<string, unknown>).sections
+      ? (input as Record<string, unknown>)
       : undefined;
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
-      if (known.size >= MAX_FORM_SECTIONS) break;
-      if (!item || typeof item !== "object") continue;
-      const s = item as Record<string, unknown>;
-      if (typeof s.name !== "string" || !NAME.test(s.name) || known.has(s.name)) continue;
-      if (typeof s.label !== "string" || s.label === "") continue;
-      const section: FormSection = { name: s.name, label: s.label };
-      if (typeof s.help === "string") section.help = s.help;
-      if (s.showIf !== undefined) section.showIf = readCondition(s.showIf) ?? { any: [] };
-      const i18n = validateSectionI18n(s.i18n);
-      if (i18n) section.i18n = i18n;
-      known.set(s.name, section);
-    }
-  }
+  const known = readGroups(rawLayout?.sections, MAX_FORM_SECTIONS);
+  const narrowed = narrowSteps(readGroups(rawLayout?.steps, MAX_FORM_STEPS), fields);
 
   const closed = new Set<string>();
   const used = new Set<string>();
   let open: string | undefined;
-  const out = fields.map((f): FormField => {
+  let prevStep: string | undefined;
+  const out = narrowed.fields.map((f): FormField => {
+    if (f.step !== prevStep) {
+      // A section lies inside one step: the boundary closes it.
+      if (open !== undefined) closed.add(open);
+      open = undefined;
+      prevStep = f.step;
+    }
     const name = f.section;
     if (name === open) {
       if (name !== undefined) used.add(name);
@@ -557,7 +662,13 @@ export function readFormLayout(
   const sections = [...known.values()].filter((s) => used.has(s.name));
   // A section dropped for having no members can have none to clear; one dropped
   // for being unknown was cleared above.
-  return { layout: sections.length > 0 ? { sections } : {}, fields: out };
+  return {
+    layout: {
+      ...(sections.length > 0 ? { sections } : {}),
+      ...(narrowed.steps.length > 0 ? { steps: narrowed.steps } : {}),
+    },
+    fields: out,
+  };
 }
 
 const VALUE_BEARING = (kind: FormFieldKind) => kind !== "file" && kind !== "statement";
@@ -667,6 +778,9 @@ export function checkFormLogic(fields: readonly FormField[], layout: FormLayout 
     }
   };
 
+  const steps = layout.steps ?? [];
+  const stepAt = new Map(steps.map((st, i) => [st.name, i]));
+
   fields.forEach((f, i) => {
     if (f.showIf) check(`${tag(f)}'s show rule`, f.showIf, "shown", i, i);
     if (f.requireIf) {
@@ -676,6 +790,21 @@ export function checkFormLogic(fields: readonly FormField[], layout: FormLayout 
         throw new Error(`${tag(f)} cannot be both always required and required only sometimes`);
       }
       check(`${tag(f)}'s required rule`, f.requireIf, "required", i, fields.length);
+      // On a stepped form a required rule may name only this step or an earlier one:
+      // otherwise a step already left becomes incomplete because of a later answer
+      // (spec 38 decision 2).
+      const own = f.step === undefined ? undefined : stepAt.get(f.step);
+      if (own !== undefined) {
+        for (const leaf of leavesOf(f.requireIf)) {
+          const source = fields[indexOf.get(leaf.field)!]!;
+          const theirs = source.step === undefined ? undefined : stepAt.get(source.step);
+          if (theirs !== undefined && theirs > own) {
+            throw new Error(
+              `${tag(f)}'s required rule depends on ${tag(source)}, which is on a later step`,
+            );
+          }
+        }
+      }
     }
   });
 
@@ -696,9 +825,51 @@ export function checkFormLogic(fields: readonly FormField[], layout: FormLayout 
     if (last - first + 1 !== members.length) {
       throw new Error(`Section "${section.label}" has questions that are not together`);
     }
+    const sectionSteps = new Set(members.map((i) => fields[i]!.step));
+    if (sectionSteps.size > 1) {
+      throw new Error(`Section "${section.label}" has questions on more than one step`);
+    }
     if (section.showIf) {
       check(`Section "${section.label}"'s show rule`, section.showIf, "shown", null, first);
     }
+  }
+
+  for (const f of fields) {
+    if (f.step !== undefined && !stepAt.has(f.step)) {
+      throw new Error(`${tag(f)} is on step "${f.step}", which does not exist`);
+    }
+    if (steps.length > 0 && f.step === undefined) {
+      throw new Error(`${tag(f)} is not on a step, and every question on a stepped form must be`);
+    }
+  }
+  let previousFirst = -1;
+  let previous: FormStep | undefined;
+  for (const step of steps) {
+    const members = fields.flatMap((f, i) => (f.step === step.name ? [i] : []));
+    const first = members[0];
+    const last = members[members.length - 1];
+    if (first === undefined || last === undefined) {
+      throw new Error(`Step "${step.label}" has no questions`);
+    }
+    if (last - first + 1 !== members.length) {
+      throw new Error(`Step "${step.label}" has questions that are not together`);
+    }
+    if (first < previousFirst && previous) {
+      throw new Error(
+        `Step "${step.label}" is listed after "${previous.label}", but its questions come first`,
+      );
+    }
+    if (members.every((i) => fields[i]!.kind === "hidden")) {
+      throw new Error(`Step "${step.label}" has only hidden questions, so a visitor sees nothing`);
+    }
+    if (step.showIf) {
+      if (previous === undefined) {
+        throw new Error(`Step "${step.label}" is the first step, so it cannot be conditional`);
+      }
+      check(`Step "${step.label}"'s show rule`, step.showIf, "shown", null, first);
+    }
+    previousFirst = first;
+    previous = step;
   }
 }
 
@@ -731,6 +902,7 @@ export const FORM_FIELD_KEYS: Record<keyof FormField, "shape" | "presentation"> 
   showIf: "shape",
   requireIf: "shape",
   section: "presentation",
+  step: "presentation",
   hold: "presentation",
   prefill: "presentation",
   i18n: "presentation",
@@ -739,13 +911,14 @@ export const FORM_FIELD_KEYS: Record<keyof FormField, "shape" | "presentation"> 
 /**
  * The projection `forms.version` is bumped from: everything the server enforces
  * (decision 11). Per question: name, kind, `required`, `requireIf`, effective
- * visibility (its own `showIf` and its section's, as a pair), option values, `min`,
+ * visibility (its own `showIf`, its section's and its step's), option values, `min`,
  * `max`, `pattern`, `accept` and `maxBytes`. Nothing a label, help, placeholder,
  * translation, layout or prefill edit would touch. Pure, and comparable by simple
  * string equality against what is stored; never stored itself.
  */
 export function shapeOf(fields: readonly FormField[], layout: FormLayout = {}): string {
   const sectionShowIf = new Map((layout.sections ?? []).map((s) => [s.name, s.showIf]));
+  const stepShowIf = new Map((layout.steps ?? []).map((s) => [s.name, s.showIf]));
   return JSON.stringify(
     fields.map((f) => ({
       name: f.name,
@@ -754,6 +927,7 @@ export function shapeOf(fields: readonly FormField[], layout: FormLayout = {}): 
       requireIf: f.requireIf,
       showIf: f.showIf,
       sectionShowIf: f.section === undefined ? undefined : sectionShowIf.get(f.section),
+      stepShowIf: f.step === undefined ? undefined : stepShowIf.get(f.step),
       options: f.options?.map((o) => o.value),
       optionsFrom: f.optionsFrom
         ? { source: f.optionsFrom.source, settings: f.optionsFrom.settings }
@@ -785,7 +959,8 @@ export const MAX_ROW_CELLS = 4;
  * The start of the form, a `statement` and a row already at `MAX_ROW_CELLS`
  * all start a fresh one — a `statement` starts a row of one and forces the
  * *next* question into a fresh row too, whatever its own `beside` says.
- * A change of `section` between consecutive questions starts a fresh row too.
+ * A change of `section` or of `step` between consecutive questions starts a fresh
+ * row too.
  * `hidden` questions are layout-transparent: they neither join nor break a
  * row and are not counted against the cap, so this narrows a form that has
  * one wedged between two halves of what is visually one row.
@@ -801,6 +976,7 @@ export function rowsOf(fields: readonly FormField[]): number[] {
   let cellsInRow = 0;
   let breaksNext = true; // the start of the form breaks a row
   let prevSection: string | undefined;
+  let prevStep: string | undefined;
   for (const field of fields) {
     if (field.kind === "hidden") {
       rows.push(Math.max(row, 0));
@@ -812,7 +988,8 @@ export function rowsOf(fields: readonly FormField[]): number[] {
       breaksNext ||
       !field.beside ||
       cellsInRow >= MAX_ROW_CELLS ||
-      field.section !== prevSection
+      field.section !== prevSection ||
+      field.step !== prevStep
     ) {
       row += 1;
       cellsInRow = 0;
@@ -821,6 +998,7 @@ export function rowsOf(fields: readonly FormField[]): number[] {
     cellsInRow += 1;
     breaksNext = isStatement;
     prevSection = field.section;
+    prevStep = field.step;
   }
   return rows;
 }
@@ -912,6 +1090,9 @@ export interface ResolvedFormField {
   grow: number;
   /** The section this question is in, by `ResolvedFormSection.name`. */
   section?: string;
+  /** The step this question is on, by `ResolvedFormStep.name`. Emitted on every
+   *  question of a stepped form, and only there. */
+  step?: string;
   /** Asked only while this holds. Emitted only when set. */
   showIf?: FieldCondition;
   /** Required whenever asked and this holds. Emitted only when set. */
@@ -953,6 +1134,10 @@ export interface ResolvedForm {
   fields: readonly ResolvedFormField[];
   /** Always present, `[]` with none. Questions name theirs in `section`. */
   sections: readonly ResolvedFormSection[];
+  /** The form's pages, in question order. Emitted only when the form has steps, so
+   *  a form without any keeps a byte-identical descriptor. Questions name theirs in
+   *  `step`. */
+  steps?: readonly ResolvedFormStep[];
   /** `_folio_page` when the render knows its path; empty otherwise. */
   hidden: readonly { name: string; value: string }[];
   honeypot: string;
@@ -971,6 +1156,14 @@ export interface ResolvedForm {
 
 /** One section: its legend, and the condition that shows it. */
 export interface ResolvedFormSection {
+  name: string;
+  label: string;
+  help?: string;
+  showIf?: FieldCondition;
+}
+
+/** One step: a page's heading, and the condition that makes it reachable. */
+export interface ResolvedFormStep {
   name: string;
   label: string;
   help?: string;
@@ -1005,10 +1198,22 @@ export interface LayoutSection {
   rows: readonly LayoutRow[];
 }
 
+/** A step's own sections. `step` is `null` for a form without steps, which is one
+ *  group holding every section. */
+export interface LayoutStep {
+  step: ResolvedFormStep | null;
+  sections: readonly LayoutSection[];
+}
+
 /** What `formLayout` hands a host: rows to render in order, grouped into
  *  sections, plus the `hidden`-kind questions rows have no room for. */
 export interface FormLayoutView {
+  /** Every section across all steps, flat. */
   sections: readonly LayoutSection[];
+  /** The same sections grouped by step. Always present and never empty: one
+   *  `{ step: null, sections }` for a form without steps, so a host can always
+   *  iterate it. */
+  steps: readonly LayoutStep[];
   /** `hidden`-kind questions: position-free, rendered anywhere inside the
    *  `<form>` — a host emits each as `<input type="hidden">` and moves on. */
   inputs: readonly ResolvedFormField[];
@@ -1031,13 +1236,24 @@ export interface FormLayoutView {
  * row with no shown cell is removed; a section whose `showIf` fails, or that has no
  * rows left, is removed; and `inputs` keeps only asked questions, so an unasked
  * hidden input does not post. A section with no rows is dropped in both modes.
+ *
+ * **Steps group the sections** (spec 38): a new group starts when a row's step
+ * changes, and with answers a step that is not reachable, or has no rows, is removed.
+ * When every step is removed, `steps` is the single never-empty group, as `sections`
+ * has always been.
  */
 export function formLayout(form: ResolvedForm, answers?: Record<string, Json>): FormLayoutView {
   const state = answers === undefined ? null : formState(form, answers);
   // A descriptor a host cached across a deploy can predate `sections`.
   const defs = new Map((form.sections ?? []).map((s) => [s.name, s]));
+  const stepDefs = new Map((form.steps ?? []).map((s) => [s.name, s]));
   const inputs: ResolvedFormField[] = [];
-  const rows: { key: string; cells: LayoutCell[]; section: ResolvedFormSection | null }[] = [];
+  const rows: {
+    key: string;
+    cells: LayoutCell[];
+    section: ResolvedFormSection | null;
+    step: ResolvedFormStep | null;
+  }[] = [];
   let openRow: number | null = null;
 
   for (const field of form.fields) {
@@ -1065,6 +1281,7 @@ export function formLayout(form: ResolvedForm, answers?: Record<string, Json>): 
           }
         : null;
     const section = (field.section !== undefined && defs.get(field.section)) || null;
+    const step = (field.step !== undefined && stepDefs.get(field.step)) || null;
     const last = rows[rows.length - 1];
     if (row !== null && row === openRow && last) {
       if (cell) last.cells.push(cell);
@@ -1072,20 +1289,35 @@ export function formLayout(form: ResolvedForm, answers?: Record<string, Json>): 
       // The key is the question that opened the row, asked or not: a host keys
       // React on it, and a key that moved when a condition hid the first cell
       // would remount the sibling and drop what the visitor typed in it.
-      rows.push({ key: field.name, cells: cell ? [cell] : [], section });
+      rows.push({ key: field.name, cells: cell ? [cell] : [], section, step });
       openRow = row;
     }
   }
 
-  const groups: { section: ResolvedFormSection | null; rows: LayoutRow[] }[] = [];
+  const grouped: {
+    step: ResolvedFormStep | null;
+    sections: { section: ResolvedFormSection | null; rows: LayoutRow[] }[];
+  }[] = [];
   for (const row of rows) {
     if (!row.cells.some((c) => c.shown)) continue;
+    if (row.step && state && !state.steps.has(row.step.name)) continue;
     if (row.section && state && !state.sections.has(row.section.name)) continue;
     const layoutRow: LayoutRow = { key: row.key, cells: row.cells };
-    const group = groups[groups.length - 1];
-    if (group && group.section?.name === row.section?.name) group.rows.push(layoutRow);
-    else groups.push({ section: row.section, rows: [layoutRow] });
+    let stepGroup = grouped[grouped.length - 1];
+    if (!stepGroup || stepGroup.step?.name !== row.step?.name) {
+      stepGroup = { step: row.step, sections: [] };
+      grouped.push(stepGroup);
+    }
+    const group = stepGroup.sections[stepGroup.sections.length - 1];
+    if (group && group.section?.name === row.section?.name) {
+      group.rows.push(layoutRow);
+    } else stepGroup.sections.push({ section: row.section, rows: [layoutRow] });
   }
 
-  return { sections: groups.length > 0 ? groups : [{ section: null, rows: [] }], inputs };
+  const flat = grouped.flatMap((g) => g.sections);
+  return {
+    sections: flat.length > 0 ? flat : [{ section: null, rows: [] }],
+    steps: grouped.length > 0 ? grouped : [{ step: null, sections: [{ section: null, rows: [] }] }],
+    inputs,
+  };
 }

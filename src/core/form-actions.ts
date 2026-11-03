@@ -385,7 +385,7 @@ export function normaliseFormActions(
 
 /**
  * Whether a question is answered on every submission (decision 5): asked
- * unconditionally (no `showIf` on it or its section) and either stored required with
+ * unconditionally (no `showIf` on it, its section or its step) and either stored required with
  * no `requireIf`, or a tick-box kind, which stores `false` / `[]` when untouched.
  * `server/forms.ts`'s `compileField` computes `always` the same way; restated here
  * because `server/` may import `core/` and not the reverse.
@@ -394,7 +394,10 @@ function alwaysAnswered(field: FormField, layout: FormLayout): boolean {
   const section = field.section
     ? layout.sections?.find((s) => s.name === field.section)
     : undefined;
-  if (field.showIf !== undefined || section?.showIf !== undefined) return false;
+  const step = field.step ? layout.steps?.find((s) => s.name === field.step) : undefined;
+  if (field.showIf !== undefined || section?.showIf !== undefined || step?.showIf !== undefined) {
+    return false;
+  }
   if (field.kind === "checkbox" || field.kind === "checkboxes") return true;
   return field.required === true && field.requireIf === undefined;
 }

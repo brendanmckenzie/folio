@@ -1293,6 +1293,105 @@ describe("form logic: saving and reading", () => {
     expect(conditional.json.version).toBe(seeded.json.version + 1);
   });
 
+  describe("steps (spec 38)", () => {
+    const ONE = { name: "one", kind: "text", label: "One", step: "a" };
+    const TWO = { name: "two", kind: "text", label: "Two", step: "b" };
+    const steps = [
+      { name: "a", label: "First", i18n: { fr: { label: "Premier" } } },
+      { name: "b", label: "Second" },
+    ];
+
+    it("round-trips steps and memberships, and answers them from /forms/resolved", async () => {
+      const form = await makeForm("Stepped");
+      const saved = await patch<Form>(`/forms/${form.id}`, {
+        expectedUpdatedAt: form.updatedAt,
+        fields: [ONE, TWO],
+        layout: { steps },
+      });
+      expect(saved.status).toBe(200);
+      expect(saved.json.layout).toEqual({ steps });
+      expect(saved.json.fields.map((f) => f.step)).toEqual(["a", "b"]);
+      expect(await readBack(form.id)).toMatchObject({ layout: { steps } });
+
+      const { json } = await get<Record<string, ResolvedForm>>(`/forms/resolved?ids=${form.id}`);
+      expect(json[form.id]?.steps).toEqual([
+        { name: "a", label: "First" },
+        { name: "b", label: "Second" },
+      ]);
+      expect(json[form.id]?.fields.map((f) => f.step)).toEqual(["a", "b"]);
+    });
+
+    it("refuses a stepped form with an unstepped question, and writes nothing", async () => {
+      const form = await makeForm("Unstepped member");
+      const before = await readBack(form.id);
+      const refused = await patch<ErrorBody>(`/forms/${form.id}`, {
+        expectedUpdatedAt: form.updatedAt,
+        fields: [ONE, { name: "loose", kind: "text", label: "Loose" }],
+        layout: { steps: [steps[0]] },
+      });
+      expect(refused.status).toBe(400);
+      expect(refused.json.error.code).toBe("bad_request");
+      expect(refused.json.error.message).toContain("Loose");
+      const after = await readBack(form.id);
+      expect(after.updatedAt).toBe(before.updatedAt);
+      expect(after.fields).toEqual(before.fields);
+    });
+
+    it("refuses steps out of member order and a malformed step", async () => {
+      const form = await makeForm("Order");
+      const wrong = await patch<ErrorBody>(`/forms/${form.id}`, {
+        expectedUpdatedAt: form.updatedAt,
+        fields: [ONE, TWO],
+        layout: { steps: [steps[1], steps[0]] },
+      });
+      expect(wrong.status).toBe(400);
+      const malformed = await patch<ErrorBody>(`/forms/${form.id}`, {
+        expectedUpdatedAt: form.updatedAt,
+        fields: [ONE],
+        layout: { steps: [{ name: "Not A Slug", label: "x" }] },
+      });
+      expect(malformed.status).toBe(400);
+    });
+
+    it("bumps version and fires formChanged for a step showIf, and only purges for a label", async () => {
+      const form = await makeForm("StepBump");
+      const calls: FormChangedHookPayload<Cloudflare.Env>[] = [];
+      const folio = folioWithHooks({ formChanged: (e) => calls.push(e) });
+      const save = async (expectedUpdatedAt: number, layout: unknown) => {
+        const res = await callHooked(folio, `/folio/api/forms/${form.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ expectedUpdatedAt, fields: [ONE, TWO], layout }),
+        });
+        expect(res.status).toBe(200);
+        return res.json<Form>();
+      };
+      const seeded = await save(form.updatedAt, { steps });
+      calls.length = 0;
+
+      const relabelled = await save(seeded.updatedAt, {
+        steps: [{ ...steps[0], label: "Renamed" }, steps[1]],
+      });
+      expect(relabelled.version).toBe(seeded.version);
+      expect(calls).toHaveLength(0);
+
+      const conditional = await save(relabelled.updatedAt, {
+        steps: [steps[0], { ...steps[1], showIf: { field: "one", isSet: true } }],
+      });
+      expect(conditional.version).toBe(seeded.version + 1);
+      expect(calls).toHaveLength(1);
+    });
+
+    it("reads every question when the stored steps are corrupt", async () => {
+      const form = await makeForm("CorruptSteps");
+      await env.DB.prepare("update forms set fields = ?, layout = ? where id = ?")
+        .bind(JSON.stringify([ONE, TWO]), JSON.stringify({ steps: "nonsense" }), form.id)
+        .run();
+      const read = await formById(env.DB, form.id);
+      expect(read?.fields.map((f) => f.name)).toEqual(["one", "two"]);
+      expect(read?.layout.steps).toBeUndefined();
+    });
+  });
+
   describe("reading never empties a form", () => {
     it("reads every question when the stored layout is not JSON", async () => {
       const form = await makeForm("Corrupt");

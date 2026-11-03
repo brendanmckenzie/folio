@@ -6,6 +6,7 @@ import {
   type FormFieldKind,
   type FormLayout,
   type FormSection,
+  type FormStep,
   MAX_FORM_FIELDS,
   MAX_FORM_SECTIONS,
   shapeOf,
@@ -31,7 +32,7 @@ import { ActionsEditor } from "./ActionsEditor";
 import { OptionSourceEditor } from "./OptionSourceEditor";
 import { FormDeleteDialog } from "./FormDeleteDialog";
 import css from "./FormBuilder.module.css";
-import { blankCondition, formConditionText, sourcesFor } from "./condition-model";
+import { blankCondition, formConditionText, sourcesFor, stepSourcesFor } from "./condition-model";
 import {
   type ActionContext,
   actionReaders,
@@ -41,16 +42,27 @@ import {
   changeRefusal,
   endSectionAfter,
   logicRefusal,
+  mergeRefusal,
+  mergeStepIntoPrevious,
+  moveRefusal,
   optionRefusal,
   pruneSections,
   removeRefusal,
   removeSection,
+  removeSteps,
   renameField,
+  splitRefusal,
+  splitStepsAt,
   startSection,
+  startStepAt,
+  startStepRefusal,
+  stepRuleRefusal,
   updateSection,
+  updateStep,
+  groupText,
+  withGroupText,
   MAX_FIELDS_REACHED,
   canJoinPrevious,
-  canMoveField,
   closesAtFromInput,
   closesAtInputValue,
   fieldKindLabel,
@@ -148,6 +160,7 @@ export function FormBuilder({
   const [draft, setDraft] = useState<Form | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [selectedInitialName, setSelectedInitialName] = useState<string | null>(null);
   const [locale, setLocale] = useState(locales?.default ?? "");
   const [saving, setSaving] = useState(false);
@@ -247,6 +260,7 @@ export function FormBuilder({
   const actionsChanged =
     JSON.stringify(draft.actions ?? []) !== JSON.stringify(data.form?.actions ?? []);
   const selectedSectionDef = draft.layout.sections?.find((s) => s.name === selectedSection) ?? null;
+  const selectedStepDef = draft.layout.steps?.find((s) => s.name === selectedStep) ?? null;
   // The list's own row grouping (`form-model.ts`'s `fieldRows`), and whether
   // `beside` on the selected question could do anything at all — the first
   // question in the form, and the one right after a statement, always start a
@@ -261,17 +275,26 @@ export function FormBuilder({
   const select = (name: string | null) => {
     setSelected(name);
     setSelectedSection(null);
+    setSelectedStep(null);
     setSelectedInitialName(name);
   };
 
   const selectSection = (name: string) => {
     setSelected(null);
     setSelectedInitialName(null);
+    setSelectedStep(null);
     setSelectedSection(name);
   };
 
+  const selectStep = (name: string) => {
+    setSelected(null);
+    setSelectedInitialName(null);
+    setSelectedSection(null);
+    setSelectedStep(name);
+  };
+
   const onAddField = (kind: FormFieldKind) => {
-    const next = addField(draft.fields, kind, draft.id);
+    const next = addField(draft.fields, kind, draft.id, draft.layout);
     setDraft({ ...draft, fields: next });
     select(next[next.length - 1]?.name ?? null);
   };
@@ -311,7 +334,10 @@ export function FormBuilder({
   };
 
   const onMoveField = (index: number, direction: -1 | 1) => {
-    setDraft({ ...draft, fields: moveFieldStep(draft.fields, index, direction, draft.layout) });
+    setDraft({
+      ...draft,
+      fields: moveFieldStep(draft.fields, index, direction, draft.layout, actionCtx),
+    });
   };
 
   const onLayout = (next: { fields: FormField[]; layout: FormLayout }) =>
@@ -431,10 +457,10 @@ export function FormBuilder({
       {structural ? (
         <p className={css.structuralNote}>
           Saving will change this form's shape — a question added, removed, renamed, retyped, made
-          required or conditional, an option, length limit, pattern or accepted file type changed,
-          or a section given a condition — which bumps its version as well as purging every cached
-          page that renders it. A label, help-text, layout, prefill or section-heading change purges
-          the same cache without bumping the version.
+          required or conditional, an option, length limit, pattern or accepted file type changed, a
+          section or a step given a condition — which bumps its version as well as purging every
+          cached page that renders it. A label, help-text, layout, prefill, section-heading or
+          step-heading change purges the same cache without bumping the version.
         </p>
       ) : null}
       {logicProblem ? (
@@ -452,6 +478,8 @@ export function FormBuilder({
         <div className={css.fields}>
           <ol className={css.fieldList}>
             {draft.fields.flatMap((field, i) => {
+              const step = draft.layout.steps?.find((s) => s.name === field.step);
+              const opensStep = step !== undefined && draft.fields[i - 1]?.step !== field.step;
               const section = draft.layout.sections?.find((s) => s.name === field.section);
               const opensSection =
                 section !== undefined && draft.fields[i - 1]?.section !== field.section;
@@ -460,7 +488,24 @@ export function FormBuilder({
               const requiredWhen = field.requireIf
                 ? formConditionText(field.requireIf, draft.fields)
                 : null;
+              const upReason = moveRefusal(draft.fields, i, -1, draft.layout, actionCtx);
+              const downReason = moveRefusal(draft.fields, i, 1, draft.layout, actionCtx);
               return [
+                opensStep ? (
+                  <li key={`step:${step.name}`} className={css.stepRow}>
+                    <button
+                      type="button"
+                      className={`${css.fieldRow} ${selectedStep === step.name ? css.fieldRowSelected : ""}`}
+                      onClick={() => selectStep(step.name)}
+                    >
+                      <span className={css.fieldRowKind}>
+                        Step {(draft.layout.steps?.indexOf(step) ?? 0) + 1}
+                      </span>
+                      <span className={css.fieldRowLabel}>{step.label || step.name}</span>
+                      {step.showIf ? <Badge>Conditional</Badge> : null}
+                    </button>
+                  </li>
+                ) : null,
                 opensSection ? (
                   <li key={`section:${section.name}`} className={css.sectionRow}>
                     <button
@@ -508,8 +553,8 @@ export function FormBuilder({
                       // Row-aware, not `i === 0`: the first member of a
                       // multi-question row can still detach from its row-mates
                       // without leaving position 0 (`canMoveField`).
-                      disabled={!editable || !canMoveField(draft.fields, i, -1, draft.layout)}
-                      reason="Already first"
+                      disabled={!editable || upReason !== null}
+                      reason={upReason ?? undefined}
                       aria-label={`Move ${field.label || field.name} up`}
                       onClick={() => onMoveField(i, -1)}
                     >
@@ -518,8 +563,8 @@ export function FormBuilder({
                     <Button
                       size="sm"
                       variant="subtle"
-                      disabled={!editable || !canMoveField(draft.fields, i, 1, draft.layout)}
-                      reason="Already last"
+                      disabled={!editable || downReason !== null}
+                      reason={downReason ?? undefined}
                       aria-label={`Move ${field.label || field.name} down`}
                       onClick={() => onMoveField(i, 1)}
                     >
@@ -558,7 +603,44 @@ export function FormBuilder({
         </div>
 
         <div className={css.panel}>
-          {selectedSectionDef ? (
+          {selectedStepDef ? (
+            <StepPanel
+              key={selectedStepDef.name}
+              step={selectedStepDef}
+              index={draft.layout.steps?.indexOf(selectedStepDef) ?? 0}
+              fields={draft.fields}
+              locale={locale || source}
+              source={source}
+              editable={editable}
+              ruleRefusal={stepRuleRefusal(draft.fields, selectedStepDef.name, actionCtx)}
+              onChange={(next) =>
+                setDraft({ ...draft, layout: updateStep(draft.layout, next.name, next) })
+              }
+              mergeReason={mergeRefusal(
+                draft.layout,
+                selectedStepDef.name,
+                draft.fields,
+                actionCtx,
+              )}
+              onMerge={() => {
+                const merged = mergeStepIntoPrevious(
+                  draft.fields,
+                  draft.layout,
+                  selectedStepDef.name,
+                  actionCtx,
+                );
+                if (merged) {
+                  onLayout(merged);
+                  selectStep(merged.step);
+                }
+              }}
+              onRemoveAll={() => {
+                onLayout(removeSteps(draft.fields, draft.layout));
+                setSelectedStep(null);
+              }}
+              stepCount={draft.layout.steps?.length ?? 0}
+            />
+          ) : selectedSectionDef ? (
             <SectionPanel
               key={selectedSectionDef.name}
               section={selectedSectionDef}
@@ -586,6 +668,29 @@ export function FormBuilder({
                   ?.length ?? 1
               }
               sectionCount={draft.layout.sections?.length ?? 0}
+              stepped={(draft.layout.steps?.length ?? 0) > 0}
+              splitReason={
+                (draft.layout.steps?.length ?? 0) > 0
+                  ? null
+                  : splitRefusal(draft.fields, draft.layout, selectedField.name)
+              }
+              startStepReason={startStepRefusal(draft.fields, draft.layout, selectedField.name)}
+              startsPage={
+                draft.fields.findIndex((f) => f.name === selectedField.name) === 0 ||
+                draft.fields[draft.fields.findIndex((f) => f.name === selectedField.name) - 1]
+                  ?.step !== selectedField.step
+              }
+              onSplit={() => {
+                const split = splitStepsAt(draft.fields, draft.layout, selectedField.name);
+                if (split) onLayout(split);
+              }}
+              onStartStep={() => {
+                const started = startStepAt(draft.fields, draft.layout, selectedField.name);
+                if (started) {
+                  onLayout(started);
+                  selectStep(started.step);
+                }
+              }}
               onStartSection={() => {
                 const started = startSection(draft.fields, draft.layout, selectedField.name);
                 if (started) {
@@ -659,6 +764,12 @@ function FieldPanel({
   index,
   rowSize,
   sectionCount,
+  stepped,
+  splitReason,
+  startStepReason,
+  startsPage,
+  onSplit,
+  onStartStep,
   onStartSection,
   onEndSection,
   formId,
@@ -686,6 +797,14 @@ function FieldPanel({
   /** How many questions share this one's row: `hold` only matters above one. */
   rowSize: number;
   sectionCount: number;
+  /** Whether the form has steps, and why this question cannot start one (null when it can). */
+  stepped: boolean;
+  splitReason: string | null;
+  startStepReason: string | null;
+  /** The first question of the form or of its step, which can never start a step. */
+  startsPage: boolean;
+  onSplit: () => void;
+  onStartStep: () => void;
   onStartSection: () => void;
   onEndSection: () => void;
   formId: string;
@@ -716,12 +835,14 @@ function FieldPanel({
   // conditionally asked at all (its own `showIf` or its section's), which is what
   // makes "Required" read "Whenever it is shown".
   const showSources = sourcesFor(fields, index, "show");
-  const requireSources = sourcesFor(fields, index, "require");
+  const requireSources = sourcesFor(fields, index, "require", layout);
   // A sourced question compares against its previewed list merged with its extras.
   const showListed = withListedOptions(showSources, lists);
   const requireListed = withListedOptions(requireSources, lists);
   const sectionRule = layout.sections?.find((sec) => sec.name === field.section)?.showIf;
-  const conditional = field.showIf !== undefined || sectionRule !== undefined;
+  const stepRule = layout.steps?.find((s) => s.name === field.step)?.showIf;
+  const conditional =
+    field.showIf !== undefined || sectionRule !== undefined || stepRule !== undefined;
   const requirement = field.requireIf ? "when" : field.required ? "always" : "no";
 
   const text = (key: TranslatableKey) => fieldText(field, key, locale, source);
@@ -964,6 +1085,27 @@ function FieldPanel({
           {field.section !== undefined ? (
             <Button size="sm" disabled={!editable} onClick={onEndSection}>
               End the section after this question
+            </Button>
+          ) : null}
+          {/* Offered only below the first question of the form or of its step. */}
+          {!stepped && !startsPage ? (
+            <Button
+              size="sm"
+              disabled={!editable || splitReason !== null}
+              reason={splitReason ?? undefined}
+              onClick={onSplit}
+            >
+              Split into steps here
+            </Button>
+          ) : null}
+          {stepped && !startsPage ? (
+            <Button
+              size="sm"
+              disabled={!editable || startStepReason !== null}
+              reason={startStepReason ?? undefined}
+              onClick={onStartStep}
+            >
+              Start a new step here
             </Button>
           ) : null}
         </div>
@@ -1264,6 +1406,164 @@ function OptionsEditor({
         <Button size="sm" disabled={!editable} onClick={() => onChange(addOption(field))}>
           Add option
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- step panel --- */
+
+/** A step's heading, its translations, the rule that makes the page reachable, and
+ *  the two whole-form moves: merge into the previous step, or remove every step. */
+function StepPanel({
+  step,
+  index,
+  stepCount,
+  fields,
+  locale,
+  source,
+  editable,
+  ruleRefusal,
+  mergeReason,
+  onChange,
+  onMerge,
+  onRemoveAll,
+}: {
+  step: FormStep;
+  /** Zero-based place in the list: the first step can never be conditional. */
+  index: number;
+  stepCount: number;
+  fields: readonly FormField[];
+  locale: string;
+  source: string;
+  editable: boolean;
+  /** Why this step cannot be made conditional, when an action needs its answers. */
+  ruleRefusal: string | null;
+  mergeReason: string | null;
+  onChange: (next: FormStep) => void;
+  onMerge: () => void;
+  onRemoveAll: () => void;
+}) {
+  const translating = locale !== source;
+  const [confirming, setConfirming] = useState(false);
+  // A step's rule may name only questions above its first member, on earlier steps.
+  const sources = stepSourcesFor(fields, step.name);
+  const conditional = index > 0;
+
+  return (
+    <div className={css.fieldPanel}>
+      <div className={css.panelHead}>
+        <Badge>Step {index + 1}</Badge>
+      </div>
+      <Field label="Heading" required={!translating}>
+        {(id) => (
+          <Input
+            id={id}
+            value={groupText(step, "label", locale, source)}
+            placeholder={translating ? step.label : undefined}
+            disabled={!editable}
+            onChange={(e) => onChange(withGroupText(step, "label", e.target.value, locale, source))}
+          />
+        )}
+      </Field>
+      <Field label="Help text">
+        {(id) => (
+          <Input
+            id={id}
+            value={groupText(step, "help", locale, source)}
+            placeholder={translating ? step.help : undefined}
+            disabled={!editable}
+            onChange={(e) => onChange(withGroupText(step, "help", e.target.value, locale, source))}
+          />
+        )}
+      </Field>
+      {!translating ? (
+        <>
+          {conditional ? (
+            <>
+              <Field label="Show this step">
+                {(id) => (
+                  <Select
+                    id={id}
+                    value={step.showIf ? "when" : "always"}
+                    disabled={
+                      !editable || (!step.showIf && (sources.length === 0 || ruleRefusal !== null))
+                    }
+                    title={!step.showIf ? (ruleRefusal ?? undefined) : undefined}
+                    onChange={(e) => {
+                      if (e.target.value === "always") {
+                        const next = { ...step };
+                        delete next.showIf;
+                        onChange(next);
+                      } else if (sources[0]) {
+                        onChange({ ...step, showIf: blankCondition(sources[0]) });
+                      }
+                    }}
+                  >
+                    <option value="always">Always</option>
+                    <option value="when" disabled={sources.length === 0}>
+                      Only when…
+                    </option>
+                  </Select>
+                )}
+              </Field>
+              {step.showIf ? (
+                <ConditionEditor
+                  condition={step.showIf}
+                  sources={sources}
+                  fields={fields}
+                  editable={editable}
+                  onChange={(showIf) => onChange({ ...step, showIf })}
+                />
+              ) : null}
+            </>
+          ) : null}
+          <div className={css.sectionActions}>
+            {index > 0 ? (
+              <Button
+                size="sm"
+                disabled={!editable || mergeReason !== null}
+                title={mergeReason ?? undefined}
+                onClick={onMerge}
+              >
+                Merge with previous step
+              </Button>
+            ) : null}
+            {confirming ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={!editable}
+                  onClick={() => {
+                    setConfirming(false);
+                    onRemoveAll();
+                  }}
+                >
+                  Remove all {stepCount} {stepCount === 1 ? "step" : "steps"}
+                </Button>
+                <Button size="sm" onClick={() => setConfirming(false)}>
+                  Keep steps
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                variant="danger"
+                disabled={!editable}
+                onClick={() => setConfirming(true)}
+              >
+                Remove steps
+              </Button>
+            )}
+          </div>
+          {confirming ? (
+            <p className={css.note} role="alert">
+              This puts every question on one page again and drops each step's heading and
+              condition. The questions stay where they are.
+            </p>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

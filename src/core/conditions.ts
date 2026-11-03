@@ -53,7 +53,7 @@ export function matches(condition: FieldCondition, data: Record<string, Json>): 
   if ("not" in condition) return !matches(condition.not, data);
 
   if ("field" in condition) {
-    const value = data[condition.field] ?? null;
+    const value = (Object.hasOwn(data, condition.field) ? data[condition.field] : null) ?? null;
     if ("eq" in condition) return deepEqual(value, condition.eq);
     if ("ne" in condition) return !deepEqual(value, condition.ne);
     if ("in" in condition) return condition.in.some((v) => deepEqual(value, v));
