@@ -49,6 +49,7 @@ import {
   type FolioRuntime,
   type SiteRender,
 } from "./runtime";
+import { refreshOptionSources } from "./option-sources";
 import { runSchedules, scheduleDeps } from "./scheduler";
 import {
   candidateFor,
@@ -1932,6 +1933,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       ]);
       return { sessions, challenges, events };
     },
+    /**
+     * The option-source cron sweep (`form-option-sources.md` decision 7), implemented
+     * in `option-sources.ts`. Bindings alone, like `sweepAuth`, on the primary.
+     */
+    refreshOptionSources: (env, opts) =>
+      refreshOptionSources(rt, env, config.bindings(env).db, opts),
     render: (doc, opts) => (
       <FolioDoc
         doc={doc}

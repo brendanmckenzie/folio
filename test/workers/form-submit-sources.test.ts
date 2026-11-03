@@ -209,7 +209,8 @@ const body = (values: Record<string, string | string[]>) => {
 
 interface Posted {
   res: Response;
-  json: Record<string, any>; // biome-ignore lint/suspicious/noExplicitAny: a reply read by shape
+  // biome-ignore lint/suspicious/noExplicitAny: a reply read by shape
+  json: Record<string, any>;
   settle: () => Promise<void>;
 }
 

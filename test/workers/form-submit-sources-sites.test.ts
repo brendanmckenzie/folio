@@ -134,7 +134,8 @@ async function submit(host: string, value: string) {
     env,
     createExecutionContext(),
   )) as Response;
-  return { status: res.status, json: (await res.json()) as Record<string, any> }; // biome-ignore lint/suspicious/noExplicitAny: a reply read by shape
+  // biome-ignore lint/suspicious/noExplicitAny: a reply read by shape
+  return { status: res.status, json: (await res.json()) as Record<string, any> };
 }
 
 const storedFor = async (site: string) =>

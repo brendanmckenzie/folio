@@ -21,7 +21,17 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { wasRefused } from "../../core/bulk";
 import { NO_STORE } from "../../core/cache-tags";
-import { honeypotName } from "../../core/forms";
+import { type FormField, honeypotName } from "../../core/forms";
+import { isKnownLocale } from "../../core/locales";
+import {
+  CONTENT_SOURCE,
+  contentOptionQuery,
+  contentOptionSettings,
+  MAX_SOURCED_OPTIONS,
+  optionListKey,
+  readOptionsFrom,
+} from "../../core/option-sources";
+import { indexedFields } from "../../core/index-projection";
 import {
   chain as chainOf,
   DEFAULT_SITE,
@@ -65,6 +75,7 @@ import {
   compileForm,
   createForm,
   deleteForm,
+  fieldsFromInput,
   type Form,
   formById,
   formMeta,
@@ -80,6 +91,14 @@ import {
   PAGE_INPUT,
   updateForm,
 } from "../forms";
+import {
+  brandKey,
+  checkOptionSources,
+  hostListsOf,
+  previewHostList,
+  referencedLists,
+  refreshSavedSources,
+} from "../option-sources";
 import {
   brandIdOf,
   hookCtx,
@@ -99,6 +118,7 @@ import {
   DOWNLOAD_CONTENT_TYPE,
   fieldNameParam,
   FormCreateBody,
+  FormOptionPreviewBody,
   FormPatchBody,
   formIdListQuery,
   formIdParam,
@@ -294,6 +314,29 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     );
   });
 
+  /**
+   * The option sources the builder may offer, and (spec 36) the actions
+   * (`form-option-sources.md` decision 17). **Signed in, at `READ`, and the request's
+   * brand's**: a branded deployment asked with no scope is `400 site_required`, never
+   * the first brand's sources. Metadata only, no function: a source's label names the
+   * vendor and its settings are what a host passes to it, which is why none of this is
+   * on the unauthenticated Manifest. `content` is built in and not listed. Registered
+   * ahead of `/forms/:id`, so `registry` is never read as an id.
+   */
+  app.get("/forms/registry", requireAccess<Env>(rt, READ), (c) => {
+    const brand = brandOf(c);
+    return c.json({
+      sources: [...(brand.forms?.sources.values() ?? [])].map((source) => ({
+        id: source.id,
+        label: source.label,
+        settings: { ...(source.settings ?? {}) },
+        ttl: source.ttl,
+        localised: source.localised,
+      })),
+      actions: [],
+    });
+  });
+
   app.get("/forms/:id", requireAccess<Env>(rt, READ), fenceForm("read"), async (c) => {
     const form = await formById(c.var.bindings().db, formIdParam(c.req.param("id")), rt.logger);
     if (!form) throw new FolioError("not_found", "Unknown form");
@@ -327,8 +370,36 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // reason `deleteForm` can treat "files with no bucket" as unreachable.
     if (!media && body.fields?.some((field) => field.kind === "file")) throw noMedia();
 
+    // Whether each sourced question's source exists and its settings suit it is the
+    // brand's to say (`form-option-sources.md` decision 12): refused here, before the
+    // write, naming the question. Shape was `validateFormFields`' (`fieldsFromInput`).
+    const incoming = body.fields === undefined ? [] : fieldsFromInput(body.fields);
+    const sourced = incoming.some((f) => f.optionsFrom);
+    if (sourced) checkOptionSources(incoming, brandOf(c));
+
     const result = await updateForm(db, id, body, scopeOf(c));
     if (!result) throw new FolioError("not_found", "Unknown form");
+
+    // The saved host sources' missing or stale lists load in the background: the Save
+    // button never waits on a vendor (decision 7).
+    if (sourced) {
+      const lists = hostListsOf(result.form.fields, brandOf(c), rt.locales);
+      if (lists.length > 0) {
+        const { waitUntil } = hookCtx(c);
+        waitUntil(
+          refreshSavedSources(
+            {
+              db,
+              env: c.env,
+              logger: rt.logger,
+              ...(rt.formPurgeCapability ? { purgeCapability: rt.formPurgeCapability } : {}),
+              waitUntil,
+            },
+            lists,
+          ).catch((err) => rt.logger.error("folio: option source refresh failed", err)),
+        );
+      }
+    }
 
     if (result.structural) {
       await rt.hookRunner(hookCtx(c), brandIdOf(c)).run("formChanged", {
@@ -350,6 +421,115 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
     return c.json(result.form);
   });
+
+  /**
+   * The list an unsaved question would offer (`form-option-sources.md` decision 14).
+   *
+   * `EDIT`, because it can make a vendor call; `fenceForm('read')`, because it changes
+   * no form. **The body is validated as a save is** (`checkOptionSources`), so a host's
+   * `load` never sees an undeclared key or an unlisted `select` value. It persists a
+   * row only when a saved form already references the key (`previewHostList`), so
+   * typing through settings leaves nothing behind. Content is the same paged query a
+   * render runs, in the request's chain.
+   */
+  app.post(
+    "/forms/:id/option-preview",
+    requireAccess<Env>(rt, EDIT),
+    fenceForm("read"),
+    async (c) => {
+      const id = formIdParam(c.req.param("id"));
+      const body = await parseBody(c.req, FormOptionPreviewBody);
+      if (body.locale !== undefined && !isKnownLocale(rt.locales, body.locale)) {
+        throw new FolioError("unsupported", `Unknown locale: ${body.locale}`);
+      }
+      const brand = brandOf(c);
+      const bindings = c.var.bindings();
+      const form = await formById(bindings.db, id, rt.logger);
+      if (!form) throw new FolioError("not_found", "Unknown form");
+
+      let optionsFrom: FormField["optionsFrom"];
+      try {
+        optionsFrom = readOptionsFrom(body.optionsFrom, "preview");
+      } catch (err) {
+        throw new FolioError("bad_request", err instanceof Error ? err.message : "Invalid source");
+      }
+      const field: FormField = {
+        name: "preview",
+        kind: "select",
+        label: "Preview",
+        optionsFrom,
+      };
+      checkOptionSources([field], brand);
+
+      const locale = rt.localeOf(body.locale);
+      const from = optionsFrom!;
+
+      if (from.source === CONTENT_SOURCE) {
+        const chain = await requestChain(c, rt);
+        const site =
+          rt.sites && c.var.scope !== null
+            ? (await rt.sites.registry(c.env)).sites.find((s) => s.id === c.var.scope)
+            : undefined;
+        const lists = await brand.optionLists(bindings, [{ ...form, fields: [field] }], {
+          chain,
+          ...(site ? { site } : {}),
+          ...(locale ? { locale } : {}),
+          refresh: "never",
+          env: c.env,
+        });
+        const options = lists.get(form.id)?.get(field.name)?.options ?? [];
+        let total = options.length;
+        if (options.length >= MAX_SOURCED_OPTIONS) {
+          // Only a full list can have more behind it: ask the query for its count.
+          const settings = contentOptionSettings(from.settings)!;
+          const type = brand.typeOf(settings.type)!;
+          const rootIndexed = new Set(indexedFields(brand.schema, type.root).map(([n]) => n));
+          total = (
+            await brand.query(bindings, contentOptionQuery(settings, rootIndexed, 1), chain, site)
+          ).total;
+        }
+        return c.json({
+          options,
+          total,
+          truncated: total > MAX_SOURCED_OPTIONS,
+          status: "fresh",
+          loadedAt: null,
+        });
+      }
+
+      const source = brand.forms!.sources.get(from.source)!;
+      const code =
+        source.localised && locale && locale.code !== rt.locales?.default ? locale.code : "";
+      const key = optionListKey(from.settings, code);
+      const wanted = `${brandKey(brand.brand)}\u0000${source.id}\u0000${key}`;
+      const referenced = (await referencedLists(rt, c.env, bindings.db)).some(
+        (list) => list.canonical === wanted,
+      );
+      const preview = await previewHostList(
+        {
+          db: bindings.db,
+          env: c.env,
+          brand: brand.brand,
+          source,
+          logger: rt.logger,
+          ...(rt.formPurgeCapability ? { purgeCapability: rt.formPurgeCapability } : {}),
+          waitUntil: hookCtx(c).waitUntil,
+        },
+        { settings: from.settings, locale: code },
+        referenced,
+        10_000,
+      );
+      const options = preview.options ?? [];
+      return c.json({
+        options,
+        total: options.length,
+        truncated: preview.truncated || options.length >= MAX_SOURCED_OPTIONS,
+        status: preview.status,
+        loadedAt: preview.loadedAt,
+        ...(preview.failure ? { failure: preview.failure } : {}),
+      });
+    },
+  );
 
   /**
    * The form, its responses and their files — all of it, and the counts of what

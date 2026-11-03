@@ -219,7 +219,7 @@ function readFields(id: string, raw: string, logger: FolioLogger = console): For
  * name the field and what is wrong with it), which is why they travel verbatim
  * rather than being replaced with something vaguer.
  */
-function fieldsFromInput(input: unknown): FormField[] {
+export function fieldsFromInput(input: unknown): FormField[] {
   try {
     return validateFormFields(input);
   } catch (err) {

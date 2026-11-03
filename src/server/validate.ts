@@ -2039,6 +2039,25 @@ export const FormPatchBody = v.object(
   OBJECT,
 );
 
+/**
+ * The builder's preview of one question's option source
+ * (`POST {base}/api/forms/:id/option-preview`, `form-option-sources.md` decision 14).
+ * The unsaved `optionsFrom`, bounded as `FORM_FIELD`'s is, and the locale the labels
+ * are wanted in. `v.strictObject`: a stripped key here is a preview of something
+ * other than what was asked for. Whether the source exists and the settings suit it is
+ * `checkOptionSources`', run by the route.
+ */
+export const FormOptionPreviewBody = v.strictObject(
+  {
+    optionsFrom: v.strictObject(
+      { source: required(48), settings: v.optional(OPTION_SETTINGS) },
+      OBJECT,
+    ),
+    locale: v.optional(LOCALE_CODE),
+  },
+  OBJECT,
+);
+
 export type FormCreateInput = v.InferOutput<typeof FormCreateBody>;
 export type FormPatchInput = v.InferOutput<typeof FormPatchBody>;
 

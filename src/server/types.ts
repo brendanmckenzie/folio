@@ -1227,6 +1227,41 @@ export interface Folio<Env> {
     opts?: { now?: number },
   ) => Promise<{ sessions: number; challenges: number; events: number }>;
   /**
+   * Refreshes the host option lists that saved forms reference and that are missing or
+   * past their `ttl` (`../../docs/specs/content-model/form-option-sources.md` decision
+   * 7). Call it from `scheduled()`, beside `runSchedules` and `sweepAuth`:
+   *
+   * ```ts
+   * await folio.refreshOptionSources(env, { waitUntil: ctx.waitUntil.bind(ctx) })
+   * ```
+   *
+   * Batched and resumable: one call loads up to `opts.batch` due lists (default 10,
+   * at most 50) after `opts.continueFrom` and answers the cursor for the next, `null`
+   * when none is left. The referenced set is read whole on every call, so any call may
+   * prune the rows nothing references and nobody has attempted for 7 days. `due` counts
+   * the due lists after the cursor. Without a cron, lists still refresh on save and on
+   * submit, and a page's list can be as old as the last submission.
+   *
+   * A host that caches on one entrypoint routes this cron through it, like any write:
+   * a changed list purges its tag from the entrypoint that ran the refresh.
+   */
+  refreshOptionSources: (
+    env: Env,
+    opts?: {
+      batch?: number;
+      continueFrom?: string | null;
+      now?: number;
+      waitUntil?: (p: Promise<unknown>) => void;
+    },
+  ) => Promise<{
+    due: number;
+    loaded: number;
+    failed: number;
+    unchanged: number;
+    pruned: number;
+    continueFrom: string | null;
+  }>;
+  /**
    * The block registry. **Throws on a deployment with `brands`**
    * (`../../docs/specs/foundation/multi-brand.md` decision 21), where a registry
    * is a brand's: read `registryFor(brand)` there, or let `render` pick it from
