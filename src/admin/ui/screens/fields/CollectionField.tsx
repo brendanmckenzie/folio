@@ -1,17 +1,20 @@
 import type { Json } from "../../../../core/doc";
-import type { Field as FieldDef } from "../../../../core/fields";
 import {
   asCollectionValue,
   BUILT_IN_ORDERS,
   type CollectionField as CollectionFieldDef,
   type CollectionValue,
-  type ContentWhere,
   maxPerPageOf,
   type ResolvedCollection,
 } from "../../../../core/query";
 import type { DocumentType, SchemaIndex } from "../../../../core/schema";
-import { Input, Select } from "../../Field";
+import { Input } from "../../Field";
 import css from "./fields.module.css";
+import { QueryControls } from "./QueryControls";
+
+// The helpers moved to `QueryControls.tsx` with the controls that use them (the form
+// builder composes the same ones). Re-exported so this file's importers are unchanged.
+export { filterField, filterValue, sortLabel, withFilter } from "./QueryControls";
 
 /**
  * The editor's half of a `collection` field (`collections.md` decision 5).
@@ -34,46 +37,6 @@ import css from "./fields.module.css";
  * `Field` puts the label *above* the control. A `collection` field with four filters
  * would then be eight rows tall inside a field that is itself one row of the form.
  */
-
-/**
- * The field declaration behind one filterable name, found by walking the schema.
- *
- * A `filterable` entry names a field on the **target type's root block**, which is
- * some other block entirely — so this looks for the first block declaring that name
- * with `indexed: true`. Two blocks declaring the same indexed name is exactly the
- * case the index itself treats as one queryable field (it is keyed on the name), so
- * taking the first is consistent rather than arbitrary.
- */
-export function filterField(schema: SchemaIndex, name: string): FieldDef | undefined {
-  for (const def of Object.values(schema)) {
-    const field = def.fields[name];
-    if (field && (field as { indexed?: unknown }).indexed === true) return field;
-  }
-  return undefined;
-}
-
-/** The stored value with one filter replaced, or removed when the choice is "any". */
-export function withFilter(value: CollectionValue, field: string, chosen: string): CollectionValue {
-  const rest = (value.where ?? []).filter((w) => w.field !== field);
-  const next: ContentWhere[] = chosen === "" ? rest : [...rest, { field, op: "eq", value: chosen }];
-  return { ...value, where: next };
-}
-
-/** The current choice for one filter, or `''` for "any". */
-export function filterValue(value: CollectionValue, field: string): string {
-  const hit = (value.where ?? []).find((w) => w.field === field && w.op === "eq");
-  if (!hit) return "";
-  return Array.isArray(hit.value) ? (hit.value[0] ?? "") : String(hit.value);
-}
-
-/** A sort key's label: a built-in's own name, or the field's declared label. */
-export function sortLabel(schema: SchemaIndex, name: string): string {
-  if (name === "publishedAt") return "Publish date";
-  if (name === "title") return "Title";
-  if (name === "ord") return "Manual order";
-  if (name === "relevance") return "Best match";
-  return filterField(schema, name)?.label ?? name;
-}
 
 export function CollectionField({
   id,
@@ -150,110 +113,52 @@ export function CollectionField({
         ) : null}
       </p>
 
-      {/* Only when the field declares it (`full-text-search.md` decision 10):
-          a `collection` with no `searchable: true` never sees this control at
-          all, because a render-time term would have nowhere to go — dropped by
-          `collectionQuery` exactly as an unfilterable `where` already is. */}
-      {field.searchable ? (
-        <label className={css.filter} htmlFor={idFor("search")}>
-          <span>Search</span>
-          <Input
-            id={idFor("search")}
-            type="search"
-            value={stored.search ?? ""}
-            placeholder="Any"
-            onChange={(e) => patch({ ...stored, search: e.target.value })}
-          />
-        </label>
-      ) : null}
-
-      {filterable.map((name) => {
-        const def = filterField(schema, name);
-        const current = filterValue(stored, name);
-        return (
-          /*
-           * `htmlFor` and a minted id, rather than a label wrapping its control.
-           * Implicit association is valid HTML and Biome's `noLabelWithoutControl`
-           * still rejects it here, because the control is a `<Select>` component and
-           * the rule can only see literal elements — so the explicit id is what makes
-           * the association reviewable as well as real.
-           */
-          <label key={name} className={css.filter} htmlFor={idFor(name)}>
-            <span>{def?.label ?? name}</span>
-            {def?.kind === "select" ? (
-              <Select
-                id={idFor(name)}
-                value={current}
-                onChange={(e) => patch(withFilter(stored, name, e.target.value))}
-              >
-                <option value="">Any</option>
-                {def.options.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </Select>
-            ) : def?.kind === "boolean" ? (
-              <Select
-                id={idFor(name)}
-                value={current}
-                onChange={(e) => patch(withFilter(stored, name, e.target.value))}
-              >
-                <option value="">Any</option>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </Select>
-            ) : (
+      <QueryControls
+        schema={schema}
+        value={stored}
+        order={order}
+        filterable={filterable}
+        orderable={orderable}
+        idFor={idFor}
+        onChange={patch}
+        // Only when the field declares it (`full-text-search.md` decision 10):
+        // a `collection` with no `searchable: true` never sees this control at
+        // all, because a render-time term would have nowhere to go — dropped by
+        // `collectionQuery` exactly as an unfilterable `where` already is.
+        before={
+          field.searchable ? (
+            <label className={css.filter} htmlFor={idFor("search")}>
+              <span>Search</span>
               <Input
-                id={idFor(name)}
-                type="text"
-                value={current}
+                id={idFor("search")}
+                type="search"
+                value={stored.search ?? ""}
                 placeholder="Any"
-                onChange={(e) => patch(withFilter(stored, name, e.target.value))}
+                onChange={(e) => patch({ ...stored, search: e.target.value })}
               />
-            )}
+            </label>
+          ) : null
+        }
+        between={
+          <label className={css.filter} htmlFor={idFor("perPage")}>
+            <span>How many</span>
+            <Input
+              id={idFor("perPage")}
+              type="number"
+              min={1}
+              max={max}
+              value={perPage}
+              onChange={(e) => {
+                const n = e.target.valueAsNumber;
+                patch({
+                  ...stored,
+                  perPage: Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), max) : 1,
+                });
+              }}
+            />
           </label>
-        );
-      })}
-
-      <label className={css.filter} htmlFor={idFor("perPage")}>
-        <span>How many</span>
-        <Input
-          id={idFor("perPage")}
-          type="number"
-          min={1}
-          max={max}
-          value={perPage}
-          onChange={(e) => {
-            const n = e.target.valueAsNumber;
-            patch({
-              ...stored,
-              perPage: Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), max) : 1,
-            });
-          }}
-        />
-      </label>
-
-      <label className={css.filter} htmlFor={idFor("order")}>
-        <span>Sort by</span>
-        <Select
-          id={idFor("order")}
-          value={`${order.field}:${order.dir}`}
-          onChange={(e) => {
-            const [f, dir] = e.target.value.split(":");
-            patch({ ...stored, order: { field: f!, dir: dir === "asc" ? "asc" : "desc" } });
-          }}
-        >
-          {orderable.flatMap((name) => [
-            <option key={`${name}:desc`} value={`${name}:desc`}>
-              {sortLabel(schema, name)} — newest / Z to A
-            </option>,
-            <option key={`${name}:asc`} value={`${name}:asc`}>
-              {sortLabel(schema, name)} — oldest / A to Z
-            </option>,
-          ])}
-        </Select>
-      </label>
+        }
+      />
 
       {/* Why the count can differ from what the live page shows, said once, where it
           is relevant: a draft insight is not in the index (decision 3). */}

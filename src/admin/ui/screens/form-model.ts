@@ -17,6 +17,8 @@
  * as far as being useful, `redirects-model.ts`'s `draftRefusal` posture: a
  * refusal the server does not need a round trip to give.
  */
+import type { Json } from "../../../core/doc";
+import type { Field } from "../../../core/fields";
 import {
   checkFormLogic,
   type FormField,
@@ -30,6 +32,8 @@ import {
   RESERVED_PREFIX,
 } from "../../../core/forms";
 import type { LocaleConfig } from "../../../core/locales";
+import { CONTENT_SOURCE, materialiseOptions, type OptionsFrom } from "../../../core/option-sources";
+import type { DocumentType } from "../../../core/schema";
 import { comparesValue, referencedNames, renameInCondition } from "./condition-model";
 
 /* -------------------------------------------------------------- locales --- */
@@ -98,6 +102,9 @@ export function fieldKindLabel(kind: FormFieldKind): string {
 
 /** The kinds `validateFormFields` requires at least one option for. */
 const OPTION_KINDS: ReadonlySet<FormFieldKind> = new Set(["select", "radio", "checkboxes"]);
+
+/** The one option `blankField` seeds, so a question is valid the moment it is added. */
+export const SEEDED_OPTION: Readonly<FormFieldOption> = { value: "option_1", label: "Option 1" };
 
 export function needsOptions(kind: FormFieldKind): boolean {
   return OPTION_KINDS.has(kind);
@@ -210,7 +217,7 @@ export function blankField(
   const label = fieldKindLabel(kind);
   const field: FormField = { name, kind, label };
   if (needsOptions(kind)) {
-    field.options = [{ value: "option_1", label: "Option 1" }];
+    field.options = [{ ...SEEDED_OPTION }];
   }
   if (kind === "file") field.accept = "documents";
   if (kind === "statement") field.text = label;
@@ -951,6 +958,187 @@ function replaceI18nEntry(
   if (Object.keys(entry).length > 0) next[locale] = entry;
   else delete next[locale];
   return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/* ------------------------------------------------------- option sources --- */
+
+/**
+ * What `GET {base}/api/forms/registry` answers for one host source
+ * (`form-option-sources.md` decision 17). Metadata only; `content` is not listed
+ * because it is built in.
+ */
+export interface FormSourceInfo {
+  id: string;
+  label: string;
+  settings: Record<string, Field>;
+  ttl: number;
+  localised: boolean;
+}
+
+/** What `POST {base}/api/forms/:id/option-preview` answers (decision 14). */
+export interface OptionPreview {
+  options: FormFieldOption[];
+  total: number;
+  truncated: boolean;
+  status: "fresh" | "stale" | "never-loaded" | "unknown-source";
+  loadedAt: number | null;
+  failure?: "timeout" | "threw" | "malformed" | "empty";
+}
+
+/** How many labels the preview names before "and N more". */
+export const PREVIEW_LABELS = 10;
+
+/** The four setting kinds a host source may declare (`OptionSourceSetting`). */
+export type SettingKind = "text" | "number" | "boolean" | "select";
+
+/**
+ * The question with its source chosen, or removed when `next` is undefined.
+ *
+ * Choosing a source drops `blankField`'s seeded option **only when the typed list is
+ * still exactly that**: an editor who has typed their own extras keeps them (they are
+ * the "Also offer" list), and one who never touched the question gets a source with no
+ * stray "Option 1" under it. Going back to typed options re-seeds, because an option
+ * question with nothing to offer does not validate.
+ */
+export function withOptionsFrom(field: FormField, next: OptionsFrom | undefined): FormField {
+  const out: FormField = { ...field };
+  if (next === undefined) {
+    delete out.optionsFrom;
+    if ((out.options ?? []).length === 0) out.options = [{ ...SEEDED_OPTION }];
+    return out;
+  }
+  out.optionsFrom = next;
+  if (isSeededOptions(out.options)) delete out.options;
+  return out;
+}
+
+/** Whether a typed list is exactly the untouched seed. */
+export function isSeededOptions(options: readonly FormFieldOption[] | undefined): boolean {
+  return (
+    options !== undefined &&
+    options.length === 1 &&
+    options[0]?.value === SEEDED_OPTION.value &&
+    options[0]?.label === SEEDED_OPTION.label
+  );
+}
+
+/** The fewest typed options a question may keep: none when a source supplies the rest. */
+export function minTypedOptions(field: FormField): number {
+  return field.optionsFrom ? 0 : 1;
+}
+
+/** A source's descriptor as first chosen: a host source starts from its settings'
+ *  declared defaults, `content` from the first page or record type (the one thing it
+ *  cannot be saved without). */
+export function blankOptionsFrom(
+  source: string,
+  info: FormSourceInfo | undefined,
+  types: readonly DocumentType[],
+): OptionsFrom {
+  if (source === CONTENT_SOURCE) {
+    const first = contentTypes(types)[0];
+    return { source, settings: first ? { type: first.name } : {} };
+  }
+  const settings: Record<string, Json> = {};
+  for (const [name, def] of Object.entries(info?.settings ?? {})) {
+    const fallback = (def as { default?: unknown }).default;
+    if (fallback !== undefined) settings[name] = fallback as Json;
+  }
+  return { source, settings };
+}
+
+/** The types a `content` source may list: pages and records, never a singleton. */
+export function contentTypes(types: readonly DocumentType[]): DocumentType[] {
+  return types.filter((t) => t.kind === "page" || t.kind === "record");
+}
+
+/** `optionsFrom` with one setting changed; an empty value removes the key. */
+export function withSetting(from: OptionsFrom, name: string, value: Json | undefined): OptionsFrom {
+  const settings: Record<string, Json> = { ...from.settings };
+  if (value === undefined || value === "") delete settings[name];
+  else settings[name] = value;
+  return { ...from, settings };
+}
+
+/** The key an `optionsFrom` and a locale preview under, so a repeated commit of the
+ *  same thing does not ask the server again. */
+export function previewKeyOf(from: OptionsFrom, locale: string): string {
+  return JSON.stringify([from, locale]);
+}
+
+/**
+ * Whether a preview has anything to ask. A `content` source with no type is not a
+ * query yet, and asking would only answer a `400` the editor can already see.
+ */
+export function previewable(from: OptionsFrom | undefined): from is OptionsFrom {
+  if (!from) return false;
+  if (from.source !== CONTENT_SOURCE) return true;
+  const type = from.settings?.type;
+  return typeof type === "string" && type !== "";
+}
+
+/**
+ * The preview's one-line status for a host source (decision 14): `fresh`,
+ * `stale since <time>`, or `never loaded: <category>`. Nothing for `content`, whose
+ * list is read live and has no freshness to report.
+ */
+export function previewStatusText(
+  preview: OptionPreview,
+  format: (at: number) => string = (at) => new Date(at).toLocaleString(),
+): string | null {
+  if (preview.status === "fresh") return preview.loadedAt === null ? null : "Fresh";
+  if (preview.status === "stale") {
+    return preview.loadedAt === null ? "Stale" : `Stale since ${format(preview.loadedAt)}`;
+  }
+  if (preview.status === "never-loaded") {
+    return preview.failure ? `Never loaded: ${preview.failure}` : "Never loaded";
+  }
+  return "Unknown source";
+}
+
+/** The "N options" line, and what was cut. */
+export function previewSummary(preview: OptionPreview): string {
+  const n = preview.options.length;
+  const noun = n === 1 ? "option" : "options";
+  return preview.truncated
+    ? `${preview.total} ${preview.total === 1 ? "option" : "options"} match, first ${n} shown`
+    : `${n} ${noun}`;
+}
+
+/**
+ * Decision 18's warning: a required content-sourced question whose list is empty and
+ * which has no typed extras is not asked at all, so the form quietly stops collecting
+ * it. Only a list that was actually read and was empty warns: an outage or an unknown
+ * source is a different problem with its own line.
+ */
+export function emptyRequiredWarning(
+  field: FormField,
+  preview: OptionPreview | null,
+): string | null {
+  if (field.optionsFrom?.source !== CONTENT_SOURCE || field.required !== true) return null;
+  if ((field.options ?? []).length > 0) return null;
+  if (!preview || preview.options.length > 0 || preview.total > 0) return null;
+  return "No published documents match. Until one does, this question is not asked";
+}
+
+/**
+ * The list a rule on a sourced question can compare against: the previewed list
+ * merged with the typed extras, exactly as the page will offer it
+ * (`materialiseOptions`, decision 11). A sourced question whose list is not known yet
+ * loses its `options` altogether, so the rule editor offers a free-text value rather
+ * than a menu of only the extras, which would read as the complete set.
+ */
+export function withListedOptions(
+  sources: readonly FormField[],
+  lists: Readonly<Record<string, readonly FormFieldOption[]>>,
+): FormField[] {
+  return sources.map((field) => {
+    if (!field.optionsFrom) return field;
+    const list = lists[field.name];
+    if (list) return materialiseOptions(field, list);
+    const { options: _typed, ...rest } = field;
+    return rest;
+  });
 }
 
 /* ---------------------------------------------------------- closesAt --- */

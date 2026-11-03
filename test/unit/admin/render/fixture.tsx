@@ -460,10 +460,24 @@ function bodyFor(url: string): unknown {
   // The three sub-routes before `/forms/:id` itself, and all of them only when
   // there *is* an id — the bare `/forms` is the list route and wants the page
   // envelope like every other list.
+  if (path === `${API}/forms/registry`) {
+    return { sources: served.registrySources ?? [], actions: [] };
+  }
   if (path.startsWith(`${API}/forms/`)) {
+    if (path.endsWith("/option-preview"))
+      return (
+        served.preview ?? {
+          options: [],
+          total: 0,
+          truncated: false,
+          status: "fresh",
+          loadedAt: null,
+        }
+      );
     if (path.endsWith("/usage")) return { published: [], total: 0, responses: 0, files: 0 };
     if (path.endsWith("/responses")) return EMPTY_PAGE;
-    return { form: FORM, ...FORM };
+    const form = (served.form ?? FORM) as typeof FORM;
+    return { form, ...form };
   }
   // `/story/:id` and its sub-routes (`/versions`, `/activity`) share a prefix, and
   // the envelope is merged in rather than branched per sub-route: `useTrail` reads
@@ -514,6 +528,12 @@ const served: {
   schemaAt?: (scope: string | null) => Manifest;
   registry?: unknown;
   schemaStatus?: number;
+  /** The form the builder opens, in place of the fixture's. */
+  form?: unknown;
+  /** What `GET /forms/registry` lists. */
+  registrySources?: unknown[];
+  /** What `POST /forms/:id/option-preview` answers. */
+  preview?: unknown;
 } = {};
 
 export function serve(over: typeof served): void {
@@ -524,6 +544,9 @@ export function resetServed(): void {
   delete served.schemaAt;
   delete served.registry;
   delete served.schemaStatus;
+  delete served.form;
+  delete served.registrySources;
+  delete served.preview;
 }
 
 /**
