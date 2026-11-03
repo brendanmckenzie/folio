@@ -38,15 +38,12 @@ export const MAX_ANSWER_CHARS = 10_000;
 export const PRINTABLE = /^[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]*$/u;
 
 /**
- * `PRINTABLE`'s screen with the three whitespace controls a `textarea` carries
- * legitimately allowed back in.
- *
- * Written as an alternation rather than by subtracting from the negated class,
- * because there is no subtraction to write: `[^\p{Cc}\n]` still excludes every
- * control including the newline, so the three have to be admitted by a second
- * branch rather than carved out of the first.
+ * The three whitespace controls a `textarea` carries legitimately. A multiline answer
+ * is screened by removing them and testing the rest against `PRINTABLE`, rather than
+ * by an alternation of two disjoint classes under `*`, which is equivalent but reads
+ * to a ReDoS scanner as exponential backtracking.
  */
-const PRINTABLE_MULTILINE = /^(?:[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]|[\n\r\t])*$/u;
+const MULTILINE_WHITESPACE = /[\n\r\t]/g;
 
 /**
  * Whether one submitted answer holds only characters a stored string may hold.
@@ -57,7 +54,7 @@ const PRINTABLE_MULTILINE = /^(?:[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]|[\n\r
  * is somebody trying to make one stored value look like two.
  */
 export function isPrintableAnswer(raw: string, multiline: boolean): boolean {
-  return (multiline ? PRINTABLE_MULTILINE : PRINTABLE).test(raw);
+  return PRINTABLE.test(multiline ? raw.replace(MULTILINE_WHITESPACE, "") : raw);
 }
 
 /** What one answer is stored as. */
