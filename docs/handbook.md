@@ -2094,7 +2094,10 @@ const view = formLayout(form)
 // view.sections — [{ section: null | { name, label, help?, showIf? }, rows: [{ key, cells: [{ field, grow, shown, required }] }] }]
 ```
 
-A row is the first question plus every following question with `beside`. A
+A row is the first question plus every following question with `beside`. Its `key`
+is that first question's name, even while a condition hides that question, so a host
+can pass it to React as `key` without a hidden cell remounting the row's other inputs
+and losing what the visitor typed. A
 `statement` and the start of the form always break a row, whatever the next
 question's own `beside` says, and a `hidden` question is layout-transparent —
 it neither joins nor breaks one, which is why `formLayout` hands it back
