@@ -200,7 +200,7 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`migrations/`). **There are fourteen: `0001`–`0008`, `0010`, `0011`, `0013`, `0014`, `0015` and `0016`.**
+**D1 migrations** (`migrations/`). **There are fifteen: `0001`–`0008`, `0010`, `0011`, `0013`, `0014`, `0015`, `0016` and `0017`.**
 `0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
 it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
 landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a permanent
@@ -221,8 +221,10 @@ of the draft's root scalars written by the story Durable Object, selected by the
 that carries it, so it must be applied before that Worker is deployed.
 `0016_option_sources.sql` (spec 37) landed 2026-11-03: the `option_lists` table and
 `form_responses.option_labels`, both read by the release that carries them, so it must be applied
-before that Worker is deployed. `0017_form_actions.sql` (spec 36) is claimed and ships with it in
-v1.3.0, which is roll-forward only (`UPGRADING.md`, "v1.3.0 is roll-forward only"). Next free is `0018`.
+before that Worker is deployed. `0017_form_actions.sql` (spec 36) landed 2026-11-03: `forms.actions`,
+the `form_deliveries` log and `form_refusals` (refused attempts, for the rate limit), read by the same
+release, so it must be applied before that Worker is deployed. v1.3.0 is roll-forward only
+(`UPGRADING.md`, "v1.3.0 is roll-forward only"). Next free is `0018`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a
@@ -402,6 +404,12 @@ are free to go the next time that code is touched.
   Durable Object) seeds from `published_doc`, else the newest version, else blank, at
   the row's own sync position. A new direct `getOrInit` on an existing id silently
   reopens #28 and freezes a blank document into the object.
+- **A delivery row is written in the response's batch and deleted in every response
+  delete's batch; a fourth delete path must add it. A result write is fenced by the
+  claim token.** `form_deliveries` has no foreign key, so a delete path that forgets it
+  leaves rows (with their stored mapping and any `detail`) behind, and a result write
+  without the claim lets a stale runner overwrite a newer attempt. A delivery reads the
+  mapping snapshotted at submit (`inputs_map`), never the form's current one.
 - **Writes go through the mutation log.** `StoryDO.commit` for programmatic writes,
   `tx` for keystrokes. Writing `published_doc` or the object's `doc` row directly is
   faster and breaks sync, undo, presence and the activity trail — visible only to

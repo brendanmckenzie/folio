@@ -471,7 +471,11 @@ Deferred or uncovered, each named rather than glossed:
   boundary, which is the bug worth catching, but a test cannot watch bytes arrive.
 - **No `retentionDays`, no per-response comments, no spam score, no vendor
   integration.** `verify` is a host function precisely so Folio never names a
-  captcha vendor, holds a key or has a timeout policy.
+  captcha vendor, holds a key or has a timeout policy. **Vendor integrations are done
+  as form actions (spec 36, built 2026-11-03; see
+  `docs/specs/content-model/form-actions.md`)**: a host registers `forms.actions`, an
+  editor attaches one to a form and maps its inputs, and Folio logs, retries and shows
+  each delivery. Folio still ships no integration of its own and names no vendor.
 - **A form has no logic, and had no layout at all.** Every question is visible and
   always required-or-not. Reported by the second host on 2026-09-07 over the
   narrowest possible case — a first/last name pair that used to share a row and now

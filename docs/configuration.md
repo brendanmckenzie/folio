@@ -405,7 +405,7 @@ id out of the registry, and the repair is SQL (`UPGRADING.md`).
 | `settings` | optional | The brand's site-settings singleton. It replaces `sites.settings`, which is refused beside `brands`. Each brand has its own type, so `/me`'s `sites.settings` is null on a branded deployment and the scoped manifest carries `settings`. |
 | `previewCss`, `previewWrap` | optional | This brand's preview stylesheets and wrap. The wrap's client half is a `wrap` export of the brand's own blocks module. |
 | `gate` | optional | This brand's visitor gate, validated against this brand's root blocks. |
-| `forms` | optional | `verify` and `ratePerHour` for a submission on this brand's live hosts, and its option sources. |
+| `forms` | optional | `verify`, `ratePerHour` and `actions` for a submission on this brand's live hosts, and its option sources. |
 | `describe` | optional | This brand's describer, `onUpload` and `concurrency`. |
 | `migrations` | optional | This brand's content migrations. **Each id starts `<brand>/`.** `migrate` runs a brand's list over that brand's sites only. |
 
@@ -676,6 +676,73 @@ category for editors and logs the error itself.
 An id is lowercase letters, digits and hyphens, and `content` is reserved. Editors
 see your sources through a signed-in admin route, never the public schema.
 
+`actions` registers the integrations an editor can attach to a form. Each is written
+with `formAction`, which only exists to infer the types, and declares what it needs
+(`inputs`), what a publisher can tune (`settings`), what it can refuse with (`codes`)
+and up to two phases.
+
+```ts
+import { formAction } from 'folio/server'
+
+export const jamboEnquiry = formAction({
+  id: 'jambo-enquiry',
+  label: 'File in Jambo',
+  inputs: { email: { kind: 'email', label: 'Email', required: true } },
+  settings: { area: { kind: 'text', label: 'Area', help: 'Defaults to the form slug' } },
+  codes: { duplicate: { label: 'Already enquired', message: 'We already have your enquiry.' } },
+  async check(ctx, env: Env) {
+    return (await jambo(env).exists(ctx.inputs.email, { signal: ctx.signal }))
+      ? { ok: false, code: 'duplicate' }
+      : { ok: true }
+  },
+  async deliver(ctx, env: Env) {
+    if (!isLiveHost(ctx.host)) return { skipped: 'Not a production host' }
+    await jambo(env).file(ctx.inputs, { idempotencyKey: ctx.key, signal: ctx.signal })
+  },
+})
+
+forms: { actions: [jamboEnquiry] }
+```
+
+**Two phases, with opposite postures.** A `check` runs after validation and before the
+response is stored. It can refuse with a declared code, and it **fails closed**: a
+throw, a timeout or a malformed answer refuses the visitor with the action's `error`
+code. A `deliver` runs after the response has committed. It never changes what the
+visitor is told, is recorded as a row in the response's `form_deliveries`, and is
+retried with backoff (eight attempts) from `scheduled()`. **A `check` is a read with no
+side effects**: it may run for a submission that is then refused by a later check or
+collapsed as a duplicate, so anything that creates or changes state belongs in
+`deliver`, which runs once per stored response and receives `ctx.key` as an
+idempotency key.
+
+**Inputs and the mapping.** An action names the inputs it needs (`text`, `email`,
+`number`, `boolean`, `list` or `file`), and the editor maps each one to a question in
+the form builder. Folio refuses a save that would leave a required input unfed, or
+that deletes or retypes a question an action reads. A delivery reads the mapping as it
+stood when the visitor submitted, so renaming a question never breaks a retry.
+
+**Settings are not secrets.** They are `text`, `textarea`, `number`, `boolean`, `date`
+or `select` fields the publisher sees and fills in, and they are visible to anyone who
+can read the form. Their defaults are applied when an action is attached, not when it
+runs. Keys belong in `env`.
+
+**A check's verdict is public.** Anyone who can post the form can learn the answer, so
+a code like `duplicate` is an oracle for "is this address already known". Refused
+attempts count against `ratePerHour`, which bounds the probing, but a code that
+reveals something about a person belongs on a brand that also configures `verify`, so
+each probe costs a solved captcha. Folio logs a warning at construction for a brand
+that registers a check with codes and no `verify`.
+
+**Production-only rules are an outcome.** Both phases receive `host`, the hostname that
+received the submission (stored on the delivery, so a retry hours later still sees
+it). An action that must not act off production returns `{ skipped: 'reason' }` from
+`deliver`, and Responses shows the reason against that response. A thrown message is
+never shown to editors: it goes to the logger, and the screen shows a category.
+
+The editor writes the visitor-facing text of each code, per locale, when attaching the
+action. A host renders it from `ResolvedForm.refusals`, never from the
+`folio_reason` parameter itself.
+
 #### `describe: FolioDescribe<Env>`
 
 Machine-written alt text, descriptions and tags for the media library. One
@@ -943,6 +1010,9 @@ async scheduled(_controller, env, _ctx) {
     const report = await folio.runSchedules(env, { continueFrom: cursor })
     cursor = report.continueFrom
   } while (cursor !== null && ++batches < 20)
+  // The call that finishes the schedule sweep also retries failed form
+  // deliveries (`report.deliveries`); without a cron, a delivery gets its
+  // first attempt and no retries.
 
   // Auth housekeeping: expired sessions, consumed challenges, auth_events past
   // its 90-day retention. Nothing breaks when this is never wired up — an
@@ -970,6 +1040,7 @@ you can recognise one:
 | `describe.fn` not a function, or `concurrency` outside 1–8 | Would 500 on whichever request reached it first |
 | `forms.verify` not a function, `ratePerHour` outside 0–100 | The discovering request is an anonymous POST from the internet |
 | `forms.sources`: an id that is not `[a-z][a-z0-9-]*` or is `content`, a `load` that is not a function, `ttl` outside 60–604800, `localised` not a boolean, a setting of another kind | A form naming the source would fail on an anonymous POST |
+| `forms.actions`: a duplicate or malformed id, no `check` or `deliver`, a setting kind outside the six, a code named `error`, codes on an action with no `check` | An integration an editor attaches and nothing runs |
 | An unknown key in `hooks` (or in `hooks.await`) | A typo means a hook that silently never fires |
 | `migrations` whose declared order and sort order disagree | Documents would migrate in an order depending on which comparison ran |
 | A `presets` entry naming a field the block does not declare | The preset would silently do nothing |

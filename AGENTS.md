@@ -191,6 +191,15 @@ that has never loaded is `no-store`, so build headers with `reader.page()` or ch
 `hasUnavailableOptions(resolution)`. A content-sourced answer is stored as a story id, so read
 the label from `optionLabels`, not from the value.
 
+**Anything that forwards a form response belongs in `forms.actions` before
+`hooks.submitted`** (spec 36, `docs/handbook.md` "Form actions"). Write it with
+`formAction`: a `check` refuses a submission with a declared code and fails closed, and
+a `deliver` runs after the response commits and is logged, retried from
+`folio.runSchedules` and shown with a Retry button in Responses. A check is a read; put
+anything with a side effect in `deliver` and use `ctx.key` as the idempotency key.
+Render a refusal from `form.refusals[reason]` (with the `<action>.error` fallback),
+never by echoing `folio_reason`. `submitted` stays for fire-and-forget work.
+
 **3. Add the Vite plugin.** `folio/vite` supplies the admin entry, the client
 build and the asset constants. Do not hand-roll them.
 

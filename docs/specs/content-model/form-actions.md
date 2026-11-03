@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 36
 > **Size:** L
-> **Status:** approved (owner, 2026-11-03)
+> **Status:** done (built 2026-11-03)
 > **Wire version:** none. Forms cross neither the socket nor the admin↔preview frame shape; the one new descriptor key (`ResolvedForm.refusals`) rides inside the `Resolution` JSON the bridge already carries, exactly as spec 35's keys did
 > **Migration:** `0017_form_actions.sql`
 > **Build sequence:** after 35 (form logic, `0014`) and after spec 37 (option sources), which builds first and takes `0016_option_sources.sql`. Both touch `FormBuilder.tsx`, `server/forms.ts`, `form-responses.ts`, the submit route and `validate.ts`, so the builds are serialised, never parallel. **Both ship together as the minor `v1.3.0`**; next free migration after both is `0018`.
@@ -1905,3 +1905,109 @@ eleventh-post test fail.
   combined with owner decision 8 (no rollback), the only way to have a window with no
   deliveries is to detach the action, and a host that wants those responses delivered
   runs its own script against `form_responses`.
+
+## Implementation notes
+
+Built 2026-11-03 in six phases on `feat/form-actions`, after spec 37 on the same branch:
+the core vocabulary, the registry and `0017`, storage and the builder's PATCH, the
+submit route and deliveries, the admin, then the demo, the end-to-end script and the
+prose. It ships with spec 37 as **v1.3.0**.
+
+**Where the spec was wrong or ambiguous, and what was done.** Each is the conservative
+reading consistent with the Architecture decisions.
+
+Core (phase 1)
+- A required setting hidden by its `showIf` is not required. A blank setting (`''`,
+  `null`, `undefined`) is unset and omitted.
+- `alwaysAnswered` follows `compileField`: a question with `requireIf` is not always
+  answered.
+- `normaliseFormActions` also drops map keys for inputs the action no longer declares.
+- An empty editor message is unwritten in `refusalsOf`; `error` is always present, with
+  `DEFAULT_ERROR_MESSAGE`.
+- Bounds the spec did not state: a setting string is 2000 characters, a refusal message
+  500 (`MAX_REFUSAL_MESSAGE`).
+- Extra exports: `ACTION_INPUT_NAME`, `DEFAULT_ERROR_MESSAGE`, `ActionSettingValue`. The
+  vocabulary is public from `folio/core` (decision 4).
+
+Registry and migration (phase 2)
+- The "check with codes and no `verify`" warning is a pure `actionWarnings(infos,
+  hasVerify, brand)`, logged once from `createRuntime`, because `validateForms` and
+  `prepareBrand` have no logger.
+- `formAction` constrains `I` and `S` to `Record<string, ActionInputDef | ActionSettingDef>`
+  with `const` inference. `DeliverResult` keeps `void`, under a `biome-ignore
+  noConfusingVoidType`.
+- Extra construction refusals: a non-object entry, a bad setting name, an input without a
+  label or with a non-boolean `required`, a non-string description.
+- A resolved action stores `check` and `deliver` bound to the definition. The info
+  includes the implicit `error` code (label "Could not process"); settings are
+  deep-copied through JSON.
+
+Storage, PATCH and the descriptor (phase 3)
+- The `FORMS` guard refuses by default when `mayConfigureActions` is absent.
+- The purge compares `refusalsOf` for the source locale and every configured locale;
+  with no locales configured, a translated message does not purge.
+- The client's `delivers` is never believed. An unregistered attachment keeps its stored
+  value; an echo of the stored value is a no-op; attaching a new unregistered action is a
+  `400`.
+- "Adds a problem" compares problem sentences per attachment, so renaming a question that
+  already had a problem may read as a new one. Left.
+- The request schema for an attachment avoids `bounded()` because a `textarea` setting
+  needs newlines; the limits live in `validateFormActions`.
+- `listForms` reads `fields` and `layout` only for forms that have attachments.
+- `GET /forms` and the PATCH read `c.var.brand`; the PATCH calls `brandOf` only when the
+  body carries `actions`.
+- `attention` counts registered attachments with a problem (check or deliver);
+  unregistered ones do not count.
+
+Submit and deliveries (phase 4)
+- Decision 15's Retry reset SQL was wrong twice. `not (failure = 'predates_mapping')` is
+  `NULL` for a row with no failure, which refused every ordinary retry, so the statement
+  uses `failure is not 'predates_mapping'`. `not (status = 'pending' and next_at > ?now)`
+  refused a retry during a backoff wait, so the reset allows `claim is null or next_at <=
+  now` and clears the claim, and a result write clears the claim as well.
+- `givenUp` means the row ended `failed`, including a permanent `refused`.
+- **`ResponsePage` carries `overdueDeliveries` beside `failedDeliveries`**, both at the top
+  level of the page (not under `count`), both fenced by the site fence and neither narrowed
+  by `q` or the date range. It counts `pending` deliveries more than ten minutes past
+  `next_at` (`DELIVERY_OVERDUE_MS`) and is what the admin's "Retries are not running"
+  banner reads (phase 5). The spec named only `failedDeliveries`.
+- `ResponseRow.deliveries` is `DeliverySummary[]`; `responseById` answers a
+  `ResponseDetail` whose `deliveries` are `DeliveryRow[]` (no `host`).
+- The timeout skip inside a delivery pass is keyed by action id alone, because the brand
+  is unknown before the load, so one 25-row page of one hung action can starve another
+  brand's rows for a tick. Not fixed.
+- `runDeliveries` takes internal `budgetMs` and `deliverMs`; the check timeout is tested
+  with fake timers. `no_brand` is tested with `brandFor` returning null.
+- The Retry route uses the request's brand, not the response's site's brand; the cron
+  resolves it from `site_id`.
+- Decision 19's exports from `folio/server`: `FolioForms`, `FormResponse`, `ResponseValue`,
+  `SubmittedFile`, `FormMeta` and the `Delivery*` types.
+- New test files: `form-actions-admin.test.ts`, `form-submit-actions.test.ts`,
+  `form-deliveries.test.ts` and `form-actions-fixture.ts`.
+
+Admin (phase 5)
+- The builder sends `actions` on the PATCH only when they differ from the saved value.
+- Retyping, requiring or making conditional a question an action reads is refused with a
+  toast rather than applied. Save is disabled, with the reason shown, only when the draft
+  adds a new attachment problem.
+- `ActionsEditor` is in `BY_ROUTE` (the dialog count becomes 41). The fixture gains
+  `registryActions`, `responses`, `deliveries` and `retried`.
+- Retry is shown only when `canRetryDelivery`, and the server's `409` reason is the toast.
+- While translating, mappings and settings are hidden and only the messages are shown.
+  `SettingControl` gained `textarea` and `date` branches.
+- **Not browser-verified**: the Actions layout, badge wrapping, the banners, the
+  drawer and Retry focus, the "Working..." state, settings text inputs, disabled-button
+  tooltips and the date and textarea controls.
+
+Demo, end-to-end script and prose (phase 6)
+- `demo-guard` and `demo-webhook` are defined with `formAction` above `createFolio` in
+  `examples/demo/src/index.tsx` (a `const` used in the config has to be declared first).
+  `examples/starter` is unchanged.
+- `scripts/form-actions-test.mjs` asserts the delivery is gone through the HTTP surface
+  (the response is a `404`, Retry is a `404`, and `failedDeliveries` and
+  `overdueDeliveries` are zero), because a script cannot read D1; the table itself is
+  proven by `form-deliveries.test.ts`. It does not assert the rate-limit counting, which
+  `form-submit-actions.test.ts` owns.
+- `docs/configuration.md` anchors were corrected from the spec's line numbers, which had
+  moved. The `ROADMAP.md` entry is a note on the existing "no vendor integration" bullet,
+  since the roadmap had no spec-36 item to mark.

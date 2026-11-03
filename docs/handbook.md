@@ -2327,10 +2327,12 @@ parameter becoming an open redirect). It is a **303** rather than a 302 so the
 follow-up is a GET whatever the browser would otherwise have done, and a refresh
 on the thank-you page does not re-post.
 
-It carries at most three parameters: `folio_status` (`ok` | `invalid` | `closed` |
-`rate` | `verify` | `error`), `folio_form` (the form's slug, so a page carrying two
-forms can tell which one answered) and `folio_invalid` (a comma-separated list of
-field names, never their values). **No submitted value, no response id and no
+It carries at most four parameters: `folio_status` (`ok` | `invalid` | `closed` |
+`rate` | `verify` | `refused` | `error`), `folio_form` (the form's slug, so a page carrying two
+forms can tell which one answered), `folio_invalid` (a comma-separated list of
+field names, never their values) and, with `refused`, `folio_reason` (an
+`<action>.<code>` identifier from code, rendered by lookup in `form.refusals`; see
+[Form actions](#form-actions)). **No submitted value, no response id and no
 visitor identifier ever reaches a URL** — a URL is a cache key, a `Referer`, a
 history entry and a log line at once. The good half of that rule is that
 `?folio_status=ok` names nothing personal and is therefore an ordinary cacheable
@@ -2456,6 +2458,9 @@ hooks: {
 }
 ```
 
+For anything that needs a delivery log, retries or a visitor-facing refusal, use
+[Form actions](#form-actions) instead; `submitted` is the unlogged, unretried hook.
+
 **This is the entire programmatic surface for responses**: there is no `/api/v1`
 route, no MCP tool and no in-process reader, deliberately. It fires after the row
 has committed and only for a row that was actually written — a submission that
@@ -2464,6 +2469,73 @@ identical submission from thirty seconds ago fires once, which is what stops a C
 seeing the same lead twice. `actor` is always `null`, unlike every other hook: the
 route is unauthenticated and the answer is a stranger's, so attributing it to
 whichever editor happened to be signed in in that browser would be a lie.
+
+### Form actions
+
+`hooks.submitted` forwards a response and forgets it. When a submission has to reach a
+CRM, a booking system or a mailbox, and somebody has to know when it did not, register
+an **action** instead. A host writes it once; a publisher attaches it to a form.
+
+**For the developer.** Register actions per brand under `forms.actions` (the
+[configuration reference](configuration.md#forms-folioformsenv) has the full example)
+and write each with `formAction`. An action declares:
+
+- `inputs`: what it needs, by kind (`text`, `email`, `number`, `boolean`, `list`,
+  `file`), each required or optional;
+- `settings`: what a publisher fills in per form, drawn with the same controls as block
+  fields;
+- `codes`: the reasons a `check` may refuse with; and
+- a `check`, a `deliver`, or both.
+
+A `check` runs before the response is stored, is a read with no side effects, and can
+refuse the visitor with a code. If it throws or runs out of time it refuses the visitor
+with the action's `error` code: it fails closed. A `deliver` runs after the response
+has committed, never changes what the visitor is told, and is attempted again with
+backoff, up to eight times, by the `folio.runSchedules` call in your `scheduled()`
+handler. It receives `ctx.key`, an idempotency key stable across retries, so use it
+against a vendor that accepts one.
+
+A refused attempt counts against `ratePerHour`, and a check's verdict is visible to
+anyone who can post, so a code that reveals something about a person (`duplicate`)
+belongs behind `verify`. To skip a delivery off production, compare `ctx.host` and
+return `{ skipped: 'Not a production host' }`.
+
+**For the publisher.** In the form builder, **Actions** lists what the host provides.
+Attaching one asks for three things:
+
+1. **Mapping.** Each input the action needs is mapped to one of the form's questions.
+   Folio will not save an action whose required input has no question, and it will not
+   let you delete, retype, make optional or make conditional a question an action reads.
+   Renaming a question moves the mapping with it.
+2. **Settings.** Whatever the developer exposed. They are visible to anyone who can read
+   the form, so they are not the place for a key.
+3. **Messages.** For each code a check can refuse with, the text the visitor reads, per
+   language. Left empty, the developer's default is used. The implicit "Could not
+   process" code covers a check that failed.
+
+Changing where responses go needs **publisher** access, not editor.
+
+**Reading deliveries.** Responses shows each action's outcome against the response:
+*Delivered*, *Skipped* with the action's own reason, *Failed*, *Queued* or
+*Retrying (3 of 8)* while attempts remain, or *Cancelled* (the action was removed from
+the form). A failure shows a category, such
+as "The action threw an error. Details are in the Worker's logs." The text of a thrown
+error is never shown to an editor, since a vendor URL can carry a key; it goes to the
+Worker's log with the response id. **Retry** sends a failed, skipped or waiting delivery
+again now, with the form's current settings and the mapping as it stood when the visitor
+submitted, and shows the result. A delivered row cannot be retried, because resending a
+lead the other system already holds makes a duplicate, and a response submitted before
+the current mapping cannot be retried either.
+
+**Needs attention** is the badge on a form in the Forms list, and the banner above its
+responses, when an attached action has a problem: its code is no longer registered, its
+mapping is incomplete, or deliveries have failed. A banner also says when retries are
+not running, which means your Worker has no cron calling `folio.runSchedules`. The
+problem never locks the form; a checking action with a broken mapping refuses visitors
+until a publisher remaps it, and the banner says so.
+
+Attachment is forward-only. A response is delivered only to the actions attached when it
+was submitted, and deleting a response deletes its deliveries.
 
 ### Two things about the cache
 

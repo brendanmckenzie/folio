@@ -11,6 +11,10 @@
  * Nothing here knows about Hono or a Request, matching `publish.ts`'s own
  * rule: a Durable Object alarm (no `ExecutionContext`) has to be able to fire
  * these too (see `runtime.ts`'s `alarmHookCtx`).
+ *
+ * A form submission that needs a delivery log and retries wants `forms.actions`
+ * (`docs/specs/content-model/form-actions.md`), which has both; `submitted` below
+ * stays the unlogged, unretried hook this paragraph describes.
  */
 import type { Doc } from "../core/doc";
 import { DEFAULT_SITE, type GroupRef, type SiteRef } from "../core/sites";

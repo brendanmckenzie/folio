@@ -108,8 +108,9 @@ and whether it needs anything from you beyond applying it.
 | `0014_form_logic.sql` | `forms.layout` (a form's sections) and `form_responses.unasked` (the questions a response was never asked) | **Apply it before you deploy**: this release's form reads select `forms.layout` and its response reads select `unasked`, so a Worker deployed first fails every form read with `no such column`. Both columns are additive with defaults (`'{}'` and `'[]'`), safe ahead of the deploy, and change nothing for a form until an editor gives it a condition or a section. Read [conditional questions](#conditional-questions-sections-and-prefill-2026-10-19) before you do. |
 | `0015_draft_data.sql` | One nullable column, `stories.draft_data` (a JSON mirror of the draft's root scalars, for the Data table) | **Apply it before you deploy**: the Data list selects it for anyone who may read drafts, so a Worker deployed first answers `500` to every editor. Additive and nullable, so safe ahead of the deploy. Then run `POST {base}/api/reindex?drafts=1` once. Read [draft values](#draft-values-in-the-data-table-v120) first. |
 | `0016_option_sources.sql` | `option_lists` (the last good list per host option source) and `form_responses.option_labels` | **Apply it before you deploy**: v1.3.0 reads `option_lists` when it renders a form and selects `option_labels` in every response read, so a Worker deployed first fails both with `no such table` / `no such column`. Additive and safe ahead of the deploy. v1.3.0 is **roll-forward only**: read [that section](#v130-is-roll-forward-only) first. |
+| `0017_form_actions.sql` | `forms.actions` (a form's attached actions), the `form_deliveries` log, and `form_refusals` (refused attempts, for the rate limit) | **Apply it before you deploy**: this release's form reads select `forms.actions` and every submission's rate check reads `form_refusals`, so a Worker deployed first fails both with `no such column` / `no such table`. Additive, safe ahead of the deploy, and independent of `0016`. v1.3.0 is **roll-forward only**: read [that section](#v130-is-roll-forward-only) first. |
 
-`0011`, `0013`, `0014`, `0015` and `0016` have landed, and `0017` is claimed by v1.3.0's form actions. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0018`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
+`0011`, `0013`, `0014`, `0015`, `0016` and `0017` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0018`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -816,11 +817,53 @@ in the code regardless:
   `ContentOptionSettings` and `ResolvedOptionsFrom`. `folio/server` gains the types
   `FolioOptionSource`, `OptionSourceInput` and `OptionSourceItem`.
 
+### Form actions (v1.3.0)
+
+`0017_form_actions.sql` adds a column and two tables. Apply it before you deploy.
+Nothing changes for a form until code registers an action, with one exception:
+**refused submissions now count against `ratePerHour`**. A visitor who is answered
+`invalid` ten times in an hour is then answered `rate`. What changes in the code
+regardless:
+
+- **`FolioForms` gains `actions`**, per brand on a deployment with `brands`. Write each
+  with the new `formAction`. A publisher attaches an action to a form in the builder,
+  maps its inputs to questions and writes the text of each refusal code.
+- **New exports from `folio/server`**: the value `formAction`, and the types
+  `FormAction`, `ActionInputDef`, `ActionInputKind`, `ActionSettingDef`, `ActionCodeDef`,
+  `CheckContext`, `CheckResult`, `DeliverContext`, `DeliverResult`, `ActionQuestion`,
+  `DeliveryStatus`, `DeliveryFailureCategory`, `DeliveryRow`, `DeliveryRunReport`,
+  `DeliveryFailure`, `FolioForms`, and the four payload types `ResponseValue`,
+  `FormResponse`, `FormMeta` and `SubmittedFile`. **A host that redefined those four
+  locally may delete its copies.** The vocabulary (attachments, `refusalsOf`,
+  `validateSettings`) is public from `folio/core`.
+- **`ResolvedForm` gains `refusals`** and a native refused submission redirects with
+  `folio_status=refused&folio_reason=<action>.<code>`. Render the text by lookup, and
+  never print the parameter, which is attacker-controlled:
+
+  ```ts
+  const reason = params.get('folio_reason') ?? ''
+  const text = form.refusals?.[reason]
+    ?? form.refusals?.[`${reason.split('.')[0]}.error`]
+    ?? 'We could not accept that submission.'
+  ```
+
+  The second fallback covers a page cached before a deploy that added a code. The key
+  is absent when the form has no checking action, so an existing descriptor is
+  unchanged. A JSON submission gets the resolved message in `error.message`, with
+  `reason` beside it.
+- **`ScheduleRunReport` gains `deliveries`**, present only on the `folio.runSchedules`
+  call that finishes the sweep (`continueFrom` null). That call also retries failed
+  deliveries, so a `scheduled()` that already loops on `continueFrom` needs no change;
+  without a cron a delivery gets its first attempt and no retries.
+- **Configuring actions needs `publisher`.** An editor can still change everything else
+  on a form.
+
 ### v1.3.0 is roll-forward only
 
 **v1.3.0 cannot be rolled back to v1.2.x.** If something is wrong after the upgrade,
 deploy a v1.3.x fix. Do not redeploy a v1.2.x pin. A v1.2.x build reading a v1.3.0
-database breaks the following, and some of it cannot be repaired afterwards:
+database breaks the following, and none of it is undone by redeploying v1.3.0 (spec 37's
+items come first, spec 36's after them):
 
 - **Enquiries are lost while visitors are told they were received.** On any form
   with a sourced question that has no typed options, v1.2.x reads the whole form as
@@ -834,8 +877,23 @@ database breaks the following, and some of it cannot be repaired afterwards:
   overwrites the stored questions permanently.
 - **Responses taken meanwhile have no option labels**, so their content-sourced
   answers read as story ids in Responses and the CSV, permanently.
+- **Checks stop running.** A form that relied on one accepts what it would have
+  refused.
+- **Deliveries stop, and the gap is permanent.** Pending rows wait untouched and are
+  attempted on the roll-forward, possibly hours late. Responses received while the
+  older build is live get **no delivery rows at all**, and attachment is forward-only,
+  so they are never delivered by Folio.
+- **Mappings are unprotected.** The older builder has no mapping refusals, so an editor
+  can delete or retype a question an action reads. After the roll-forward, every
+  checking form whose mapping was broken that way refuses every visitor until a
+  publisher remaps it.
+- **Deleted responses leave their delivery rows behind.** The older delete paths do not
+  know `form_deliveries`, so rows (with their stored mapping and any action `detail`)
+  outlive the responses they were about, until the roll-forward's sweep finds and drops
+  them one by one.
+- **Refused attempts stop counting** against the rate limit.
 
-The new table and columns stay in the database, and an older build ignores them.
+The new tables and columns stay in the database, and an older build ignores them.
 That is the only part of this release that a rollback leaves alone.
 
 ### `anthropicDescriber` reports usage (2026-10-20) (v1.1.0)
