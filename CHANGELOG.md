@@ -8,6 +8,40 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.3.0
+
+A minor release with two migrations, `0016` and `0017`. **Apply both before you deploy
+the Worker**, and read [v1.3.0 is roll-forward only](UPGRADING.md#v130-is-roll-forward-only)
+first: a v1.2.x build cannot be redeployed over a v1.3.0 database.
+
+### Added
+
+- **Form option sources.** A question's options can come from published content or from
+  a host-registered source (`FolioForms.sources`), with the last good list kept in
+  `option_lists` and the chosen labels stored on each response as `optionLabels`
+  (`0016_option_sources.sql`, #129). `folio.refreshOptionSources` belongs in `scheduled()`.
+- **Form actions.** A publisher attaches host actions (`formAction`, `FolioForms.actions`)
+  to a form to check a submission before it is accepted and to deliver it afterwards,
+  with a delivery log and retries (`0017_form_actions.sql`, #130). Refused submissions
+  now count against `ratePerHour`.
+- **Form steps and `folio/form`.** A form can be split into steps, and `folio/form`
+  (the eighth export subpath) adds `useFolioForm`, an optional headless React hook.
+  No migration (#131).
+
+### Changed
+
+- **A host's messages can override the server's default status text** for a submission
+  (#132).
+- **A question Folio cannot read is dropped on its own**, and logged, rather than emptying
+  its whole form.
+
+### Breaking changes
+
+None to the `exports` surface or to `createFolio()` keys. The behaviour changes above
+(refusals counting against the rate limit, a sourced question showing `stry_` ids to a
+`submitted` hook that read raw values) are described under the v1.3.0 entries in
+[`UPGRADING.md`](UPGRADING.md).
+
 ## 1.2.4
 
 A patch release: nothing to run or edit.

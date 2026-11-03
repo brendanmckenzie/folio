@@ -77,13 +77,13 @@ Biome and gitleaks on commit, commitlint on the message, and a refusal to push
 
 ```
 ./scripts/e2e.sh scripts/sync-test.mjs     # one script
-./scripts/e2e-all.sh                       # all 22, one fresh database each
+./scripts/e2e-all.sh                       # all 25, one fresh database each
 ```
 
 **Both propagate the script's exit code**, so either can gate something. `e2e.sh` used
 to discard it — `node "$SCRIPT" ... || true` with a trailing `pkill ... || true` as the
 last statement — which meant the whole tier was decorative for as long as it existed.
-`e2e-all.sh` is a loop of reset-then-run rather than one server for all 22, because they
+`e2e-all.sh` is a loop of reset-then-run rather than one server for all 25, because they
 share a database otherwise; that makes it minutes rather than seconds, which is why
 `release.mjs --tag` runs it and an ordinary push does not.
 
