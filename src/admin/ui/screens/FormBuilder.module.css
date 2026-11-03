@@ -249,6 +249,13 @@
   font-weight: 550;
 }
 
+/* A step's header line: heavier than a section's, since it is a whole page. */
+.stepRow {
+  display: flex;
+  margin-top: var(--space-3);
+  font-weight: 650;
+}
+
 /* "Shown when …" under a question's own line, quieter than its label. */
 .fieldRowLogic {
   flex: none;

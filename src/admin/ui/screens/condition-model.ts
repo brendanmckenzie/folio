@@ -9,7 +9,7 @@
  */
 import type { FieldCondition } from "../../../core/conditions";
 import type { Json } from "../../../core/doc";
-import type { FormField, FormFieldKind } from "../../../core/forms";
+import type { FormField, FormFieldKind, FormLayout } from "../../../core/forms";
 
 /** What the editor offers, as the words it shows. `notSet` and `set` are both
  *  `isSet`, which carries its own boolean. */
@@ -98,15 +98,38 @@ export const isValueBearing = (kind: FormFieldKind): boolean =>
 /**
  * The questions a rule may name. A `showIf` may name only earlier questions
  * (decision 2); a `requireIf` any other question. Either way, value-bearing only.
+ *
+ * On a stepped form (`layout.steps`) a `requireIf` is further limited to questions on
+ * the same step or an earlier one (`form-steps.md` decision 2): a required rule that
+ * named a later step would make a step already left incomplete. A `showIf` already
+ * names only earlier questions, which are on the same step or an earlier one.
  */
 export function sourcesFor(
   fields: readonly FormField[],
   index: number,
   verb: "show" | "require",
+  layout?: FormLayout,
 ): FormField[] {
-  return fields.filter(
-    (f, i) => isValueBearing(f.kind) && (verb === "show" ? i < index : i !== index),
-  );
+  const order = new Map((layout?.steps ?? []).map((s, i) => [s.name, i]));
+  const own = fields[index]?.step === undefined ? undefined : order.get(fields[index].step);
+  return fields.filter((f, i) => {
+    if (!isValueBearing(f.kind)) return false;
+    if (verb === "show") return i < index;
+    if (i === index) return false;
+    if (own === undefined) return true;
+    const theirs = f.step === undefined ? undefined : order.get(f.step);
+    return theirs === undefined || theirs <= own;
+  });
+}
+
+/**
+ * The questions a step's `showIf` may name: those above its first member, which are
+ * therefore on earlier steps (decision 2). A step with no members offers every
+ * question, as `SectionPanel` does for a section.
+ */
+export function stepSourcesFor(fields: readonly FormField[], step: string): FormField[] {
+  const first = fields.findIndex((f) => f.step === step);
+  return sourcesFor(fields, first === -1 ? fields.length : first, "show");
 }
 
 /** The operators `checkFormLogic` accepts for a source of `kind`, in the order the

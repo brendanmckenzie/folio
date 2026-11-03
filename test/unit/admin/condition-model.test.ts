@@ -9,6 +9,7 @@ import {
   fromEditable,
   operatorsFor,
   sourcesFor,
+  stepSourcesFor,
   toEditable,
 } from "../../../src/admin/ui/screens/condition-model";
 
@@ -188,5 +189,48 @@ describe("formConditionText", () => {
   it("phrases a checkbox as ticked or not", () => {
     const box: FormField = { name: "box", kind: "checkbox", label: "Box" };
     expect(formConditionText({ field: "box", eq: true }, [box])).toBe('"Box" is ticked');
+  });
+});
+
+describe("sourcesFor on a stepped form", () => {
+  const f = (name: string, step: string, over: Partial<FormField> = {}): FormField => ({
+    name,
+    kind: "text",
+    label: name,
+    step,
+    ...over,
+  });
+  const fields = [f("a", "s1"), f("b", "s1"), f("c", "s2"), f("d", "s2"), f("e", "s3")];
+  const layout = {
+    steps: [
+      { name: "s1", label: "One" },
+      { name: "s2", label: "Two" },
+      { name: "s3", label: "Three" },
+    ],
+  };
+
+  it("offers a required rule only questions on its own step or earlier", () => {
+    expect(sourcesFor(fields, 2, "require", layout).map((x) => x.name)).toEqual(["a", "b", "d"]);
+    expect(sourcesFor(fields, 0, "require", layout).map((x) => x.name)).toEqual(["b"]);
+    expect(sourcesFor(fields, 4, "require", layout).map((x) => x.name)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+  });
+
+  it("excludes later-step questions, which the unstepped call would offer", () => {
+    expect(sourcesFor(fields, 0, "require").map((x) => x.name)).toContain("e");
+    expect(sourcesFor(fields, 0, "require", layout).map((x) => x.name)).not.toContain("e");
+  });
+
+  it("leaves a show rule as before: questions above", () => {
+    expect(sourcesFor(fields, 3, "show", layout).map((x) => x.name)).toEqual(["a", "b", "c"]);
+  });
+
+  it("offers a step's show rule only questions above its first member", () => {
+    expect(stepSourcesFor(fields, "s2").map((x) => x.name)).toEqual(["a", "b"]);
+    expect(stepSourcesFor(fields, "s1")).toEqual([]);
   });
 });
