@@ -128,6 +128,11 @@ export type { DocumentKind, DocumentType } from "../core/schema";
 export type { Migration } from "../core/migrate";
 export type { VersionKind, VersionMeta } from "./versions";
 export type { Redirect } from "./redirects";
+export type {
+  FolioOptionSource,
+  OptionSourceInput,
+  OptionSourceItem,
+} from "./form-responses";
 /**
  * The migration and audit surface a host reads off a report. The *authoring*
  * side (`defineMigration`, `field`, `block`) lives in `folio/engine`, where the

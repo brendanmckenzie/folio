@@ -42,6 +42,7 @@ import {
   readBulkCursor,
   writeBulkCursor,
 } from "../core/bulk";
+import type { Field } from "../core/fields";
 import { answersFrom, DATE_ANSWER, formState, NUMBER_ANSWER } from "../core/form-logic";
 import {
   type FileAccept,
@@ -51,6 +52,7 @@ import {
   type FormSection,
   RESERVED_PREFIX,
 } from "../core/forms";
+import { CONTENT_SOURCE } from "../core/option-sources";
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
 import { DEFAULT_SITE } from "../core/sites";
 import { readCappedBody, safeFilename, sniffContentType } from "./assets";
@@ -68,7 +70,7 @@ import {
   uploadKeysOf,
 } from "./forms";
 import { type Keyset, keysetWhere, orderBy, whereOf } from "./keyset";
-import type { FolioLogger } from "./types";
+import type { BrandRef, FolioLogger } from "./types";
 import {
   DOWNLOAD_CONTENT_TYPE,
   isPrintableAnswer,
@@ -2268,16 +2270,82 @@ export interface FolioForms<Env> {
    * script, not a botnet.
    */
   ratePerHour?: number;
+  /**
+   * Option sources a question may list its choices from, by id
+   * (`docs/specs/content-model/form-option-sources.md` decision 1). Per brand,
+   * because `forms` is. `content` is built in and reserved.
+   *
+   * A list is kept in D1 and refreshed in the background: a render never calls
+   * `load` (decision 6).
+   */
+  sources?: Readonly<Record<string, FolioOptionSource<Env>>>;
 }
+
+/** The field kinds a source's `settings` may use: the ones the builder can draw. */
+export type OptionSourceSetting = Extract<
+  Field,
+  { kind: "text" | "number" | "boolean" | "select" }
+>;
+
+/** One host option source (`FolioForms.sources`). */
+export interface FolioOptionSource<Env> {
+  /** What the builder calls it. */
+  label: string;
+  /** Block field definitions (`folio/core`), `text | number | boolean | select` only. */
+  settings?: Readonly<Record<string, OptionSourceSetting>>;
+  /** Seconds a list stays fresh. Default 3600, valid 60 to 604800. */
+  ttl?: number;
+  /** Labels differ by locale: load once per locale. Default false, one load serves all. */
+  localised?: boolean;
+  /**
+   * The list. A method, for `verify`'s bivariance reason. Called by the background
+   * refresh only, under a lease and a timeout, never by a render (decision 7).
+   * Anything it throws is logged and shown to an editor as a category (decision 16).
+   */
+  load(
+    input: OptionSourceInput,
+    env: Env,
+  ): readonly OptionSourceItem[] | Promise<readonly OptionSourceItem[]>;
+}
+
+export interface OptionSourceInput {
+  settings: Readonly<Record<string, string | number | boolean>>;
+  /** The locale code the labels are wanted in. Null for the source locale, and always
+   *  null for a source that is not `localised`. */
+  locale: string | null;
+  brand: BrandRef | null;
+  /** Aborts at the caller's timeout. */
+  signal: AbortSignal;
+}
+
+export interface OptionSourceItem {
+  value: string;
+  label?: string;
+}
+
+/** A source as the runtime holds it: its `id`, and `ttl` and `localised` defaulted. */
+export type ResolvedOptionSource = FolioOptionSource<unknown> & {
+  id: string;
+  ttl: number;
+  localised: boolean;
+};
 
 /** `FolioConfig.forms`, validated and defaulted. */
 export interface ResolvedForms {
   config: FolioForms<unknown>;
   /** `config.ratePerHour`, defaulted. `0` means no limit is applied. */
   ratePerHour: number;
+  /** `config.sources`, defaulted, keyed by id. Empty when the host registers none. */
+  sources: ReadonlyMap<string, ResolvedOptionSource>;
 }
 
-const FORMS_KEYS = ["verify", "ratePerHour"];
+const FORMS_KEYS = ["verify", "ratePerHour", "sources"];
+
+export const DEFAULT_SOURCE_TTL = 3600;
+export const MIN_SOURCE_TTL = 60;
+export const MAX_SOURCE_TTL = 604_800;
+const SOURCE_ID = /^[a-z][a-z0-9-]{0,47}$/;
+const SETTING_KINDS = ["text", "number", "boolean", "select"];
 
 /**
  * Construction-time validation, alongside `validateGate`, `validateDescribe` and
@@ -2315,5 +2383,66 @@ export function validateForms<Env>(forms: FolioForms<Env> | undefined): Resolved
     );
   }
 
-  return { config: forms as FolioForms<unknown>, ratePerHour };
+  return {
+    config: forms as FolioForms<unknown>,
+    ratePerHour,
+    sources: validateSources(forms.sources),
+  };
+}
+
+/**
+ * `forms.sources`, refused at construction for the same reason `verify` is: a
+ * source that cannot load would otherwise be discovered by the first editor to
+ * save a question that names it (decision 1).
+ */
+function validateSources<Env>(
+  sources: FolioForms<Env>["sources"],
+): ReadonlyMap<string, ResolvedOptionSource> {
+  const out = new Map<string, ResolvedOptionSource>();
+  if (sources === undefined) return out;
+  if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
+    throw new Error("folio: `forms.sources` must be an object keyed by source id");
+  }
+  for (const [id, source] of Object.entries(sources)) {
+    const where = `\`forms.sources.${id}\``;
+    if (!SOURCE_ID.test(id)) {
+      throw new Error(`folio: ${where} is not a valid source id (${SOURCE_ID})`);
+    }
+    if (id === CONTENT_SOURCE) {
+      throw new Error(`folio: ${where} is reserved: \`content\` is the built-in source`);
+    }
+    if (!source || typeof source !== "object") {
+      throw new Error(`folio: ${where} must be an object`);
+    }
+    if (typeof source.load !== "function") {
+      throw new Error(`folio: ${where}.load must be a function`);
+    }
+    if (typeof source.label !== "string" || source.label.trim() === "") {
+      throw new Error(`folio: ${where}.label must be a non-empty string`);
+    }
+    const ttl = source.ttl ?? DEFAULT_SOURCE_TTL;
+    if (!Number.isInteger(ttl) || ttl < MIN_SOURCE_TTL || ttl > MAX_SOURCE_TTL) {
+      throw new Error(
+        `folio: ${where}.ttl is ${JSON.stringify(source.ttl)}; it must be a whole number of seconds from ${MIN_SOURCE_TTL} to ${MAX_SOURCE_TTL}`,
+      );
+    }
+    if (source.localised !== undefined && typeof source.localised !== "boolean") {
+      throw new Error(`folio: ${where}.localised must be a boolean`);
+    }
+    for (const [name, field] of Object.entries(source.settings ?? {})) {
+      if (!field || !SETTING_KINDS.includes((field as { kind?: string }).kind ?? "")) {
+        throw new Error(
+          `folio: ${where}.settings.${name} must be a ${SETTING_KINDS.join(", ")} field`,
+        );
+      }
+    }
+    out.set(id, {
+      ...source,
+      id,
+      load: source.load.bind(source),
+      ttl,
+      localised: source.localised ?? false,
+    } as ResolvedOptionSource);
+  }
+  return out;
 }

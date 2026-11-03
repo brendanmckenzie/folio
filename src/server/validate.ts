@@ -21,6 +21,7 @@ import * as v from "valibot";
 import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from "../core/assets";
 import { MAX_SLUG } from "../core/story";
 import { conditionRefusal, type FieldCondition } from "../core/conditions";
+import type { Json } from "../core/doc";
 import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
 import type { DocumentType } from "../core/schema";
@@ -1848,6 +1849,37 @@ const FORM_CONDITION = v.custom<FieldCondition>(
   "must be a valid condition",
 );
 
+/** A source's settings: a plain JSON object of at most 4096 bytes. */
+const MAX_OPTION_SETTINGS_BYTES = 4096;
+const isPlainJson = (value: unknown, depth = 0): boolean => {
+  if (depth > 8) return false;
+  if (value === null) return true;
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return true;
+    case "number":
+      return Number.isFinite(value);
+    case "object": {
+      if (Array.isArray(value)) return value.every((x) => isPlainJson(x, depth + 1));
+      const proto = Object.getPrototypeOf(value);
+      if (proto !== Object.prototype && proto !== null) return false;
+      return Object.values(value as object).every((x) => isPlainJson(x, depth + 1));
+    }
+    default:
+      return false;
+  }
+};
+const OPTION_SETTINGS = v.custom<Record<string, Json>>(
+  (settings) =>
+    typeof settings === "object" &&
+    settings !== null &&
+    !Array.isArray(settings) &&
+    isPlainJson(settings) &&
+    JSON.stringify(settings).length <= MAX_OPTION_SETTINGS_BYTES,
+  `must be a JSON object of ${MAX_OPTION_SETTINGS_BYTES} bytes or fewer`,
+);
+
 /**
  * One question, bounded. Every string cap here exists for the reason this file
  * exists: they bound what reaches `forms.fields` before the write.
@@ -1904,6 +1936,13 @@ const FORM_FIELD = v.object(
     section: v.optional(FIELD_NAME),
     hold: v.optional(v.literal(true)),
     prefill: v.optional(v.literal("query")),
+    // Option sources (`docs/specs/content-model/form-option-sources.md` decision 1).
+    // Bounded here, structurally checked by `validateOneField`, and whether the
+    // source exists and the settings suit it is `checkOptionSources`', which has the
+    // brand. Named so the `Required<FormField>` fixture catches a stripped key.
+    optionsFrom: v.optional(
+      v.object({ source: required(48), settings: v.optional(OPTION_SETTINGS) }, OBJECT),
+    ),
     i18n: v.optional(
       v.record(
         LOCALE_CODE,

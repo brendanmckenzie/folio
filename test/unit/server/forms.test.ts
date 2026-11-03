@@ -401,9 +401,7 @@ describe("FormPatchBody keeps every FormField key", () => {
   // Typed `Required<FormField>`: adding a key to `FormField` fails typecheck here
   // until the fixture sets it, which is what makes this a guard against
   // `v.object` stripping a new key without anybody noticing.
-  // `optionsFrom` is omitted until the phase that teaches `FORM_FIELD` to keep it
-  // (spec 37 phase 2): putting it back here is what proves that change.
-  const everything: Required<Omit<FormField, "optionsFrom">> = {
+  const everything: Required<FormField> = {
     name: "q",
     kind: "text",
     label: "Q",
@@ -425,6 +423,7 @@ describe("FormPatchBody keeps every FormField key", () => {
     section: "s",
     hold: true,
     prefill: "query",
+    optionsFrom: { source: "countries", settings: { region: "oceania", limit: 5, all: false } },
     i18n: { fr: { label: "Q" } },
   };
 
@@ -435,6 +434,20 @@ describe("FormPatchBody keeps every FormField key", () => {
       "body",
     );
     expect(parsed.fields?.[0]).toEqual(everything);
+  });
+
+  it("refuses an optionsFrom that is not a bounded plain object", () => {
+    const patch = (optionsFrom: unknown) =>
+      parseOrThrow(
+        FormPatchBody,
+        { expectedUpdatedAt: 1, fields: [{ ...everything, optionsFrom }] },
+        "body",
+      );
+    expect(() => patch({ source: "" })).toThrow();
+    expect(() => patch({ source: "x".repeat(49) })).toThrow();
+    expect(() => patch({ source: "a", settings: [] })).toThrow();
+    expect(() => patch({ source: "a", settings: { big: "x".repeat(4100) } })).toThrow();
+    expect(() => patch("countries")).toThrow();
   });
 
   it("refuses a malformed condition and a malformed layout before anything is parsed", () => {

@@ -46,6 +46,7 @@ import {
   scopedGlobalTag,
   scopedTypeTag,
   siteTag,
+  sourceTag,
   storyTag,
   typeTag,
 } from "../core/cache-tags";
@@ -334,6 +335,39 @@ export async function purgeFormLayout(
   logger: FolioLogger = console,
 ): Promise<void> {
   await createPurger(capability, logger)("form layout", [formTag(id)]);
+}
+
+/**
+ * A host option source's list changed, or loaded for the first time
+ * (`form-option-sources.md` decision 7). Purges `source:<id>` (branded when the
+ * deployment is) now and, when the caller has a `waitUntil`, again
+ * `SITE_PURGE_DELAY_MS` later, `purgeSite`'s reason: a render that began on a
+ * replica before the write can put a page into the cache after the first purge.
+ *
+ * Takes the capability the way `purgeFormLayout` does, so a test injects one and a
+ * real host gets `platformPurge`. Returns the first purge's set.
+ */
+export async function purgeOptionSource(
+  id: string,
+  brand: string | null,
+  opts: {
+    capability?: PurgeCapability;
+    logger?: FolioLogger;
+    waitUntil?: (p: Promise<unknown>) => void;
+    /** Injectable so a test does not wait 25 real seconds. */
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<PurgeIssued | null> {
+  const capability = opts.capability ?? platformPurge;
+  const purge = createPurger(capability, opts.logger ?? console);
+  const sleep = opts.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const tag = [sourceTag(id, brand)];
+  const first = await purge("option source change", tag);
+  if (!opts.waitUntil || (await capability()) === null) return first;
+  opts.waitUntil(
+    sleep(SITE_PURGE_DELAY_MS).then(() => purge("option source change (second)", tag)),
+  );
+  return first;
 }
 
 /**
