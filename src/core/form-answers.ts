@@ -348,7 +348,7 @@ export function stepStatus(form: LogicForm, check: SubmissionCheck): StepStatus[
     return {
       name: step.name,
       reachable,
-      complete: reachable && !questions.some((name) => name in check.errors),
+      complete: reachable && !questions.some((name) => Object.hasOwn(check.errors, name)),
       questions,
     };
   });

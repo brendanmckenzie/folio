@@ -177,7 +177,6 @@ describe("controlPropsOf", () => {
       id: "p-email",
       name: "email",
       type: "email",
-      maxLength: 50,
       required: true,
     });
   });
@@ -234,14 +233,26 @@ describe("controlPropsOf", () => {
 });
 
 describe("fileRefusal and checkDom", () => {
-  it("refuses a file over maxBytes as too_long and a declared wrong type as invalid", () => {
+  it("refuses a file over maxBytes as too_long and leaves the type to the server", () => {
     const f = { maxBytes: 10, accept: ["image/png", "image/*"] };
     expect(fileRefusal(f, { size: 11, type: "image/png" })).toBe("too_long");
-    expect(fileRefusal({ accept: ["application/pdf"] }, { size: 1, type: "image/png" })).toBe(
-      "invalid",
-    );
-    expect(fileRefusal({ accept: ["image/*"] }, { size: 1, type: "image/webp" })).toBeNull();
+    // The server sniffs bytes: a csv or json the client would call off-type is taken.
+    const docs = { accept: ["application/pdf"] };
+    expect(fileRefusal(docs, { size: 1, type: "text/csv" })).toBeNull();
+    expect(fileRefusal(docs, { size: 1, type: "application/json" })).toBeNull();
     expect(fileRefusal(f, { size: 1, type: "" })).toBeNull();
+  });
+  it("gives number inputs step any, and no maxLength, so the browser matches the server", () => {
+    const n = controlPropsOf(rf("w", 0, { kind: "number", min: 0 }), undefined, ctx);
+    expect(n.step).toBe("any");
+    expect(controlPropsOf(rf("t", 0, { max: 10 }), undefined, ctx).maxLength).toBeUndefined();
+    expect(
+      controlPropsOf(rf("t", 0, { kind: "textarea", max: 10 }), undefined, ctx).maxLength,
+    ).toBeUndefined();
+  });
+  it("does not read Object.prototype for a question named constructor", () => {
+    const form = baseForm({ fields: [rf("constructor", 0)] });
+    expect(problemsOf(form, formLayout(form, {}), {})).toEqual([]);
   });
   it("judges a required file by the chosen File, and leaves an unavailable list to the server", () => {
     const form = baseForm({

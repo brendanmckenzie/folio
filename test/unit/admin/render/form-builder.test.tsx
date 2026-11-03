@@ -71,6 +71,19 @@ describe("FormBuilder with steps", () => {
     resetServed();
   });
 
+  it("words Required as whenever shown for a question on a conditional step", async () => {
+    serve({
+      form: {
+        ...steppedForm,
+        fields: steppedForm.fields.map((f) => (f.name === "c" ? { ...f, required: true } : f)),
+      },
+    });
+    await mountAt("/folio/form/frm_one");
+    await waitFor(() => expect(screen.getByText("Charlie")).not.toBeNull());
+    fireEvent.click(screen.getByText("Charlie"));
+    expect(screen.getByRole("option", { name: "Whenever it is shown" })).not.toBeNull();
+  });
+
   it("draws a header row per step and opens the step panel", async () => {
     serve({ form: steppedForm });
     await mountAt("/folio/form/frm_one");

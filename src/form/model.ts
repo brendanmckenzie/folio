@@ -207,7 +207,7 @@ export function problemsOf(
   const where = renderedStepOf(layout);
   const out: Problem[] = [];
   for (const field of form.fields) {
-    const token = refusals[field.name];
+    const token = Object.hasOwn(refusals, field.name) ? refusals[field.name] : undefined;
     if (!token) continue;
     out.push({
       name: field.name,
@@ -290,22 +290,14 @@ export interface DomCheck {
 
 const isFile = (v: unknown): v is File => typeof File !== "undefined" && v instanceof File;
 
-/** Client approximations for a chosen file: over `maxBytes` is `too_long`, a declared
- *  type outside `accept` is `invalid`. The server's sniff stays authoritative. */
+/** Client approximation for a chosen file: over `maxBytes` is `too_long`. The type is
+ *  left to the server: it sniffs bytes and never reads the declared type, so any client
+ *  check against `accept` could refuse a file the server takes. */
 export function fileRefusal(
   field: Pick<ResolvedFormField, "accept" | "maxBytes">,
   file: { size: number; type: string },
 ): AnswerRefusal | null {
   if (field.maxBytes !== undefined && file.size > field.maxBytes) return "too_long";
-  const accept = field.accept;
-  if (accept && accept.length > 0 && file.type !== "") {
-    const type = file.type.toLowerCase();
-    const ok = accept.some((a) => {
-      const want = a.toLowerCase();
-      return want.endsWith("/*") ? type.startsWith(want.slice(0, -1)) : type === want;
-    });
-    if (!ok) return "invalid";
-  }
   return null;
 }
 
@@ -423,7 +415,6 @@ export function controlPropsOf(
     case "tel":
     case "url":
       props.type = TEXT_TYPES[field.kind];
-      if (field.max !== undefined) props.maxLength = field.max;
       if (field.pattern !== undefined) props.pattern = field.pattern;
       if (field.placeholder !== undefined) props.placeholder = field.placeholder;
       props.defaultValue = asText(ctx.answer);
@@ -432,6 +423,7 @@ export function controlPropsOf(
     case "date":
       props.type = TEXT_TYPES[field.kind];
       if (field.kind === "number") {
+        props.step = "any";
         if (field.min !== undefined) props.min = field.min;
         if (field.max !== undefined) props.max = field.max;
       }
@@ -439,7 +431,6 @@ export function controlPropsOf(
       props.defaultValue = asText(ctx.answer);
       break;
     case "textarea":
-      if (field.max !== undefined) props.maxLength = field.max;
       if (field.placeholder !== undefined) props.placeholder = field.placeholder;
       props.defaultValue = asText(ctx.answer);
       break;

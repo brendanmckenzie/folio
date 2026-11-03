@@ -15,6 +15,7 @@ import {
   fieldRows,
   groupText,
   logicRefusal,
+  mergeRefusal,
   mergeStepIntoPrevious,
   moveFieldStep,
   moveRefusal,
@@ -265,6 +266,29 @@ describe("mergeStepIntoPrevious", () => {
     ]);
     expectContiguous(out.fields, out.layout);
     expect(logicRefusal(out.fields, out.layout)).toBeNull();
+  });
+
+  it("is refused when it would put an action's required input on a conditional step", () => {
+    const fields = [t("a", { step: "s1" }), t("m", { step: "s2" }), t("b", { step: "s3" })];
+    const layout: FormLayout = {
+      steps: [
+        { name: "s1", label: "One" },
+        { name: "s2", label: "Two", showIf: { field: "a", isSet: true } },
+        { name: "s3", label: "Three" },
+      ],
+    };
+    const info = {
+      id: "act",
+      label: "Notify",
+      inputs: [{ name: "who", label: "Who", kind: "email", required: true }],
+    } as unknown as FormActionInfo;
+    const actions: ActionContext = {
+      attachments: [{ action: "act", map: { who: "b" } }] as ActionContext["attachments"],
+      infos: new Map([["act", info]]),
+    };
+    expect(mergeRefusal(layout, "s3", fields, actions)).toMatch(/cannot be conditional/);
+    expect(mergeStepIntoPrevious(fields, layout, "s3", actions)).toBeNull();
+    expect(mergeStepIntoPrevious(fields, layout, "s3")).not.toBeNull();
   });
 
   it("is refused for the first step and for an unknown one", () => {

@@ -42,6 +42,7 @@ import {
   changeRefusal,
   endSectionAfter,
   logicRefusal,
+  mergeRefusal,
   mergeStepIntoPrevious,
   moveRefusal,
   optionRefusal,
@@ -615,11 +616,18 @@ export function FormBuilder({
               onChange={(next) =>
                 setDraft({ ...draft, layout: updateStep(draft.layout, next.name, next) })
               }
+              mergeReason={mergeRefusal(
+                draft.layout,
+                selectedStepDef.name,
+                draft.fields,
+                actionCtx,
+              )}
               onMerge={() => {
                 const merged = mergeStepIntoPrevious(
                   draft.fields,
                   draft.layout,
                   selectedStepDef.name,
+                  actionCtx,
                 );
                 if (merged) {
                   onLayout(merged);
@@ -832,7 +840,9 @@ function FieldPanel({
   const showListed = withListedOptions(showSources, lists);
   const requireListed = withListedOptions(requireSources, lists);
   const sectionRule = layout.sections?.find((sec) => sec.name === field.section)?.showIf;
-  const conditional = field.showIf !== undefined || sectionRule !== undefined;
+  const stepRule = layout.steps?.find((s) => s.name === field.step)?.showIf;
+  const conditional =
+    field.showIf !== undefined || sectionRule !== undefined || stepRule !== undefined;
   const requirement = field.requireIf ? "when" : field.required ? "always" : "no";
 
   const text = (key: TranslatableKey) => fieldText(field, key, locale, source);
@@ -1414,6 +1424,7 @@ function StepPanel({
   source,
   editable,
   ruleRefusal,
+  mergeReason,
   onChange,
   onMerge,
   onRemoveAll,
@@ -1428,6 +1439,7 @@ function StepPanel({
   editable: boolean;
   /** Why this step cannot be made conditional, when an action needs its answers. */
   ruleRefusal: string | null;
+  mergeReason: string | null;
   onChange: (next: FormStep) => void;
   onMerge: () => void;
   onRemoveAll: () => void;
@@ -1508,7 +1520,12 @@ function StepPanel({
           ) : null}
           <div className={css.sectionActions}>
             {index > 0 ? (
-              <Button size="sm" disabled={!editable} onClick={onMerge}>
+              <Button
+                size="sm"
+                disabled={!editable || mergeReason !== null}
+                title={mergeReason ?? undefined}
+                onClick={onMerge}
+              >
                 Merge with previous step
               </Button>
             ) : null}

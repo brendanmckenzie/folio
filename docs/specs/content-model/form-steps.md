@@ -1637,3 +1637,19 @@ remove confirmation and step translation; and for the hook, the browser's constr
 validation on hidden steps, autofill on hidden steps, a Turnstile widget inside a hidden
 step with `key={attempt}`, real focus, scroll and screen-reader announcements, a
 `requestSubmit` native POST, a real multipart fetch, and the hydration flash.
+
+**Build review.** An adversarial review of the built branch found seven things, all fixed.
+(1) The `[form]` effect committed on every run, so a host passing a new descriptor object
+each render looped until the tab ran out of memory; it now commits only when the read
+answers, errors or clamped step moved. (2) `number` controls now carry `step="any"`, as the
+server has no integer rule. (3) The client file check keeps only `maxBytes`: the server
+sniffs bytes and never reads the declared type, so any client type check could refuse a
+file the server takes. (4) Lookups keyed by question name (`problemsOf`, `refusalFor`,
+`stepStatus` and, predating the branch, `matches`) use `Object.hasOwn`, so a question named
+`constructor` no longer reads `Object.prototype`. (5) "Merge with previous step" is refused
+(and its button disabled with the reason) when it would put an action's required input on a
+conditional step, by the same `stepRuleRefusal` guard as a move. (6) The field panel words
+"Required" as "Whenever it is shown" when the step has a condition. (7) The hook no longer
+sets `maxLength`: browsers count UTF-16 units and the server counts code points, so it
+stopped astral characters the server accepts; `checkSubmission`'s `too_long` applies the
+limit.

@@ -728,7 +728,13 @@ export function useFolioForm(form: ResolvedForm, options: FolioFormOptions = {})
     if (!c.mounted || c.degraded) return;
     try {
       const fresh = read();
-      if (fresh) absorb(fresh.dom);
+      if (!fresh) return;
+      // Settle: a host that passes a new descriptor object every render must not
+      // re-render itself forever, so commit only when the read or the clamp moved.
+      const ev = evaluate(latest.current.form, fresh.dom.answers, c.current, true);
+      if (ev.error) throw ev.error;
+      if (same(fresh.dom) && ev.current === c.current) return;
+      absorb(fresh.dom);
     } catch (err) {
       degrade(err);
     }
@@ -741,7 +747,8 @@ export function useFolioForm(form: ResolvedForm, options: FolioFormOptions = {})
     core.outcome ?? (trip ? statusView(form, trip, messages) : null);
 
   const refusalFor = (name: string): AnswerRefusal | undefined =>
-    core.refusals[name] ?? (core.touched.has(name) ? core.errors[name] : undefined);
+    (Object.hasOwn(core.refusals, name) ? core.refusals[name] : undefined) ??
+    (core.touched.has(name) && Object.hasOwn(core.errors, name) ? core.errors[name] : undefined);
 
   const errorFor = (name: string) => {
     const token = refusalFor(name);

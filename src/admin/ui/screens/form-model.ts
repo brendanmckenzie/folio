@@ -1157,10 +1157,23 @@ export function startStepAt(
 }
 
 /** Why step `name` cannot merge into the one before it, or null. */
-export function mergeRefusal(layout: FormLayout, name: string): string | null {
-  const at = (layout.steps ?? []).findIndex((s) => s.name === name);
+export function mergeRefusal(
+  layout: FormLayout,
+  name: string,
+  fields?: readonly FormField[],
+  actions?: ActionContext,
+): string | null {
+  const steps = layout.steps ?? [];
+  const at = steps.findIndex((s) => s.name === name);
   if (at === -1) return "That step is not on the form.";
   if (at === 0) return "The first step has nothing before it to merge into.";
+  // Landing on a conditional step must not leave an action's required input
+  // sometimes unanswered (decision 14), the same guard as a move.
+  const into = steps[at - 1]!;
+  if (fields && into.showIf) {
+    const after = fields.map((f) => (f.step === name ? withStep(f, into.name) : f));
+    return stepRuleRefusal(after, into.name, actions);
+  }
   return null;
 }
 
@@ -1172,8 +1185,9 @@ export function mergeStepIntoPrevious(
   fields: readonly FormField[],
   layout: FormLayout,
   name: string,
+  actions?: ActionContext,
 ): { fields: FormField[]; layout: FormLayout; step: string } | null {
-  if (mergeRefusal(layout, name) !== null) return null;
+  if (mergeRefusal(layout, name, fields, actions) !== null) return null;
   const steps = layout.steps ?? [];
   const at = steps.findIndex((s) => s.name === name);
   const into = steps[at - 1]!.name;

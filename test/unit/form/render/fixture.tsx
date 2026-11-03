@@ -78,14 +78,20 @@ export function Host({
   options,
   expose,
   gate,
+  fresh,
+  onRender,
 }: {
   form: ResolvedForm;
   options?: FolioFormOptions;
   expose?: (f: FolioForm) => void;
   /** Disable the submit button, as a captcha gate does. */
   gate?: boolean;
+  /** Hand the hook a new descriptor object on every render, as an unmemoised host does. */
+  fresh?: boolean;
+  onRender?: () => void;
 }) {
-  const f = useFolioForm(form, options);
+  onRender?.();
+  const f = useFolioForm(fresh ? { ...form } : form, options);
   expose?.(f);
   const field = (fld: ResolvedFormField) => {
     const err = f.errorProps(fld);

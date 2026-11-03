@@ -45,6 +45,17 @@ describe("checkSubmission", () => {
   });
 });
 
+describe("stepStatus: Object.prototype names", () => {
+  it("is complete for a question named constructor with no errors", () => {
+    const form: LogicForm & { fields: CheckField[] } = {
+      fields: [text("constructor", { step: "one" })],
+      steps: [{ name: "one" }],
+    };
+    const check = checkSubmission(form, source({}));
+    expect(stepStatus(form, check)[0]?.complete).toBe(true);
+  });
+});
+
 describe("stepStatus", () => {
   const form: LogicForm & { fields: CheckField[] } = {
     fields: [

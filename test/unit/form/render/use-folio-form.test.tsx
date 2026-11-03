@@ -499,3 +499,26 @@ describe("degradation", () => {
     expect(hook().degraded).toBe(true);
   });
 });
+
+describe("render stability", () => {
+  it("settles when the host passes a new descriptor object every render", () => {
+    let renders = 0;
+    const form = steppedForm();
+    render(
+      <Host
+        form={form}
+        fresh
+        onRender={() => {
+          if (++renders > 200) throw new Error("render loop");
+        }}
+      />,
+    );
+    expect(renders).toBeLessThan(10);
+  });
+
+  it("does not show a phantom refusal for a question named constructor", () => {
+    const form = baseForm({ fields: [rf("constructor", 0)] });
+    const { container } = mount(form);
+    expect(input(container, "constructor").getAttribute("aria-invalid")).not.toBe("true");
+  });
+});
