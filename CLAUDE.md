@@ -570,9 +570,9 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) are built (2026-11-03/04) and ship together as v1.3.0; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
+Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on group-web staging; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
 
-**Specs 1–22 and 24–34 are done** — 34 (`foundation/multi-brand.md`) since the owner's
+**Specs 1–22 and 24–38 are done** (36–38 in v1.3.0) — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and
 merged to `main` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33
