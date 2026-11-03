@@ -394,3 +394,76 @@ describe("a materialised sourced question (spec 37 decision 2)", () => {
     expect(prefillAnswers(bare, { query: "?trip=stry_2" })).toEqual({});
   });
 });
+
+describe("formState: steps (spec 38 decision 2)", () => {
+  const go = q("go", { kind: "radio", step: "one", options: [{ value: "yes" }, { value: "no" }] });
+  const steps = [{ name: "one" }, { name: "two", showIf: { field: "go", eq: "yes" } as const }];
+
+  it("asks a question on an unreachable step: no, and its answer never reaches a condition", () => {
+    const follow = q("follow", { step: "three", showIf: { field: "more", eq: "x" } });
+    const form = {
+      fields: [go, q("more", { step: "two" }), follow],
+      steps: [...steps, { name: "three" }],
+    };
+    const off = formState(form, { go: "no", more: "x" });
+    expect([...off.asked]).toEqual(["go"]);
+    expect(off.answers).toEqual({ go: "no" });
+    expect([...off.steps]).toEqual(["one", "three"]);
+    const on = formState(form, { go: "yes", more: "x" });
+    expect([...on.asked]).toEqual(["go", "more", "follow"]);
+    expect([...on.steps]).toEqual(["one", "two", "three"]);
+  });
+
+  it("decides a step at its first member, against earlier answers only", () => {
+    const form = {
+      fields: [go, q("a", { step: "two" }), q("b", { step: "two" })],
+      steps,
+    };
+    expect([...formState(form, { go: "yes" }).asked]).toEqual(["go", "a", "b"]);
+    expect([...formState(form, { go: "no" }).asked]).toEqual(["go"]);
+  });
+
+  it("needs the step AND the section AND the question's own showIf", () => {
+    const form = {
+      fields: [
+        go,
+        q("flag", { step: "two", kind: "checkbox" }),
+        q("a", { step: "two", section: "s", showIf: { field: "flag", eq: true } }),
+      ],
+      steps,
+      sections: [{ name: "s", showIf: { field: "flag", eq: true } as const }],
+    };
+    expect(formState(form, { go: "yes", flag: "1" }).asked.has("a")).toBe(true);
+    expect(formState(form, { go: "yes" }).asked.has("a")).toBe(false);
+    expect(formState(form, { go: "no", flag: "1" }).asked.has("a")).toBe(false);
+  });
+
+  it("never shows a section whose members are all on an unreachable step", () => {
+    const form = {
+      fields: [go, q("a", { step: "two", section: "s" })],
+      steps,
+      sections: [{ name: "s" }],
+    };
+    expect(formState(form, { go: "no" }).sections.has("s")).toBe(false);
+    expect(formState(form, { go: "yes" }).sections.has("s")).toBe(true);
+  });
+
+  it("judges a step with no members against the whole form", () => {
+    const form = {
+      fields: [go],
+      steps: [{ name: "one" }, { name: "empty", showIf: { field: "go", eq: "yes" } as const }],
+    };
+    expect(formState(form, { go: "yes" }).steps.has("empty")).toBe(true);
+    expect(formState(form, { go: "no" }).steps.has("empty")).toBe(false);
+  });
+
+  it("reports no steps for a form without any", () => {
+    expect(formState({ fields: [q("a")] }, {}).steps.size).toBe(0);
+  });
+
+  it("does not require a question on an unreachable step", () => {
+    const form = { fields: [go, q("a", { step: "two", required: true })], steps };
+    expect(formState(form, { go: "no" }).required.has("a")).toBe(false);
+    expect(formState(form, { go: "yes" }).required.has("a")).toBe(true);
+  });
+});

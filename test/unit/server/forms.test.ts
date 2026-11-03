@@ -424,6 +424,7 @@ describe("FormPatchBody keeps every FormField key", () => {
     showIf: { field: "heard", eq: "other" },
     requireIf: { field: "heard", isSet: true },
     section: "s",
+    step: "p",
     hold: true,
     prefill: "query",
     optionsFrom: { source: "countries", settings: { region: "oceania", limit: 5, all: false } },

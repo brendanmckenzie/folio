@@ -294,6 +294,7 @@ export function checkSubmission(
   form: {
     fields: readonly CheckField[];
     sections?: LogicForm["sections"];
+    steps?: LogicForm["steps"];
   },
   source: { getAll(name: string): readonly unknown[] },
   uploaded: ReadonlySet<string> = new Set(),
@@ -320,4 +321,35 @@ export function checkSubmission(
   }
 
   return { state, values, errors, unasked };
+}
+
+/** One step's standing against a check (spec 38 decision 3). */
+export interface StepStatus {
+  name: string;
+  /** The engine reached it: its own `showIf`, and every earlier answer, allow it. */
+  reachable: boolean;
+  /** Reachable, and none of its questions was refused by the validator. */
+  complete: boolean;
+  /** Every question on the step, in form order, asked or not. */
+  questions: readonly string[];
+}
+
+/**
+ * Where each step stands, in step order, judged by the same validator the server
+ * runs: a step is complete when it is reachable and none of its questions is in
+ * `check.errors`. So a step with a malformed phone number is incomplete, not merely
+ * "required fields answered". A reachable step whose questions are all unasked has no
+ * errors and is complete. A form without steps answers `[]`.
+ */
+export function stepStatus(form: LogicForm, check: SubmissionCheck): StepStatus[] {
+  return (form.steps ?? []).map((step) => {
+    const questions = form.fields.filter((f) => f.step === step.name).map((f) => f.name);
+    const reachable = check.state.steps.has(step.name);
+    return {
+      name: step.name,
+      reachable,
+      complete: reachable && !questions.some((name) => name in check.errors),
+      questions,
+    };
+  });
 }

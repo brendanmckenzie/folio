@@ -12,6 +12,7 @@ import {
   checkFormLogic,
   FORM_FIELD_KEYS,
   MAX_FORM_SECTIONS,
+  MAX_FORM_STEPS,
   readFormLayout,
   validateFormLayout,
 } from "../../../src/core/forms";
@@ -924,6 +925,7 @@ describe("shapeOf covers everything the server enforces", () => {
     showIf: { field: "o", eq: 1 },
     requireIf: { field: "o", eq: 2 },
     section: "s",
+    step: "p",
     hold: true,
     prefill: "query",
     i18n: { fr: { label: "Q" } },
@@ -960,6 +962,8 @@ describe("shapeOf covers everything the server enforces", () => {
     requireIf: (f) => ({ ...f, requireIf: { field: "o", eq: 99 } }),
     // Moves to another, equally unconditional, section.
     section: (f) => ({ ...f, section: "t" }),
+    // Moves to another, equally unconditional, step.
+    step: (f) => ({ ...f, step: "q" }),
     hold: (f) => drop(f, "hold"),
     prefill: (f) => drop(f, "prefill"),
     i18n: (f) => ({ ...f, i18n: { fr: { label: "Autre" } } }),
@@ -968,6 +972,10 @@ describe("shapeOf covers everything the server enforces", () => {
     sections: [
       { name: "s", label: "S" },
       { name: "t", label: "T" },
+    ],
+    steps: [
+      { name: "p", label: "P" },
+      { name: "q", label: "Q" },
     ],
   };
 
@@ -1224,5 +1232,353 @@ describe("option sources: checkFormLogic (spec 37 decision 11)", () => {
   it("an unsourced select still refuses a value it does not have", () => {
     const plain = sourcedSelect({ optionsFrom: undefined });
     expect(refusal([plain, gated({ eq: "stry_9f2abc" })])).toMatch(/option it does not have/);
+  });
+});
+
+/* ------------------------------------------------------------------- steps --- */
+
+describe("steps (spec 38): validateFormLayout", () => {
+  const steps = [
+    { name: "about", label: "About you" },
+    { name: "trip", label: "Your trip", help: "Where to", showIf: { field: "a", eq: "x" } },
+  ];
+
+  it("validates steps like sections, and keeps them beside sections", () => {
+    const layout = validateFormLayout({ steps, sections: [{ name: "s", label: "S" }] }, []);
+    expect(layout.steps?.map((s) => s.name)).toEqual(["about", "trip"]);
+    expect(layout.steps?.[1]?.showIf).toEqual({ field: "a", eq: "x" });
+    expect(layout.sections?.map((s) => s.name)).toEqual(["s"]);
+  });
+
+  it("refuses a bad step the way it refuses a bad section, naming a step", () => {
+    expect(() => validateFormLayout({ steps: "no" }, [])).toThrow(/steps must be an array/);
+    expect(() => validateFormLayout({ steps: [{ name: "Bad Name", label: "x" }] }, [])).toThrow(
+      /invalid step name/,
+    );
+    expect(() => validateFormLayout({ steps: [{ name: "a", label: "" }] }, [])).toThrow(
+      /step "a" needs a label/,
+    );
+    expect(() =>
+      validateFormLayout(
+        {
+          steps: [
+            { name: "a", label: "A" },
+            { name: "a", label: "B" },
+          ],
+        },
+        [],
+      ),
+    ).toThrow(/duplicate step name/);
+    expect(() =>
+      validateFormLayout({ steps: [{ name: "a", label: "A", showIf: { bogus: 1 } }] }, []),
+    ).toThrow(/step "a"/);
+  });
+
+  it("caps steps at MAX_FORM_STEPS, separately from sections", () => {
+    const many = Array.from({ length: MAX_FORM_STEPS + 1 }, (_, i) => ({
+      name: `s${i}`,
+      label: `S${i}`,
+    }));
+    expect(() => validateFormLayout({ steps: many }, [])).toThrow(/at most 20 steps/);
+  });
+
+  it("answers {} when there are none", () => {
+    expect(validateFormLayout({ steps: [] }, [])).toEqual({});
+  });
+});
+
+describe("steps (spec 38): readFormLayout narrows to a closed, complete membership", () => {
+  const layout = {
+    steps: [
+      { name: "one", label: "One" },
+      { name: "two", label: "Two" },
+      { name: "three", label: "Three" },
+    ],
+  };
+
+  it("changes nothing for a form without steps", () => {
+    const fields = [txt("a"), txt("b")];
+    expect(readFormLayout({}, fields)).toEqual({ layout: {}, fields });
+  });
+
+  it("clears an unknown membership and gives the question the previous step", () => {
+    const { fields } = readFormLayout(layout, [
+      txt("a", { step: "one" }),
+      txt("b", { step: "ghost" }),
+      txt("c", { step: "two" }),
+      txt("d"),
+    ]);
+    expect(fields.map((f) => f.step)).toEqual(["one", "one", "two", "two"]);
+  });
+
+  it("gives a leading question the nearest later question's step", () => {
+    const { fields } = readFormLayout(layout, [txt("a"), txt("b"), txt("c", { step: "two" })]);
+    expect(fields.map((f) => f.step)).toEqual(["two", "two", "two"]);
+  });
+
+  it("does not reopen a step that has closed, and the straggler joins the open one", () => {
+    const { fields, layout: read } = readFormLayout(layout, [
+      txt("a", { step: "one" }),
+      txt("b", { step: "two" }),
+      txt("c", { step: "one" }),
+    ]);
+    expect(fields.map((f) => f.step)).toEqual(["one", "two", "two"]);
+    expect(read.steps?.map((s) => s.name)).toEqual(["one", "two"]);
+  });
+
+  it("drops a step with no members and reorders steps into member order", () => {
+    const { layout: read } = readFormLayout(layout, [
+      txt("a", { step: "three" }),
+      txt("b", { step: "one" }),
+    ]);
+    expect(read.steps?.map((s) => s.name)).toEqual(["three", "one"]);
+  });
+
+  it("clears every step key when no step is usable, and never empties the form", () => {
+    const { layout: read, fields } = readFormLayout({ steps: [] }, [
+      txt("a", { step: "one" }),
+      txt("b"),
+    ]);
+    expect(read).toEqual({});
+    expect(fields).toEqual([txt("a"), txt("b")]);
+  });
+
+  it("closes a section at a step boundary", () => {
+    const { fields, layout: read } = readFormLayout(
+      { ...layout, sections: [{ name: "s", label: "S" }] },
+      [
+        txt("a", { step: "one", section: "s" }),
+        txt("b", { step: "two", section: "s" }),
+        txt("c", { step: "two", section: "s" }),
+      ],
+    );
+    expect(fields.map((f) => f.section)).toEqual(["s", undefined, undefined]);
+    expect(read.sections?.map((s) => s.name)).toEqual(["s"]);
+  });
+
+  it("reads a malformed step as never-true rather than dropping its questions", () => {
+    const { layout: read, fields } = readFormLayout(
+      { steps: [{ name: "one", label: "One", showIf: "junk" }] },
+      [txt("a", { step: "one" })],
+    );
+    expect(read.steps?.[0]?.showIf).toEqual({ any: [] });
+    expect(fields).toHaveLength(1);
+  });
+});
+
+describe("steps (spec 38): checkFormLogic", () => {
+  const refusal = (fields: FormField[], layout: FormLayout = {}): string => {
+    try {
+      checkFormLogic(fields, layout);
+    } catch (err) {
+      return (err as Error).message;
+    }
+    return "";
+  };
+  const two: FormLayout = {
+    steps: [
+      { name: "one", label: "About you" },
+      { name: "two", label: "Your trip" },
+    ],
+  };
+  const ok = [txt("a", { step: "one" }), txt("b", { step: "two" })];
+
+  it("accepts a contiguous, ordered, complete membership", () => {
+    expect(refusal(ok, two)).toBe("");
+  });
+
+  it("refuses a question with no step on a stepped form, naming it", () => {
+    expect(refusal([txt("a", { step: "one" }), txt("b", { label: "Beta" })], two)).toMatch(
+      /"Beta" \(b\) is not on a step/,
+    );
+  });
+
+  it("refuses a step that does not exist, and a step with no questions", () => {
+    expect(refusal([txt("a", { step: "ghost" })], two)).toMatch(
+      /step "ghost", which does not exist/,
+    );
+    expect(refusal([txt("a", { step: "one" })], two)).toMatch(/Step "Your trip" has no questions/);
+  });
+
+  it("refuses non-contiguous membership", () => {
+    const fields = [
+      txt("a", { step: "one" }),
+      txt("b", { step: "two" }),
+      txt("c", { step: "one" }),
+    ];
+    expect(refusal(fields, two)).toMatch(/Step "About you" has questions that are not together/);
+  });
+
+  it("refuses steps listed out of member order", () => {
+    const flipped = { steps: [two.steps![1]!, two.steps![0]!] };
+    expect(refusal(ok, flipped)).toMatch(/"About you" is listed after "Your trip"/);
+  });
+
+  it("refuses a section that spans a step boundary", () => {
+    const fields = [
+      txt("a", { step: "one", section: "s" }),
+      txt("b", { step: "two", section: "s" }),
+    ];
+    expect(refusal(fields, { ...two, sections: [{ name: "s", label: "Postal" }] })).toMatch(
+      /Section "Postal" has questions on more than one step/,
+    );
+  });
+
+  it("refuses a step of only hidden questions, and allows a lone statement", () => {
+    const hiddenOnly = [
+      txt("a", { step: "one" }),
+      txt("h", { step: "two", kind: "hidden", value: "x" }),
+    ];
+    expect(refusal(hiddenOnly, two)).toMatch(/Step "Your trip" has only hidden questions/);
+    const statement = [
+      txt("a", { step: "one" }),
+      txt("s", { step: "two", kind: "statement", text: "Before you start" }),
+    ];
+    expect(refusal(statement, two)).toBe("");
+  });
+
+  it("refuses a showIf on the first step", () => {
+    const layout = {
+      steps: [{ name: "one", label: "About you", showIf: { any: [] } }, two.steps![1]!],
+    };
+    expect(refusal(ok, layout)).toMatch(/Step "About you" is the first step/);
+  });
+
+  it("refuses a step showIf naming a question at or after its first member", () => {
+    const layout = {
+      steps: [two.steps![0]!, { name: "two", label: "Your trip", showIf: { field: "b", eq: "x" } }],
+    };
+    expect(refusal(ok, layout)).toMatch(
+      /Step "Your trip"'s show rule can only be shown based on a question above it/,
+    );
+    const fine = {
+      steps: [two.steps![0]!, { name: "two", label: "Your trip", showIf: { field: "a", eq: "x" } }],
+    };
+    expect(refusal(ok, fine)).toBe("");
+  });
+
+  it("refuses a requireIf naming a question on a later step, and allows the same or an earlier one", () => {
+    const later = [
+      txt("a", { step: "one", label: "Alpha", requireIf: { field: "b", isSet: true } }),
+      txt("b", { step: "two" }),
+    ];
+    expect(refusal(later, two)).toMatch(
+      /"Alpha" \(a\)'s required rule depends on "b" \(b\), which is on a later step/,
+    );
+    const same = [
+      txt("a", { step: "one", requireIf: { field: "a2", isSet: true } }),
+      txt("a2", { step: "one" }),
+      txt("b", { step: "two", requireIf: { field: "a", isSet: true } }),
+    ];
+    expect(refusal(same, two)).toBe("");
+  });
+
+  it("leaves an unstepped form's requireIf alone", () => {
+    expect(refusal([txt("a", { requireIf: { field: "b", isSet: true } }), txt("b")], {})).toBe("");
+  });
+});
+
+describe("steps (spec 38): shapeOf and rowsOf", () => {
+  const fields = [txt("a", { step: "one" }), txt("b", { step: "two" })];
+  const plain: FormLayout = {
+    steps: [
+      { name: "one", label: "One" },
+      { name: "two", label: "Two" },
+    ],
+  };
+
+  it("moves for a step's showIf and not for its label, help or membership of an unconditional step", () => {
+    const base = shapeOf(fields, plain);
+    const conditional = {
+      steps: [plain.steps![0]!, { ...plain.steps![1]!, showIf: { field: "a", eq: "x" } }],
+    };
+    expect(shapeOf(fields, conditional)).not.toBe(base);
+    const relabelled = {
+      steps: [{ ...plain.steps![0]!, label: "Other", help: "h" }, plain.steps![1]!],
+    };
+    expect(shapeOf(fields, relabelled)).toBe(base);
+    const moved = [txt("a", { step: "one" }), txt("b", { step: "one" })];
+    expect(shapeOf(moved, plain)).toBe(base);
+  });
+
+  it("is unchanged for a form with no steps", () => {
+    expect(shapeOf([txt("a")], {})).toBe(shapeOf([txt("a")]));
+    expect(shapeOf([txt("a")], {})).not.toContain("stepShowIf");
+  });
+
+  it("starts a row at a step change even when beside is set", () => {
+    expect(
+      rowsOf([
+        txt("a", { step: "one" }),
+        txt("b", { step: "one", beside: true }),
+        txt("c", { step: "two", beside: true }),
+      ]),
+    ).toEqual([0, 0, 1]);
+  });
+});
+
+describe("steps (spec 38): formLayout", () => {
+  const steps = [
+    { name: "one", label: "One" },
+    { name: "two", label: "Two", showIf: { field: "go", eq: "yes" } as const },
+  ];
+  const stepped = (): ResolvedForm => ({
+    ...resolvedForm([
+      rf("go", 0, {
+        step: "one",
+        kind: "radio",
+        options: [
+          { value: "yes", label: "Yes" },
+          { value: "no", label: "No" },
+        ],
+      }),
+      rf("more", 1, { step: "two" }),
+      rf("extra", 2, { step: "two" }),
+    ]),
+    steps,
+  });
+
+  it("answers one null step holding every section for an unstepped form", () => {
+    const view = formLayout(resolvedForm([rf("a", 0), rf("b", 1)]));
+    expect(view.steps).toHaveLength(1);
+    expect(view.steps[0]?.step).toBeNull();
+    expect(view.steps[0]?.sections).toEqual(view.sections);
+  });
+
+  it("shows every step with no answers", () => {
+    const view = formLayout(stepped());
+    expect(view.steps.map((s) => s.step?.name)).toEqual(["one", "two"]);
+    expect(view.sections).toHaveLength(2);
+  });
+
+  it("removes a step that is not reachable once answers are given", () => {
+    const view = formLayout(stepped(), { go: "no" });
+    expect(view.steps.map((s) => s.step?.name)).toEqual(["one"]);
+    expect(formLayout(stepped(), { go: "yes" }).steps.map((s) => s.step?.name)).toEqual([
+      "one",
+      "two",
+    ]);
+  });
+
+  it("falls back to the single never-empty group when every step is removed", () => {
+    const form: ResolvedForm = {
+      ...resolvedForm([rf("a", 0, { step: "one", showIf: { any: [] } })]),
+      steps: [{ name: "one", label: "One" }],
+    };
+    const view = formLayout(form, {});
+    expect(view.steps).toEqual([{ step: null, sections: [{ section: null, rows: [] }] }]);
+    expect(view.sections).toEqual([{ section: null, rows: [] }]);
+  });
+
+  it("groups a descriptor with step keys but no steps under null", () => {
+    const form = resolvedForm([rf("a", 0, { step: "one" }), rf("b", 1, { step: "two" })]);
+    expect(formLayout(form).steps.map((s) => s.step)).toEqual([null]);
+  });
+
+  it("keeps a row's key when its first cell sits on a step that changes nothing", () => {
+    expect(formLayout(stepped()).steps[1]?.sections[0]?.rows.map((r) => r.key)).toEqual([
+      "more",
+      "extra",
+    ]);
   });
 });

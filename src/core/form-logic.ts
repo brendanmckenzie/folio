@@ -35,6 +35,8 @@ export interface LogicField {
   name: string;
   kind: FormFieldKind;
   section?: string;
+  /** The step this question is on (spec 38), when the form has steps. */
+  step?: string;
   showIf?: FieldCondition;
   required?: boolean;
   requireIf?: FieldCondition;
@@ -44,6 +46,7 @@ export interface LogicField {
 export interface LogicForm {
   fields: readonly LogicField[];
   sections?: readonly { name: string; showIf?: FieldCondition }[];
+  steps?: readonly { name: string; showIf?: FieldCondition }[];
 }
 
 export interface FormState {
@@ -51,6 +54,8 @@ export interface FormState {
   required: ReadonlySet<string>;
   /** Sections shown. */
   sections: ReadonlySet<string>;
+  /** Steps reachable (spec 38 decision 2). Empty for a form with no steps. */
+  steps: ReadonlySet<string>;
   /** Normalised answers of asked questions only. */
   answers: Record<string, Json>;
 }
@@ -133,21 +138,44 @@ function normalise(field: LogicField, value: unknown): Json | undefined {
 }
 
 /**
- * Which questions are asked, which are required and which sections are shown.
+ * Which questions are asked, which are required, which sections are shown and which
+ * steps are reachable.
  *
- * Walked in array order (decision 2): a question is asked when its section's
- * `showIf` (evaluated where the section begins) and its own both hold, against the
- * answers of earlier, asked questions only. `requireIf` is a second pass over every
- * asked question's answer, so it may name any other question.
+ * Walked in array order (decision 2): a question is asked when its step is reachable,
+ * its section's `showIf` and its own both hold, each section and step rule evaluated
+ * where the group begins and against the answers of earlier, asked questions only.
+ * `requireIf` is a second pass over every asked question's answer, so it may name any
+ * other question.
  */
 export function formState(form: LogicForm, answers: Record<string, unknown>): FormState {
   const sectionRules = new Map((form.sections ?? []).map((s) => [s.name, s.showIf]));
+  const stepRules = new Map((form.steps ?? []).map((s) => [s.name, s.showIf]));
   const asked = new Set<string>();
   const shown = new Set<string>();
   const decided = new Set<string>();
+  const reachable = new Set<string>();
+  const stepDecided = new Set<string>();
   const live: Record<string, Json> = {};
 
   for (const field of form.fields) {
+    // The step gate comes first (spec 38 decision 2). A section whose first member is
+    // on an unreachable step is decided here and not shown, so the closing pass below
+    // never adds it back.
+    let stepOk = true;
+    if (field.step !== undefined && stepRules.has(field.step)) {
+      if (!stepDecided.has(field.step)) {
+        stepDecided.add(field.step);
+        const rule = stepRules.get(field.step);
+        if (!rule || matches(rule, live)) reachable.add(field.step);
+      }
+      stepOk = reachable.has(field.step);
+    }
+    if (!stepOk) {
+      if (field.section !== undefined && sectionRules.has(field.section)) {
+        decided.add(field.section);
+      }
+      continue;
+    }
     let sectionOk = true;
     if (field.section !== undefined && sectionRules.has(field.section)) {
       if (!decided.has(field.section)) {
@@ -163,9 +191,12 @@ export function formState(form: LogicForm, answers: Record<string, unknown>): Fo
     if (value !== undefined) live[field.name] = value;
   }
 
-  // A section none of whose members came up is judged against the whole form.
+  // A section or step none of whose members came up is judged against the whole form.
   for (const [name, rule] of sectionRules) {
     if (!decided.has(name) && (!rule || matches(rule, live))) shown.add(name);
+  }
+  for (const [name, rule] of stepRules) {
+    if (!stepDecided.has(name) && (!rule || matches(rule, live))) reachable.add(name);
   }
 
   const required = new Set<string>();
@@ -176,7 +207,7 @@ export function formState(form: LogicForm, answers: Record<string, unknown>): Fo
     }
   }
 
-  return { asked, required, sections: shown, answers: live };
+  return { asked, required, sections: shown, steps: reachable, answers: live };
 }
 
 /**

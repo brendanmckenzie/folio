@@ -105,6 +105,22 @@ export type { OutboundRef } from "./refs";
 // builder and the submit route, none of which should each carry their own
 // reading of what a valid `FormField` is.
 export { answersFrom, formState, prefillAnswers } from "./form-logic";
+// The answer validator the submit route runs, and the status vocabulary of the
+// round trip (`form-steps.md` decisions 3 and 10).
+export { checkSubmission, stepStatus } from "./form-answers";
+export type {
+  AnswerRefusal,
+  ResponseValue,
+  StepStatus,
+  SubmissionCheck,
+} from "./form-answers";
+export {
+  DEFAULT_STATUS_MESSAGES,
+  readSubmitStatus,
+  statusLocation,
+  SUBMIT_STATUSES,
+} from "./form-status";
+export type { SubmitStatus, SubmitStatusRead } from "./form-status";
 // Form actions (`../../docs/specs/content-model/form-actions.md`): the attachment
 // vocabulary the builder and the server share.
 export {
@@ -138,6 +154,7 @@ export {
   honeypotName,
   MAX_FORM_FIELDS,
   MAX_FORM_SECTIONS,
+  MAX_FORM_STEPS,
   MAX_ROW_CELLS,
   RESERVED_PREFIX,
   rowsOf,
@@ -153,12 +170,15 @@ export type {
   FormLayout,
   FormLayoutView,
   FormSection,
+  FormStep,
   LayoutCell,
   LayoutRow,
   LayoutSection,
+  LayoutStep,
   ResolvedForm,
   ResolvedFormField,
   ResolvedFormSection,
+  ResolvedFormStep,
   ResolvedOptionsFrom,
 } from "./forms";
 export {

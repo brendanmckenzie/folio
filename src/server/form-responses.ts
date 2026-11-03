@@ -364,7 +364,7 @@ export function validateSubmission(
   layout: FormLayout = {},
 ): SubmissionResult {
   const { values, errors, unasked } = checkSubmission(
-    { fields, sections: layout.sections },
+    { fields, sections: layout.sections, steps: layout.steps },
     { getAll: (name) => body.get(name) ?? [] },
     uploaded,
   );

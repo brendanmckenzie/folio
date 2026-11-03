@@ -1935,6 +1935,7 @@ const FORM_FIELD = v.object(
     showIf: v.optional(FORM_CONDITION),
     requireIf: v.optional(FORM_CONDITION),
     section: v.optional(FIELD_NAME),
+    step: v.optional(FIELD_NAME),
     hold: v.optional(v.literal(true)),
     prefill: v.optional(v.literal("query")),
     // Option sources (`docs/specs/content-model/form-option-sources.md` decision 1).
