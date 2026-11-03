@@ -52,7 +52,7 @@ import {
   type FormSection,
   RESERVED_PREFIX,
 } from "../core/forms";
-import { CONTENT_SOURCE } from "../core/option-sources";
+import { CONTENT_SOURCE, MAX_SOURCED_OPTIONS, screenOptionLabel } from "../core/option-sources";
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
 import { DEFAULT_SITE } from "../core/sites";
 import { readCappedBody, safeFilename, sniffContentType } from "./assets";
@@ -133,6 +133,15 @@ function answerBudget(field: FormField): number {
     case "select":
     case "radio":
     case "checkboxes":
+      // The list of a sourced question does not exist yet: `capFor` runs before the
+      // body is read, and the lists load after the rate limit (decision 8). A sourced
+      // `select`/`radio` carries one value; a `checkboxes` any of the most a source
+      // can offer, plus its typed extras.
+      if (field.optionsFrom) {
+        return field.kind === "checkboxes"
+          ? (MAX_SOURCED_OPTIONS + (field.options?.length ?? 0)) * OPTION_VALUE_CHARS
+          : OPTION_VALUE_CHARS;
+      }
       return Math.max(1, field.options?.length ?? 1) * OPTION_VALUE_CHARS;
     case "checkbox":
     case "number":
@@ -574,6 +583,37 @@ export function validateSubmission(
   }
 
   return { values, errors, unasked };
+}
+
+/**
+ * The labels of what was chosen on each sourced question, from the materialised
+ * fields the submission was validated against (decision 13). So they are in the
+ * submission's locale, as the visitor read them, and a story deleted next week still
+ * reads as the title it had. Only a value that is in the list is recorded, and only
+ * for a question that is sourced: a typed question's labels are in the form row.
+ */
+export function optionLabelsOf(
+  fields: readonly FormField[],
+  values: Readonly<Record<string, ResponseValue>>,
+): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const field of fields) {
+    if (!field.optionsFrom) continue;
+    const answer = values[field.name];
+    const chosen = typeof answer === "string" ? [answer] : Array.isArray(answer) ? answer : [];
+    if (chosen.length === 0) continue;
+    const labels = new Map((field.options ?? []).map((o) => [o.value, o.label]));
+    // `fromEntries` defines own properties: a vendor value of `__proto__` is a key
+    // here, not an assignment to the prototype.
+    const kept = Object.fromEntries(
+      chosen.flatMap((value) => {
+        const label = labels.get(value);
+        return label === undefined ? [] : [[value, label] as const];
+      }),
+    );
+    if (Object.keys(kept).length > 0) out[field.name] = kept;
+  }
+  return out;
 }
 
 /* -------------------------------------------------------------- hashing --- */
@@ -1031,6 +1071,12 @@ export interface FormResponse {
   /** Questions this response was never asked. Always present: `[]` for a form with
    *  no logic. */
   unasked: readonly string[];
+  /**
+   * `{ [question]: { [value]: label } }` for each answered sourced question, in the
+   * locale the response was submitted in (`form-option-sources.md` decision 13).
+   * Always present: `{}` for a form with no sourced question.
+   */
+  optionLabels: Readonly<Record<string, Readonly<Record<string, string>>>>;
   locale: string;
   page: string;
 }
@@ -1048,6 +1094,8 @@ export interface NewResponse {
   /** Names of the questions the engine did not ask (`validateSubmission`'s
    *  `unasked`). Stored beside `data`, which holds no key for them. */
   unasked: readonly string[];
+  /** As `FormResponse.optionLabels`. Default `{}`. */
+  optionLabels?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   now?: number;
   /**
    * The site the submission arrived on — the live host that served the page the form
@@ -1098,7 +1146,7 @@ export function newResponseId(): string {
  * page claimed: a page cached for a week submits against the live form, and the
  * stored stamp has to say which shape actually validated it (decision 7).
  *
- * Sixteen binds, fixed. Nothing here is sized by the submitter.
+ * Seventeen binds, fixed. Nothing here is sized by the submitter.
  *
  * The duplicate window is **per submitting site**: the same answers arriving on two
  * sites within a minute are two submissions, and collapsing the second into the first
@@ -1113,6 +1161,7 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
     createdAt: now,
     data: input.data,
     unasked: input.unasked,
+    optionLabels: input.optionLabels ?? {},
     locale: input.locale,
     page: input.page,
   };
@@ -1120,8 +1169,8 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
   const result = await db
     .prepare(
       `insert into form_responses
-         (id, form_id, version, created_at, data, locale, page, ip_hash, body_hash, files, site_id, unasked)
-       select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         (id, form_id, version, created_at, data, locale, page, ip_hash, body_hash, files, site_id, unasked, option_labels)
+       select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        where not exists (
          select 1 from form_responses
          where form_id = ? and body_hash = ? and created_at > ? and site_id = ?
@@ -1140,6 +1189,7 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
       JSON.stringify(input.files),
       input.site ?? DEFAULT_SITE,
       JSON.stringify(response.unasked),
+      JSON.stringify(response.optionLabels),
       response.formId,
       input.bodyHash,
       now - DUPLICATE_WINDOW_MS,
@@ -1272,13 +1322,15 @@ export interface ResponseRow {
   files: SubmittedFile[];
   /** Screened on read: `[]` for every row written before `0014`. */
   unasked: string[];
+  /** Screened on read: `{}` for every row written before `0016`. */
+  optionLabels: Record<string, Record<string, string>>;
 }
 
 /** The columns every reader here projects. `ip_hash` and `body_hash` are absent
  *  from the *statement*, not filtered afterwards — the narrower read is the one
  *  that cannot leak. */
 const RESPONSE_COLS = `id, form_id as formId, version, created_at as createdAt,
-  data, locale, page, files, unasked`;
+  data, locale, page, files, unasked, option_labels as optionLabels`;
 
 interface ResponseDbRow {
   id: string;
@@ -1290,6 +1342,7 @@ interface ResponseDbRow {
   page: string;
   files: string;
   unasked: string;
+  optionLabels: string;
 }
 
 /** One answer, or nothing. Arrays are screened element by element, because a
@@ -1366,6 +1419,36 @@ function readUnasked(raw: string): string[] {
   );
 }
 
+/**
+ * The `option_labels` column: `{ [question]: { [value]: label } }`, screened to
+ * string maps. A question key outside the field-name charset, a non-object, or a
+ * label that fails the screen every label passes at write is dropped, and the cell
+ * reads the stored value instead. **A label is a stranger-influenced string** (a
+ * content title, a vendor's name), so it is screened on the way out as well.
+ */
+function readOptionLabels(raw: string): Record<string, Record<string, string>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return {};
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  const labels: Record<string, Record<string, string>> = {};
+  for (const [question, byValue] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!CSV_KEY.test(question)) continue;
+    if (!byValue || typeof byValue !== "object" || Array.isArray(byValue)) continue;
+    const kept = Object.fromEntries(
+      Object.entries(byValue as Record<string, unknown>).flatMap(([value, label]) => {
+        const screened = screenOptionLabel(label);
+        return screened === null ? [] : [[value, screened] as const];
+      }),
+    );
+    if (Object.keys(kept).length > 0) labels[question] = kept;
+  }
+  return labels;
+}
+
 function toResponse(row: ResponseDbRow): ResponseRow {
   return {
     id: row.id,
@@ -1377,6 +1460,7 @@ function toResponse(row: ResponseDbRow): ResponseRow {
     page: row.page,
     files: readFiles(row.files),
     unasked: readUnasked(row.unasked),
+    optionLabels: readOptionLabels(row.optionLabels),
   };
 }
 
@@ -1422,8 +1506,11 @@ function responseFilterSql(
     binds.push(filter.to);
   }
   if (filter.q) {
-    clauses.push(`data like ? ${LIKE_ESCAPE}`);
-    binds.push(likePattern(filter.q));
+    // `option_labels` as well, so "Serengeti" finds a response that stored only the
+    // id of that trip (decision 13).
+    clauses.push(`(data like ? ${LIKE_ESCAPE} or option_labels like ? ${LIKE_ESCAPE})`);
+    const pattern = likePattern(filter.q);
+    binds.push(pattern, pattern);
   }
   return { clauses, binds };
 }
@@ -2010,6 +2097,17 @@ export interface CsvColumn {
   /** A `file` question: the value is a filename out of the `files` column, since
    *  an upload stores no answer in `data` at all. */
   file?: boolean;
+  /**
+   * The column reads the label the visitor chose (`ResponseRow.optionLabels`)
+   * where the response has one, and the stored value where it has none.
+   */
+  labelled?: boolean;
+  /**
+   * The `<name>:value` column: the stored value of the question `key` is the header
+   * of, which follows its labelled column (decision 13). `:` cannot occur in a field
+   * name, so this header cannot collide with a question.
+   */
+  rawOf?: string;
 }
 
 /** Which field kinds are a column. `statement` is prose between questions and
@@ -2029,13 +2127,25 @@ const isColumnKind = (field: FormField): boolean => field.kind !== "statement";
 export function responseCsvColumns(
   fields: readonly FormField[],
   keys: readonly string[],
+  /** The questions any response holds labels for (`submittedKeys`' second answer). */
+  labelled: readonly string[] = [],
 ): CsvColumn[] {
   const columns: CsvColumn[] = [...META_COLUMNS];
   const declared = new Set<string>();
+  const labels = new Set(labelled.filter((key) => CSV_KEY.test(key)));
+  /** A labelled question's column, then its stored values beside it. */
+  const pushAnswer = (column: CsvColumn) => {
+    if (!labels.has(column.key)) {
+      columns.push(column);
+      return;
+    }
+    columns.push({ ...column, labelled: true });
+    columns.push({ key: `${column.key}:value`, source: column.source, rawOf: column.key });
+  };
   for (const field of fields) {
     if (!isColumnKind(field)) continue;
     declared.add(field.name);
-    columns.push({
+    pushAnswer({
       key: field.name,
       source: "field",
       ...(field.kind === "file" ? { file: true } : {}),
@@ -2044,7 +2154,7 @@ export function responseCsvColumns(
   const retired = [...new Set(keys)]
     .filter((key) => CSV_KEY.test(key) && !declared.has(key))
     .sort();
-  for (const key of retired) columns.push({ key, source: "retired" });
+  for (const key of retired) pushAnswer({ key, source: "retired" });
   return columns;
 }
 
@@ -2064,13 +2174,19 @@ export function csvValue(column: CsvColumn, response: ResponseRow): string {
   // The files column is checked for **every** answer column, not only a current
   // `file` question: a retired file question leaves no key in `data` at all, so
   // reading `data` first would render an attachment somebody sent as `—`.
-  const file = response.files.find((one) => one.field === column.key);
+  const key = column.rawOf ?? column.key;
+  const file = response.files.find((one) => one.field === key);
   if (file) return file.filename;
-  if (response.unasked.includes(column.key)) return CSV_NOT_ASKED;
+  if (response.unasked.includes(key)) return CSV_NOT_ASKED;
   if (column.file) return CSV_ABSENT;
-  const value = response.data[column.key];
+  const value = response.data[key];
   if (value === undefined) return CSV_ABSENT;
-  if (Array.isArray(value)) return value.join(", ");
+  // A labelled column reads what the visitor read; a value with no label (an answer
+  // taken before the question was sourced, or a typed extra) reads as itself.
+  const labels = column.labelled ? response.optionLabels[key] : undefined;
+  const named = (one: string) => labels?.[one] ?? one;
+  if (Array.isArray(value)) return value.map(named).join(", ");
+  if (labels && typeof value === "string") return named(value);
   if (typeof value === "boolean") return value ? "yes" : "no";
   return String(value);
 }
@@ -2127,28 +2243,51 @@ export function csvRow(cells: readonly string[]): string {
  * *retired* one would otherwise vanish from the export entirely, taking the
  * filenames of everything anybody ever attached with it.
  *
- * Two binds, whatever the form holds.
+ * `option_labels` contributes its keys too (a sourced question the form no longer
+ * declares still has its answer in `data`, but a key is a key), and `labelled` is
+ * the questions any response holds labels for: those get a `<name>:value` column
+ * (decision 13).
+ *
+ * Four binds per scope, whatever the form holds.
  */
 export async function submittedKeys(
   db: FolioDb,
   formId: string,
   sites?: readonly string[],
-): Promise<string[]> {
+): Promise<{ keys: string[]; labelled: string[] }> {
   const within = sitesClause(sites, "form_responses.site_id");
   const { results } = await db
     .prepare(
-      `select distinct key from (
-         select j.key as key from form_responses, json_each(form_responses.data) j
+      `select distinct kind, key from (
+         select 'k' as kind, j.key as key from form_responses, json_each(form_responses.data) j
           where form_responses.form_id = ?${within.sql}
          union
-         select json_extract(f.value, '$.field') as key
+         select 'k' as kind, json_extract(f.value, '$.field') as key
            from form_responses, json_each(form_responses.files) f
+          where form_responses.form_id = ?${within.sql}
+         union
+         select 'k' as kind, j.key as key from form_responses, json_each(form_responses.option_labels) j
+          where form_responses.form_id = ?${within.sql}
+         union
+         select 'l' as kind, j.key as key from form_responses, json_each(form_responses.option_labels) j
           where form_responses.form_id = ?${within.sql}
        ) where key is not null`,
     )
-    .bind(formId, ...within.binds, formId, ...within.binds)
-    .all<{ key: string }>();
-  return results.map((row) => row.key);
+    .bind(
+      formId,
+      ...within.binds,
+      formId,
+      ...within.binds,
+      formId,
+      ...within.binds,
+      formId,
+      ...within.binds,
+    )
+    .all<{ kind: "k" | "l"; key: string }>();
+  return {
+    keys: results.filter((row) => row.kind === "k").map((row) => row.key),
+    labelled: results.filter((row) => row.kind === "l").map((row) => row.key),
+  };
 }
 
 export interface ResponseCsv {
@@ -2180,7 +2319,8 @@ export async function responseCsv(
   /** The submitting sites exported, as `ListResponsesOptions.sites`. */
   sites?: readonly string[],
 ): Promise<ResponseCsv> {
-  const columns = responseCsvColumns(form.fields, await submittedKeys(db, form.id, sites));
+  const submitted = await submittedKeys(db, form.id, sites);
+  const columns = responseCsvColumns(form.fields, submitted.keys, submitted.labelled);
   const encoder = new TextEncoder();
   const date = new Date().toISOString().slice(0, 10);
 

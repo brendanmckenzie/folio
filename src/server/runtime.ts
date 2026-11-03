@@ -406,6 +406,12 @@ export interface FolioRuntime {
    * own default and therefore no behaviour change at all.
    */
   formPurgeCapability?: PurgeCapability;
+  /**
+   * The host's raw D1 binding for `env`, not a request's session. For the one read
+   * that must open a session of its own: the submit route's primary re-read after a
+   * lost option-list lease (`form-option-sources.md` decision 7).
+   */
+  rawDb: (env: unknown) => D1Database;
   /** Where the routes are mounted, with no trailing slash. */
   base: string;
   /** `FolioConfig.sites`, validated, or null for a deployment with no `sites`. */
@@ -2159,6 +2165,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     auth,
     logger,
     formPurgeCapability,
+    rawDb: (env: unknown) => config.bindings(env as Env).db,
     base,
     sites,
     route,

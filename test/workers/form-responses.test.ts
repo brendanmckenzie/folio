@@ -209,6 +209,7 @@ describe("listResponses", () => {
       "formId",
       "id",
       "locale",
+      "optionLabels",
       "page",
       "unasked",
       "version",

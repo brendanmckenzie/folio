@@ -22,7 +22,13 @@ import type { Context } from "hono";
 import { wasRefused } from "../../core/bulk";
 import { NO_STORE } from "../../core/cache-tags";
 import { honeypotName } from "../../core/forms";
-import { chain as chainOf, DEFAULT_SITE, sitesUnder } from "../../core/sites";
+import {
+  chain as chainOf,
+  DEFAULT_SITE,
+  SINGLE_SITE_CHAIN,
+  type SiteRef,
+  sitesUnder,
+} from "../../core/sites";
 import { actorString, EDIT, FORMS, READ, SCOPE_ADMIN } from "../auth/roles";
 import { purgeFormLayout } from "../cache-purge";
 import { FolioError } from "../errors";
@@ -40,6 +46,7 @@ import {
   isDuplicateSubmission,
   listResponses,
   newResponseId,
+  optionLabelsOf,
   type PreparedUpload,
   prepareUploads,
   putUploads,
@@ -790,19 +797,36 @@ function refererPath(req: Request): string {
  *     to the host's widget (decision 13), and which fails closed on a throw.
  *  7. **The rate limit**, after `verify` so a verified submission is never
  *     refused for an unverified one's traffic.
- *  8. **The uploads**, bounded per question, typed from their own bytes and
- *     hashed — with nothing written to R2. Behind every abuse control above,
- *     because buffering an attachment for a bot is the cost the honeypot exists
- *     to avoid, and ahead of validation because a `file` question's `required`
- *     is the question "did an acceptable file arrive".
- *  9. **Validation**, then the duplicate check, then the put, then the insert,
- *     then the hook. The put is between the last two reads and the write for
- *     `uploadAsset`'s reason: a row naming an object that never landed is worse
- *     than an object with no row, and the second is closed by a compensating
- *     delete on either failure.
+ *  8. **The uploads and the option lists**, together. The uploads are bounded per
+ *     question, typed from their own bytes and hashed, with nothing written to R2.
+ *     Behind every abuse control above, because buffering an attachment for a bot is
+ *     the cost the honeypot exists to avoid, and ahead of validation because a
+ *     `file` question's `required` is the question "did an acceptable file arrive".
+ *     The lists are every sourced question's, asked or not (spec 37 decision 8), on
+ *     the same side of the rate limit for the same reason: a bot or a flood never
+ *     costs a vendor call.
+ *  9. **Validation** over the fully materialised questions, then the duplicate
+ *     check, then the put, then the insert, then the hook. The put is between the
+ *     last two reads and the write for `uploadAsset`'s reason: a row naming an
+ *     object that never landed is worse than an object with no row, and the second
+ *     is closed by a compensating delete on either failure.
  *  9a. **The engine decides what was asked** (`validateSubmission`, spec 35): an
  *     answer or a file for a question that was not is dropped here, before
  *     anything is hashed or written.
+ *  9b. **A refusal on a question whose list is unavailable** is `source_unavailable`
+ *     (503), not `invalid` (spec 37).
+ *
+ * That is the merged order of specs 36 and 37, stated identically in both:
+ *
+ *     chain check → body cap → closed → honeypot → verify → rate limit (spec 36:
+ *     counts refused attempts too) → uploads + option-list load for every sourced
+ *     question (37) → validateSubmission on materialised fields (37 maps refusals
+ *     on unavailable lists to source_unavailable) → duplicate check → spec 36
+ *     checks → insert (option labels + delivery rows, one batch) → spec 36
+ *     deliveries + hooks.submitted
+ *
+ * Spec 36's steps are named here and not yet built: its refusal counting, its
+ * checks and its delivery rows.
  *
  * Nothing about the answer distinguishes a stored row from a collapsed duplicate
  * or from a caught honeypot: all three answer `ok` with a minted id. That is
@@ -827,14 +851,24 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // is an unknown one. Recorded on the response, so a shared form's answers can be
     // read by the site they came from.
     let submitting = DEFAULT_SITE;
+    // The receiving site's chain and ref, for a content-sourced question's list: the
+    // page was drawn from this chain, so the POST validates against it
+    // (`form-option-sources.md` decision 8). Hoisted out of the check below, which
+    // used to hold `within` block-scoped.
+    let chain: readonly string[] = SINGLE_SITE_CHAIN;
+    let receiving: SiteRef | undefined;
     let form: Form | null;
     if (rt.sites) {
       const received = c.var.site;
       form = null;
+      chain = [];
       if (received?.surface === "live") {
         submitting = received.id;
         const owner = await formSiteOf(db, id);
-        const within = chainOf(await rt.sites.registry(c.env), received.id);
+        const registry = await rt.sites.registry(c.env);
+        const within = chainOf(registry, received.id);
+        chain = within;
+        receiving = registry.sites.find((site) => site.id === received.id);
         if (owner !== null && within.includes(owner)) form = await formById(db, id, rt.logger);
       }
     } else {
@@ -939,9 +973,35 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // `required` check for a `file` question is the answer to "did a file
     // arrive", and behind every abuse control because buffering an attachment
     // for a bot is the one cost the honeypot exists to avoid.
-    const prepared = await prepareUploads(form.fields, parts);
+    //
+    // **The option lists load here, beside the uploads and behind the same
+    // controls** (`form-option-sources.md` decision 8): a bot caught by the
+    // honeypot, or a flood, never costs a vendor call or a content query. Every
+    // sourced question's list, asked or not, because whether a question is asked
+    // can itself depend on another sourced answer, and `formState` reads an option
+    // answer through the list. The locale is the one the row will be stored under,
+    // so a label is snapshotted in the language the visitor read it in.
+    const locale = rt.localeOf(body.get(LOCALE_INPUT)?.[0]);
+    const [prepared, lists] = await Promise.all([
+      prepareUploads(form.fields, parts),
+      form.fields.some((field) => field.optionsFrom)
+        ? brand.optionLists(c.var.bindings(), [form], {
+            chain,
+            ...(receiving ? { site: receiving } : {}),
+            ...(locale ? { locale } : {}),
+            refresh: "submit",
+            waitUntil: hookCtx(c).waitUntil,
+            env: c.env,
+            primary: rt.rawDb(c.env),
+          })
+        : undefined,
+    ]);
+    // The engine only ever sees an ordinary option question (decision 2). `form`
+    // stays the stored one: its version, layout and names are what the reply and the
+    // row are made from.
+    const sourced = materialiseForm(form, lists?.get(form.id), locale?.code ?? rt.locales?.default);
     const { values, errors, unasked } = validateSubmission(
-      form.fields,
+      sourced.form.fields,
       body,
       new Set(prepared.files.map((file) => file.field)),
       form.layout.sections ?? [],
@@ -962,6 +1022,24 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // should say `too_long`, not `required`.
     const refusals = { ...errors, ...uploads.errors };
     const invalid = Object.keys(refusals);
+    // A refusal on a question whose list could not be read is the host's outage, not
+    // something the visitor can fix, so it is not `invalid` (decision 8). Such a
+    // question is refused only because it was asked and answered or required: an
+    // unanswered optional one, or one the engine did not ask, has no refusal here.
+    const unavailable = new Set(
+      [...(lists?.get(form.id) ?? [])].flatMap(([name, list]) =>
+        list.options === null ? [name] : [],
+      ),
+    );
+    if (invalid.some((name) => unavailable.has(name))) {
+      return replyTo({
+        ...reply,
+        status: "error",
+        code: "source_unavailable",
+        message: "This form cannot take submissions right now. Try again later.",
+        httpStatus: 503,
+      });
+    }
     if (invalid.length > 0) {
       return replyTo({
         ...reply,
@@ -1000,11 +1078,12 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         form,
         data: values,
         unasked,
+        optionLabels: optionLabelsOf(sourced.form.fields, values),
         // Whatever the descriptor's hidden input said, run back through the
         // runtime's own locale resolution: an undeclared code — or one a submitter
         // invented — is stored as `''`, the source-locale convention `content_index`
         // already uses.
-        locale: rt.localeOf(body.get(LOCALE_INPUT)?.[0])?.code ?? "",
+        locale: locale?.code ?? "",
         page,
         ipHash: hash,
         bodyHash: hashed,
