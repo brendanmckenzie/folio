@@ -306,6 +306,84 @@ describe("capFor", () => {
   });
 });
 
+describe("capFor: a sourced question's list does not exist yet", () => {
+  const sourced = (kind: FormField["kind"], extra: Partial<FormField> = {}): FormField =>
+    ({
+      name: "pick",
+      kind,
+      label: "Pick",
+      optionsFrom: { source: "countries" },
+      ...extra,
+    }) as FormField;
+  const FIXED = capFor(makeForm([]));
+
+  it("budgets a sourced checkboxes at 500 values of 120 characters", () => {
+    expect(capFor(makeForm([sourced("checkboxes")])) - FIXED).toBe(500 * 120 * 4);
+  });
+
+  it("adds the typed extras to it", () => {
+    const extras = [
+      { value: "a", label: "A" },
+      { value: "b", label: "B" },
+    ];
+    expect(capFor(makeForm([sourced("checkboxes", { options: extras })])) - FIXED).toBe(
+      502 * 120 * 4,
+    );
+  });
+
+  it("budgets a sourced select or radio one value, whatever the typed extras", () => {
+    for (const kind of ["select", "radio"] as const) {
+      expect(capFor(makeForm([sourced(kind)])) - FIXED).toBe(120 * 4);
+    }
+  });
+
+  it("leaves an unsourced option question budgeted by its typed list, as before", () => {
+    const typed: FormField = {
+      name: "pick",
+      kind: "checkboxes",
+      label: "Pick",
+      options: [
+        { value: "a", label: "A" },
+        { value: "b", label: "B" },
+      ],
+    };
+    expect(capFor(makeForm([typed])) - FIXED).toBe(2 * 120 * 4);
+  });
+});
+
+describe("validateSubmission over a materialised sourced question", () => {
+  const sourced: FormField = {
+    name: "trip",
+    kind: "select",
+    label: "Trip",
+    optionsFrom: { source: "content", settings: { type: "trip" } },
+    options: [
+      { value: "sty_a", label: "Alps" },
+      { value: "other", label: "Other" },
+    ],
+  };
+
+  it("accepts a listed value and refuses an unlisted one", () => {
+    expect(validateSubmission([sourced], body({ trip: "sty_a" })).values).toEqual({
+      trip: "sty_a",
+    });
+    expect(validateSubmission([sourced], body({ trip: "sty_z" })).errors).toEqual({
+      trip: "invalid",
+    });
+  });
+
+  it("refuses a value in the list of a different question", () => {
+    const other: FormField = {
+      name: "colour",
+      kind: "select",
+      label: "Colour",
+      options: [{ value: "red", label: "Red" }],
+    };
+    const result = validateSubmission([sourced, other], body({ trip: "sty_a", colour: "sty_a" }));
+    expect(result.errors).toEqual({ colour: "invalid" });
+  });
+});
+
 describe("bodyHash", () => {
   it("is the same for the same answers in a different order, and different otherwise", async () => {
     const a = await bodyHash({ email: "ada@example.com", full_name: "Ada" });

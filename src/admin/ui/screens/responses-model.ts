@@ -173,14 +173,31 @@ export function cellText(field: FormField, response: ResponseRow): string {
   if (field.kind === "file") {
     return response.files.find((file) => file.field === field.name)?.filename ?? ABSENT;
   }
-  return answerText(response.data[field.name]);
+  return answerText(response.data[field.name], response.optionLabels?.[field.name]);
+}
+
+/**
+ * The stored value as text, when the response holds a label snapshot that reads
+ * differently from it (`form-option-sources.md` decision 13), else null. The drawer
+ * shows it in muted text beneath the label, so the id behind "Serengeti" stays
+ * findable.
+ */
+export function rawAnswerText(field: FormField, response: ResponseRow): string | null {
+  const labels = response.optionLabels?.[field.name];
+  if (!labels || response.unasked.includes(field.name)) return null;
+  const raw = answerText(response.data[field.name]);
+  return raw === answerText(response.data[field.name], labels) ? null : raw;
 }
 
 /** A stored value as text. `yes`/`no` for a tick box, because the question was
  *  one and `true` is a programmer's word for it. */
-export function answerText(value: unknown): string {
+export function answerText(value: unknown, labels?: Readonly<Record<string, string>>): string {
   if (value === undefined) return ABSENT;
-  if (Array.isArray(value)) return value.length === 0 ? ABSENT : value.join(", ");
+  // A snapshotted label is what the visitor read; a value with none (a typed extra, or
+  // an answer from before the question was sourced) reads as itself.
+  const named = (one: unknown) => (typeof one === "string" ? (labels?.[one] ?? one) : String(one));
+  if (Array.isArray(value)) return value.length === 0 ? ABSENT : value.map(named).join(", ");
+  if (typeof value === "string") return named(value);
   if (typeof value === "boolean") return value ? "yes" : "no";
   return String(value);
 }
@@ -264,6 +281,8 @@ export interface AnswerLine {
    *  is all that is left of a retired question. */
   label: string;
   value: string;
+  /** The stored value, when `value` is a label that differs from it. */
+  raw?: string;
   retired: boolean;
   /** The visitor was never shown this question (`value` reads `NOT_ASKED`). */
   notAsked: boolean;
@@ -287,10 +306,13 @@ export function answerLines(response: ResponseRow, fields: readonly FormField[])
   for (const field of tableColumns(fields)) {
     declared.add(field.name);
     const file = response.files.find((one) => one.field === field.name);
+    const raw = rawAnswerText(field, response);
     lines.push({
       name: field.name,
       label: field.label || field.name,
       value: cellText(field, response),
+      ...(raw !== null ? { raw } : {}),
+
       retired: false,
       notAsked: response.unasked.includes(field.name),
       ...(file ? { file: { filename: file.filename, size: file.size } } : {}),

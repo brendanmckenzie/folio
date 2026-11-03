@@ -624,6 +624,7 @@ describe("the submitted hook", () => {
       "formId",
       "id",
       "locale",
+      "optionLabels",
       "page",
       "unasked",
       "version",

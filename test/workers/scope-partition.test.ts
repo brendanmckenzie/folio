@@ -801,6 +801,7 @@ describe("every id loader is a fence", () => {
     ["DELETE", "/api/shares/:id", "write", "share"],
     ["GET", "/api/forms/:id", "read", "form"],
     ["GET", "/api/forms/:id/usage", "read", "form"],
+    ["POST", "/api/forms/:id/option-preview", "read", "form"],
     ["PATCH", "/api/forms/:id", "write", "form"],
     ["DELETE", "/api/forms/:id", "write", "form"],
     // Responses are a read since phase 7, with the submitting site as a second fence
@@ -838,6 +839,11 @@ describe("every id loader is a fence", () => {
     "/api/story/:id/restore": { versionId: "ver_nothing" },
     "/api/story/:id/schedule": { action: "publish", at: Date.now() + 3_600_000 },
     "/api/forms/:id": { label: "Changed" },
+    // The content source over the fixture's page type: a body the validator and
+    // `checkOptionSources` accept, so what answers is the fence.
+    "/api/forms/:id/option-preview": {
+      optionsFrom: { source: "content", settings: { type: "spPage" } },
+    },
     "/api/forms/:id/responses/delete": { ids: [RESPONSES.bravo] },
   };
   const init = (method: string, path = ""): RequestInit =>
@@ -889,7 +895,7 @@ describe("every id loader is a fence", () => {
     const wrong: string[] = [];
     for (const [method, path, reach, kind, skipUp] of LOADERS) {
       if (reach !== "read" || skipUp) continue;
-      const res = await call(`/~alpha${at(path, kind, "shared")}`, U, init(method));
+      const res = await call(`/~alpha${at(path, kind, "shared")}`, U, init(method, path));
       if (res.status !== 200) wrong.push(`${method} ${path} → ${res.status}`);
     }
     expect(wrong).toEqual([]);

@@ -212,6 +212,39 @@ const folio = createFolio<Env>({
     // hash it counts carries the hour it was made in, so it stops being
     // computable from an address once that hour passes (decision 10).
     ratePerHour: 20,
+    /**
+     * content-model/form-option-sources.md. A question's choices can come from a
+     * list the host owns: this one is a static list so the demo needs no network.
+     * A real source calls its vendor here, with `signal` so Folio can cut it off, and
+     * is refreshed by the `scheduled()` handler below, on save and on submit, never
+     * by a page render.
+     */
+    sources: {
+      countries: {
+        label: "Countries",
+        ttl: 3600,
+        // `region` narrows the list; the builder draws one control per setting.
+        settings: {
+          region: {
+            kind: "select",
+            label: "Region",
+            options: [
+              { value: "all", label: "All" },
+              { value: "africa", label: "Africa" },
+            ],
+            default: "all",
+          },
+        },
+        load: ({ settings }) => {
+          // `/dev/option-source?fail=1` (below) makes the vendor go down, which is
+          // what `scripts/option-sources-test.mjs` needs to see an outage.
+          if (countriesDown) throw new Error("the demo's country vendor is down");
+          return COUNTRIES.filter((c) => settings.region !== "africa" || c.africa).map(
+            ({ value, label }) => ({ value, label }),
+          );
+        },
+      },
+    },
   },
   basePath: "/folio",
   // content-model/localisation.md: two languages, one document per story.
@@ -319,6 +352,9 @@ const folio = createFolio<Env>({
  */
 let lastSignInUrl: string | null = null;
 
+/** Set by `/dev/option-source?fail=1`: the demo's `countries` source throws while true. */
+let countriesDown = false;
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -335,6 +371,22 @@ export default {
         return new Response("Not found", { status: 404 });
       }
       return Response.json({ url: lastSignInUrl });
+    }
+    // Local development only, like the route above: takes the demo's `countries`
+    // vendor down (`?fail=1`) or back up (`?fail=0`), and `?stale=1` ages every stored
+    // option list past its ttl and its lease, so `scripts/option-sources-test.mjs` can
+    // see a stale list used through an outage without waiting an hour.
+    if (url.pathname === "/dev/option-source") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
+      }
+      if (url.searchParams.has("fail")) countriesDown = url.searchParams.get("fail") === "1";
+      if (url.searchParams.get("stale") === "1") {
+        await env.DB.prepare(
+          "update option_lists set loaded_at = loaded_at - 604800000, attempted_at = attempted_at - 604800000 where loaded_at is not null",
+        ).run();
+      }
+      return Response.json({ fail: countriesDown });
     }
     if (url.pathname === "/sitemap.xml") {
       return sitemap(await folio.stories(env), url.origin);
@@ -507,7 +559,7 @@ export default {
    * Awaited rather than `ctx.waitUntil`-ed: a cron invocation exists to do this
    * work, so there is no response whose latency is being protected.
    */
-  async scheduled(_controller, env, _ctx) {
+  async scheduled(_controller, env, ctx) {
     let cursor: string | null = null;
     let batches = 0;
     do {
@@ -538,6 +590,27 @@ export default {
      * calls `folio.sweepAuth` for a host that forgets to, which is why it says
      * so, and `GET {base}/api/auth-events`'s `oldestAt` is where that would show.
      */
+    /**
+     * Form option lists (`docs/specs/content-model/form-option-sources.md` decision 7):
+     * the host sources that saved forms name, refreshed when missing or past their ttl,
+     * and the rows nothing references any more pruned. Beside `sweepAuth`, and with
+     * `waitUntil` so a changed list's second purge lands after the first.
+     */
+    let optionCursor: string | null = null;
+    let optionBatches = 0;
+    do {
+      const refreshed = await folio.refreshOptionSources(env, {
+        continueFrom: optionCursor,
+        waitUntil: ctx.waitUntil.bind(ctx),
+      });
+      optionCursor = refreshed.continueFrom;
+      if (refreshed.loaded || refreshed.failed || refreshed.pruned) {
+        console.log(
+          `folio: option lists loaded ${refreshed.loaded}, failed ${refreshed.failed}, pruned ${refreshed.pruned}`,
+        );
+      }
+    } while (optionCursor !== null && ++optionBatches < 20);
+
     const swept = await folio.sweepAuth(env);
     if (swept.sessions || swept.challenges || swept.events) {
       console.log(
@@ -546,6 +619,15 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
+
+/** The demo's `countries` option source: a static list, so it needs no network. */
+const COUNTRIES = [
+  { value: "ke", label: "Kenya", africa: true },
+  { value: "tz", label: "Tanzania", africa: true },
+  { value: "za", label: "South Africa", africa: true },
+  { value: "au", label: "Australia", africa: false },
+  { value: "nz", label: "New Zealand", africa: false },
+];
 
 /** The locales this site serves, mirroring `locales.available` above. */
 const LOCALES = ["en", "fr"] as const;

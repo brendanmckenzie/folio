@@ -184,6 +184,13 @@ This is editor-only: there is no share link for a record, and the page renders
 with no edit markers, so the form is the editing surface. Nothing in your route
 changes, and `resolution.record` is never set outside the editor.
 
+**A form question can take its choices from a source** (spec 37, `docs/handbook.md`
+"Options from a source"). `forms.sources` registers a host list, and `folio.refreshOptionSources`
+belongs in `scheduled()`. Folio never calls `load` while rendering, and a page showing a list
+that has never loaded is `no-store`, so build headers with `reader.page()` or check
+`hasUnavailableOptions(resolution)`. A content-sourced answer is stored as a story id, so read
+the label from `optionLabels`, not from the value.
+
 **3. Add the Vite plugin.** `folio/vite` supplies the admin entry, the client
 build and the asset constants. Do not hand-roll them.
 

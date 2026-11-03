@@ -1,0 +1,81 @@
+/*
+ * The "Options come from" block of an option question
+ * (`form-option-sources.md` decision 14). It sits inside the field panel, which is
+ * already under `.folio-ui`, and portals nothing itself: the document picker it opens
+ * is a `Dialog` that carries its own scope.
+ */
+
+.source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* The settings under the select, set in from it so they read as belonging to it. */
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+}
+
+.parent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.parentName {
+  overflow-wrap: anywhere;
+  color: var(--fg);
+}
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.previewHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.previewList {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.previewMeta {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+/* A left edge on a plain block, not an inset shadow (see `FormBuilder.module.css`). */
+.warning {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--state-warn-bg, var(--bg-inset));
+  color: var(--state-warn-fg, var(--fg));
+  font-size: var(--text-sm);
+}
+
+.error {
+  margin: 0;
+  color: var(--state-danger-fg);
+  font-size: var(--text-sm);
+}

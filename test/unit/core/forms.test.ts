@@ -914,6 +914,7 @@ describe("shapeOf covers everything the server enforces", () => {
     min: 1,
     pattern: "a+",
     options: [{ value: "a", label: "A" }],
+    optionsFrom: { source: "countries" },
     accept: "documents",
     maxBytes: 100,
     value: "v",
@@ -945,6 +946,10 @@ describe("shapeOf covers everything the server enforces", () => {
     min: (f) => ({ ...f, min: 2 }),
     pattern: (f) => ({ ...f, pattern: "b+" }),
     options: (f) => ({ ...f, options: [{ value: "z", label: "Z" }] }),
+    optionsFrom: (f) => ({
+      ...f,
+      optionsFrom: { source: "countries", settings: { sort: "name" } },
+    }),
     accept: (f) => ({ ...f, accept: "images" }),
     maxBytes: (f) => ({ ...f, maxBytes: 200 }),
     value: (f) => ({ ...f, value: "other" }),
@@ -1110,5 +1115,114 @@ describe("formLayout: answers", () => {
     const view = formLayout(old as ResolvedForm);
     expect(view.sections).toHaveLength(1);
     expect(view.sections[0]?.section).toBeNull();
+  });
+});
+
+describe("option sources: validateFormFields (spec 37)", () => {
+  const sel = (over: Record<string, unknown> = {}) => ({
+    name: "trip",
+    kind: "select",
+    label: "Trip",
+    ...over,
+  });
+  const content = { source: "content", settings: { type: "trip" } };
+
+  it("accepts a sourced question with no typed options, and refuses an unsourced one", () => {
+    const [field] = validateFormFields([sel({ optionsFrom: content })]);
+    expect(field?.options).toEqual([]);
+    expect(field?.optionsFrom).toEqual(content);
+    expect(() => validateFormFields([sel()])).toThrow(/at least one option/);
+  });
+
+  it("still holds extras on a sourced question to validateOption", () => {
+    expect(() =>
+      validateFormFields([sel({ optionsFrom: content, options: [{ label: "x" }] })]),
+    ).toThrow(/no value/);
+    const [field] = validateFormFields([
+      sel({ optionsFrom: content, options: [{ value: "any", label: "Any" }] }),
+    ]);
+    expect(field?.options).toEqual([{ value: "any", label: "Any" }]);
+  });
+
+  it("throws on a structural fault in optionsFrom, or in content settings", () => {
+    expect(() => validateFormFields([sel({ optionsFrom: "content" })])).toThrow(/optionsFrom/);
+    expect(() =>
+      validateFormFields([sel({ optionsFrom: { source: "content", settings: {} } })]),
+    ).toThrow(/content source settings/);
+    // A host source's settings are not content settings.
+    expect(() =>
+      validateFormFields([sel({ optionsFrom: { source: "countries", settings: {} } })]),
+    ).not.toThrow();
+  });
+
+  it("with onInvalid, returns the other questions and reports the unreadable one", () => {
+    const reported: string[] = [];
+    const out = validateFormFields([txt("a"), sel(), txt("b"), txt("a", { label: "dup" })], {
+      onInvalid: (name) => reported.push(name),
+    });
+    expect(out.map((f) => f.name)).toEqual(["a", "b"]);
+    expect(reported).toEqual(["trip", "a"]);
+  });
+
+  it("without onInvalid, the same input still throws", () => {
+    expect(() => validateFormFields([txt("a"), sel(), txt("b")])).toThrow(/at least one option/);
+    expect(() => validateFormFields([txt("a"), txt("a")])).toThrow(/duplicate/);
+  });
+
+  it("shapeOf moves for a changed source, type or setting, and not for a re-ordered spelling", () => {
+    const f = (optionsFrom: object) => validateFormFields([sel({ optionsFrom })]);
+    const base = shapeOf(f(content));
+    expect(shapeOf(f({ source: "content", settings: { type: "other" } }))).not.toBe(base);
+    expect(
+      shapeOf(
+        f({
+          source: "content",
+          settings: { type: "trip", order: { field: "title", dir: "desc" } },
+        }),
+      ),
+    ).not.toBe(base);
+    expect(shapeOf(f({ source: "content", settings: { where: [], type: "trip" } }))).toBe(
+      shapeOf(f({ source: "content", settings: { type: "trip", where: [] } })),
+    );
+  });
+});
+
+describe("option sources: checkFormLogic (spec 37 decision 11)", () => {
+  const sourcedSelect = (over: Partial<FormField> = {}): FormField => ({
+    name: "trip",
+    kind: "select",
+    label: "Trip",
+    options: [{ value: "any", label: "Any" }],
+    optionsFrom: { source: "content", settings: { type: "trip" } },
+    ...over,
+  });
+  const refusal = (fields: FormField[]): string => {
+    try {
+      checkFormLogic(fields, {});
+    } catch (err) {
+      return (err as Error).message;
+    }
+    return "";
+  };
+  const gated = (cond: object) => txt("more", { showIf: { field: "trip", ...cond } as never });
+
+  it("accepts an arbitrary id on a sourced select, and refuses one over 120 characters", () => {
+    expect(refusal([sourcedSelect(), gated({ eq: "stry_9f2abc" })])).toBe("");
+    expect(refusal([sourcedSelect(), gated({ in: ["stry_a", "any"] })])).toBe("");
+    expect(refusal([sourcedSelect(), gated({ eq: "s".repeat(121) })])).toMatch(/option/);
+    expect(refusal([sourcedSelect(), gated({ eq: "" })])).toMatch(/option/);
+    expect(refusal([sourcedSelect(), gated({ eq: 3 })])).toMatch(/option/);
+  });
+
+  it("keeps the operator rules", () => {
+    expect(refusal([sourcedSelect(), gated({ includes: "stry_a" })])).toMatch(/includes/);
+    const boxes = sourcedSelect({ kind: "checkboxes" });
+    expect(refusal([boxes, gated({ includes: "stry_a" })])).toBe("");
+    expect(refusal([boxes, gated({ eq: "stry_a" })])).toMatch(/"eq"/);
+  });
+
+  it("an unsourced select still refuses a value it does not have", () => {
+    const plain = sourcedSelect({ optionsFrom: undefined });
+    expect(refusal([plain, gated({ eq: "stry_9f2abc" })])).toMatch(/option it does not have/);
   });
 });

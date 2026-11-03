@@ -7,6 +7,7 @@ import {
   type LogicField,
 } from "../../../src/core/form-logic";
 import type { FormField, FormFieldKind, ResolvedForm } from "../../../src/core/forms";
+import { materialiseOptions } from "../../../src/core/option-sources";
 import { validateSubmission } from "../../../src/server/form-responses";
 
 /**
@@ -356,5 +357,37 @@ describe("round 2: parity, unreadable rules, cache-stripped prefill", () => {
     expect(prefillAnswers(resolved, { values: { utm_campaign: "mine" } })).toEqual({
       utm_campaign: "mine",
     });
+  });
+});
+
+describe("a materialised sourced question (spec 37 decision 2)", () => {
+  const field = materialiseOptions(
+    {
+      name: "trip",
+      kind: "select",
+      label: "Trip",
+      prefill: "query",
+      optionsFrom: { source: "content", settings: { type: "trip" } },
+    },
+    [
+      { value: "stry_1", label: "Safari" },
+      { value: "stry_2", label: "Beach" },
+    ],
+  );
+  const form = { fields: [field] } as unknown as ResolvedForm;
+
+  it("formState accepts a sourced value and drops an unlisted one", () => {
+    expect(formState(form, { trip: "stry_1" }).answers).toEqual({ trip: "stry_1" });
+    expect(formState(form, { trip: "stry_9" }).answers).toEqual({});
+  });
+
+  it("prefillAnswers accepts a sourced value and drops an unlisted one", () => {
+    expect(prefillAnswers(form, { query: "?trip=stry_2" })).toEqual({ trip: "stry_2" });
+    expect(prefillAnswers(form, { query: "?trip=stry_9" })).toEqual({});
+  });
+
+  it("the unmaterialised descriptor knows no value at all", () => {
+    const bare = { fields: [{ ...field, options: [] }] } as unknown as ResolvedForm;
+    expect(prefillAnswers(bare, { query: "?trip=stry_2" })).toEqual({});
   });
 });

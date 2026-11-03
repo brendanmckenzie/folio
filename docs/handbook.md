@@ -2224,6 +2224,52 @@ on a no-JavaScript render. A prefilled page is its own cache entry per query str
 cached under a key that ignores it, and the next visitor would get the first one's
 value. Read those on the client. The `values` map is not affected, because you chose it.
 
+### Options from a source
+
+A `select`, `radio` or `checkboxes` question can take its choices from a list instead of
+typing them. An editor picks the source in the form builder: **Published documents** (the
+built-in `content` source) or a host source you registered under `forms.sources`
+([configuration](configuration.md#forms-folioformsenv)).
+
+**Published documents.** The editor names one `page` or `record` type and may narrow it
+with `where` filters on the type's indexed fields and an `order`. The list is the
+published documents of that type in the form's site chain, labelled by the type's title
+field. A visitor's choice is stored as the **story id**, so `?trip=<id>` seeds the question
+through `prefill: 'query'` like any option value, and an id that is not in the list is
+dropped. Nothing is loaded or cached for it: it is resolved on the pass a `collection` field
+already uses, and the page carries a `type:<name>` tag, so publishing, retitling or
+unpublishing a document purges every page showing it. A question whose list is empty and has
+no typed options is not asked (the response lists it in `unasked`).
+
+**Typed options still work beside a source.** They come after the sourced entries and win a
+value collision, so `Any trip` can sit under the list.
+
+**Labels.** A story id is no use to whoever reads the enquiry, so the response stores the
+label the visitor read, in `optionLabels`. Responses show the label with the raw value
+muted beneath it, and the CSV puts the label in the question's column and the stored
+value in a following `<name>:value` column. A response taken before the feature has
+`optionLabels: {}` and shows the raw value. A `submitted` hook gets `optionLabels` too.
+
+**Host sources.** Folio calls your `load` for you, never while rendering. A page reads the
+last good list from `option_lists`. Editors see your sources through a signed-in route
+and the builder previews the list, with its status and any failure category.
+
+**An outage.** The rule is in one sentence: *a submission is checked against the last list
+that loaded, and is refused only if the list has never loaded.* A vendor that is down
+leaves the last good copy in place; a never-loaded list compiles as `unavailable` (the
+typed extras only), the page is not edge-cached (`reader.page()` answers `no-store`;
+check `hasUnavailableOptions(resolution)` if you build headers yourself), and a submission
+that answers or requires that question gets `503 source_unavailable`. Anything else on the
+form still submits. Editors see the failure category on the question, never the vendor's
+message.
+
+**The purge-entrypoint caveat.** A list that changes (or loads for the first time) purges
+the `source:<id>` tag, twice, the second 25 seconds later. A purge is scoped to the
+entrypoint that issued it, so the background refresh and the cron must run through the
+entrypoint you cache on, as for `runSchedules`. Without
+`folio.refreshOptionSources(env, { waitUntil })` in `scheduled()`, a list refreshes only
+on saves and submissions, so a list nobody saves or submits to goes stale on the page.
+
 ### The two hidden inputs, which nothing else will tell you about
 
 `form.hidden` is a list of `{ name, value }` and **a host emits it verbatim**. Two

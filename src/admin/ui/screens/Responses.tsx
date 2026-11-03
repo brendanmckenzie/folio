@@ -596,9 +596,16 @@ function ResponseDrawer({
                   <span className={css.size}>{sizeLabel(line.file.size)}</span>
                 </a>
               ) : (
-                <span className={line.value === ABSENT || line.notAsked ? css.absent : undefined}>
-                  {line.value}
-                </span>
+                <>
+                  <span className={line.value === ABSENT || line.notAsked ? css.absent : undefined}>
+                    {line.value}
+                  </span>
+                  {line.raw !== undefined ? (
+                    <code className={`${css.mono} ${css.absent}`} title="The value as stored">
+                      {line.raw}
+                    </code>
+                  ) : null}
+                </>
               )}
             </dd>
           </div>

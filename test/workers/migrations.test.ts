@@ -1387,6 +1387,78 @@ describe("forms", () => {
   });
 });
 
+/**
+ * `option_lists` (`0016_option_sources.sql`, `docs/specs/content-model/form-option-sources.md`
+ * decision 6): the last good list a host option source returned. Read by primary key
+ * only, so it carries no other index.
+ */
+describe("option_lists", () => {
+  beforeEach(async () => {
+    await env.DB.prepare("delete from option_lists").run();
+  });
+
+  it("has every column, in order", async () => {
+    expect((await columnsOf("option_lists")).map((c) => c.name)).toEqual([
+      "brand",
+      "source",
+      "key",
+      "options",
+      "digest",
+      "loaded_at",
+      "attempted_at",
+      "failures",
+      "failure",
+    ]);
+  });
+
+  it("is keyed by brand, source and key together, in that order", async () => {
+    const pk = (await columnsOf("option_lists"))
+      .filter((c) => c.pk > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((c) => c.name);
+    expect(pk).toEqual(["brand", "source", "key"]);
+  });
+
+  it("is a rowid-less table with no secondary index", async () => {
+    const row = await env.DB.prepare(
+      "select sql from sqlite_master where name = 'option_lists'",
+    ).first<{ sql: string }>();
+    expect(row?.sql.toLowerCase()).toContain("without rowid");
+    expect(await indexesOf("option_lists")).toEqual([]);
+  });
+
+  it("is nullable where a never-loaded row is, and defaults the failure count to 0", async () => {
+    const byName = new Map((await columnsOf("option_lists")).map((c) => [c.name, c]));
+    for (const name of ["options", "digest", "loaded_at", "failure"]) {
+      expect(byName.get(name)?.notnull, name).toBe(0);
+    }
+    for (const name of ["brand", "source", "key", "attempted_at", "failures"]) {
+      expect(byName.get(name)?.notnull, name).toBe(1);
+    }
+    expect(byName.get("failures")?.dflt_value).toBe("0");
+    await env.DB.prepare(
+      "insert into option_lists (brand, source, key, attempted_at) values ('', 'countries', '[]', 1)",
+    ).run();
+    const row = await env.DB.prepare("select failures, options from option_lists").first<{
+      failures: number;
+      options: string | null;
+    }>();
+    expect(row).toEqual({ failures: 0, options: null });
+  });
+
+  it("refuses a second row for one brand, source and key, and keeps brands apart", async () => {
+    const insert = (brand: string) =>
+      env.DB.prepare(
+        "insert into option_lists (brand, source, key, attempted_at) values (?, 'countries', '[]', 1)",
+      )
+        .bind(brand)
+        .run();
+    await insert("");
+    await insert("takeoffgo");
+    await expect(insert("")).rejects.toThrow();
+  });
+});
+
 describe("form_responses", () => {
   const insert = (
     id: string,
@@ -1422,11 +1494,15 @@ describe("form_responses", () => {
       "site_id",
       // 0014: the questions this response was never asked, as JSON.
       "unasked",
+      // 0016: { question: { value: label } } for each answered sourced question.
+      "option_labels",
     ]);
 
     const byName = new Map((await columnsOf("form_responses")).map((c) => [c.name, c]));
     expect(byName.get("unasked")?.dflt_value).toBe("'[]'");
     expect(byName.get("unasked")?.notnull).toBe(1);
+    expect(byName.get("option_labels")?.dflt_value).toBe("'{}'");
+    expect(byName.get("option_labels")?.notnull).toBe(1);
     expect(byName.get("id")?.pk).toBe(1);
     expect(byName.get("data")?.dflt_value).toBe("'{}'");
     expect(byName.get("locale")?.dflt_value).toBe("''");
@@ -1688,6 +1764,7 @@ describe("the ledger", () => {
       "0013_site_brands.sql",
       "0014_form_logic.sql",
       "0015_draft_data.sql",
+      "0016_option_sources.sql",
     ]);
   });
 

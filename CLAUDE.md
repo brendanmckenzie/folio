@@ -200,7 +200,7 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`migrations/`). **There are thirteen: `0001`–`0008`, `0010`, `0011`, `0013`, `0014` and `0015`.**
+**D1 migrations** (`migrations/`). **There are fourteen: `0001`–`0008`, `0010`, `0011`, `0013`, `0014`, `0015` and `0016`.**
 `0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
 it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
 landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a permanent
@@ -219,8 +219,10 @@ it must be applied before that Worker is deployed.
 `0015_draft_data.sql` (issue #82) landed 2026-10-22: one nullable column, `stories.draft_data`, a JSON mirror
 of the draft's root scalars written by the story Durable Object, selected by the Data list of the release
 that carries it, so it must be applied before that Worker is deployed.
-`0016_option_sources.sql` (spec 37) and `0017_form_actions.sql` (spec 36) are claimed and ship
-together in v1.3.0 (roll-forward only, see `UPGRADING.md` once written). Next free is `0018`.
+`0016_option_sources.sql` (spec 37) landed 2026-11-03: the `option_lists` table and
+`form_responses.option_labels`, both read by the release that carries them, so it must be applied
+before that Worker is deployed. `0017_form_actions.sql` (spec 36) is claimed and ships with it in
+v1.3.0, which is roll-forward only (`UPGRADING.md`, "v1.3.0 is roll-forward only"). Next free is `0018`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a

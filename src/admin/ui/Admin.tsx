@@ -1016,6 +1016,7 @@ function screenFor(a: ScreenArgs) {
           apiBase={boot.apiBase}
           id={formId}
           me={a.me}
+          manifest={a.manifest}
           {...(a.manifest?.locales ? { locales: a.manifest.locales } : {})}
           onNotice={a.notify}
           onLabel={(label) => a.onFormLabel(formId, label)}

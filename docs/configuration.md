@@ -405,7 +405,7 @@ id out of the registry, and the repair is SQL (`UPGRADING.md`).
 | `settings` | optional | The brand's site-settings singleton. It replaces `sites.settings`, which is refused beside `brands`. Each brand has its own type, so `/me`'s `sites.settings` is null on a branded deployment and the scoped manifest carries `settings`. |
 | `previewCss`, `previewWrap` | optional | This brand's preview stylesheets and wrap. The wrap's client half is a `wrap` export of the brand's own blocks module. |
 | `gate` | optional | This brand's visitor gate, validated against this brand's root blocks. |
-| `forms` | optional | `verify` and `ratePerHour` for a submission on this brand's live hosts. |
+| `forms` | optional | `verify` and `ratePerHour` for a submission on this brand's live hosts, and its option sources. |
 | `describe` | optional | This brand's describer, `onUpload` and `concurrency`. |
 | `migrations` | optional | This brand's content migrations. **Each id starts `<brand>/`.** `migrate` runs a brand's list over that brand's sites only. |
 
@@ -615,6 +615,66 @@ Validated a rung more insistently than `gate` or `describe`, because the request
 that would otherwise discover a broken `verify` is an anonymous POST from the
 public internet — so the symptom would be a contact form that silently collects
 nothing.
+
+`sources` gives a `select`, `radio` or `checkboxes` question its choices from a
+list you supply. Editors pick the source and its settings in the form builder.
+
+```ts
+forms: {
+  sources: {
+    countries: {
+      label: 'Countries',                        // what an editor sees
+      settings: { region: select({ options: [{ value: 'all', label: 'All' }, { value: 'africa', label: 'Africa' }], default: 'all' }) },
+      ttl: 86_400,                               // seconds fresh. Default 3600, valid 60–604800
+      localised: false,                          // default: one list serves every locale
+      async load({ settings, locale, signal }, env) {
+        const rows = await crm(env).countries(settings.region, { signal })
+        return rows.map((c) => ({ value: c.iso2, label: c.name }))
+      },
+    },
+  },
+},
+```
+
+`content` is built in and needs nothing here: it lists published documents of one
+type, and a chosen value is the story id.
+
+**Folio never calls `load` while rendering a page.** It calls it in four situations:
+
+- in the background after an editor saves a form;
+- when an editor previews a list in the builder;
+- during a submission, but only for a list that has never loaded (3 s), with a
+  stale list refreshed in the background;
+- from `folio.refreshOptionSources(env, { waitUntil })`, which belongs in your
+  `scheduled()` beside `runSchedules`.
+
+Without that cron call, a list refreshes only on saves and submissions. A list that
+changes, or loads for the first time, purges the pages showing it. The purge comes
+from whichever entrypoint ran the refresh, so route your cron through the entrypoint
+you cache on. While a list has never loaded, a page showing it answers
+`cache-control: no-store` from `reader.page()`. If you assemble headers yourself,
+check `hasUnavailableOptions(resolution)`.
+
+Set `localised: true` only if your labels differ by language. The source is then
+loaded once per locale, and `locale` is the code wanted. Otherwise `locale` is
+always `null`.
+
+`load` gets an `AbortSignal` that fires at the caller's timeout. It must return 1–500
+`{ value, label }` entries:
+
+- a value is 1–120 characters;
+- a label is truncated at 200 characters;
+- a repeated value keeps its first label;
+- anything past 500 is dropped, with a warning.
+
+An empty list, a throw or a timeout counts as a failure and leaves the last good list
+in place. **A submission during an outage is checked against the last list that
+loaded, and is refused only if the list has never loaded.** Folio stores the error
+category for editors and logs the error itself.
+
+`settings` takes `text`, `number`, `boolean` and `select` fields from `folio/core`.
+An id is lowercase letters, digits and hyphens, and `content` is reserved. Editors
+see your sources through a signed-in admin route, never the public schema.
 
 #### `describe: FolioDescribe<Env>`
 
@@ -909,6 +969,7 @@ you can recognise one:
 | `gate.field` translatable, unindexed, the wrong kind, or on no `page` root | A gate the editor believes in and nothing enforces |
 | `describe.fn` not a function, or `concurrency` outside 1–8 | Would 500 on whichever request reached it first |
 | `forms.verify` not a function, `ratePerHour` outside 0–100 | The discovering request is an anonymous POST from the internet |
+| `forms.sources`: an id that is not `[a-z][a-z0-9-]*` or is `content`, a `load` that is not a function, `ttl` outside 60–604800, `localised` not a boolean, a setting of another kind | A form naming the source would fail on an anonymous POST |
 | An unknown key in `hooks` (or in `hooks.await`) | A typo means a hook that silently never fires |
 | `migrations` whose declared order and sort order disagree | Documents would migrate in an order depending on which comparison ran |
 | A `presets` entry naming a field the block does not declare | The preset would silently do nothing |

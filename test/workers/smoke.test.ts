@@ -87,6 +87,8 @@ describe("workers harness: D1", () => {
       "form_responses",
       "forms",
       "login_challenges",
+      // 0016: the last good list of each host option source (form-option-sources.md).
+      "option_lists",
       // 0007: one WebAuthn credential per row (foundation/passkeys.md). Its
       // shape is asserted in migrations.test.ts; this list only says it exists.
       "passkeys",

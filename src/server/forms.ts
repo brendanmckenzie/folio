@@ -41,6 +41,7 @@ import {
   readFormLayout,
   type ResolvedForm,
   type ResolvedFormField,
+  type ResolvedOptionsFrom,
   type ResolvedFormSection,
   rowsOf,
   shapeOf,
@@ -48,6 +49,7 @@ import {
   validateFormLayout,
 } from "../core/forms";
 import type { LocaleContext } from "../core/locales";
+import { CONTENT_SOURCE, contentOptionSettings, materialiseOptions } from "../core/option-sources";
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
 import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from "../core/sites";
 import type { StoryMeta } from "../core/story";
@@ -195,7 +197,11 @@ interface SummaryRow extends Omit<FormSummary, "open" | "responses"> {
  */
 function readFields(id: string, raw: string, logger: FolioLogger = console): FormField[] {
   try {
-    return validateFormFields(JSON.parse(raw));
+    // Per question (spec 37 decision 19): one a build cannot read costs that
+    // question, not every answer on the form.
+    return validateFormFields(JSON.parse(raw), {
+      onInvalid: (name, err) => logger.error(`folio: form ${id} question ${name} unreadable`, err),
+    });
   } catch (err) {
     logger.error(`folio: form ${id} has unreadable fields`, err);
     return [];
@@ -213,7 +219,7 @@ function readFields(id: string, raw: string, logger: FolioLogger = console): For
  * name the field and what is wrong with it), which is why they travel verbatim
  * rather than being replaced with something vaguer.
  */
-function fieldsFromInput(input: unknown): FormField[] {
+export function fieldsFromInput(input: unknown): FormField[] {
   try {
     return validateFormFields(input);
   } catch (err) {
@@ -390,6 +396,52 @@ export interface FormRenderContext {
   page?: string;
   /** The clock half of `isOpen`. Injected so a test can move it. */
   now?: number;
+  /**
+   * What each sourced question resolved to, by question name
+   * (`materialiseForm`'s second half). A sourced question absent from it compiles
+   * `unavailable`: nothing read its list.
+   */
+  sources?: ReadonlyMap<string, ResolvedOptionsFrom>;
+}
+
+/** What one sourced question's list read as (`BrandRuntime.optionLists`' answer). */
+export interface SourcedAnswer {
+  options: FormFieldOption[] | null;
+  resolved: ResolvedOptionsFrom;
+}
+
+/**
+ * A form with every sourced question's list put into its `options`
+ * (`form-option-sources.md` decision 2), and what each resolved to. Run before
+ * `compileForm` at render and in `/forms/resolved`, and before `validateSubmission`
+ * at submit, so the engine only ever sees an ordinary option question.
+ *
+ * - A content question with no entries and no typed extras is not asked (decision
+ *   18); a host question never is, because an empty host list is a failed load.
+ * - A content list ordered by `title` ascending is re-sorted by label in the
+ *   render's locale (decision 4): the query orders by the source-locale title.
+ *   `collate` is that locale's code; absent leaves the query's order.
+ */
+export function materialiseForm(
+  form: Form,
+  answers: ReadonlyMap<string, SourcedAnswer> | undefined,
+  collate?: string,
+): { form: Form; sources: Map<string, ResolvedOptionsFrom> } {
+  const sources = new Map<string, ResolvedOptionsFrom>();
+  if (!answers || answers.size === 0) return { form, sources };
+  const fields = form.fields.map((field) => {
+    const answer = answers.get(field.name);
+    if (!field.optionsFrom || !answer) return field;
+    sources.set(field.name, answer.resolved);
+    const content = field.optionsFrom.source === CONTENT_SOURCE;
+    const order = content ? contentOptionSettings(field.optionsFrom.settings)?.order : undefined;
+    const byTitle = content && (!order || (order.field === "title" && order.dir === "asc"));
+    return materialiseOptions(field, answer.options, {
+      ...(content ? { emptyIsNotAsked: true } : {}),
+      ...(byTitle && collate !== undefined ? { collate } : {}),
+    });
+  });
+  return { form: { ...form, fields }, sources };
 }
 
 /** The i18n keys a `FormField` can translate one string under. */
@@ -444,6 +496,7 @@ function compileField(
   locale: LocaleContext | undefined,
   row: number,
   sectionShowIf: FieldCondition | undefined,
+  sourced: ResolvedOptionsFrom | undefined,
 ): ResolvedFormField {
   // Spec 35 decision 6: `required` on the descriptor is "required unconditionally".
   // A question stored as required that may not be asked (its own or its section's
@@ -474,6 +527,11 @@ function compileField(
   if (field.min !== undefined) out.min = field.min;
   if (field.pattern !== undefined) out.pattern = field.pattern;
   if (field.options) out.options = field.options.map((o) => translateOption(field, o, locale));
+  // A sourced question says where its list came from (`cacheTags` reads `types`).
+  // One nobody read compiles `unavailable`, never an empty list passed off as real.
+  if (field.optionsFrom) {
+    out.optionsFrom = sourced ?? { source: field.optionsFrom.source, unavailable: true as const };
+  }
   // The expanded content-type list, not the stored token: a host puts it
   // straight on the input's `accept`, and the menu it came from is an editor's
   // vocabulary rather than a visitor's.
@@ -561,6 +619,7 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
       ctx.locale,
       rows[i] ?? 0,
       field.section === undefined ? undefined : sectionRules.get(field.section),
+      ctx.sources?.get(field.name),
     ),
   );
   return {

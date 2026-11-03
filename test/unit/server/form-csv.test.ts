@@ -40,6 +40,7 @@ const response = (over: Partial<ResponseRow> = {}): ResponseRow => ({
   page: "",
   files: [],
   unasked: [],
+  optionLabels: {},
   ...over,
 });
 
@@ -222,5 +223,86 @@ describe("csvValue: not asked (spec 35)", () => {
 
   it("still writes the answer when the key is present", () => {
     expect(csvValue(current, response({ data: { heard_other: "hi" } }))).toBe("hi");
+  });
+});
+
+describe("option labels (form-option-sources decision 13)", () => {
+  const trip = field("trip", { kind: "select" });
+  const trips = field("trips", { kind: "checkboxes" });
+  const labels = { trip: { sty_a: "Serengeti" }, trips: { sty_a: "Serengeti", sty_b: "Bali" } };
+
+  it("adds a `<name>:value` column after each labelled question, and only those", () => {
+    const columns = responseCsvColumns([field("name"), trip, trips], [], ["trip"]);
+    expect(columns.slice(5).map((c) => c.key)).toEqual(["name", "trip", "trip:value", "trips"]);
+    expect(columns.find((c) => c.key === "trip")?.labelled).toBe(true);
+    expect(columns.find((c) => c.key === "trip:value")?.rawOf).toBe("trip");
+    expect(columns.find((c) => c.key === "trips")?.labelled).toBeUndefined();
+  });
+
+  it("adds none when nothing is labelled, so an unsourced form's header is unchanged", () => {
+    const columns = responseCsvColumns([field("name"), trip], ["name", "trip"]);
+    expect(columns.slice(5).map((c) => c.key)).toEqual(["name", "trip"]);
+  });
+
+  it("keeps a retired labelled key's pair, after the declared columns", () => {
+    const columns = responseCsvColumns([field("name")], ["name", "zone"], ["zone"]);
+    expect(columns.slice(5).map((c) => c.key)).toEqual(["name", "zone", "zone:value"]);
+  });
+
+  it("screens a labelled key against the field-name charset", () => {
+    const columns = responseCsvColumns(
+      [],
+      ["ok", 'x"\n=1', "a:value"],
+      ["ok", 'x"\n=1', "a:value"],
+    );
+    expect(columns.slice(5).map((c) => c.key)).toEqual(["ok", "ok:value"]);
+  });
+
+  it("writes the label in the labelled column and the stored value beside it", () => {
+    const [label, raw] = responseCsvColumns([trip], [], ["trip"]).slice(5);
+    const r = response({ data: { trip: "sty_a" }, optionLabels: labels });
+    expect(csvValue(label!, r)).toBe("Serengeti");
+    expect(csvValue(raw!, r)).toBe("sty_a");
+  });
+
+  it("maps each checkboxes value, joined, and falls back to the value with no label", () => {
+    const [label, raw] = responseCsvColumns([trips], [], ["trips"]).slice(5);
+    const r = response({ data: { trips: ["sty_a", "sty_b", "sty_c"] }, optionLabels: labels });
+    expect(csvValue(label!, r)).toBe("Serengeti, Bali, sty_c");
+    expect(csvValue(raw!, r)).toBe("sty_a, sty_b, sty_c");
+  });
+
+  it("reads a response from before the question was sourced as its value, in both columns", () => {
+    const [label, raw] = responseCsvColumns([trip], [], ["trip"]).slice(5);
+    const r = response({ data: { trip: "red" } });
+    expect(csvValue(label!, r)).toBe("red");
+    expect(csvValue(raw!, r)).toBe("red");
+  });
+
+  it("keeps the em dash and (not asked) in both columns", () => {
+    const [label, raw] = responseCsvColumns([trip], [], ["trip"]).slice(5);
+    expect(csvValue(label!, response())).toBe("—");
+    expect(csvValue(raw!, response())).toBe("—");
+    const skipped = response({ unasked: ["trip"] });
+    expect(csvValue(label!, skipped)).toBe("(not asked)");
+    expect(csvValue(raw!, skipped)).toBe("(not asked)");
+  });
+
+  it("does not use the labels on an unlabelled column", () => {
+    const [plain] = responseCsvColumns([trip], []).slice(5);
+    expect(csvValue(plain!, response({ data: { trip: "sty_a" }, optionLabels: labels }))).toBe(
+      "sty_a",
+    );
+  });
+
+  it("de-fangs a label that begins with a formula character, after quoting rules", () => {
+    const [label] = responseCsvColumns([trip], [], ["trip"]).slice(5);
+    const r = response({
+      data: { trip: "sty_x" },
+      optionLabels: { trip: { sty_x: '=HYPERLINK("http://evil")' } },
+    });
+    expect(csvRow([csvValue(label!, r)])).toBe(`"'=HYPERLINK(""http://evil"")"\r\n`);
+    const plus = response({ data: { trip: "sty_x" }, optionLabels: { trip: { sty_x: "+1 555" } } });
+    expect(csvRow([csvValue(label!, plus)])).toBe("'+1 555\r\n");
   });
 });

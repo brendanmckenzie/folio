@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 37
 > **Size:** L
-> **Status:** approved (owner, 2026-11-03)
+> **Status:** done (built 2026-11-03)
 > **Wire version:** none. Forms cross neither the socket nor the admin↔preview frame shape; the new descriptor keys ride inside the `Resolution` JSON the bridge already carries.
 > **Migration:** `0016_option_sources.sql` (a new `option_lists` table and one additive column, `form_responses.option_labels`)
 > **Build sequence:** after 35 (form logic, landed). Builds first of the pair, then spec 36 (form actions, `0017_form_actions.sql`); the two ship together as **v1.3.0** (owner, 2026-11-03). Absorbs issue #54 and `ROADMAP.md` §4 item 7. Steps and the `folio/form` hook (#55) follow both.
@@ -1763,3 +1763,142 @@ lists, and the gated-pair test must fail. Remove `hasUnavailableOptions` from
 - **`{base}/api/v1` routes and MCP tools for sources**: forms.md checkpoint 20's
   reason. The `submitted` hook and `refreshOptionSources` are the programmatic
   surface.
+
+## Implementation notes
+
+Built 2026-11-03 in seven phases on `feat/form-option-sources`: core vocabulary, the
+`option_lists` store and lease, the render path, submit validation, save/cron/preview,
+the admin, then the demo, the end-to-end script and the prose. A review after phase 6
+found no High, one Medium and four Low findings; all but the last were fixed before the
+tag (below). Spec 36 builds on this branch next and ships with it as v1.3.0.
+
+**Where the spec was wrong or ambiguous, and what was done.** Each is the conservative
+reading consistent with the Architecture decisions.
+
+Core
+- `screenOptionLabel` is a core copy of the server's printable-text test (core cannot
+  import server). A label that fails it falls back to its value, and a truncated label is
+  exactly 200 characters including the ellipsis.
+- `contentOptionSettings` is strict: a `where` or `order` entry that `asCollectionValue`
+  would drop makes the whole settings object null, and its keys are sorted.
+- With `onInvalid`, a duplicate question name drops the later question (decision 19);
+  without it, `validateFormFields` still throws.
+
+Store
+- `purgeOptionSource` is new in `cache-purge.ts` (the `createPurger` path was not
+  exported). The second purge happens only with a `waitUntil`.
+- The lease claim is one upsert, `returning digest, options is not null as had`; no row
+  back means the lease was lost.
+- Failure categories: not an array is `malformed`; `[]` is `empty`; no valid entry is
+  `malformed`; a timeout races a timer that aborts the signal, so a `load` that ignores
+  its signal is abandoned.
+- A host value must be 1 to 120 characters, already trimmed and printable;
+  whitespace-padded values are dropped, not trimmed.
+- `readListOnPrimary` takes `Pick<D1Database, 'withSession'>` because `FolioDb` cannot
+  open a session; `OptionListsContext.primary` is optional and the submit route passes
+  `c.env.DB`. `FolioRuntime.rawDb(env)` serves the lost-lease primary re-read.
+- Refresh `'submit'` without `waitUntil` uses a stale row as read and does not refresh it;
+  a never-loaded row is still awaited for 3 seconds.
+- Locale: the source locale and the config default map to `''`; other locales map to
+  themselves, and only for a `localised` source.
+- A content list is up to 5 pages of 100 fetched in parallel; the title collation is left
+  to `materialiseOptions`. An unknown or singleton content type at render gives an empty
+  list, and `checkOptionSources` refuses it at save.
+
+Render
+- `GET /forms/resolved` goes through `brandOf`: unscoped on a branded deployment it is now
+  `400 site_required` (it was an empty chain). A behaviour change that follows the
+  registry-read invariant.
+- Collation applies only to `title` ascending or unset order. The locale is
+  `active?.code ?? locales.default`.
+- A sourced question with no resolved entry compiles `{ source, unavailable: true }`.
+- An unsourced form costs no extra round trip; a sourced form without collections adds
+  one (count and page together); with collections all statements are sent together.
+
+Submit
+- `FormResponse.optionLabels` and `ResponseRow.optionLabels` are required;
+  `NewResponse.optionLabels` is optional and defaults to `{}`.
+- The cap for a sourced `checkboxes` is `(500 + typed extras) x 120`.
+- If any refusal falls on an unavailable-list question, the whole reply is
+  `503 source_unavailable`, even with other invalid fields (decision 8).
+- An unscoped submit on a branded deployment gets `404` at the chain check, before
+  `brandOf`, so there is no `400 site_required` test on that route.
+- The submit-time session behaviour is covered by `form-submit-sources.test.ts` through a
+  lagging-replica proxy; `read-session.test.ts` was not extended.
+
+Save, cron and preview
+- An unreferenced preview key calls `load` directly: no lease and no row, because a lease
+  is a row. Referenced keys go through `refreshList`.
+- The preview chain is the request's (`requestChain` plus the request site), like
+  `/forms/resolved`, where the spec text says "the form's chain". It shows what the
+  editor's own site would render.
+- Preview `total` for content comes from one extra query only when the page is full at
+  500; for a host source it is the list length, `truncated` when just cut or at 500.
+- `refreshOptionSources`: `due` counts lists after the cursor; lists whose lease another
+  request held count as `unchanged`; concurrency 4, 10 seconds per load; the cursor is the
+  last key only when more remain; the prune runs on every call and removes rows with
+  `attempted_at` older than 7 days that no form references.
+- `PATCH` calls `brandOf` only when the fields contain a sourced question.
+
+Admin
+- `OptionSourceEditor` and `SettingControl` live in
+  `src/admin/ui/screens/OptionSourceEditor.tsx` because `FormBuilder` is already 1,366
+  lines. The `dialogs.test` count went from 39 to 40.
+- Text filters preview on blur or Enter rather than per keystroke. The "Under" picker
+  shows the raw parent id (`DocumentPicker.onPick` gives only an id). The builder
+  previews every saved sourced question once on load, so rules on unopened questions have
+  their list. A sourced question with no known list falls back to free text in the rule
+  editor. On a non-source locale the source select and settings are hidden and only the
+  preview shows.
+- Responses show the label in the table and label plus muted raw value in the drawer; the
+  CSV `:value` column is built server-side.
+- **Not browser-verified:** real blur and Enter commits, the layout of the settings,
+  preview and warning, the `DocumentPicker` from "Under", the `.raw` line, and a number
+  input mid-edit.
+
+**The build review's findings, and what was done.**
+- **M1 (fixed).** `new Intl.Collator('en_AU')` throws a `RangeError` in V8, and
+  `validateLocales` accepts any `[A-Za-z0-9_-]` code, so a host with `en_AU` would have
+  returned 500 on every page and submit of a title-ordered sourced form. The collator is
+  now built through `collatorFor`: `_` becomes `-`, and a code still refused sorts with
+  the default collator. Rejecting such codes in `validateLocales` was the alternative; it
+  narrows a config key and would need a major bump.
+- **L1 (fixed).** The 25-second delay of the second purge started when the load finished,
+  so a slow vendor on the save or stale-submit path could push it past `waitUntil`'s 30
+  seconds, where the runtime drops it silently. Those two paths now pass
+  `requestStartedAt`, and the delay is `max(0, 25 s - elapsed since the request began)`.
+  The cron passes none and keeps the full 25 seconds.
+- **L2 (fixed).** The prune's `delete` re-checks `attempted_at < ?`, so a row a
+  concurrent save just loaded is kept.
+- **L3 (fixed).** `effectiveSettings` drops `null` and `''`, then fills each declared
+  `default`, and runs before the list key, the lease and `load`. `{}`, `{ region: null }`
+  and the default spelled out are now one list, and `load` receives the defaults.
+- **L4 (release order, no code).** Until spec 36 counts `source_unavailable` as a refused
+  attempt, a script POSTing to a form with a never-loaded list costs a lease write and a
+  primary read per request, uncounted by `ratePerHour`. Vendor calls stay capped by the
+  lease, so decision 7 holds. Spec 37 does not ship without spec 36: v1.3.0 is tagged only
+  after 36's counting is merged.
+
+**Phase 7.**
+- **The demo had no seeded contact form**, because forms are rows an editor creates and
+  `seed.sql` holds none. The "contact form" therefore lives in `scripts/seed-demo.mjs`,
+  which creates a `contact` form (a `country` question from `countries`, and a `guide`
+  question from published People, asked only when `country` is `au`, so one sourced
+  question gates on the other) and drops a `contactForm` block on the showcase page. The
+  demo's `countries` source was already registered in phase 5.
+- **The `/dev/option-source` switch** is `?fail=1|0` (the demo's `countries` `load`
+  throws) and `?stale=1` (ages every `option_lists` row by seven days, past its ttl and
+  its lease). Both answer 404 off localhost like `/dev/last-signin`. `stale` is an addition
+  to the spec: it is how the script sees a stale list accepted without waiting an hour.
+- **The end-to-end script** has 15 checks over the four things the spec lists, plus the
+  `unasked` record of a gated question and the CSV's `:value` column. It uses the `person`
+  record type for the content source, because a record needs no parent page.
+- **The shared UPGRADING section** is "v1.3.0 is roll-forward only"; spec 36 appends its
+  bullets. This spec also rewrote the "Next free" sentence to `0018`.
+
+**Verified by breaking** (phase 7 and the fixes; earlier phases' results are in their
+reports). With `collatorFor`'s catch rethrowing, the `en_AU` unit test fails. With the
+prune's `attempted_at < ?` removed from the delete, the race test fails. With the default
+fill removed from `effectiveSettings`, the two settings tests fail. With the purge using
+the full 25-second delay again, the request-timing test fails. Each was reverted by an
+edit and the diff checked.

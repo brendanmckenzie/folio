@@ -107,8 +107,9 @@ and whether it needs anything from you beyond applying it.
 | `0013_site_brands.sql` | One nullable `sites.brand` column | **Apply it before you deploy, on every deployment with `sites`**: this release's registry read selects the column, so a Worker deployed first fails every registry read with `no such column`. It is additive and safe ahead of the deploy. It changes nothing until you configure `brands`; read [the brands section](#0013-and-turning-brands-on-2026-09-30-v100) before you do. |
 | `0014_form_logic.sql` | `forms.layout` (a form's sections) and `form_responses.unasked` (the questions a response was never asked) | **Apply it before you deploy**: this release's form reads select `forms.layout` and its response reads select `unasked`, so a Worker deployed first fails every form read with `no such column`. Both columns are additive with defaults (`'{}'` and `'[]'`), safe ahead of the deploy, and change nothing for a form until an editor gives it a condition or a section. Read [conditional questions](#conditional-questions-sections-and-prefill-2026-10-19) before you do. |
 | `0015_draft_data.sql` | One nullable column, `stories.draft_data` (a JSON mirror of the draft's root scalars, for the Data table) | **Apply it before you deploy**: the Data list selects it for anyone who may read drafts, so a Worker deployed first answers `500` to every editor. Additive and nullable, so safe ahead of the deploy. Then run `POST {base}/api/reindex?drafts=1` once. Read [draft values](#draft-values-in-the-data-table-v120) first. |
+| `0016_option_sources.sql` | `option_lists` (the last good list per host option source) and `form_responses.option_labels` | **Apply it before you deploy**: v1.3.0 reads `option_lists` when it renders a form and selects `option_labels` in every response read, so a Worker deployed first fails both with `no such table` / `no such column`. Additive and safe ahead of the deploy. v1.3.0 is **roll-forward only**: read [that section](#v130-is-roll-forward-only) first. |
 
-`0011`, `0013`, `0014` and `0015` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0016`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
+`0011`, `0013`, `0014`, `0015` and `0016` have landed, and `0017` is claimed by v1.3.0's form actions. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0018`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -777,6 +778,65 @@ into a Data, media, redirects or form-responses search box used to answer `500`.
 cut to fit (counting wildcards, escapes and UTF-8 bytes) and matches on its prefix, and the same
 bound applies to `contains` and `startsWith` in content queries. `%`, `_` and `\` in a term now
 match themselves in the four admin search boxes, where before they acted as wildcards.
+
+### Form option sources (v1.3.0)
+
+`0016_option_sources.sql` adds one table and one column. Apply it before you deploy.
+Nothing changes for a form until an editor gives a question a source. What changes
+in the code regardless:
+
+- **`FolioForms` gains `sources`**, per brand on a deployment with `brands`. It is
+  optional, and absent means only the built-in `content` source is offered.
+- **`ResolvedFormField` gains `optionsFrom`** on a sourced question: `{ source, types?,
+  unavailable? }`. `options` already holds the full list, so a host that renders
+  `field.options` needs no change. `unavailable: true` means the list could not be
+  read and only the editor's typed extras are present. Render that however your
+  design says "temporarily unavailable". `reader.page()` does not edge-cache such a
+  page.
+- **A content-sourced question whose list is empty, and which has no typed options,
+  is not asked**: it arrives with `showIf: { any: [] }`, so `formLayout` omits it,
+  and the response lists it in `unasked`.
+- **`FormResponse` and the response reads gain `optionLabels`**, `{ [question]: {
+  [value]: label } }`, holding what the visitor read when they chose. It is `{}` for
+  every response stored before `0016`. A content option's value is a story id, so a
+  `submitted` hook that showed the raw value now shows `stry_…`: read the label from
+  here.
+- **A new submit refusal**: `folio_status=error`, JSON `code: 'source_unavailable'`,
+  HTTP 503, sent only when a question's list has never loaded and the visitor
+  answered it or it is required.
+- **The CSV** puts a sourced question's labels in its column and the stored values
+  in a following `<name>:value` column.
+- **Add `await folio.refreshOptionSources(env, { waitUntil: ctx.waitUntil.bind(ctx) })`
+  to `scheduled()`** if you register a host source. Without it, a list refreshes only
+  on saves and submissions.
+- **A question Folio cannot read is now dropped on its own**, and logged, rather than
+  emptying its whole form.
+- **New exports**: `folio/core` gains `CONTENT_SOURCE`, `MAX_SOURCED_OPTIONS`,
+  `materialiseOptions`, `hasUnavailableOptions` and the types `OptionsFrom`,
+  `ContentOptionSettings` and `ResolvedOptionsFrom`. `folio/server` gains the types
+  `FolioOptionSource`, `OptionSourceInput` and `OptionSourceItem`.
+
+### v1.3.0 is roll-forward only
+
+**v1.3.0 cannot be rolled back to v1.2.x.** If something is wrong after the upgrade,
+deploy a v1.3.x fix. Do not redeploy a v1.2.x pin. A v1.2.x build reading a v1.3.0
+database breaks the following, and some of it cannot be repaired afterwards:
+
+- **Enquiries are lost while visitors are told they were received.** On any form
+  with a sourced question that has no typed options, v1.2.x reads the whole form as
+  having no questions. Pages cached by v1.3.0 keep showing it for up to a week, and
+  every submission to it is stored empty, answered `ok`, and handed to your
+  `submitted` hook with no answers.
+- **A sourced question is un-sourced for good** if anyone saves its form in the
+  v1.2.x builder: the older build strips the source on save, and rolling forward does
+  not bring it back.
+- **The builder shows those forms with no questions**, and a save from there
+  overwrites the stored questions permanently.
+- **Responses taken meanwhile have no option labels**, so their content-sourced
+  answers read as story ids in Responses and the CSV, permanently.
+
+The new table and columns stay in the database, and an older build ignores them.
+That is the only part of this release that a rollback leaves alone.
 
 ### `anthropicDescriber` reports usage (2026-10-20) (v1.1.0)
 

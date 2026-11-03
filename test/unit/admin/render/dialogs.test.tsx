@@ -277,7 +277,7 @@ describe("every interaction-only surface mounts", () => {
  * `fields/` is deliberately excluded: those render inside `Inspector`, which the
  * `edit` routes mount, and they have no props of their own to give.
  */
-describe("the thirty-nine screens are all accounted for", () => {
+describe("the forty screens are all accounted for", () => {
   /** Reached by `screens.test.tsx`'s nineteen URLs, directly or nested. */
   const BY_ROUTE = [
     "Access",
@@ -294,6 +294,7 @@ describe("the thirty-nine screens are all accounted for", () => {
     "Home",
     "Inspector",
     "Model",
+    "OptionSourceEditor",
     "Redirects",
     "Responses",
     "Schedules",
@@ -317,7 +318,7 @@ describe("the thirty-nine screens are all accounted for", () => {
 
     const covered = [...BY_ROUTE, ...BY_PORTAL, ...SURFACES.map(([name]) => name)].sort();
 
-    expect(files.length).toBe(39);
+    expect(files.length).toBe(40);
     expect(covered).toEqual(files);
   });
 });

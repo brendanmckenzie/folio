@@ -21,8 +21,24 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { wasRefused } from "../../core/bulk";
 import { NO_STORE } from "../../core/cache-tags";
-import { honeypotName } from "../../core/forms";
-import { chain as chainOf, DEFAULT_SITE, sitesUnder } from "../../core/sites";
+import { type FormField, honeypotName } from "../../core/forms";
+import { isKnownLocale } from "../../core/locales";
+import {
+  CONTENT_SOURCE,
+  contentOptionQuery,
+  contentOptionSettings,
+  MAX_SOURCED_OPTIONS,
+  optionListKey,
+  readOptionsFrom,
+} from "../../core/option-sources";
+import { indexedFields } from "../../core/index-projection";
+import {
+  chain as chainOf,
+  DEFAULT_SITE,
+  SINGLE_SITE_CHAIN,
+  type SiteRef,
+  sitesUnder,
+} from "../../core/sites";
 import { actorString, EDIT, FORMS, READ, SCOPE_ADMIN } from "../auth/roles";
 import { purgeFormLayout } from "../cache-purge";
 import { FolioError } from "../errors";
@@ -40,6 +56,7 @@ import {
   isDuplicateSubmission,
   listResponses,
   newResponseId,
+  optionLabelsOf,
   type PreparedUpload,
   prepareUploads,
   putUploads,
@@ -58,11 +75,13 @@ import {
   compileForm,
   createForm,
   deleteForm,
+  fieldsFromInput,
   type Form,
   formById,
   formMeta,
   formSiteOf,
   formsByIds,
+  materialiseForm,
   deleteUploads,
   formUsage,
   hasFileQuestion,
@@ -72,6 +91,15 @@ import {
   PAGE_INPUT,
   updateForm,
 } from "../forms";
+import {
+  effectiveSettings,
+  brandKey,
+  checkOptionSources,
+  hostListsOf,
+  previewHostList,
+  referencedLists,
+  refreshSavedSources,
+} from "../option-sources";
 import {
   brandIdOf,
   hookCtx,
@@ -91,6 +119,7 @@ import {
   DOWNLOAD_CONTENT_TYPE,
   fieldNameParam,
   FormCreateBody,
+  FormOptionPreviewBody,
   FormPatchBody,
   formIdListQuery,
   formIdParam,
@@ -246,15 +275,67 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     // Within the request's chain: a form outside it is absent from the answer, exactly
     // as a deleted one is (`multi-site.md` decision 3).
-    const forms = await formsByIds(c.var.bindings().db, ids, rt.logger, await requestChain(c, rt));
+    const bindings = c.var.bindings();
+    const chain = await requestChain(c, rt);
+    const forms = await formsByIds(bindings.db, ids, rt.logger, chain);
     const locale = rt.localeOf(c.req.query("locale"));
     const page = c.req.query("page");
-    const ctx = {
-      base: rt.base,
+    // Sourced questions carry the list the page will: rows read, nothing loaded
+    // (`refresh: 'never'`), on the request's scope (`form-option-sources.md`
+    // decision 14). The brand is the request's (`site_required` when unscoped on a
+    // branded deployment), and the site is its scope, for the query's URLs.
+    const brand = brandOf(c);
+    const site =
+      rt.sites && c.var.scope !== null
+        ? (await rt.sites.registry(c.env)).sites.find((s) => s.id === c.var.scope)
+        : undefined;
+    const lists = await brand.optionLists(bindings, forms, {
+      chain,
+      ...(site ? { site } : {}),
       ...(locale ? { locale } : {}),
-      ...(page ? { page: formPageQuery(page) } : {}),
-    };
-    return c.json(Object.fromEntries(forms.map((form) => [form.id, compileForm(form, ctx)])));
+      refresh: "never",
+      env: c.env,
+    });
+    const collate = locale?.code ?? rt.locales?.default;
+    return c.json(
+      Object.fromEntries(
+        forms.map((form) => {
+          const sourced = materialiseForm(form, lists.get(form.id), collate);
+          return [
+            form.id,
+            compileForm(sourced.form, {
+              base: rt.base,
+              ...(locale ? { locale } : {}),
+              ...(page ? { page: formPageQuery(page) } : {}),
+              sources: sourced.sources,
+            }),
+          ];
+        }),
+      ),
+    );
+  });
+
+  /**
+   * The option sources the builder may offer, and (spec 36) the actions
+   * (`form-option-sources.md` decision 17). **Signed in, at `READ`, and the request's
+   * brand's**: a branded deployment asked with no scope is `400 site_required`, never
+   * the first brand's sources. Metadata only, no function: a source's label names the
+   * vendor and its settings are what a host passes to it, which is why none of this is
+   * on the unauthenticated Manifest. `content` is built in and not listed. Registered
+   * ahead of `/forms/:id`, so `registry` is never read as an id.
+   */
+  app.get("/forms/registry", requireAccess<Env>(rt, READ), (c) => {
+    const brand = brandOf(c);
+    return c.json({
+      sources: [...(brand.forms?.sources.values() ?? [])].map((source) => ({
+        id: source.id,
+        label: source.label,
+        settings: { ...(source.settings ?? {}) },
+        ttl: source.ttl,
+        localised: source.localised,
+      })),
+      actions: [],
+    });
   });
 
   app.get("/forms/:id", requireAccess<Env>(rt, READ), fenceForm("read"), async (c) => {
@@ -290,8 +371,37 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // reason `deleteForm` can treat "files with no bucket" as unreachable.
     if (!media && body.fields?.some((field) => field.kind === "file")) throw noMedia();
 
+    // Whether each sourced question's source exists and its settings suit it is the
+    // brand's to say (`form-option-sources.md` decision 12): refused here, before the
+    // write, naming the question. Shape was `validateFormFields`' (`fieldsFromInput`).
+    const incoming = body.fields === undefined ? [] : fieldsFromInput(body.fields);
+    const sourced = incoming.some((f) => f.optionsFrom);
+    if (sourced) checkOptionSources(incoming, brandOf(c));
+
     const result = await updateForm(db, id, body, scopeOf(c));
     if (!result) throw new FolioError("not_found", "Unknown form");
+
+    // The saved host sources' missing or stale lists load in the background: the Save
+    // button never waits on a vendor (decision 7).
+    if (sourced) {
+      const lists = hostListsOf(result.form.fields, brandOf(c), rt.locales);
+      if (lists.length > 0) {
+        const { waitUntil } = hookCtx(c);
+        waitUntil(
+          refreshSavedSources(
+            {
+              db,
+              env: c.env,
+              logger: rt.logger,
+              ...(rt.formPurgeCapability ? { purgeCapability: rt.formPurgeCapability } : {}),
+              waitUntil,
+              requestStartedAt: Date.now(),
+            },
+            lists,
+          ).catch((err) => rt.logger.error("folio: option source refresh failed", err)),
+        );
+      }
+    }
 
     if (result.structural) {
       await rt.hookRunner(hookCtx(c), brandIdOf(c)).run("formChanged", {
@@ -313,6 +423,116 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
     return c.json(result.form);
   });
+
+  /**
+   * The list an unsaved question would offer (`form-option-sources.md` decision 14).
+   *
+   * `EDIT`, because it can make a vendor call; `fenceForm('read')`, because it changes
+   * no form. **The body is validated as a save is** (`checkOptionSources`), so a host's
+   * `load` never sees an undeclared key or an unlisted `select` value. It persists a
+   * row only when a saved form already references the key (`previewHostList`), so
+   * typing through settings leaves nothing behind. Content is the same paged query a
+   * render runs, in the request's chain.
+   */
+  app.post(
+    "/forms/:id/option-preview",
+    requireAccess<Env>(rt, EDIT),
+    fenceForm("read"),
+    async (c) => {
+      const id = formIdParam(c.req.param("id"));
+      const body = await parseBody(c.req, FormOptionPreviewBody);
+      if (body.locale !== undefined && !isKnownLocale(rt.locales, body.locale)) {
+        throw new FolioError("unsupported", `Unknown locale: ${body.locale}`);
+      }
+      const brand = brandOf(c);
+      const bindings = c.var.bindings();
+      const form = await formById(bindings.db, id, rt.logger);
+      if (!form) throw new FolioError("not_found", "Unknown form");
+
+      let optionsFrom: FormField["optionsFrom"];
+      try {
+        optionsFrom = readOptionsFrom(body.optionsFrom, "preview");
+      } catch (err) {
+        throw new FolioError("bad_request", err instanceof Error ? err.message : "Invalid source");
+      }
+      const field: FormField = {
+        name: "preview",
+        kind: "select",
+        label: "Preview",
+        optionsFrom,
+      };
+      checkOptionSources([field], brand);
+
+      const locale = rt.localeOf(body.locale);
+      const from = optionsFrom!;
+
+      if (from.source === CONTENT_SOURCE) {
+        const chain = await requestChain(c, rt);
+        const site =
+          rt.sites && c.var.scope !== null
+            ? (await rt.sites.registry(c.env)).sites.find((s) => s.id === c.var.scope)
+            : undefined;
+        const lists = await brand.optionLists(bindings, [{ ...form, fields: [field] }], {
+          chain,
+          ...(site ? { site } : {}),
+          ...(locale ? { locale } : {}),
+          refresh: "never",
+          env: c.env,
+        });
+        const options = lists.get(form.id)?.get(field.name)?.options ?? [];
+        let total = options.length;
+        if (options.length >= MAX_SOURCED_OPTIONS) {
+          // Only a full list can have more behind it: ask the query for its count.
+          const settings = contentOptionSettings(from.settings)!;
+          const type = brand.typeOf(settings.type)!;
+          const rootIndexed = new Set(indexedFields(brand.schema, type.root).map(([n]) => n));
+          total = (
+            await brand.query(bindings, contentOptionQuery(settings, rootIndexed, 1), chain, site)
+          ).total;
+        }
+        return c.json({
+          options,
+          total,
+          truncated: total > MAX_SOURCED_OPTIONS,
+          status: "fresh",
+          loadedAt: null,
+        });
+      }
+
+      const source = brand.forms!.sources.get(from.source)!;
+      const code =
+        source.localised && locale && locale.code !== rt.locales?.default ? locale.code : "";
+      const settings = effectiveSettings(source, from.settings);
+      const key = optionListKey(settings, code);
+      const wanted = `${brandKey(brand.brand)}\u0000${source.id}\u0000${key}`;
+      const referenced = (await referencedLists(rt, c.env, bindings.db)).some(
+        (list) => list.canonical === wanted,
+      );
+      const preview = await previewHostList(
+        {
+          db: bindings.db,
+          env: c.env,
+          brand: brand.brand,
+          source,
+          logger: rt.logger,
+          ...(rt.formPurgeCapability ? { purgeCapability: rt.formPurgeCapability } : {}),
+          waitUntil: hookCtx(c).waitUntil,
+        },
+        { settings, locale: code },
+        referenced,
+        10_000,
+      );
+      const options = preview.options ?? [];
+      return c.json({
+        options,
+        total: options.length,
+        truncated: preview.truncated || options.length >= MAX_SOURCED_OPTIONS,
+        status: preview.status,
+        loadedAt: preview.loadedAt,
+        ...(preview.failure ? { failure: preview.failure } : {}),
+      });
+    },
+  );
 
   /**
    * The form, its responses and their files — all of it, and the counts of what
@@ -760,19 +980,36 @@ function refererPath(req: Request): string {
  *     to the host's widget (decision 13), and which fails closed on a throw.
  *  7. **The rate limit**, after `verify` so a verified submission is never
  *     refused for an unverified one's traffic.
- *  8. **The uploads**, bounded per question, typed from their own bytes and
- *     hashed — with nothing written to R2. Behind every abuse control above,
- *     because buffering an attachment for a bot is the cost the honeypot exists
- *     to avoid, and ahead of validation because a `file` question's `required`
- *     is the question "did an acceptable file arrive".
- *  9. **Validation**, then the duplicate check, then the put, then the insert,
- *     then the hook. The put is between the last two reads and the write for
- *     `uploadAsset`'s reason: a row naming an object that never landed is worse
- *     than an object with no row, and the second is closed by a compensating
- *     delete on either failure.
+ *  8. **The uploads and the option lists**, together. The uploads are bounded per
+ *     question, typed from their own bytes and hashed, with nothing written to R2.
+ *     Behind every abuse control above, because buffering an attachment for a bot is
+ *     the cost the honeypot exists to avoid, and ahead of validation because a
+ *     `file` question's `required` is the question "did an acceptable file arrive".
+ *     The lists are every sourced question's, asked or not (spec 37 decision 8), on
+ *     the same side of the rate limit for the same reason: a bot or a flood never
+ *     costs a vendor call.
+ *  9. **Validation** over the fully materialised questions, then the duplicate
+ *     check, then the put, then the insert, then the hook. The put is between the
+ *     last two reads and the write for `uploadAsset`'s reason: a row naming an
+ *     object that never landed is worse than an object with no row, and the second
+ *     is closed by a compensating delete on either failure.
  *  9a. **The engine decides what was asked** (`validateSubmission`, spec 35): an
  *     answer or a file for a question that was not is dropped here, before
  *     anything is hashed or written.
+ *  9b. **A refusal on a question whose list is unavailable** is `source_unavailable`
+ *     (503), not `invalid` (spec 37).
+ *
+ * That is the merged order of specs 36 and 37, stated identically in both:
+ *
+ *     chain check → body cap → closed → honeypot → verify → rate limit (spec 36:
+ *     counts refused attempts too) → uploads + option-list load for every sourced
+ *     question (37) → validateSubmission on materialised fields (37 maps refusals
+ *     on unavailable lists to source_unavailable) → duplicate check → spec 36
+ *     checks → insert (option labels + delivery rows, one batch) → spec 36
+ *     deliveries + hooks.submitted
+ *
+ * Spec 36's steps are named here and not yet built: its refusal counting, its
+ * checks and its delivery rows.
  *
  * Nothing about the answer distinguishes a stored row from a collapsed duplicate
  * or from a caught honeypot: all three answer `ok` with a minted id. That is
@@ -797,14 +1034,24 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // is an unknown one. Recorded on the response, so a shared form's answers can be
     // read by the site they came from.
     let submitting = DEFAULT_SITE;
+    // The receiving site's chain and ref, for a content-sourced question's list: the
+    // page was drawn from this chain, so the POST validates against it
+    // (`form-option-sources.md` decision 8). Hoisted out of the check below, which
+    // used to hold `within` block-scoped.
+    let chain: readonly string[] = SINGLE_SITE_CHAIN;
+    let receiving: SiteRef | undefined;
     let form: Form | null;
     if (rt.sites) {
       const received = c.var.site;
       form = null;
+      chain = [];
       if (received?.surface === "live") {
         submitting = received.id;
         const owner = await formSiteOf(db, id);
-        const within = chainOf(await rt.sites.registry(c.env), received.id);
+        const registry = await rt.sites.registry(c.env);
+        const within = chainOf(registry, received.id);
+        chain = within;
+        receiving = registry.sites.find((site) => site.id === received.id);
         if (owner !== null && within.includes(owner)) form = await formById(db, id, rt.logger);
       }
     } else {
@@ -909,9 +1156,35 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // `required` check for a `file` question is the answer to "did a file
     // arrive", and behind every abuse control because buffering an attachment
     // for a bot is the one cost the honeypot exists to avoid.
-    const prepared = await prepareUploads(form.fields, parts);
+    //
+    // **The option lists load here, beside the uploads and behind the same
+    // controls** (`form-option-sources.md` decision 8): a bot caught by the
+    // honeypot, or a flood, never costs a vendor call or a content query. Every
+    // sourced question's list, asked or not, because whether a question is asked
+    // can itself depend on another sourced answer, and `formState` reads an option
+    // answer through the list. The locale is the one the row will be stored under,
+    // so a label is snapshotted in the language the visitor read it in.
+    const locale = rt.localeOf(body.get(LOCALE_INPUT)?.[0]);
+    const [prepared, lists] = await Promise.all([
+      prepareUploads(form.fields, parts),
+      form.fields.some((field) => field.optionsFrom)
+        ? brand.optionLists(c.var.bindings(), [form], {
+            chain,
+            ...(receiving ? { site: receiving } : {}),
+            ...(locale ? { locale } : {}),
+            refresh: "submit",
+            waitUntil: hookCtx(c).waitUntil,
+            env: c.env,
+            primary: rt.rawDb(c.env),
+          })
+        : undefined,
+    ]);
+    // The engine only ever sees an ordinary option question (decision 2). `form`
+    // stays the stored one: its version, layout and names are what the reply and the
+    // row are made from.
+    const sourced = materialiseForm(form, lists?.get(form.id), locale?.code ?? rt.locales?.default);
     const { values, errors, unasked } = validateSubmission(
-      form.fields,
+      sourced.form.fields,
       body,
       new Set(prepared.files.map((file) => file.field)),
       form.layout.sections ?? [],
@@ -932,6 +1205,24 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // should say `too_long`, not `required`.
     const refusals = { ...errors, ...uploads.errors };
     const invalid = Object.keys(refusals);
+    // A refusal on a question whose list could not be read is the host's outage, not
+    // something the visitor can fix, so it is not `invalid` (decision 8). Such a
+    // question is refused only because it was asked and answered or required: an
+    // unanswered optional one, or one the engine did not ask, has no refusal here.
+    const unavailable = new Set(
+      [...(lists?.get(form.id) ?? [])].flatMap(([name, list]) =>
+        list.options === null ? [name] : [],
+      ),
+    );
+    if (invalid.some((name) => unavailable.has(name))) {
+      return replyTo({
+        ...reply,
+        status: "error",
+        code: "source_unavailable",
+        message: "This form cannot take submissions right now. Try again later.",
+        httpStatus: 503,
+      });
+    }
     if (invalid.length > 0) {
       return replyTo({
         ...reply,
@@ -970,11 +1261,12 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         form,
         data: values,
         unasked,
+        optionLabels: optionLabelsOf(sourced.form.fields, values),
         // Whatever the descriptor's hidden input said, run back through the
         // runtime's own locale resolution: an undeclared code — or one a submitter
         // invented — is stored as `''`, the source-locale convention `content_index`
         // already uses.
-        locale: rt.localeOf(body.get(LOCALE_INPUT)?.[0])?.code ?? "",
+        locale: locale?.code ?? "",
         page,
         ipHash: hash,
         bodyHash: hashed,

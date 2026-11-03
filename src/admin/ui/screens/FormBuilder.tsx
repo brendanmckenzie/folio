@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FILE_ACCEPT,
   type FormField,
+  type FormFieldOption,
   type FormFieldKind,
   type FormLayout,
   type FormSection,
@@ -10,6 +11,12 @@ import {
   shapeOf,
 } from "../../../core/forms";
 import type { LocaleConfig } from "../../../core/locales";
+import {
+  type DocumentType,
+  indexManifest,
+  type Manifest,
+  type SchemaIndex,
+} from "../../../core/schema";
 import type { Form } from "../../../server/forms";
 import { canDeleteForms, canEdit, type Me } from "../../me";
 import { Badge } from "../Badge";
@@ -19,6 +26,7 @@ import { Field, Input, Select, Textarea } from "../Field";
 import { ListHeader } from "../List";
 import { Menu, type MenuItem } from "../Menu";
 import { ConditionEditor } from "./ConditionEditor";
+import { OptionSourceEditor } from "./OptionSourceEditor";
 import { FormDeleteDialog } from "./FormDeleteDialog";
 import css from "./FormBuilder.module.css";
 import { blankCondition, formConditionText, sourcesFor } from "./condition-model";
@@ -59,9 +67,15 @@ import {
   withFieldText,
   withGrow,
   withOptionLabel,
+  minTypedOptions,
+  previewable,
+  withListedOptions,
+  type FormSourceInfo,
 } from "./form-model";
 import { messageOf } from "./useContent";
 import { useForm } from "./useForm";
+import { useFormRegistry } from "./useFormRegistry";
+import { fetchOptionPreview } from "./useOptionPreview";
 
 interface Props {
   apiBase: string;
@@ -71,6 +85,9 @@ interface Props {
    *  locale switcher entirely — decision 12: "shown only when
    *  `config.locales` is set." */
   locales?: LocaleConfig;
+  /** The scope's Manifest: its types and schema, for a "Published content" source
+   *  (`form-option-sources.md` decision 14). Null until it has loaded. */
+  manifest: Manifest | null;
   onNotice: (message: string) => void;
   /** Reports the saved label, for the shell's breadcrumb and tab title. */
   onLabel: (label: string) => void;
@@ -99,12 +116,28 @@ export function FormBuilder({
   id,
   me,
   locales,
+  manifest,
   onNotice,
   onLabel,
   onOpenResponses,
   onDeleted,
 }: Props) {
   const data = useForm(apiBase, id);
+  const registry = useFormRegistry(apiBase);
+  const types = useMemo(() => manifest?.types ?? [], [manifest]);
+  const schema = useMemo(() => (manifest ? indexManifest(manifest) : {}), [manifest]);
+  // The list each sourced question last previewed, by question name: what a rule on
+  // that question may compare against (decision 11).
+  const [lists, setLists] = useState<Record<string, readonly FormFieldOption[]>>({});
+  const onList = (name: string, options: readonly FormFieldOption[] | null) =>
+    setLists((prev) => {
+      if (options === null) {
+        if (!(name in prev)) return prev;
+        const { [name]: _gone, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [name]: options };
+    });
   const [draft, setDraft] = useState<Form | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
@@ -116,6 +149,23 @@ export function FormBuilder({
   useEffect(() => {
     if (data.form) setDraft(data.form);
   }, [data.form]);
+
+  // A rule on one sourced question is edited from another's panel, where that
+  // question's own preview has not run. Ask for the saved ones once, so the rule
+  // editor can offer the list rather than a free-text box.
+  const asked = useRef(new Set<string>());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the saved form and locale only.
+  useEffect(() => {
+    for (const f of data.form?.fields ?? []) {
+      if (!previewable(f.optionsFrom)) continue;
+      const key = JSON.stringify([f.name, f.optionsFrom, locale]);
+      if (asked.current.has(key)) continue;
+      asked.current.add(key);
+      fetchOptionPreview(apiBase, id, f.optionsFrom, locale)
+        .then((preview) => setLists((prev) => ({ ...prev, [f.name]: preview.options })))
+        .catch(() => undefined);
+    }
+  }, [data.form, locale]);
 
   // `onLabel` is a fresh closure on every render of the shell around this
   // screen; naming it here would refire this effect — and re-notify the
@@ -504,6 +554,13 @@ export function FormBuilder({
                 setDraft({ ...draft, fields: endSectionAfter(draft.fields, selectedField.name) })
               }
               formId={draft.id}
+              apiBase={apiBase}
+              types={types}
+              schema={schema}
+              sources={registry.sources}
+              registryError={registry.error}
+              lists={lists}
+              onList={onList}
               otherNames={draft.fields
                 .filter((f) => f.name !== selectedField.name)
                 .map((f) => f.name)}
@@ -552,6 +609,13 @@ function FieldPanel({
   onStartSection,
   onEndSection,
   formId,
+  apiBase,
+  types,
+  schema,
+  sources,
+  registryError,
+  lists,
+  onList,
   otherNames,
   locale,
   source,
@@ -571,6 +635,13 @@ function FieldPanel({
   onStartSection: () => void;
   onEndSection: () => void;
   formId: string;
+  apiBase: string;
+  types: readonly DocumentType[];
+  schema: SchemaIndex;
+  sources: readonly FormSourceInfo[];
+  registryError: string | undefined;
+  lists: Readonly<Record<string, readonly FormFieldOption[]>>;
+  onList: (name: string, options: readonly FormFieldOption[] | null) => void;
   otherNames: readonly string[];
   locale: string;
   source: string;
@@ -589,6 +660,9 @@ function FieldPanel({
   // makes "Required" read "Whenever it is shown".
   const showSources = sourcesFor(fields, index, "show");
   const requireSources = sourcesFor(fields, index, "require");
+  // A sourced question compares against its previewed list merged with its extras.
+  const showListed = withListedOptions(showSources, lists);
+  const requireListed = withListedOptions(requireSources, lists);
   const sectionRule = layout.sections?.find((sec) => sec.name === field.section)?.showIf;
   const conditional = field.showIf !== undefined || sectionRule !== undefined;
   const requirement = field.requireIf ? "when" : field.required ? "always" : "no";
@@ -725,7 +799,7 @@ function FieldPanel({
       {locale === source && field.showIf ? (
         <ConditionEditor
           condition={field.showIf}
-          sources={showSources}
+          sources={showListed}
           fields={fields}
           editable={editable}
           onChange={(showIf) => onChange({ ...field, showIf })}
@@ -762,7 +836,7 @@ function FieldPanel({
       {locale === source && field.requireIf ? (
         <ConditionEditor
           condition={field.requireIf}
-          sources={requireSources}
+          sources={requireListed}
           fields={fields}
           editable={editable}
           onChange={(requireIf) => onChange({ ...field, requireIf })}
@@ -938,6 +1012,23 @@ function FieldPanel({
       ) : null}
 
       {needsOptions(field.kind) ? (
+        <OptionSourceEditor
+          apiBase={apiBase}
+          formId={formId}
+          field={field}
+          types={types}
+          schema={schema}
+          sources={sources}
+          registryError={registryError}
+          locale={locale}
+          translating={locale !== source}
+          editable={editable}
+          onChange={onChange}
+          onList={onList}
+        />
+      ) : null}
+
+      {needsOptions(field.kind) ? (
         <OptionsEditor
           field={field}
           fields={fields}
@@ -1052,7 +1143,7 @@ function OptionsEditor({
   const options = field.options ?? [];
   return (
     <div className={css.options}>
-      <span className={css.optionsLabel}>Options</span>
+      <span className={css.optionsLabel}>{field.optionsFrom ? "Also offer" : "Options"}</span>
       <ol className={css.optionList}>
         {/* Keyed by position: the value is what the first input edits, so a
             value key remounts the row, and drops focus, on every keystroke. */}
@@ -1090,11 +1181,11 @@ function OptionsEditor({
                 variant="danger"
                 disabled={
                   !editable ||
-                  options.length <= 1 ||
+                  options.length <= minTypedOptions(field) ||
                   optionRefusal(fields, layout, field.name, option.value) !== null
                 }
                 reason={
-                  options.length <= 1
+                  options.length <= minTypedOptions(field)
                     ? "At least one option is required"
                     : (optionRefusal(fields, layout, field.name, option.value) ?? undefined)
                 }

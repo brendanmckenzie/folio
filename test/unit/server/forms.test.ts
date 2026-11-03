@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { FILE_ACCEPT, type FormField } from "../../../src/core/forms";
 import type { LocaleContext } from "../../../src/core/locales";
 import { formState } from "../../../src/core/form-logic";
-import { compileForm, type Form, LOCALE_INPUT, PAGE_INPUT } from "../../../src/server/forms";
+import {
+  compileForm,
+  type Form,
+  formById,
+  LOCALE_INPUT,
+  materialiseForm,
+  PAGE_INPUT,
+} from "../../../src/server/forms";
 import { FormPatchBody, parseOrThrow } from "../../../src/server/validate";
 
 /**
@@ -417,6 +424,7 @@ describe("FormPatchBody keeps every FormField key", () => {
     section: "s",
     hold: true,
     prefill: "query",
+    optionsFrom: { source: "countries", settings: { region: "oceania", limit: 5, all: false } },
     i18n: { fr: { label: "Q" } },
   };
 
@@ -427,6 +435,20 @@ describe("FormPatchBody keeps every FormField key", () => {
       "body",
     );
     expect(parsed.fields?.[0]).toEqual(everything);
+  });
+
+  it("refuses an optionsFrom that is not a bounded plain object", () => {
+    const patch = (optionsFrom: unknown) =>
+      parseOrThrow(
+        FormPatchBody,
+        { expectedUpdatedAt: 1, fields: [{ ...everything, optionsFrom }] },
+        "body",
+      );
+    expect(() => patch({ source: "" })).toThrow();
+    expect(() => patch({ source: "x".repeat(49) })).toThrow();
+    expect(() => patch({ source: "a", settings: [] })).toThrow();
+    expect(() => patch({ source: "a", settings: { big: "x".repeat(4100) } })).toThrow();
+    expect(() => patch("countries")).toThrow();
   });
 
   it("refuses a malformed condition and a malformed layout before anything is parsed", () => {
@@ -440,5 +462,130 @@ describe("FormPatchBody keeps every FormField key", () => {
       patch({ layout: { sections: [{ name: "s", label: "S", showIf: { field: "a", eq: 1 } }] } })
         .layout,
     ).toEqual({ sections: [{ name: "s", label: "S", showIf: { field: "a", eq: 1 } }] });
+  });
+});
+
+describe("formById: a question this build cannot read costs that question (spec 37 decision 19)", () => {
+  const rowWith = (fields: unknown) => ({
+    id: "frm_0123456789ab",
+    name: "contact",
+    label: "Contact",
+    fields: typeof fields === "string" ? fields : JSON.stringify(fields),
+    layout: "{}",
+    version: 1,
+    open: 1,
+    closes_at: null,
+    closedMessage: "",
+    successMessage: "",
+    submitLabel: "",
+    redirectTo: null,
+    createdAt: 0,
+    updatedAt: 0,
+  });
+  const fakeDb = (row: unknown) =>
+    ({
+      prepare: () => ({ bind: () => ({ first: async () => row }) }),
+      batch: async () => [],
+    }) as never;
+  const logger = () => {
+    const errors: string[] = [];
+    return {
+      errors,
+      log: { error: (m: string) => errors.push(m), warn() {}, info() {}, debug() {} } as never,
+    };
+  };
+
+  it("keeps the rest of the form and logs the one dropped", async () => {
+    const { errors, log } = logger();
+    const form = await formById(
+      fakeDb(rowWith([NAME, { name: "trip", kind: "select", label: "Trip" }, EMAIL])),
+      "frm_0123456789ab",
+      log,
+    );
+    expect(form?.fields.map((f) => f.name)).toEqual(["full_name", "email"]);
+    expect(errors).toEqual(["folio: form frm_0123456789ab question trip unreadable"]);
+  });
+
+  it("still answers no questions for a column that is not JSON at all", async () => {
+    const { errors, log } = logger();
+    const form = await formById(fakeDb(rowWith("{nope")), "frm_0123456789ab", log);
+    expect(form?.fields).toEqual([]);
+    expect(errors).toEqual(["folio: form frm_0123456789ab has unreadable fields"]);
+  });
+});
+
+describe("materialiseForm and a sourced question", () => {
+  const sourced: FormField = {
+    name: "trip",
+    kind: "select",
+    label: "Trip",
+    optionsFrom: { source: "content", settings: { type: "trip" } },
+  };
+  const answer = (options: { value: string; label: string }[] | null) =>
+    new Map([
+      [
+        "trip",
+        {
+          options,
+          resolved: {
+            source: "content",
+            types: ["trip"],
+            ...(options === null ? { unavailable: true as const } : {}),
+          },
+        },
+      ],
+    ]);
+
+  it("compiles the list and the source onto the descriptor", () => {
+    const { form, sources } = materialiseForm(
+      makeForm({ fields: [sourced] }),
+      answer([{ value: "sty_1", label: "Alps" }]),
+    );
+    const field = compileForm(form, { base: BASE, sources }).fields[0]!;
+    expect(field.options).toEqual([{ value: "sty_1", label: "Alps" }]);
+    expect(field.optionsFrom).toEqual({ source: "content", types: ["trip"] });
+  });
+
+  it("compiles a sourced question nobody resolved as unavailable, never as an empty list", () => {
+    const field = compileForm(makeForm({ fields: [sourced] }), { base: BASE }).fields[0]!;
+    expect(field.optionsFrom).toEqual({ source: "content", unavailable: true });
+  });
+
+  it("leaves an unsourced form byte-identical", () => {
+    const form = makeForm({ fields: [NAME] });
+    expect(materialiseForm(form, undefined).form).toBe(form);
+    expect(compileForm(form, { base: BASE }).fields[0]).not.toHaveProperty("optionsFrom");
+  });
+
+  it("does not ask an empty content question with no extras, and asks one with extras", () => {
+    expect(
+      materialiseForm(makeForm({ fields: [sourced] }), answer([])).form.fields[0]!.showIf,
+    ).toEqual({ any: [] });
+    const withExtra = { ...sourced, options: [{ value: "x", label: "Other" }] };
+    expect(
+      materialiseForm(makeForm({ fields: [withExtra] }), answer([])).form.fields[0]!.showIf,
+    ).toBeUndefined();
+  });
+
+  it("re-sorts a title-ordered content list by the render's locale, and leaves other orders", () => {
+    const list = [
+      { value: "a", label: "Zanzibar" },
+      { value: "b", label: "Egypte" },
+    ];
+    const labels = (f: FormField, collate: string) =>
+      materialiseForm(
+        makeForm({ fields: [f] }),
+        answer(list),
+        collate,
+      ).form.fields[0]!.options?.map((o) => o.label);
+    expect(labels(sourced, "fr")).toEqual(["Egypte", "Zanzibar"]);
+    const dated = {
+      ...sourced,
+      optionsFrom: {
+        source: "content",
+        settings: { type: "trip", order: { field: "published", dir: "asc" } },
+      },
+    };
+    expect(labels(dated, "fr")).toEqual(["Zanzibar", "Egypte"]);
   });
 });

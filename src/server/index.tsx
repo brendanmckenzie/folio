@@ -2,6 +2,7 @@ import { cacheHeaders, cacheTags, NO_STORE, scopedTypeTag } from "../core/cache-
 import { type Blok, childrenOf, type Doc, type Json } from "../core/doc";
 import { gateValue, isUngated, type PageAccess, redactDoc } from "../core/gate";
 import { mergeLayers } from "../core/layers";
+import { hasUnavailableOptions } from "../core/option-sources";
 import {
   dataOf,
   fieldValue,
@@ -48,6 +49,7 @@ import {
   type FolioRuntime,
   type SiteRender,
 } from "./runtime";
+import { refreshOptionSources } from "./option-sources";
 import { runSchedules, scheduleDeps } from "./scheduler";
 import {
   candidateFor,
@@ -128,6 +130,11 @@ export type { DocumentKind, DocumentType } from "../core/schema";
 export type { Migration } from "../core/migrate";
 export type { VersionKind, VersionMeta } from "./versions";
 export type { Redirect } from "./redirects";
+export type {
+  FolioOptionSource,
+  OptionSourceInput,
+  OptionSourceItem,
+} from "./form-responses";
 /**
  * The migration and audit surface a host reads off a report. The *authoring*
  * side (`defineMigration`, `field`, `block`) lives in `folio/engine`, where the
@@ -1367,7 +1374,17 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           // Params are the host's and Folio cannot see what they depend on, so a
           // page given them is `no-store` unless the host asserts they derive from
           // the URL (`FolioPageOptions.cacheable`).
-          ...(drafted || access !== "public" || (opts?.params !== undefined && !opts.cacheable)
+          //
+          // An unavailable option list is `no-store` too (`form-option-sources.md`
+          // decision 6), for two races a purge cannot close: a render on a replica
+          // that has not yet seen a list's first load caches `unavailable` after the
+          // load's purge has gone out, and a source unregistered by a bad deploy and
+          // registered again returns with an unchanged digest, which purges nothing.
+          // Rendered fresh until the list reads, it costs one D1 point read.
+          ...(drafted ||
+          access !== "public" ||
+          (opts?.params !== undefined && !opts.cacheable) ||
+          hasUnavailableOptions(resolution)
             ? { "cache-control": NO_STORE }
             : cacheHeaders(resolution, { story: story.id })),
           // On a site's preview origin the admin is the one page that may frame
@@ -1916,6 +1933,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       ]);
       return { sessions, challenges, events };
     },
+    /**
+     * The option-source cron sweep (`form-option-sources.md` decision 7), implemented
+     * in `option-sources.ts`. Bindings alone, like `sweepAuth`, on the primary.
+     */
+    refreshOptionSources: (env, opts) =>
+      refreshOptionSources(rt, env, config.bindings(env).db, opts),
     render: (doc, opts) => (
       <FolioDoc
         doc={doc}

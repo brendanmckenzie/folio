@@ -10,7 +10,15 @@
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from "../core/block";
 import { type Doc, type Json, newUid } from "../core/doc";
 import { isBareLayer, mergeLayers } from "../core/layers";
-import { indexedFieldNames } from "../core/index-projection";
+import { indexedFieldNames, indexedFields } from "../core/index-projection";
+import type { FormFieldOption, ResolvedOptionsFrom } from "../core/forms";
+import {
+  CONTENT_SOURCE,
+  contentOptionQuery,
+  contentOptionSettings,
+  MAX_SOURCED_OPTIONS,
+  optionListKey,
+} from "../core/option-sources";
 import {
   dataOf,
   type LocaleConfig,
@@ -61,7 +69,18 @@ import type { AuditContext } from "./audit";
 import { type ContentProjection, contentProjection } from "./content-index";
 import { type ResolvedDescribe, validateDescribe } from "./describe";
 import { type ResolvedForms, validateForms } from "./form-responses";
-import { compileForm, formsByIds } from "./forms";
+import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
+import {
+  effectiveSettings,
+  type ListRef,
+  listId,
+  brandKey,
+  listStatus,
+  readListOnPrimary,
+  readLists,
+  type RefreshDeps,
+  refreshList,
+} from "./option-sources";
 import { gateValue, isUngated } from "../core/gate";
 import { type ResolvedGate, validateGate } from "./gate";
 import {
@@ -219,6 +238,36 @@ export interface SitesRuntime extends ResolvedSites {
  * **A request finds its brand once**, in `withScope` (`c.var.brand`); off a
  * request, from the gated site (`rt.forScope`). Nothing picks a brand by default.
  */
+/**
+ * What `BrandRuntime.optionLists` answers for one sourced question: the list as it
+ * reads now (`null` when it cannot be read) and the descriptor the page compiles.
+ */
+export interface OptionListAnswer {
+  options: FormFieldOption[] | null;
+  resolved: ResolvedOptionsFrom;
+}
+
+/** What `BrandRuntime.optionLists` needs of the request. */
+export interface OptionListsContext {
+  chain: readonly string[];
+  site?: SiteRef;
+  locale?: LocaleContext;
+  /**
+   * `never`: read rows and call nothing (a render, an admin preview). `submit`:
+   * decision 7's submit row. A stale row is used as read and refreshed under
+   * `waitUntil`, a row that never held options is loaded in 3 seconds, and a lost
+   * lease re-reads once on the primary.
+   */
+  refresh: "never" | "submit";
+  waitUntil?: (p: Promise<unknown>) => void;
+  env: unknown;
+  /**
+   * The raw D1 binding, for the primary re-read after a lost lease. Absent: that
+   * re-read is skipped, and a never-loaded row whose lease was lost stays unavailable.
+   */
+  primary?: Pick<D1Database, "withSession">;
+}
+
 export interface BrandRuntime {
   /** `{ id, label }`, or null for the one brand of a deployment with no `brands`. */
   brand: BrandRef | null;
@@ -275,6 +324,17 @@ export interface BrandRuntime {
     bindings: ReadBindings,
     hookCtx: HookRunnerCtx,
   ) => PublishDeps & { logger: FolioLogger };
+  /**
+   * The list behind every sourced question on `forms`, by form id then question name
+   * (`form-option-sources.md` decisions 5 to 8). Content is answered by paged
+   * `runQuery` over this brand, host sources from `option_lists`. **Never calls a
+   * host's `load` unless `refresh` is `'submit'`.** Unsourced questions are absent.
+   */
+  optionLists: (
+    bindings: ReadBindings,
+    forms: readonly Form[],
+    ctx: OptionListsContext,
+  ) => Promise<Map<string, Map<string, OptionListAnswer>>>;
   /** `FolioRuntime.auditContext` for this brand: its types, its settings type, its own rows. */
   auditContext: (env: unknown) => Promise<AuditContext>;
 }
@@ -347,6 +407,12 @@ export interface FolioRuntime {
    * own default and therefore no behaviour change at all.
    */
   formPurgeCapability?: PurgeCapability;
+  /**
+   * The host's raw D1 binding for `env`, not a request's session. For the one read
+   * that must open a session of its own: the submit route's primary re-read after a
+   * lost option-list lease (`form-option-sources.md` decision 7).
+   */
+  rawDb: (env: unknown) => D1Database;
   /** Where the routes are mounted, with no trailing slash. */
   base: string;
   /** `FolioConfig.sites`, validated, or null for a deployment with no `sites`. */
@@ -1584,15 +1650,63 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
        */
       const formPage =
         opts?.story?.path != null ? route(opts.story.path, active?.code, render?.site) : undefined;
-      const forms = Object.fromEntries(
-        [...(await formRows), ...nestedFormRows].map((form) => [
-          form.id,
-          compileForm(form, {
-            base,
+      const formList = [...(await formRows), ...nestedFormRows];
+
+      /** Pass four: the collection queries this document contains, run once each. */
+      const queries = doc
+        ? collectionQueries(doc, schema, opts?.page, active, opts?.search)
+        : new Map<string, ContentQuery>();
+
+      /**
+       * Option lists for every sourced question on the forms above — the document's
+       * own and the nested ones — **in the same `Promise.all` as pass four's
+       * collection queries** (`form-option-sources.md` decision 5). A page with a
+       * collection pays no extra round trip for a content-sourced form, and a page
+       * with no sourced form issues nothing and awaits nothing. `refresh: 'never'`:
+       * a render only reads rows and never calls a host's `load` (decision 6).
+       *
+       * **The forms compile after this, so the early return that used to sit above
+       * pass four cannot.** A page with a sourced form and no collection must still
+       * reach the lists. Draft mode needs nothing different: lists read published
+       * content and `option_lists` rows, and neither opens a Durable Object.
+       */
+      const listsOf = formList.some((form) => form.fields.some((f) => f.optionsFrom))
+        ? optionLists(bindings, formList, {
+            chain,
+            ...(render?.site ? { site: render.site } : {}),
             ...(active ? { locale: active } : {}),
-            ...(formPage !== undefined ? { page: formPage } : {}),
-          }),
-        ]),
+            refresh: "never",
+            env: undefined,
+          })
+        : undefined;
+
+      const [answers, lists] = await Promise.all([
+        Promise.all(
+          [...queries].map(
+            async ([key, q]) =>
+              [
+                key,
+                await runQuery(queryDeps(db, chain, render?.site), q, { locale: active }),
+              ] as const,
+          ),
+        ),
+        listsOf,
+      ]);
+
+      const collate = active?.code ?? locales?.default;
+      const forms = Object.fromEntries(
+        formList.map((form) => {
+          const sourced = materialiseForm(form, lists?.get(form.id), collate);
+          return [
+            form.id,
+            compileForm(sourced.form, {
+              base,
+              ...(active ? { locale: active } : {}),
+              ...(formPage !== undefined ? { page: formPage } : {}),
+              sources: sourced.sources,
+            }),
+          ];
+        }),
       );
 
       const resolution: Resolution = {
@@ -1611,22 +1725,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         ...(render ? { site: siteContext(render) } : {}),
         ...(render && opts?.story?.path != null ? { path: opts.story.path } : {}),
       };
-
-      /** Pass four: the collection queries this document contains, run once each. */
-      const queries = doc
-        ? collectionQueries(doc, schema, opts?.page, active, opts?.search)
-        : new Map<string, ContentQuery>();
       if (queries.size === 0) return resolution;
 
-      const answers = await Promise.all(
-        [...queries].map(
-          async ([key, q]) =>
-            [
-              key,
-              await runQuery(queryDeps(db, chain, render?.site), q, { locale: active }),
-            ] as const,
-        ),
-      );
       const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers);
 
       // Decision 3: a preview resolves collections against **published** content.
@@ -1706,6 +1806,148 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         }
       }
       return runQuery(queryDeps(bindings.db, chain, site), q, { locale: localeOf(q.locale) });
+    };
+
+    const optionLists: BrandRuntime["optionLists"] = async (bindings, formList, ctx) => {
+      const out = new Map<string, Map<string, OptionListAnswer>>();
+      const sourced = formList.flatMap((form) =>
+        form.fields.flatMap((field) => (field.optionsFrom ? [{ form: form.id, field }] : [])),
+      );
+      if (sourced.length === 0) return out;
+
+      // Content: one list per distinct settings, however many questions share it.
+      const contentLists = new Map<string, Promise<FormFieldOption[]>>();
+      const contentList = (raw: Readonly<Record<string, Json>> | undefined, key: string) => {
+        const memo = contentLists.get(key);
+        if (memo) return memo;
+        const list = (async () => {
+          const settings = contentOptionSettings(raw);
+          const type = settings ? typeOf(settings.type) : undefined;
+          if (!settings || !type || type.kind === "singleton") return [];
+          const root = schema[type.root];
+          const rootIndexed = new Set(indexedFields(schema, type.root).map(([name]) => name));
+          const deps = queryDeps(bindings.db, ctx.chain, ctx.site);
+          const first = await runQuery(deps, contentOptionQuery(settings, rootIndexed, 1), {
+            ...(ctx.locale ? { locale: ctx.locale } : {}),
+          });
+          const pages = Math.min(first.pages, Math.ceil(MAX_SOURCED_OPTIONS / first.perPage));
+          const rest = await Promise.all(
+            Array.from({ length: Math.max(0, pages - 1) }, (_, i) =>
+              runQuery(deps, contentOptionQuery(settings, rootIndexed, i + 2), {
+                ...(ctx.locale ? { locale: ctx.locale } : {}),
+              }),
+            ),
+          );
+          const titleField = titleFieldOf(type, root);
+          return [first, ...rest]
+            .flatMap((page) => page.items)
+            .slice(0, MAX_SOURCED_OPTIONS)
+            .map((item) => {
+              const named = titleField ? item.data[titleField] : undefined;
+              return {
+                value: item.id,
+                label: typeof named === "string" && named.trim() !== "" ? named : item.title,
+              };
+            });
+        })();
+        contentLists.set(key, list);
+        return list;
+      };
+
+      // Host: the row per distinct (source, key), read in one batch.
+      const codeFor = (source: { localised: boolean }) =>
+        source.localised && ctx.locale && ctx.locale.code !== locales?.default
+          ? ctx.locale.code
+          : "";
+      const refs = new Map<string, ListRef>();
+      for (const { field } of sourced) {
+        const from = field.optionsFrom!;
+        const source = forms?.sources.get(from.source);
+        if (from.source === CONTENT_SOURCE || !source) continue;
+        const ref = {
+          source: from.source,
+          key: optionListKey(effectiveSettings(source, from.settings), codeFor(source)),
+        };
+        refs.set(listId(ref), ref);
+      }
+      const brandRef: BrandRef | null =
+        b.id !== null && b.label !== null ? { id: b.id, label: b.label } : null;
+      const brand = brandKey(brandRef);
+      const requestStartedAt = Date.now();
+      const rows =
+        refs.size > 0 ? await readLists(bindings.db, brand, [...refs.values()]) : new Map();
+
+      const hostLists = new Map<string, Promise<FormFieldOption[] | null>>();
+      const hostList = (
+        id: string,
+        raw: Readonly<Record<string, Json>> | undefined,
+        ref: ListRef,
+      ) => {
+        const memo = hostLists.get(listId(ref));
+        if (memo) return memo;
+        const source = forms!.sources.get(id)!;
+        const row = rows.get(listId(ref)) ?? null;
+        const list = (async () => {
+          const status = listStatus(row, source.ttl, Date.now());
+          if (ctx.refresh !== "submit" || status === "fresh") return row?.options ?? null;
+          const deps: RefreshDeps = {
+            db: bindings.db,
+            env: ctx.env,
+            brand: brandRef,
+            source,
+            logger,
+            ...(formPurgeCapability ? { purgeCapability: formPurgeCapability } : {}),
+            ...(ctx.waitUntil ? { waitUntil: ctx.waitUntil, requestStartedAt } : {}),
+          };
+          const target = { settings: raw, locale: codeFor(source) };
+          if (status === "stale") {
+            // The visitor drew the form from the stored row, so a synchronous
+            // refresh could only remove a choice they had (decision 7).
+            ctx.waitUntil?.(refreshList(deps, target, 10_000).catch((err) => logger.error(err)));
+            return row?.options ?? null;
+          }
+          const result = await refreshList(deps, target, 3_000);
+          if (result.status === "loaded") return result.options;
+          if (result.status === "leased" && ctx.primary) {
+            return (await readListOnPrimary(ctx.primary, brand, ref))?.options ?? null;
+          }
+          return null;
+        })();
+        hostLists.set(listId(ref), list);
+        return list;
+      };
+
+      await Promise.all(
+        sourced.map(async ({ form, field }) => {
+          const from = field.optionsFrom!;
+          let options: FormFieldOption[] | null;
+          let types: string[] | undefined;
+          if (from.source === CONTENT_SOURCE) {
+            const settings = contentOptionSettings(from.settings);
+            options = settings
+              ? await contentList(from.settings, optionListKey(from.settings, ""))
+              : null;
+            if (settings) types = [settings.type];
+          } else {
+            const source = forms?.sources.get(from.source);
+            options = source
+              ? await hostList(from.source, effectiveSettings(source, from.settings), {
+                  source: from.source,
+                  key: optionListKey(effectiveSettings(source, from.settings), codeFor(source)),
+                })
+              : null;
+          }
+          const resolved: ResolvedOptionsFrom = {
+            source: from.source,
+            ...(types ? { types } : {}),
+            ...(options === null ? { unavailable: true as const } : {}),
+          };
+          const inForm = out.get(form) ?? new Map<string, OptionListAnswer>();
+          inForm.set(field.name, { options, resolved });
+          out.set(form, inForm);
+        }),
+      );
+      return out;
     };
 
     /** `Resolution.site` for a render (`multi-site.md` decision 15). */
@@ -1869,6 +2111,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       resolve,
       query,
       publishDeps,
+      optionLists,
       auditContext,
     };
   };
@@ -1927,6 +2170,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     auth,
     logger,
     formPurgeCapability,
+    rawDb: (env: unknown) => config.bindings(env as Env).db,
     base,
     sites,
     route,
