@@ -189,6 +189,20 @@ export function screenOptionLabel(raw: unknown): string | null {
 }
 
 /**
+ * A collator for a locale code.replace(/_/g, "-"), never throwing. `validateLocales` accepts any
+ * `[A-Za-z0-9_-]` code, and V8 rejects `en_AU` (and `x`, `1`) with a RangeError, which
+ * would 500 every page and submit of the form. `_` is read as `-`; a code still refused
+ * sorts with the default collator.
+ */
+function collatorFor(code: string): Intl.Collator {
+  try {
+    return new Intl.Collator(code);
+  } catch {
+    return new Intl.Collator();
+  }
+}
+
+/**
  * The question with its options filled in: sourced entries first, then the typed
  * extras (decision 2). An extra wins a value collision, so the editor's label
  * stands. `null` (the list is unavailable) gives the extras only. Every sourced
@@ -212,7 +226,7 @@ export function materialiseOptions(
     .filter((o) => !taken.has(o.value))
     .map((o) => ({ value: o.value, label: screenOptionLabel(o.label) ?? o.value }));
   if (opts.collate !== undefined) {
-    const collator = new Intl.Collator(opts.collate);
+    const collator = collatorFor(opts.collate);
     sourced = sourced.sort((a, b) => collator.compare(a.label, b.label));
   }
   const options = [...sourced, ...extras];

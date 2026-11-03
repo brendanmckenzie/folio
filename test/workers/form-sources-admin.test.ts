@@ -270,7 +270,7 @@ describe("PATCH /forms/:id", () => {
     expect((await saved()).version).toBe(v0 + 1);
     await waitOnExecutionContext(ctx);
     expect(calls).toEqual([
-      { source: "Countries", brand: null, settings: { token: "t" }, locale: null },
+      { source: "Countries", brand: null, settings: { region: "all", token: "t" }, locale: null },
     ]);
     expect(await rows()).toMatchObject([{ brand: "", source: "countries", loaded: 1 }]);
 
@@ -383,7 +383,12 @@ describe("POST /forms/:id/option-preview", () => {
     const res = await preview({ optionsFrom: okFrom });
     expect(res.status).toBe(200);
     expect(await rows()).toMatchObject([
-      { brand: "", source: "countries", key: optionListKey({ token: "t" }, ""), loaded: 1 },
+      {
+        brand: "",
+        source: "countries",
+        key: optionListKey({ region: "all", token: "t" }, ""),
+        loaded: 1,
+      },
     ]);
     // A second preview inside the lease is answered from the row.
     await preview({ optionsFrom: okFrom });
@@ -420,7 +425,8 @@ describe("POST /forms/:id/option-preview", () => {
 
 describe("folio.refreshOptionSources", () => {
   const keys = ["a", "b", "c"].map((t) => ({ source: "countries", settings: { token: t } }));
-  const keyOf = (token: string) => optionListKey({ token }, "");
+  // The key is spelled with the declared default filled in (`effectiveSettings`).
+  const keyOf = (token: string) => optionListKey({ region: "all", token }, "");
   const canonical = (token: string) => `\u0000countries\u0000${keyOf(token)}`;
 
   it("loads referenced lists, resumes after the cursor and finishes with null", async () => {

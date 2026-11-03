@@ -71,6 +71,7 @@ import { type ResolvedDescribe, validateDescribe } from "./describe";
 import { type ResolvedForms, validateForms } from "./form-responses";
 import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
 import {
+  effectiveSettings,
   type ListRef,
   listId,
   brandKey,
@@ -1863,12 +1864,16 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         const from = field.optionsFrom!;
         const source = forms?.sources.get(from.source);
         if (from.source === CONTENT_SOURCE || !source) continue;
-        const ref = { source: from.source, key: optionListKey(from.settings, codeFor(source)) };
+        const ref = {
+          source: from.source,
+          key: optionListKey(effectiveSettings(source, from.settings), codeFor(source)),
+        };
         refs.set(listId(ref), ref);
       }
       const brandRef: BrandRef | null =
         b.id !== null && b.label !== null ? { id: b.id, label: b.label } : null;
       const brand = brandKey(brandRef);
+      const requestStartedAt = Date.now();
       const rows =
         refs.size > 0 ? await readLists(bindings.db, brand, [...refs.values()]) : new Map();
 
@@ -1892,7 +1897,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
             source,
             logger,
             ...(formPurgeCapability ? { purgeCapability: formPurgeCapability } : {}),
-            ...(ctx.waitUntil ? { waitUntil: ctx.waitUntil } : {}),
+            ...(ctx.waitUntil ? { waitUntil: ctx.waitUntil, requestStartedAt } : {}),
           };
           const target = { settings: raw, locale: codeFor(source) };
           if (status === "stale") {
@@ -1926,9 +1931,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           } else {
             const source = forms?.sources.get(from.source);
             options = source
-              ? await hostList(from.source, from.settings, {
+              ? await hostList(from.source, effectiveSettings(source, from.settings), {
                   source: from.source,
-                  key: optionListKey(from.settings, codeFor(source)),
+                  key: optionListKey(effectiveSettings(source, from.settings), codeFor(source)),
                 })
               : null;
           }

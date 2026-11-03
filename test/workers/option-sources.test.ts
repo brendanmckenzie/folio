@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { defineBlock, text } from "../../src/core";
+import { defineBlock, select, text } from "../../src/core";
 import type { Doc } from "../../src/core/doc";
 import { sourceTag } from "../../src/core/cache-tags";
 import type { FormField } from "../../src/core/forms";
@@ -15,6 +15,8 @@ import {
   listId,
   readListOnPrimary,
   readLists,
+  pruneLists,
+  PRUNE_AFTER_MS,
   type RefreshDeps,
   refreshList,
 } from "../../src/server/option-sources";
@@ -65,6 +67,22 @@ const config = {
   route: (p: string) => (p ? `/${p}` : "/"),
   forms: {
     sources: {
+      regional: {
+        label: "Regional",
+        settings: {
+          region: select({
+            options: [
+              { value: "all", label: "All" },
+              { value: "africa", label: "Africa" },
+            ],
+            default: "all",
+          }),
+        },
+        async load(input: { locale: string | null; settings: unknown; signal: AbortSignal }) {
+          loads.push(input);
+          return answer() as never;
+        },
+      },
       countries: {
         label: "Countries",
         ttl: 60,
@@ -79,6 +97,7 @@ const config = {
 
 const brand = createRuntime<Cloudflare.Env>(config).brands.get(null)!;
 const source = brand.forms!.sources.get("countries") as ResolvedOptionSource;
+const regional = brand.forms!.sources.get("regional") as ResolvedOptionSource;
 
 const purges: string[][] = [];
 const capability: PurgeCapability = async () => async (opts) => {
@@ -176,6 +195,63 @@ describe("refreshList", () => {
     expect(purges).toHaveLength(2);
   });
 
+  it("times the second purge from the request, not from the end of the load", async () => {
+    const pending: Promise<unknown>[] = [];
+    const slept: number[] = [];
+    await refreshList(
+      deps({
+        waitUntil: (p) => pending.push(p),
+        requestStartedAt: Date.now() - 20_000,
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      }),
+      target,
+      1000,
+    );
+    await Promise.all(pending);
+    expect(slept).toHaveLength(1);
+    expect(slept[0]).toBeLessThanOrEqual(5_000);
+    expect(slept[0]).toBeGreaterThan(0);
+    // A load that outlasted the window leaves no delay at all.
+    clock += LEASE_MS + 1;
+    answer = () => [{ value: "nz", label: "New Zealand" }];
+    slept.length = 0;
+    await refreshList(
+      deps({
+        waitUntil: (p) => pending.push(p),
+        requestStartedAt: Date.now() - 40_000,
+        sleep: async (ms) => {
+          slept.push(ms);
+        },
+      }),
+      target,
+      1000,
+    );
+    await Promise.all(pending);
+    expect(slept).toEqual([0]);
+  });
+
+  it("fills a declared default and drops null and empty before load, and keys them as one", async () => {
+    await refreshList(deps({ source: regional }), { settings: undefined, locale: "" }, 1000);
+    expect(loads[0]!.settings).toEqual({ region: "all" });
+    const keys = () =>
+      env.DB.prepare("select key from option_lists")
+        .all<{ key: string }>()
+        .then((r) => r.results);
+    expect(await keys()).toHaveLength(1);
+    clock += LEASE_MS + 1;
+    await refreshList(deps({ source: regional }), { settings: { region: null }, locale: "" }, 1000);
+    clock += LEASE_MS + 1;
+    await refreshList(deps({ source: regional }), { settings: { region: "" }, locale: "" }, 1000);
+    expect(await keys()).toHaveLength(1);
+    expect(loads.map((l) => l.settings)).toEqual([
+      { region: "all" },
+      { region: "all" },
+      { region: "all" },
+    ]);
+  });
+
   it("makes one load for two concurrent refreshes (the lease)", async () => {
     const [a, b] = await Promise.all([
       refreshList(deps(), target, 1000),
@@ -247,6 +323,40 @@ describe("refreshList", () => {
     await refreshList(deps(), { settings: { region: "oceania" }, locale: "fr" }, 1000);
     expect(loads.map((l) => l.locale)).toEqual([null, "fr"]);
     expect(loads[1]!.settings).toEqual({ region: "oceania" });
+  });
+});
+
+describe("pruneLists", () => {
+  it("does not delete a row a concurrent save loaded after the select", async () => {
+    await refreshList(deps(), target, 1000);
+    const later = clock + PRUNE_AFTER_MS + 10_000;
+    await env.DB.prepare("update option_lists set attempted_at = ?").bind(clock).run();
+    // The select sees a stale row; before the delete runs, a save loads it afresh.
+    const racing = {
+      prepare(sql: string) {
+        const stmt = env.DB.prepare(sql);
+        if (!sql.includes("select brand, source, key")) return stmt;
+        return {
+          bind: (...a: unknown[]) => {
+            const bound = stmt.bind(...a);
+            return {
+              all: async () => {
+                const seen = await bound.all();
+                await env.DB.prepare("update option_lists set attempted_at = ?").bind(later).run();
+                return seen;
+              },
+            };
+          },
+        };
+      },
+      batch: (s: never) => env.DB.batch(s),
+    } as unknown as FolioDb;
+    await pruneLists(racing, new Set(), later);
+    expect(await rowOf()).not.toBeNull();
+    // And a genuinely old unreferenced row still goes.
+    await env.DB.prepare("update option_lists set attempted_at = ?").bind(clock).run();
+    expect(await pruneLists(env.DB as unknown as FolioDb, new Set(), later)).toBe(1);
+    expect(await rowOf()).toBeNull();
   });
 });
 

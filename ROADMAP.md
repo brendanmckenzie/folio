@@ -787,7 +787,8 @@ resolves a narrowed content query onto the `Resolution`.
 Ranked by value × fits-a-library:
 
 1. **Conditional fields** — `showIf?: FieldCondition`, evaluated on both sides.
-2. **Options from content** — a `select` whose choices are a `ContentQuery`. Every
+2. **Done (spec 37, built 2026-11-03; see `docs/specs/content-model/form-option-sources.md`).**
+   **Options from content** — a `select` whose choices are a `ContentQuery`. Every
    product above sells "connect your dropdown to Salesforce" as a paid connector;
    ours is "the published trips under /trips, narrowed by the editor", with no
    connector, no key and no polling, resolved on the pass a `collection` field
@@ -804,7 +805,8 @@ Ranked by value × fits-a-library:
    auto-flow *is* the row algorithm, so Folio ships no row objects and no opinion
    about when a row stops being one; the host's breakpoint collapses it. This is the
    original complaint, and it is one axis of six.
-7. **Options the host supplies** — the escape hatch for genuinely external data.
+7. **Done (spec 37, built 2026-11-03; see `docs/specs/content-model/form-option-sources.md`).**
+   **Options the host supplies** — the escape hatch for genuinely external data.
    Folio holds no key and names no vendor, `verify`'s posture exactly.
 
 **Layout (axis 6) is done, and shipped as explicit rows rather than as the span-out-

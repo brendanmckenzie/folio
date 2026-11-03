@@ -356,17 +356,29 @@ export async function purgeOptionSource(
     waitUntil?: (p: Promise<unknown>) => void;
     /** Injectable so a test does not wait 25 real seconds. */
     sleep?: (ms: number) => Promise<void>;
+    /**
+     * When the request that will hold `waitUntil` began (epoch ms). The second purge
+     * runs `SITE_PURGE_DELAY_MS` after *this*, not after the load finished: a slow
+     * vendor would otherwise push it past `waitUntil`'s 30 seconds and the runtime
+     * would drop it without a word. Absent (the cron) means the full delay.
+     */
+    requestStartedAt?: number;
   } = {},
 ): Promise<PurgeIssued | null> {
   const capability = opts.capability ?? platformPurge;
   const purge = createPurger(capability, opts.logger ?? console);
   const sleep = opts.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const tag = [sourceTag(id, brand)];
+  const delay =
+    opts.requestStartedAt === undefined
+      ? SITE_PURGE_DELAY_MS
+      : Math.max(
+          0,
+          Math.min(SITE_PURGE_DELAY_MS, opts.requestStartedAt + SITE_PURGE_DELAY_MS - Date.now()),
+        );
   const first = await purge("option source change", tag);
   if (!opts.waitUntil || (await capability()) === null) return first;
-  opts.waitUntil(
-    sleep(SITE_PURGE_DELAY_MS).then(() => purge("option source change (second)", tag)),
-  );
+  opts.waitUntil(sleep(delay).then(() => purge("option source change (second)", tag)));
   return first;
 }
 

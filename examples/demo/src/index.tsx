@@ -235,10 +235,14 @@ const folio = createFolio<Env>({
             default: "all",
           },
         },
-        load: ({ settings }) =>
-          COUNTRIES.filter((c) => settings.region !== "africa" || c.africa).map(
+        load: ({ settings }) => {
+          // `/dev/option-source?fail=1` (below) makes the vendor go down, which is
+          // what `scripts/option-sources-test.mjs` needs to see an outage.
+          if (countriesDown) throw new Error("the demo's country vendor is down");
+          return COUNTRIES.filter((c) => settings.region !== "africa" || c.africa).map(
             ({ value, label }) => ({ value, label }),
-          ),
+          );
+        },
       },
     },
   },
@@ -348,6 +352,9 @@ const folio = createFolio<Env>({
  */
 let lastSignInUrl: string | null = null;
 
+/** Set by `/dev/option-source?fail=1`: the demo's `countries` source throws while true. */
+let countriesDown = false;
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -364,6 +371,22 @@ export default {
         return new Response("Not found", { status: 404 });
       }
       return Response.json({ url: lastSignInUrl });
+    }
+    // Local development only, like the route above: takes the demo's `countries`
+    // vendor down (`?fail=1`) or back up (`?fail=0`), and `?stale=1` ages every stored
+    // option list past its ttl and its lease, so `scripts/option-sources-test.mjs` can
+    // see a stale list used through an outage without waiting an hour.
+    if (url.pathname === "/dev/option-source") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
+      }
+      if (url.searchParams.has("fail")) countriesDown = url.searchParams.get("fail") === "1";
+      if (url.searchParams.get("stale") === "1") {
+        await env.DB.prepare(
+          "update option_lists set loaded_at = loaded_at - 604800000, attempted_at = attempted_at - 604800000 where loaded_at is not null",
+        ).run();
+      }
+      return Response.json({ fail: countriesDown });
     }
     if (url.pathname === "/sitemap.xml") {
       return sitemap(await folio.stories(env), url.origin);

@@ -23,6 +23,11 @@ const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 
 const json = (url, init) => fetch(url, init).then((r) => r.json());
+const jsonInit = (method, body) => ({
+  method,
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
 const log = (...a) => console.log(...a);
 
 /* ----------------------------------------------------------------- images --- */
@@ -188,6 +193,44 @@ const three = await upload("scree.png", png(800, 800, [60, 70, 80], [200, 210, 2
 const showcase = await storyBySlug("showcase", "Field types");
 const details = await storyBySlug("reference-target", "A referenced page", showcase.id);
 log(`Stories: ${showcase.url}  ${details.url}`);
+
+// A contact form whose country comes from the demo's host `countries` source and
+// whose guide comes from published People (`content-model/form-option-sources.md`).
+// The guide is asked only of an Australian, so the second sourced question is gated
+// on the first. Reused if a previous run already made it.
+const contactForm = await (async () => {
+  const listed = await json(`${API}/forms`);
+  const rows = Array.isArray(listed) ? listed : (listed.rows ?? []);
+  const existing = rows.find((f) => f.name === "contact");
+  const created = existing ?? (await json(`${API}/forms`, jsonInit("POST", { label: "Contact" })));
+  return json(
+    `${API}/forms/${created.id}`,
+    jsonInit("PATCH", {
+      expectedUpdatedAt: created.updatedAt,
+      fields: [
+        { name: "name", kind: "text", label: "Your name", required: true, max: 80 },
+        { name: "email", kind: "email", label: "Email", required: true },
+        {
+          name: "country",
+          kind: "select",
+          label: "Country",
+          required: true,
+          optionsFrom: { source: "countries", settings: { region: "all" } },
+        },
+        {
+          name: "guide",
+          kind: "select",
+          label: "Preferred guide",
+          optionsFrom: { source: "content", settings: { type: "person" } },
+          options: [{ value: "any", label: "No preference" }],
+          showIf: { field: "country", eq: "au" },
+        },
+        { name: "message", kind: "textarea", label: "Message", required: true },
+      ],
+    }),
+  );
+})();
+log(`Form: ${contactForm.id}`);
 
 // The page the `reference` field points at. Seeded first so the embed resolves.
 await seed(details.id, (root) => [
@@ -367,6 +410,11 @@ await seed(showcase.id, (root) => [
     icon: "📄",
     title: "Richtext is data",
     body: "The editor is admin-only; the page is plain HTML.",
+  }),
+
+  blok("contact", "contactForm", root, "body", "a9", {
+    heading: "Contact us",
+    form: contactForm.id,
   }),
 
   blok("cta", "cta", root, "body", "a8", {

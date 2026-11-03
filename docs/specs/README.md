@@ -80,7 +80,7 @@ sequence because the dependency graph is the same one.
 | 34 | [Many brands in one deployment](foundation/multi-brand.md) | foundation | L | — | `0013` (landed) | owner, 2026-09-30 |
 | 35 | [Conditional questions, sections and prefill on forms](content-model/form-logic.md) | content model | L | — | `0014` (landed) | issue #33, slice 1 |
 | 36 | [Form actions](content-model/form-actions.md) | content model | L | — | `0017` (claimed) | owner, 2026-11-03 |
-| 37 | [Form option sources](content-model/form-option-sources.md) | content model | L | #54 | `0016` (claimed) | owner, 2026-11-03 |
+| 37 | [Form option sources](content-model/form-option-sources.md) | content model | L | #54 | `0016` (landed) | owner, 2026-11-03 |
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were

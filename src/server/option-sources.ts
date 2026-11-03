@@ -232,7 +232,29 @@ export interface RefreshDeps {
   waitUntil?: (p: Promise<unknown>) => void;
   /** Injectable so a test does not wait 25 real seconds. */
   sleep?: (ms: number) => Promise<void>;
+  /** When the request holding `waitUntil` began: the second purge is timed from it. */
+  requestStartedAt?: number;
   now?: () => number;
+}
+
+/**
+ * A host source's settings as `load` receives them, and as its list key spells them:
+ * `null`, `''` and absent are one thing (absent), then each declared `default` fills
+ * what is absent. So `{}`, `{ region: null }` and `{ region: 'all' }` (default `all`) are
+ * one list, and `load` never sees a value outside its declared contract. Idempotent.
+ */
+export function effectiveSettings(
+  source: Pick<ResolvedOptionSource, "settings">,
+  raw: Readonly<Record<string, Json>> | undefined,
+): Record<string, Json> | undefined {
+  const out: Record<string, Json> = {};
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    if (value !== null && value !== "") out[key] = value;
+  }
+  for (const [key, def] of Object.entries(source.settings ?? {})) {
+    if (out[key] === undefined && def.default !== undefined) out[key] = def.default as Json;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** One list to load: `settings` as stored, and `locale` `''` for the source locale. */
@@ -276,7 +298,9 @@ async function loadScreened(
     const loading = Promise.resolve().then(() =>
       deps.source.load(
         {
-          settings: (target.settings ?? {}) as Readonly<Record<string, string | number | boolean>>,
+          settings: (effectiveSettings(deps.source, target.settings) ?? {}) as Readonly<
+            Record<string, string | number | boolean>
+          >,
           locale: target.locale === "" ? null : target.locale,
           brand: deps.brand,
           signal: controller.signal,
@@ -321,6 +345,7 @@ export async function refreshList(
   const now = deps.now ?? Date.now;
   const brand = brandKey(deps.brand);
   const id = source.id;
+  target = { ...target, settings: effectiveSettings(source, target.settings) };
   const key = optionListKey(target.settings, target.locale);
   const at = now();
 
@@ -376,6 +401,7 @@ export async function refreshList(
       logger,
       ...(deps.waitUntil ? { waitUntil: deps.waitUntil } : {}),
       ...(deps.sleep ? { sleep: deps.sleep } : {}),
+      ...(deps.requestStartedAt !== undefined ? { requestStartedAt: deps.requestStartedAt } : {}),
     });
   }
   return { status: "loaded", options: screened.options, changed };
@@ -552,10 +578,11 @@ export function hostListsOf(
     const source =
       from && from.source !== CONTENT_SOURCE ? brand.forms?.sources.get(from.source) : undefined;
     if (!from || !source) continue;
+    const settings = effectiveSettings(source, from.settings);
     for (const locale of hostLocales(source, locales)) {
-      const ref = { source: source.id, key: optionListKey(from.settings, locale) };
+      const ref = { source: source.id, key: optionListKey(settings, locale) };
       const canonical = `${brandKey(brand.brand)}\u0000${ref.source}\u0000${ref.key}`;
-      out.set(canonical, { brand, source, settings: from.settings, locale, ref, canonical });
+      out.set(canonical, { brand, source, settings, locale, ref, canonical });
     }
   }
   return [...out.values()];
@@ -626,6 +653,8 @@ export interface RefreshLists {
   logger: FolioLogger;
   purgeCapability?: PurgeCapability;
   waitUntil?: (p: Promise<unknown>) => void;
+  /** When the request holding `waitUntil` began (see `RefreshDeps`). */
+  requestStartedAt?: number;
   now?: () => number;
 }
 
@@ -647,6 +676,9 @@ export function refreshLists(
           logger: deps.logger,
           ...(deps.purgeCapability ? { purgeCapability: deps.purgeCapability } : {}),
           ...(deps.waitUntil ? { waitUntil: deps.waitUntil } : {}),
+          ...(deps.requestStartedAt !== undefined
+            ? { requestStartedAt: deps.requestStartedAt }
+            : {}),
           ...(deps.now ? { now: deps.now } : {}),
         },
         { settings: list.settings, locale: list.locale },
@@ -752,20 +784,24 @@ export async function refreshOptionSources(
 }
 
 /** Deletes the rows past `PRUNE_AFTER_MS` that `referenced` (canonical keys) does not name. */
-async function pruneLists(db: FolioDb, referenced: ReadonlySet<string>, now: number) {
+export async function pruneLists(db: FolioDb, referenced: ReadonlySet<string>, now: number) {
   const { results } = await db
     .prepare(`select brand, source, key from option_lists where attempted_at < ?`)
     .bind(now - PRUNE_AFTER_MS)
     .all<{ brand: string; source: string; key: string }>();
   const stale = results.filter((r) => !referenced.has(`${r.brand}\u0000${r.source}\u0000${r.key}`));
+  // `attempted_at < ?` again: a save may have claimed and loaded this row since the
+  // select, and a delete by key alone would remove what it just wrote.
   for (let i = 0; i < stale.length; i += 50) {
     await db.batch(
       stale
         .slice(i, i + 50)
         .map((r) =>
           db
-            .prepare(`delete from option_lists where brand = ? and source = ? and key = ?`)
-            .bind(r.brand, r.source, r.key),
+            .prepare(
+              `delete from option_lists where brand = ? and source = ? and key = ? and attempted_at < ?`,
+            )
+            .bind(r.brand, r.source, r.key, now - PRUNE_AFTER_MS),
         ),
     );
   }
@@ -798,6 +834,7 @@ export async function previewHostList(
   timeoutMs: number,
 ): Promise<HostPreview> {
   const brand = brandKey(deps.brand);
+  target = { ...target, settings: effectiveSettings(deps.source, target.settings) };
   const ref = { source: deps.source.id, key: optionListKey(target.settings, target.locale) };
   const now = (deps.now ?? Date.now)();
   const row = (await readLists(deps.db, brand, [ref])).get(listId(ref)) ?? null;

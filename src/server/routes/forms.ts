@@ -92,6 +92,7 @@ import {
   updateForm,
 } from "../forms";
 import {
+  effectiveSettings,
   brandKey,
   checkOptionSources,
   hostListsOf,
@@ -394,6 +395,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               logger: rt.logger,
               ...(rt.formPurgeCapability ? { purgeCapability: rt.formPurgeCapability } : {}),
               waitUntil,
+              requestStartedAt: Date.now(),
             },
             lists,
           ).catch((err) => rt.logger.error("folio: option source refresh failed", err)),
@@ -500,7 +502,8 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       const source = brand.forms!.sources.get(from.source)!;
       const code =
         source.localised && locale && locale.code !== rt.locales?.default ? locale.code : "";
-      const key = optionListKey(from.settings, code);
+      const settings = effectiveSettings(source, from.settings);
+      const key = optionListKey(settings, code);
       const wanted = `${brandKey(brand.brand)}\u0000${source.id}\u0000${key}`;
       const referenced = (await referencedLists(rt, c.env, bindings.db)).some(
         (list) => list.canonical === wanted,
@@ -515,7 +518,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           ...(rt.formPurgeCapability ? { purgeCapability: rt.formPurgeCapability } : {}),
           waitUntil: hookCtx(c).waitUntil,
         },
-        { settings: from.settings, locale: code },
+        { settings, locale: code },
         referenced,
         10_000,
       );

@@ -156,6 +156,15 @@ describe("screenOptionLabel", () => {
 });
 
 describe("materialiseOptions", () => {
+  it("sorts under a locale code V8 rejects instead of throwing", () => {
+    for (const collate of ["en_AU", "x", "1"]) {
+      const out = materialiseOptions(sourced(), [opt("b", "Beach"), opt("a", "Apple")], {
+        collate,
+      });
+      expect(out.options?.map((o) => o.value)).toEqual(["a", "b"]);
+    }
+  });
+
   it("puts sourced entries first, then the extras", () => {
     const out = materialiseOptions(sourced({ options: [opt("any", "Any trip")] }), [
       opt("stry_1", "Safari"),
