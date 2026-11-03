@@ -393,6 +393,10 @@ that site's brand.
   pages. `folio/engine` is bulk-import and migration tooling — its `apply()`
   outside a transaction bypasses sync, undo and multiplayer, so it must never
   run against content someone might have open.
+- **A host renders a Folio form with its own markup.** `useFolioForm` from `folio/form`
+  is the optional React binding (state, steps, the error summary, prefill, the submit
+  round trip). The form must still be a plain `<form>` posting to `form.action`, so
+  that it works with no JavaScript and when the hook degrades.
 - **Render richtext you hold outside a block with `RenderRichtext`** from
   `folio/render`: `<RenderRichtext value={author.data.bio} field={def.fields.bio}
   resolution={resolution} />`. A reference's `data.body` is a stored value, not

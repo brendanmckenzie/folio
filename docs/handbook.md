@@ -2201,6 +2201,45 @@ condition fails, or that has no rows left, is removed.
 A question's `hold` keeps its place as `shown: false` when it is not asked, so its
 row-mates do not widen. It is layout, like `beside` and `grow`.
 
+### Steps
+
+A step is a page of a long form. Steps live in the same `forms.layout` as sections
+(`layout.steps`, at most 20), each with a `name`, a `label`, an optional `help` and an
+optional `showIf`, and a question joins one with `step`. **When a form has steps, every
+question is on one**: a save that leaves a question without a step is refused. Members
+are contiguous and the steps follow the order of `form.fields`, so the flat array, the
+CSV, `folio_invalid` and the validator never learn that steps exist. A section cannot
+span two steps, a step cannot hold only `hidden` questions, and the first step cannot
+have a `showIf`.
+
+A step's `showIf` is evaluated against the answers on earlier steps, and may name only
+a question above its first member. When it fails, the whole step is unreachable: every
+question on it is not asked, not required and not stored, and all of them are listed in
+`unasked`. A required question on a conditional step therefore compiles as not
+unconditionally required (`required: false` in the descriptor), exactly like a question
+under a conditional section. A `requireIf` on a stepped form may name only a question on
+the same step or an earlier one.
+
+`ResolvedForm.steps` and `ResolvedFormField.step` appear only on a stepped form, and
+`formLayout(form, answers)` returns `view.steps`: one `{ step, sections }` per rendered
+step, or a single `{ step: null, sections }` for a form without steps, so a host can
+always iterate it. With answers, a step that is unreachable, or that has no asked
+question left, is removed. `view.sections` is still every section, flat.
+
+**Without JavaScript a stepped form is one page, and there is no POST per step.** The
+server holds no half-finished submission: one native POST carries every answer, the
+server re-evaluates the conditions, and a refusal comes back as one redirect naming the
+fields. That keeps the thank-you and refusal pages cacheable and puts nothing personal in
+a URL. Steps are a presentation the hook adds after hydration (below); a host that
+ignores them renders a stepped form as one long page, which works. GOV.UK's guidance is
+one thing per page, so split by topic rather than by length, and keep a step to a
+handful of questions.
+
+The builder splits a form at any question (**Start a step here**), merges two steps,
+reorders them with the arrows and removes one. A save is refused if it would make the
+form invalid where it was valid before, for example a required action input mapped onto
+a question on a conditional step.
+
 ### Prefill
 
 A question can opt in to the page's query string with `prefill: 'query'`:
@@ -2223,6 +2262,144 @@ on a no-JavaScript render. A prefilled page is its own cache entry per query str
 (`utm_*` and the click identifiers such as `gclid`): a render seeded from one would be
 cached under a key that ignores it, and the next visitor would get the first one's
 value. Read those on the client. The `values` map is not affected, because you chose it.
+
+### The `folio/form` hook
+
+`useFolioForm` (`folio/form`) is optional, headless and React-only. It owns the state a
+form needs in the browser, and gives you prop-getters to spread onto your own markup.
+Folio still ships no component and no CSS. The form must stay a plain `<form>` posting
+to `form.action`: with the hook absent or failing, a native POST works and the server
+decides.
+
+```tsx
+import { useFolioForm } from 'folio/form'
+
+function Enquiry({ form }: { form: ResolvedForm }) {
+  const f = useFolioForm(form, { search: location.search })
+  return (
+    <form {...f.formProps()}>
+      {f.hidden.map((h) => <input key={h.name} type="hidden" {...h} />)}
+      <input className="decoy" {...f.honeypotProps()} />
+
+      {f.problems.length > 0 && (
+        <div {...f.summaryProps()}>
+          <h2 {...f.summaryTitleProps()}>There is a problem</h2>
+          <ul>
+            {f.problems.map((p) => (
+              <li key={p.name}><a {...f.problemLinkProps(p)}>{p.message}</a></li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {f.status && <p {...f.statusProps()}>{f.status.message}</p>}
+
+      {f.layout.steps.map((group, i) => (
+        <div key={group.step?.name ?? i} {...f.stepProps(group)}>
+          {group.step && <h2 {...f.stepLabelProps(group)}>{group.step.label}</h2>}
+          {group.sections.flatMap((s) => s.rows).flatMap((r) => r.cells).map(({ field }) => (
+            <div key={field.name}>
+              <label {...f.labelProps(field)}>{field.label}</label>
+              <input {...f.controlProps(field)} />
+              {f.errorFor(field.name) && (
+                <p {...f.errorProps(field)}>{f.errorFor(field.name)?.message}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <button {...f.backProps()}>Back</button>
+      <button {...f.nextProps()}>Next</button>
+      <button {...f.submitProps()}>{form.submitLabel}</button>
+    </form>
+  )
+}
+```
+
+A real form switches on `field.kind` (a `select` takes its options, a `radio` or
+`checkboxes` question uses `groupProps` and one `controlProps(field, option)` per
+option, a `statement` has no control and `hidden` questions arrive in `f.layout.inputs`);
+the demo's `contact.tsx` is a complete one.
+
+**Inputs are uncontrolled.** The hook reads the DOM form through a `FormData` and the
+same `answersFrom` the server runs, so what it holds is what a native POST would send.
+`controlProps` gives the id, `name`, `required`, `aria-invalid` and `aria-describedby`,
+and the prefilled `defaultValue`, from the query string and your `values` map.
+
+**Hydration.** Until mount the hook renders exactly what a server render does: no
+answers, every step visible, no `noValidate`. After mount it switches to the evaluated
+layout, so a hydrated stepped form shows one step and the others disappear. That costs a
+flash from one long page to one step. Do not hide steps with CSS before `f.stepped` is
+true: without JavaScript that would hide the questions with no way to reach them.
+`stepProps` hides the steps that are not current, and only once the hook has mounted.
+
+**Merge your own `style` with `stepProps`.** A hidden step comes back with `hidden` and
+`style: { display: 'none' }`; spreading it after your own `style` replaces yours, so
+merge them (`style={{ ...mine, ...sp.style }}`) when you set one.
+
+**The error summary, the status and the step heading follow the GOV.UK error-summary
+pattern.** A refusal moves focus to the summary (`role="alert"`, labelled by its title),
+each entry links to its control and, on a stepped form, first returns to the step that
+holds it. The status container (`role="status"`, or `alert` for a failure) takes focus
+after a round trip that is not a field refusal. After a step change, focus moves to the
+new step's heading.
+
+**Transport.** The default is `fetch`: the hook posts the form itself, a `422` becomes
+the summary with every answer kept, and `onSubmitted` receives the response id. Choose
+`transport: 'native'` when you want the browser's own POST and the 303 (a cached
+thank-you page, a host that handles the redirect): the hook validates on the client
+first and lets a valid form go. Under `fetch` the `pending` flag disables `submitProps`.
+
+**Turnstile.** The hook counts requests in `f.attempt`. A Turnstile token is single use,
+so remount the widget with `key={f.attempt}`, and reset any "captcha passed" gate the host
+holds on the same change.
+
+**Messages.** `messages` replaces the hook's default text per status (`invalid`,
+`closed`, `rate`, `verify`, `error`, `refused`) and per field refusal
+(`fields: { required: '…' }`). It replaces a host's own map; the defaults are
+`DEFAULT_STATUS_MESSAGES`, which the submit route's texts now come from too. For a
+`refused` result the text is the form's `refusals[reason]` first, then the action's
+`error` text, then `messages.refused`.
+
+**Degradation.** Every engine call sits in one `try`. A descriptor the engine cannot
+read, or any throw, makes the hook log to the console, set `f.degraded` and fall back to
+the server render, so the form is still a working native `<form>`.
+
+**Navigation.** `f.steps` lists every step with `reachable`, `complete`, `available` and
+`current`; `next()`, `back()` and `goTo(name)` move between them. Going forward is
+refused (and the summary focused) unless every earlier available step is complete;
+backward is always allowed. Which steps are shown is recomputed on every change, so
+answering `kind: company` can add a step ahead of the visitor.
+
+**Migrating from a hand-written form.** A hand-written form usually parses
+`folio_status` and `folio_invalid` from the URL, keeps its own map of status texts,
+calls `formLayout(form)` with no answers, and marks invalid inputs by hand:
+
+```tsx
+// before
+const p = new URLSearchParams(location.search)
+const bad = (p.get('folio_invalid') ?? '').split(',')
+return (
+  <form method="post" action={form.action}>
+    {form.fields.map((q) => <Q key={q.name} q={q} invalid={bad.includes(q.name)} />)}
+    {p.get('folio_status') === 'rate' && <p>{MESSAGES.rate}</p>}
+  </form>
+)
+
+// after
+const f = useFolioForm(form, { search: location.search })
+return (
+  <form {...f.formProps()}>
+    {f.layout.sections.map(/* rows and cells as before, with controlProps */)}
+    {f.status && <p {...f.statusProps()}>{f.status.message}</p>}
+  </form>
+)
+```
+
+Drop the URL parsing, the message map and the invalid bookkeeping, spread the
+prop-getters onto your own components, and keep your markup and class names. The
+conditions are evaluated in the browser from then on, so a question that does not apply
+disappears as the visitor types, and the server still decides.
 
 ### Options from a source
 
@@ -2338,6 +2515,12 @@ history entry and a log line at once. The good half of that rule is that
 `?folio_status=ok` names nothing personal and is therefore an ordinary cacheable
 page: the host renders `successMessage` from the descriptor, the edge caches it,
 and the next person to submit gets a hit.
+
+The round trip's vocabulary is shared code: `readSubmitStatus(form, search)` and the
+`SubmitStatus` type from `folio/core` read the parameters above (and refuse a
+`folio_invalid` that names a question the form does not have), and `statusLocation` writes
+them. A host that does not use the `folio/form` hook can still read the status with one
+call rather than parsing the URL.
 
 ### Abuse controls
 
@@ -4509,7 +4692,7 @@ and finding **103 names that appeared nowhere a consumer could read**, at the on
 moment when un-exporting was still free. Thirty-seven of them were internals that
 had leaked through an `index` re-export and are gone; the rest are here.
 
-The seven subpaths in `package.json`, and who each is for:
+The eight subpaths in `package.json`, and who each is for:
 
 | Subpath | For |
 | --- | --- |
@@ -4517,6 +4700,7 @@ The seven subpaths in `package.json`, and who each is for:
 | `folio/engine` | Document *tooling*: bulk imports and content migrations. `apply` outside a transaction bypasses sync, undo and multiplayer, so ordinary host code has no business here. |
 | `folio/server` | `createFolio` and everything a host's Worker wires up. |
 | `folio/vite` | The build plugin. |
+| `folio/form` | `useFolioForm`, the optional headless hook that binds a form descriptor to a host's own inputs. React, client-side. |
 | `folio/render` | `FolioDoc`, the component that renders a resolved document, and `RenderRichtext`, which renders a richtext value you hold outside a block. Both live consumers import `FolioDoc`. |
 | `folio/preview` | The preview bundle's own entry. Folio's, not a host's. |
 | `folio/admin-entry` | The admin bundle's entry, resolved by the Vite plugin. Folio's, not a host's. |
@@ -4596,7 +4780,11 @@ host writes no locale code), with `name`, `kind`, `label`, `required`, the
 optional `help`, `placeholder`, limits and `options`, and two fields that are
 always present, `row` and `grow`, so a host can lay questions out on a grid
 without calling `formLayout`. Import the type when a field component takes one as
-a prop. See [Forms](#forms).
+a prop. Steps add `ResolvedFormStep`, `LayoutStep`, `FormStep` and `MAX_FORM_STEPS`; the
+round trip adds `readSubmitStatus`, `statusLocation`, `SUBMIT_STATUSES`,
+`DEFAULT_STATUS_MESSAGES` and the types `SubmitStatus` and `SubmitStatusRead`; and the
+answer validator the submit route runs is public as `checkSubmission` and `stepStatus`,
+with `AnswerRefusal`, `SubmissionCheck` and `StepStatus`. See [Forms](#forms).
 
 **The publish projection.** `indexRowsFor(...)` answers `IndexRow[]` — a locale, a
 field, and the text or number written into `content_index`. A host importer that
@@ -4633,6 +4821,16 @@ where they came from — or an error, refusing rather than throwing.
 a `ClientMsg` plus the wire version; `HelloIdentity` is the actor, name and colour
 a client announces itself with. Exported for a test harness standing in for the
 admin. The *server* frames are not exported: nothing public produces one.
+
+### `folio/form`
+
+`useFolioForm(form: ResolvedForm, options?: FolioFormOptions): FolioForm`, and the types
+`FolioForm` and `FolioFormOptions`. Nothing else is exported; the framework-free pieces it
+uses are in `folio/core` (`formLayout`, `formState`, `prefillAnswers`, `checkSubmission`,
+`stepStatus`, `readSubmitStatus`). `react` is a peer dependency, and the bundle imports
+nothing but `react` and Folio's core chunks. Options are `search`, `values`, `messages`,
+`transport` (`'fetch'` default, or `'native'`), `idPrefix` and `onSubmitted`. See
+[The `folio/form` hook](#the-folioform-hook).
 
 ### `folio/server`
 

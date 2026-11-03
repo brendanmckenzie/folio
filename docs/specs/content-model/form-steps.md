@@ -3,11 +3,11 @@
 > **Group:** content model
 > **Build order:** 38
 > **Size:** L
-> **Status:** approved (owner, 2026-11-03)
+> **Status:** done (built 2026-11-04)
 > **Wire version:** none. Forms cross neither the socket nor the admin↔preview frame shape; the new descriptor keys (`ResolvedForm.steps`, `ResolvedFormField.step`) ride inside the `Resolution` JSON the bridge already carries, as spec 35's did
 > **Migration:** none. Steps live in `forms.layout`, the JSON column `0014_form_logic.sql` added for exactly this (Ground truth)
-> **Build sequence:** after spec 37 (form option sources, `0016`) and spec 36 (form actions, `0017`), which ship together as `v1.3.0`. This ships alone as the additive minor **`v1.4.0`**. Issue #55, slice 3 of #33. It edits the same files 36 and 37 edit (`core/forms.ts`, `core/form-logic.ts`, `server/forms.ts`, `form-responses.ts`, `routes/forms.ts`, `validate.ts`, `FormBuilder.tsx`), so it starts only once both have merged. **Decision 15 (stable row keys) is independent of the rest** and may ship earlier as its own patch release (Implementation plan, phase 0).
-> **Last updated:** 2026-11-03
+> **Build sequence:** after spec 37 (form option sources, `0016`) and spec 36 (form actions, `0017`). **Ships in the same `v1.3.0` as 36 and 37** (owner, 2026-11-04; this header said `v1.4.0` as an additive minor of its own, and every `v1.4.0` below is `v1.3.0`). Issue #55, slice 3 of #33. It edits the same files 36 and 37 edit, so it started only once both had merged. Decision 15 (stable row keys) shipped with it rather than earlier.
+> **Last updated:** 2026-11-04
 
 ## Summary
 
@@ -377,7 +377,7 @@ functions: `checkSubmission`, `stepStatus`, `readSubmitStatus` (decision 10),
 store is published.**
 
 This is a new surface that semver then covers. It is the reason for a minor bump
-(`v1.4.0`), and removing or narrowing it later is `2.0.0`. `scripts/release.mjs`
+(`v1.3.0`), and removing or narrowing it later is `2.0.0`. `scripts/release.mjs`
 gains the anchor `"dist/form.js": ["useFolioForm"]`.
 
 **Rejected: a framework-free store with a thin React binding.** That would mean two
@@ -1362,7 +1362,7 @@ per CLAUDE.md).
   that `useFolioForm` from `folio/form` is the optional binding, and that the form
   must still be a plain `<form>` posting to `form.action`.
 - **`docs/configuration.md`**: no change. There is no new `createFolio` key.
-- **`UPGRADING.md`**: a `### Form steps and the folio/form hook (v1.4.0)` entry.
+- **`UPGRADING.md`**: a `### Form steps and the folio/form hook (v1.3.0)` entry.
   - Nothing to run: no migration, and no config.
   - A form with no steps compiles byte-for-byte as before.
   - New: the `folio/form` subpath, and new `folio/core` names (list them).
@@ -1383,7 +1383,7 @@ per CLAUDE.md).
     - Before rolling back, an editor removes the conditions from steps, or the site
       rolls forward.
     - A host importing `folio/form` must remove that import to build against v1.3.x.
-- **`CHANGELOG.md`**: a `## 1.4.0` section. Added: steps, `folio/form`, and the core
+- **`CHANGELOG.md`**: a `## 1.3.0` section. Added: steps, `folio/form`, and the core
   exports. Changed, with no wording change: the submit route's status texts now come
   from `DEFAULT_STATUS_MESSAGES`.
 - **`ROADMAP.md`** §4: mark slice 3 built and remove it from the plan.
@@ -1573,3 +1573,67 @@ this spec can name.
   A reload after a fetch success shows the form again, which is harmless.
 - **Adopting the hook in `takeoffgo/group-web`**: a consumer change made in that
   repository after this ships, guided by the handbook's migration section.
+
+## Implementation notes
+
+Built 2026-11-04 in the plan's order on `feat/form-steps`, phases 1 to 5 committed
+separately and phase 6 (this one) last. The draft was reviewed adversarially before
+the build (4 high, 7 medium and 11 low findings, folded into the spec as it stands);
+the findings that mattered most were that `current` can name a step the evaluated layout
+dropped (answered by `initialStep` clamping on every recompute, decision 7) and that
+the spec must agree with the submit route's `asked` set. **Ships in `v1.3.0` with 36 and
+37**, not `v1.4.0`: the owner's sequencing changed on 2026-11-04. Its `UPGRADING.md` entry
+sits beside theirs, and the shared "roll-forward only" section gains one item for the
+`steps` that an older builder would drop on save.
+
+**Where the spec was wrong or ambiguous, and what was done.**
+
+- **`FORM_FIELD.step` landed in phase 2**, and `validateSubmission` passes
+  `layout.steps` from then on, because storing a step and compiling a step condition
+  cannot be separated.
+- **`statusLocation` is exported from `folio/core`** (decision 10 uses it to build the
+  native redirect), and the duplicate scalar-answer limit in the submit route was folded
+  into core (`SCALAR_ANSWER_CHARS`).
+- **`stepStatus().questions` is every question on the step**; an unreachable step is
+  `reachable: false, complete: false`.
+- **`source_unavailable` stays status `error`**, with its own JSON text; a native
+  redirect carries `folio_status=error`.
+- **`compileField` treats a step's `showIf` as conditional**: `required: false` and a
+  `requireIf` of `{ all: [] }`, matching sections.
+- **Builder (phase 5).** Refusals run `checkFormLogic` over the candidate form and refuse
+  only when the original passed and the result would not. The layout reducers
+  (`pruneSections`, `removeSection`, `updateSection`) used to drop `steps` and now keep
+  them. Splitting names new steps `step_N` with the default labels "Step 1" and "Step 2",
+  and "New step" when one is started.
+- **`folio/form` (phase 4).** `steps[].index` counts available steps from 0 and is `-1`
+  for an unavailable one; `total` is the available count; `FolioForm.steps` is `[]` unless
+  the form is stepped. `goTo` forward is refused (and the summary focused) unless every
+  earlier available step is complete; backward is always allowed. `controlProps` also
+  emits `placeholder`. `stepProps` for the unstepped group returns `{ ref, tabIndex: -1 }`;
+  `role`, `aria-labelledby` and `data-folio-step` are optional in its type. `summaryProps`
+  and `statusProps` return callback refs. `checkDom` in `model.ts` wraps `checkSubmission`
+  with client file approximations, drops unavailable-list questions and checks asked
+  questions only. A refused message resolves in this order: the fetch reply's message,
+  `refusals[reason]`, `refusals['<action>.error']`, `messages.refused`, the default. A
+  changed search string re-reads the round trip and clears the fetch outcome.
+- **`dist/form.js` imports only `react` and Folio's core chunks** (checked in the built
+  file), and `release.mjs` anchors `dist/form.js` on `useFolioForm`.
+- **A core fix found by the builder, made in phase 6.** Spec 36's `alwaysAnswered`
+  (`src/core/form-actions.ts`) ignored a step's `showIf`, so `attachmentProblems` did not
+  flag a required action input mapped onto a question on a conditional step, and at run
+  time that delivery would lack the input. It now requires that the question's step has
+  no `showIf`, as `compileField` does. The builder's own `stepRuleRefusal` guard was
+  covering the gap in the admin; the core check covers every caller. Pinned by a unit
+  test that fails without the fix.
+
+**Verified by breaking**: the builder, the engine, the submit path and the hook each had
+their load-bearing check disabled in place and a test went red before it was restored
+(recorded per phase); phase 6 removed the step condition from `alwaysAnswered` and the
+new `refuses a showIf on its step` test failed.
+
+**Not verified in a browser** (only jsdom and the unit model): the builder's split,
+start, merge and remove flows, the step header nesting, the up and down titles, the
+remove confirmation and step translation; and for the hook, the browser's constraint
+validation on hidden steps, autofill on hidden steps, a Turnstile widget inside a hidden
+step with `key={attempt}`, real focus, scroll and screen-reader announcements, a
+`requestSubmit` native POST, a real multipart fetch, and the hydration flash.

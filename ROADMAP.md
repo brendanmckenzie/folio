@@ -722,7 +722,7 @@ schedule cleanup.
 
 ### 4. A form has no logic, and the market says whose renderer that is
 
-**Slice 1 built 2026-10-19** as spec 35 (`docs/specs/content-model/form-logic.md`): conditional visibility and requiredness, sections, `hold` and prefill. Content-sourced options are #54; steps and the `folio/form` hook are #55. The analysis below is the record that produced them.
+**Slice 1 built 2026-10-19** as spec 35 (`docs/specs/content-model/form-logic.md`): conditional visibility and requiredness, sections, `hold` and prefill. Content-sourced options (#54) and steps with the `folio/form` hook (#55) have since been built, as specs 37 and 38. The analysis below is the record that produced them.
 
 **Raised 2026-09-07 by the second host** (`takeoffgo/takeoffgo-website`) as the
 smallest possible complaint: `/contact` used to wrap first and last name in a
@@ -803,8 +803,7 @@ Ranked by value × fits-a-library:
    different verb; `requireIf`, plus `rules: { when, message }[]`.
 4. **Prefill** — first-class `prefill: 'query' | 'none'`, plus a host-supplied map
    through `folio.resolve`. Take Off Go has already hand-rolled the query half.
-5. **Steps** — `step?: number`; the engine reports membership and completeness, and
-   with no JS the form is one page.
+5. **Done (spec 38, built 2026-11-04; see `docs/specs/content-model/form-steps.md`).** Steps and the `folio/form` hook.
 6. **Layout** — a `width` token stored, compiled to a span out of twelve. CSS grid
    auto-flow *is* the row algorithm, so Folio ships no row objects and no opinion
    about when a row stops being one; the host's breakpoint collapses it. This is the

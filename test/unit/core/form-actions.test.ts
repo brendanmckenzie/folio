@@ -163,6 +163,12 @@ describe("attachmentProblems", () => {
       expect(problems(f, layout)).toHaveLength(1);
       expect(problems(f, { sections: [{ name: "s", label: "S" }] })).toEqual([]);
     });
+    it("refuses a showIf on its step", () => {
+      const f = q("email", "email", { required: true, step: "s" });
+      const layout = { steps: [{ name: "s", label: "S", showIf: { field: "a", eq: "b" } }] };
+      expect(problems(f, layout)).toHaveLength(1);
+      expect(problems(f, { steps: [{ name: "s", label: "S" }] })).toEqual([]);
+    });
     it("refuses a requireIf, matching compileField", () => {
       const f = q("email", "email", { required: true, requireIf: { field: "a", eq: "b" } });
       expect(problems(f)).toHaveLength(1);

@@ -3,13 +3,12 @@ import type { CSSProperties } from "react";
 import {
   defineBlock,
   form,
-  formLayout,
-  type Json,
-  prefillAnswers,
-  text,
+  type LayoutSection,
   type ResolvedForm,
   type ResolvedFormField,
+  text,
 } from "folio/core";
+import { type FolioForm, useFolioForm } from "folio/form";
 
 /**
  * What the host read off its own URL after a submission
@@ -64,72 +63,47 @@ function Notice({ form: descriptor }: { form: ResolvedForm }) {
   if (state.status === "closed") {
     return <p className="form__notice">{descriptor.closedMessage || "This form is closed."}</p>;
   }
-  return (
-    <p className="form__notice form__notice--bad">
-      {state.status === "rate"
-        ? "That was a lot of submissions. Try again shortly."
-        : state.status === "verify"
-          ? "We could not verify that submission."
-          : "Please check the highlighted answers."}
-    </p>
-  );
+  // Every other status (`invalid`, `rate`, `verify`, `error`) is `useFolioForm`'s to
+  // announce, in `FormBody`, with the error summary beside it.
+  return null;
 }
 
 /** One question, drawn by the host. The descriptor is already localised and
  *  already carries `required`, `pattern`, `min`/`max` and the option labels, so
- *  there is no locale code and no fallback logic anywhere in here. */
-function Question({
-  field,
-  invalid,
-  seed,
-}: {
-  field: ResolvedFormField;
-  invalid: boolean;
-  /** `prefillAnswers`' answer for this question, if any. */
-  seed?: Json;
-}) {
-  const id = `f-${field.name}`;
-  const bad = invalid || undefined;
-  const seeded = typeof seed === "string" || typeof seed === "number" ? String(seed) : undefined;
-  const chosen = Array.isArray(seed) ? seed : typeof seed === "string" ? [seed] : [];
-
+ *  there is no locale code and no fallback logic anywhere in here. The hook's
+ *  prop-getters supply the ids, the `name`, the `aria-*` wiring and the
+ *  prefilled value; the host supplies the elements and the class names. */
+function Question({ field, f }: { field: ResolvedFormField; f: FolioForm }) {
   // Prose between questions: no input, nothing stored. `formLayout` still
-  // gives a `statement` a row of its own — it is never `hidden`, so it is
-  // never routed to `FormBody`'s `view.inputs` instead.
+  // gives a `statement` a row of its own, and `hidden` never reaches here: it
+  // comes back separately as `layout.inputs`.
   if (field.kind === "statement") {
     return <p className="form__statement">{field.text}</p>;
   }
-  // `hidden` never reaches here: `formLayout` pulls it out into
-  // `view.inputs`, position-free, before this component ever sees `field`.
+
+  const error = f.errorFor(field.name);
+  const grouped = field.kind === "radio" || field.kind === "checkboxes";
 
   return (
     <div className="form__field">
-      <label className="form__label" htmlFor={id}>
-        {field.label}
-        {field.required ? <abbr title="required"> *</abbr> : null}
-      </label>
+      {grouped ? (
+        // A group is labelled by its legend-like label, not a `for`.
+        <span className="form__label" {...f.labelProps(field)}>
+          {field.label}
+          {field.required ? <abbr title="required"> *</abbr> : null}
+        </span>
+      ) : (
+        // biome-ignore lint/a11y/noLabelWithoutControl: `labelProps` supplies `htmlFor`.
+        <label className="form__label" {...f.labelProps(field)}>
+          {field.label}
+          {field.required ? <abbr title="required"> *</abbr> : null}
+        </label>
+      )}
 
       {field.kind === "textarea" ? (
-        <textarea
-          id={id}
-          className="form__input"
-          rows={5}
-          name={field.name}
-          required={field.required}
-          placeholder={field.placeholder}
-          maxLength={field.max}
-          defaultValue={seeded}
-          aria-invalid={bad}
-        />
+        <textarea className="form__input" rows={5} {...f.controlProps(field)} />
       ) : field.kind === "select" ? (
-        <select
-          id={id}
-          className="form__input"
-          name={field.name}
-          required={field.required}
-          defaultValue={seeded}
-          aria-invalid={bad}
-        >
+        <select className="form__input" {...f.controlProps(field)}>
           <option value="">Choose…</option>
           {field.options?.map((option) => (
             <option key={option.value} value={option.value}>
@@ -137,64 +111,51 @@ function Question({
             </option>
           ))}
         </select>
-      ) : field.kind === "radio" || field.kind === "checkboxes" ? (
-        <fieldset className="form__group" aria-invalid={bad}>
+      ) : grouped ? (
+        <fieldset className="form__group" {...f.groupProps(field)}>
           {field.options?.map((option) => (
             <label key={option.value} className="form__choice">
-              <input
-                type={field.kind === "radio" ? "radio" : "checkbox"}
-                name={field.name}
-                value={option.value}
-                required={field.kind === "radio" && field.required}
-                defaultChecked={chosen.includes(option.value)}
-              />
+              <input {...f.controlProps(field, option)} />
               {option.label}
             </label>
           ))}
         </fieldset>
       ) : field.kind === "checkbox" ? (
-        <input
-          id={id}
-          type="checkbox"
-          name={field.name}
-          value="1"
-          required={field.required}
-          defaultChecked={seed === true}
-          aria-invalid={bad}
-        />
-      ) : field.kind === "file" ? (
-        // `accept` is the exact content-type list the server will re-check
-        // against the *bytes*, so the picker and the route cannot disagree —
-        // and the route's refusal is the one that counts.
-        <input
-          id={id}
-          type="file"
-          className="form__input"
-          name={field.name}
-          required={field.required}
-          accept={field.accept?.join(",")}
-          aria-invalid={bad}
-        />
+        <input {...f.controlProps(field)} />
       ) : (
-        <input
-          id={id}
-          type={field.kind}
-          className="form__input"
-          name={field.name}
-          required={field.required}
-          placeholder={field.placeholder}
-          pattern={field.pattern}
-          defaultValue={seeded}
-          aria-invalid={bad}
-          {...(field.kind === "number"
-            ? { min: field.min, max: field.max }
-            : { maxLength: field.max })}
-        />
+        <input className="form__input" {...f.controlProps(field)} />
       )}
 
       {field.help ? <p className="form__help">{field.help}</p> : null}
+      {error ? (
+        <p className="form__error" {...f.errorProps(field)}>
+          {error.message}
+        </p>
+      ) : null}
     </div>
   );
+}
+
+/** One section's rows. `cell.shown` is false only for a `hold`ing cell whose
+ *  question is not currently asked (only once the hook has mounted). */
+function Rows({ rows, f }: { rows: LayoutSection["rows"]; f: FolioForm }) {
+  return rows.map((row) => (
+    <div
+      key={row.key}
+      className="form__row"
+      style={{ "--form-row-cols": row.cells.map((c) => `${c.grow}fr`).join(" ") } as CSSProperties}
+    >
+      {row.cells.map((cell) =>
+        cell.shown ? (
+          <Question key={cell.field.name} field={cell.field} f={f} />
+        ) : (
+          // An empty, `aria-hidden` slot, never a `visibility: hidden` input: that
+          // still posts a value in a native submission.
+          <div key={cell.field.name} aria-hidden="true" />
+        ),
+      )}
+    </div>
+  ));
 }
 
 /**
@@ -210,8 +171,10 @@ function Question({
  * host's, all of it, which is the point: a form is the one place a design system
  * has strong opinions.
  *
- * It posts with **no JavaScript at all** — this page ships none — because the
- * transport is a native POST and the answer is a 303 (decision 5).
+ * On the public page it posts with **no JavaScript at all** (this page ships
+ * none), because the transport is a native POST and the answer is a 303
+ * (decision 5); a stepped form is then one page. The admin preview hydrates the
+ * block, so there `useFolioForm` mounts and the steps show.
  */
 export const contactForm = defineBlock({
   name: "contactForm",
@@ -248,100 +211,104 @@ export const contactForm = defineBlock({
 });
 
 /** The `<form>` itself. Split out so `Notice`'s hook and this one's
- *  `useContext` sit in components rather than in `render`. */
+ *  `useContext` sit in components rather than in `render`.
+ *
+ *  It renders through `useFolioForm` (`folio/form`), and the same markup serves
+ *  two paths. The public page ships no script (nothing hydrates it), so the hook
+ *  never mounts: it renders what a server render does, every step as one page
+ *  and every question present, and the browser posts the `<form>` natively. The
+ *  admin preview does hydrate the block (`preview/mount.tsx`), so there the hook
+ *  mounts and the stepped path shows: one step at a time, Back and Next, an
+ *  error summary and live conditions. Either way the element is a plain
+ *  `<form>` posting to `descriptor.action`, which is what lets the first path
+ *  work at all. */
 function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
   const state = useContext(SubmissionStatus);
-  const invalid = new Set(state?.form === descriptor.name ? state.invalid : []);
-  // `formLayout` (`folio/core`) is the one function that groups a compiled
-  // form's flat `fields` into rows and sections, so this host never
-  // reimplements the grouping `beside`/`grow` already describe. Called with no
-  // `answers` on purpose: this page ships no client script, which is the
-  // no-JavaScript path (`docs/specs/content-model/form-logic.md` decision 7). Every
-  // question and section is present and every cell `shown`, and the descriptor's
-  // `required` is only ever "required unconditionally", so a visitor who cannot
-  // reveal a conditional question is never blocked by one. The server works out
-  // which questions applied. A host with a script would switch to
-  // `formLayout(descriptor, answers)` after mount.
-  const view = formLayout(descriptor);
-  // Query-string prefill: only questions the editor opted in (`prefill: 'query'`).
-  const seeds = prefillAnswers(descriptor, { query: state?.search ?? "" });
+  const f = useFolioForm(descriptor, { search: state?.search ?? "" });
 
   return (
-    <form method={descriptor.method} action={descriptor.action} encType={descriptor.enctype}>
+    <form {...f.formProps()}>
       {/* `_folio_page` (where this was submitted from) and `_folio_locale`
           (which language it was rendered in). Both are Folio's, both are dropped
           rather than stored as answers, and a host emits them verbatim rather
           than deriving either. */}
-      {descriptor.hidden.map((input) => (
+      {f.hidden.map((input) => (
         <input key={input.name} type="hidden" name={input.name} value={input.value} />
       ))}
 
-      {/* The honeypot (decision 9). Named deterministically from the form id out
-          of a pool of boring-looking names, so a cached page and the live route
-          always agree on which input is the decoy — and so a bot cannot spot it
-          by its name. Filling it answers success and stores nothing. */}
-      <input
-        type="text"
-        name={descriptor.honeypot}
-        tabIndex={-1}
-        autoComplete="off"
-        aria-hidden="true"
-        className="form__decoy"
-      />
+      {/* The honeypot (decision 9). Named deterministically from the form id so a
+          cached page and the live route always agree on which input is the decoy.
+          Filling it answers success and stores nothing. */}
+      <input className="form__decoy" {...f.honeypotProps()} />
 
-      {/* `hidden`-kind questions: layout-transparent, so `formLayout` carries
-          them separately from every row — they render anywhere in the form. */}
-      {view.inputs.map((field) => (
-        <input key={field.name} type="hidden" name={field.name} value={field.value ?? ""} />
+      {/* `hidden`-kind questions: layout-transparent, so the layout carries them
+          separately from every row. */}
+      {f.layout.inputs.map((field) => (
+        <input key={field.name} {...f.controlProps(field)} />
       ))}
 
-      {view.sections.map(({ section, rows }, i) => {
-        const body = rows.map((row) => (
-          <div
-            key={row.key}
-            className="form__row"
-            style={
-              { "--form-row-cols": row.cells.map((c) => `${c.grow}fr`).join(" ") } as CSSProperties
-            }
-          >
-            {row.cells.map((cell) =>
-              cell.shown ? (
-                <Question
-                  key={cell.field.name}
-                  field={cell.field}
-                  invalid={invalid.has(cell.field.name)}
-                  {...(seeds[cell.field.name] !== undefined
-                    ? { seed: seeds[cell.field.name] as Json }
-                    : {})}
-                />
-              ) : (
-                // A `hold`ing cell whose question is not currently asked
-                // (only with `answers`): an empty, `aria-hidden` slot, never a
-                // `visibility: hidden` input — that still posts a value in a
-                // native submission.
-                <div key={cell.field.name} aria-hidden="true" />
-              ),
-            )}
+      {f.problems.length > 0 ? (
+        <div className="form__summary" {...f.summaryProps()}>
+          <h3 {...f.summaryTitleProps()}>There is a problem</h3>
+          <ul>
+            {f.problems.map((problem) => (
+              <li key={problem.name}>
+                <a {...f.problemLinkProps(problem)}>{problem.message}</a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {f.status && f.status.kind !== "ok" && f.status.kind !== "closed" ? (
+        <p className="form__notice form__notice--bad" {...f.statusProps()}>
+          {f.status.message}
+        </p>
+      ) : null}
+
+      {/* A form without steps is one group with a null step; the same loop covers
+          it. `stepProps` hides the steps that are not current once mounted, and
+          leaves every one visible before. */}
+      {f.layout.steps.map((group, s) => {
+        const sections = group.sections.map(({ section, rows }, i) =>
+          section ? (
+            <fieldset key={section.name} className="form__section">
+              <legend>{section.label}</legend>
+              {section.help ? <p className="form__help">{section.help}</p> : null}
+              <Rows rows={rows} f={f} />
+            </fieldset>
+          ) : (
+            // biome-ignore lint/suspicious/noArrayIndexKey: a `null` group has no name; its place is its identity.
+            <Fragment key={i}>
+              <Rows rows={rows} f={f} />
+            </Fragment>
+          ),
+        );
+        return group.step ? (
+          <div key={group.step.name} className="form__step" {...f.stepProps(group)}>
+            <h3 className="form__step-title" {...f.stepLabelProps(group)}>
+              {group.step.label}
+            </h3>
+            {group.step.help ? <p className="form__help">{group.step.help}</p> : null}
+            {sections}
           </div>
-        ));
-        // A real section is a `<fieldset>` with a `<legend>`; the questions outside
-        // any section come back as `section: null` groups, which may sit before
-        // and after the real ones.
-        return section ? (
-          <fieldset key={section.name} className="form__section">
-            <legend>{section.label}</legend>
-            {section.help ? <p className="form__help">{section.help}</p> : null}
-            {body}
-          </fieldset>
         ) : (
-          // biome-ignore lint/suspicious/noArrayIndexKey: a `null` group has no name; its place is its identity.
-          <Fragment key={i}>{body}</Fragment>
+          // biome-ignore lint/suspicious/noArrayIndexKey: the unstepped group has no name.
+          <Fragment key={s}>{sections}</Fragment>
         );
       })}
 
-      <button className="btn btn--primary" type="submit">
-        {descriptor.submitLabel}
-      </button>
+      <div className="form__nav">
+        <button className="btn" {...f.backProps()}>
+          Back
+        </button>
+        <button className="btn" {...f.nextProps()}>
+          Next
+        </button>
+        <button className="btn btn--primary" {...f.submitProps()}>
+          {descriptor.submitLabel}
+        </button>
+      </div>
     </form>
   );
 }

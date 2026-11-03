@@ -674,6 +674,136 @@ check(
 
 await fetch(`${API}/forms/${logic.id}`, { method: "DELETE" });
 
+/* --- steps (spec 38) ------------------------------------------------------ */
+
+const stepped = await post("/forms", { label: "E2E Steps" });
+const STEP_FIELDS = [
+  {
+    name: "kind",
+    kind: "select",
+    label: "Who are you?",
+    required: true,
+    step: "about",
+    options: [
+      { value: "person", label: "A person" },
+      { value: "company", label: "A company" },
+    ],
+  },
+  { name: "email", kind: "email", label: "Email", required: true, step: "about" },
+  { name: "company", kind: "text", label: "Company name", required: true, step: "business" },
+  { name: "notes", kind: "textarea", label: "Notes", step: "business" },
+  { name: "agree", kind: "checkbox", label: "I agree", required: true, step: "finish" },
+];
+const STEP_LAYOUT = {
+  steps: [
+    { name: "about", label: "About you" },
+    {
+      name: "business",
+      label: "Your business",
+      showIf: { field: "kind", eq: "company" },
+    },
+    { name: "finish", label: "Finish" },
+  ],
+};
+const steppedSaved = await patch(`/forms/${stepped.id}`, {
+  expectedUpdatedAt: stepped.updatedAt,
+  fields: STEP_FIELDS,
+  layout: STEP_LAYOUT,
+}).then((r) => r.json());
+check(
+  "a stepped form saves, and the layout carries its steps",
+  steppedSaved.layout?.steps?.length === 3 && steppedSaved.fields.every((f) => f.step),
+  JSON.stringify(steppedSaved.layout),
+);
+
+const steppedDescriptor = (await json(`${API}/forms/resolved?ids=${stepped.id}`))[stepped.id];
+check(
+  "the descriptor carries steps and each question's step, and a question on a conditional step is not unconditionally required",
+  steppedDescriptor?.steps?.map((s) => s.name).join() === "about,business,finish" &&
+    steppedDescriptor.fields.find((f) => f.name === "company")?.step === "business" &&
+    steppedDescriptor.fields.find((f) => f.name === "company")?.required === false &&
+    steppedDescriptor.fields.find((f) => f.name === "email")?.required === true,
+  JSON.stringify(steppedDescriptor?.steps),
+);
+
+const steppedRows = async () => (await json(`${API}/forms/${stepped.id}/responses`)).rows;
+
+const personNative = await submit(stepped.id, {
+  kind: "person",
+  email: "p@example.com",
+  company: "Crafted Pty",
+  agree: "1",
+});
+check(
+  "a required question on an unreachable step does not block a native submission",
+  statusOf(personNative).get("folio_status") === "ok",
+  personNative.headers.get("location"),
+);
+const [personRow] = await steppedRows();
+check(
+  "its answer is dropped and every question on that step is listed in unasked",
+  personRow &&
+    !("company" in personRow.data) &&
+    ["company", "notes"].every((n) => personRow.unasked.includes(n)),
+  JSON.stringify({ data: personRow?.data, unasked: personRow?.unasked }),
+);
+
+const personJson = await submitJson(stepped.id, {
+  kind: "person",
+  email: "q@example.com",
+  company: "Crafted Pty",
+  agree: true,
+});
+check("and the same over JSON is a 200", personJson.status === 200, `status=${personJson.status}`);
+
+const companyNative = await submit(stepped.id, {
+  kind: "company",
+  email: "c@example.com",
+  agree: "1",
+});
+check(
+  "a reachable step's required question refuses (native: folio_invalid names it)",
+  statusOf(companyNative).get("folio_status") === "invalid" &&
+    statusOf(companyNative).get("folio_invalid") === "company",
+  companyNative.headers.get("location"),
+);
+const companyJson = await submitJson(stepped.id, {
+  kind: "company",
+  email: "c@example.com",
+  agree: true,
+});
+const companyBody = await companyJson.json();
+check(
+  "and over JSON it is a 422 naming only that question",
+  companyJson.status === 422 && Object.keys(companyBody.fields).join() === "company",
+  JSON.stringify(companyBody.fields),
+);
+const companyOk = await submitJson(stepped.id, {
+  kind: "company",
+  email: "c@example.com",
+  company: "Acme Pty",
+  agree: true,
+});
+check("answering it is a 200", companyOk.status === 200, `status=${companyOk.status}`);
+const [companyRow] = (await steppedRows()).filter((r) => r.data.company === "Acme Pty");
+check(
+  "and the reachable step's answer is stored with nothing unasked",
+  companyRow?.data.company === "Acme Pty" && companyRow.unasked.length === 0,
+  JSON.stringify({ data: companyRow?.data, unasked: companyRow?.unasked }),
+);
+
+const unsteppedQuestion = await patch(`/forms/${stepped.id}`, {
+  expectedUpdatedAt: (await json(`${API}/forms/${stepped.id}`)).updatedAt,
+  fields: [...STEP_FIELDS, { name: "loose", kind: "text", label: "Loose" }],
+});
+check(
+  "a question with no step on a stepped form is refused with a 400",
+  unsteppedQuestion.status === 400,
+  `status=${unsteppedQuestion.status}`,
+);
+
+await fetch(`${API}/forms/${stepped.id}`, { method: "DELETE" });
+
 /* --- closing, and deleting ----------------------------------------------- */
 
 const closed = await patch(`/forms/${form.id}`, {
