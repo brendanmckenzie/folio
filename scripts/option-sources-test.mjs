@@ -65,7 +65,7 @@ function client(storyId) {
     const msg = JSON.parse(e.data);
     inbox.push(msg);
     for (let i = waiters.length - 1; i >= 0; i--) {
-      if (waiters[i].match(msg)) waiters.splice(i, 1)[0].resolve(msg);
+      if (waiters[i].accepts(msg)) waiters.splice(i, 1)[0].resolve(msg);
     }
   });
   return {
@@ -90,7 +90,7 @@ function client(storyId) {
       const hit = inbox.find(match);
       if (hit) return Promise.resolve(hit);
       return new Promise((resolve, reject) => {
-        waiters.push({ match, resolve });
+        waiters.push({ accepts: match, resolve });
         setTimeout(() => reject(new Error("timeout waiting on socket message")), ms);
       });
     },
