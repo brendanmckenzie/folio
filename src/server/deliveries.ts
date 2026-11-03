@@ -341,9 +341,10 @@ export async function attemptDelivery(
       `update form_deliveries
           set attempts = attempts + 1, next_at = ?, claim = ?, updated_at = ?
         where response_id = ? and action = ? and status = 'pending' and next_at <= ?
+          and attempts < ?
         returning attempts, form_id as formId, host, inputs_map as inputsMap`,
     )
-    .bind(now + DELIVERY_LEASE_MS, token, now, responseId, action, now)
+    .bind(now + DELIVERY_LEASE_MS, token, now, responseId, action, now, MAX_DELIVERY_ATTEMPTS)
     .all<{ attempts: number; formId: string; host: string; inputsMap: string | null }>();
   const claimed = claimedRows[0];
   if (!claimed) return { kind: "unclaimed" };
@@ -611,15 +612,20 @@ export async function runDeliveries(
     .bind(now - 2 * RATE_WINDOW_MS)
     .run();
 
-  const { results: due } = await db
+  // An attempt that died before it settled (an isolate killed inside `deliver`) leaves a
+  // lapsed lease and a count that only the claim moved. The claim refuses a row at the
+  // cap, so such a row is closed here as given up, where the failed banner shows it,
+  // rather than re-sent for ever (decision 12).
+  const { results: expired } = await db
     .prepare(
-      `select response_id as responseId, action from form_deliveries
-        where status = 'pending' and next_at <= ?
-        order by next_at, response_id limit ?`,
+      `update form_deliveries
+          set status = 'failed', failure = 'gave_up', next_at = null, claim = null, updated_at = ?
+        where status = 'pending' and attempts >= ? and next_at <= ?
+        returning response_id as responseId, form_id as formId, action, attempts`,
     )
-    .bind(now, batch)
-    .all<{ responseId: string; action: string }>();
-  report.due = due.length;
+    .bind(now, MAX_DELIVERY_ATTEMPTS, now)
+    .all<{ responseId: string; formId: string; action: string; attempts: number }>();
+  for (const row of expired) report.failed.push({ ...row, failure: "gave_up", givenUp: true });
 
   const deps: DeliveryDeps = {
     rt,
@@ -629,27 +635,50 @@ export async function runDeliveries(
     clock,
     ...(opts.deliverMs === undefined ? {} : { deliverMs: opts.deliverMs }),
   };
+  const deadline = opts.deliverMs ?? DELIVER_TIMEOUT_MS;
   const started = Date.now();
   const hung = new Set<string>();
-  for (const row of due) {
-    if (Date.now() - started >= budget) break;
-    if (hung.has(row.action)) continue;
-    let outcome: AttemptOutcome;
-    try {
-      outcome = await attemptDelivery(deps, row.responseId, row.action);
-    } catch (err) {
-      rt.logger.error(
-        `folio: form action "${row.action}" delivery could not be attempted (response ${row.responseId})`,
-        err,
-      );
-      continue;
+  let remaining = batch;
+  // Pages, because an action that hangs or throws slowly must not fill the batch with
+  // its own backlog: once it joins `hung` the next page is read without it, so the
+  // other actions and brands behind it are reached (decision 12).
+  while (remaining > 0 && Date.now() - started < budget) {
+    const skip = [...hung];
+    const { results: due } = await db
+      .prepare(
+        `select response_id as responseId, action from form_deliveries
+          where status = 'pending' and next_at <= ?
+            ${skip.length > 0 ? `and action not in (${skip.map(() => "?").join(", ")})` : ""}
+          order by next_at, response_id limit ?`,
+      )
+      .bind(now, ...skip, remaining)
+      .all<{ responseId: string; action: string }>();
+    if (due.length === 0) break;
+    report.due += due.length;
+    for (const row of due) {
+      if (Date.now() - started >= budget) return report;
+      if (hung.has(row.action)) continue;
+      remaining--;
+      const began = Date.now();
+      let outcome: AttemptOutcome;
+      try {
+        outcome = await attemptDelivery(deps, row.responseId, row.action);
+      } catch (err) {
+        rt.logger.error(
+          `folio: form action "${row.action}" delivery could not be attempted (response ${row.responseId})`,
+          err,
+        );
+        continue;
+      }
+      if (outcome.kind === "dropped") report.dropped++;
+      if (outcome.kind !== "done") continue;
+      // A timeout, or a throw that took over half the deadline, marks the vendor slow.
+      if (outcome.timedOut || (outcome.failure === "threw" && Date.now() - began >= deadline / 2))
+        hung.add(row.action);
+      if (outcome.status === "delivered") report.delivered++;
+      else if (outcome.status === "skipped") report.skipped++;
+      else if (outcome.failure !== null) report.failed.push(failureOf(outcome));
     }
-    if (outcome.kind === "dropped") report.dropped++;
-    if (outcome.kind !== "done") continue;
-    if (outcome.timedOut) hung.add(row.action);
-    if (outcome.status === "delivered") report.delivered++;
-    else if (outcome.status === "skipped") report.skipped++;
-    else if (outcome.failure !== null) report.failed.push(failureOf(outcome));
   }
   return report;
 }

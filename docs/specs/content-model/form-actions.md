@@ -2011,3 +2011,26 @@ Demo, end-to-end script and prose (phase 6)
 - `docs/configuration.md` anchors were corrected from the spec's line numbers, which had
   moved. The `ROADMAP.md` entry is a note on the existing "no vendor integration" bullet,
   since the roadmap had no spec-36 item to mark.
+
+Build review (adversarial review of the six phases; all six findings fixed)
+- **M2, the attempt cap held only at settle.** An attempt that died before settling (an
+  isolate killed inside `deliver`) lapsed its lease and was re-claimed for ever, past
+  `MAX_DELIVERY_ATTEMPTS`, never showing as failed. The claim now requires `attempts <
+  MAX`, and each pass first closes pending rows at or over the cap whose lease has lapsed
+  as `failed`/`gave_up`, reporting them in `failed`.
+- **M1, a hung action starved the rest.** The pass chose its batch before learning which
+  action was hung, so the hung action's backlog filled it for the length of the outage.
+  The pass now reads in pages: when an action times out, or throws after more than half
+  the deadline, the next page is read with `action not in (...)`, so decision 12 holds.
+- **M3, `auth: 'open'` could not attach actions.** `mayConfigureActions` called `allows`
+  on a null actor. It now mirrors `stories.ts`: `rt.auth.mode !== "session" || allows(...)`.
+- **L1, a throwing delivery pass rejected `runSchedules`** after the schedules were
+  published. It is caught and logged, and the report carries `deliveriesFailed: true`.
+- **L2, `form_refusals` was pruned only by the cron and the prune scanned the table.**
+  `0017` (unlanded) gains `form_refusals_age (created_at)`, and `recordRefusal` also
+  deletes rows older than two windows, so a deployment with no cron stays bounded.
+- **L3, a fields-only PATCH with no brand skipped the "adds a problem" refusal.** When a
+  form has attachments and the request has no brand, the route now calls `brandOf`
+  (`site_required`) instead of checking against no registry. This is not reachable over
+  HTTP today, because `scopedActor` refuses an unscoped request to a scoped route first,
+  so its test is a characterisation and does not go red without the fix.

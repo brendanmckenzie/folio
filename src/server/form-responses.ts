@@ -762,6 +762,13 @@ export async function recordRefusal(
     .prepare("insert into form_refusals (ip_hash, form_id, created_at) values (?, ?, ?)")
     .bind(hash, formId, now)
     .run();
+  // Pruned here as well as by the delivery pass, so a deployment with no cron does not
+  // keep every refused attempt for ever. The hash is bucketed by the hour, so an
+  // address's own rows cannot be the ones to age out: the age index serves this range.
+  await db
+    .prepare("delete from form_refusals where created_at < ?")
+    .bind(now - 2 * RATE_WINDOW_MS)
+    .run();
 }
 
 /* --------------------------------------------------------------- uploads --- */

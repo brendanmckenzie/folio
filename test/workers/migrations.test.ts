@@ -1586,10 +1586,17 @@ describe("form_refusals", () => {
   });
 
   it("has the throttle index, newest first within an address", async () => {
-    expect(await indexesOf("form_refusals")).toEqual(["form_refusals_throttle"]);
+    expect(await indexesOf("form_refusals")).toEqual([
+      "form_refusals_age",
+      "form_refusals_throttle",
+    ]);
     expect(await indexSql("form_refusals_throttle")).toMatch(
       /\(\s*ip_hash\s*,\s*created_at\s+desc\s*\)/i,
     );
+  });
+
+  it("has an age index, so the prune does not scan the table", async () => {
+    expect(await indexSql("form_refusals_age")).toMatch(/\(\s*created_at\s*\)/i);
   });
 });
 

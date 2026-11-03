@@ -16,6 +16,7 @@ import {
   deleteResponse,
   deleteResponses,
   listResponses,
+  recordRefusal,
   responseById,
 } from "../../src/server/form-responses";
 import { deleteForm, formById } from "../../src/server/forms";
@@ -745,6 +746,49 @@ describe("the pass", () => {
     expect((await rowOf(fine, "other")).status).toBe("delivered");
   });
 
+  it("does not let a hung action's backlog starve another action behind it", async () => {
+    const form = await insertForm([EMAIL], [ATTACH, { action: "other", delivers: true }]);
+    next = () => new Promise(() => {});
+    for (let i = 0; i < 4; i++) await seed(form, { next_at: 10 + i });
+    const fine = await seed(form, { action: "other", inputs_map: "{}", next_at: 20 });
+    // A batch of 3 fills with the hung action's rows when the page is read once.
+    const report = await runDeliveries(rt, env, env.DB, { now: T0, deliverMs: 40, batch: 3 });
+    expect(seen).toHaveLength(1);
+    expect((await rowOf(fine, "other")).status).toBe("delivered");
+    expect(report.delivered).toBe(1);
+  });
+
+  it("treats an action that throws slowly as hung", async () => {
+    const form = await insertForm([EMAIL], [ATTACH, { action: "other", delivers: true }]);
+    next = () => new Promise((_, reject) => setTimeout(() => reject(new Error("slow")), 30));
+    for (let i = 0; i < 4; i++) await seed(form, { next_at: 10 + i });
+    const fine = await seed(form, { action: "other", inputs_map: "{}", next_at: 20 });
+    await runDeliveries(rt, env, env.DB, { now: T0, deliverMs: 40, batch: 3 });
+    expect(seen).toHaveLength(1);
+    expect((await rowOf(fine, "other")).status).toBe("delivered");
+  });
+
+  it("closes a pending row at the cap whose attempt died, as gave_up, and never claims it", async () => {
+    const form = await insertForm([EMAIL], [ATTACH]);
+    const dead = await seed(form, {
+      attempts: MAX_DELIVERY_ATTEMPTS,
+      next_at: T0 - 1,
+      claim: "dead",
+    });
+    const report = await runDeliveries(rt, env, env.DB, { now: T0 });
+    expect(seen).toHaveLength(0);
+    expect(await rowOf(dead)).toMatchObject({
+      status: "failed",
+      failure: "gave_up",
+      attempts: MAX_DELIVERY_ATTEMPTS,
+      claim: null,
+    });
+    expect(report.failed).toMatchObject([{ responseId: dead, givenUp: true, failure: "gave_up" }]);
+    // The claim itself refuses a row at the cap, with no pass in front of it.
+    const live = await seed(form, { attempts: MAX_DELIVERY_ATTEMPTS, next_at: T0 - 1 });
+    expect(await attemptDelivery(deps({}, T0), live, "probe")).toEqual({ kind: "unclaimed" });
+  });
+
   it("stops claiming once the wall-clock budget is spent", async () => {
     const form = await insertForm([EMAIL], [{ action: "other", delivers: true }]);
     otherDelayMs = 40;
@@ -842,6 +886,31 @@ describe("folio.runSchedules runs deliveries last, and only at the end of the sw
     await seed(form, { next_at: 5 });
     const report = await folio.runSchedules(env, { now: T0 });
     expect(report.deliveries).toMatchObject({ due: 1, delivered: 1 });
+  });
+
+  it("a recorded refusal prunes the old ones itself, with no cron", async () => {
+    const window = 60 * 60 * 1000;
+    await env.DB.prepare("insert into form_refusals values ('old', 'f', ?)")
+      .bind(T0 - 2 * window - 1)
+      .run();
+    await recordRefusal(env.DB, "fresh", "f", T0);
+    const { results } = await env.DB.prepare("select ip_hash from form_refusals").all<{
+      ip_hash: string;
+    }>();
+    expect(results.map((r) => r.ip_hash)).toEqual(["fresh"]);
+  });
+
+  it("a throwing delivery pass is logged and flagged, and the call still answers", async () => {
+    await env.DB.prepare("delete from schedules").run();
+    await env.DB.prepare("alter table form_refusals rename to form_refusals_away").run();
+    try {
+      const report = await folio.runSchedules(env, { now: T0 });
+      expect(report.deliveriesFailed).toBe(true);
+      expect(report.deliveries).toBeUndefined();
+      expect(log.error.some((e) => e.message.includes("delivery pass failed"))).toBe(true);
+    } finally {
+      await env.DB.prepare("alter table form_refusals_away rename to form_refusals").run();
+    }
   });
 
   it("a dry run attempts none", async () => {
@@ -980,5 +1049,24 @@ describe("responses read their deliveries inside the site fence", () => {
     const all = await listResponses(env.DB, form, { count: true });
     expect(all.failedDeliveries).toBe(5);
     expect(all.overdueDeliveries).toBe(2);
+  });
+});
+
+describe("attaching actions under open auth", () => {
+  it("lets a PATCH change the actions when there are no actors to hold a permission", async () => {
+    const form = await insertForm([EMAIL], []);
+    const ctx = createExecutionContext();
+    const res = await folio.handle(
+      new Request(`${ORIGIN}/folio/api/forms/${form}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedUpdatedAt: 1000, actions: [ATTACH] }),
+      }),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(res!.status).toBe(200);
+    expect((await formById(env.DB, form))!.actions).toHaveLength(1);
   });
 });

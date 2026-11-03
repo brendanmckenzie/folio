@@ -162,6 +162,8 @@ export interface ScheduleRunReport {
    * schedule has been published. Never on `POST {base}/api/schedules/run`.
    */
   deliveries?: DeliveryRunReport;
+  /** The delivery pass threw after the schedules were swept; the error is in the log. */
+  deliveriesFailed?: true;
   /**
    * How many schedules are still pending and due, asked directly after the run.
    *

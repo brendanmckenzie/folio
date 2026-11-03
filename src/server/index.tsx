@@ -1953,11 +1953,18 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       // left runs none, because a late page is the worse failure. `POST
       // {base}/api/schedules/run` calls `runSchedules` itself and never gets here.
       if (report.continueFrom !== null) return report;
-      const deliveries = await runDeliveries(rt, env, bindings.db, {
-        ...(opts?.now === undefined ? {} : { now: opts.now }),
-        ...(opts?.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
-      });
-      return { ...report, deliveries };
+      // The schedules are published and cleared by now, so a pass that throws (a D1
+      // error) is logged and flagged, not allowed to reject the call and hide the report.
+      try {
+        const deliveries = await runDeliveries(rt, env, bindings.db, {
+          ...(opts?.now === undefined ? {} : { now: opts.now }),
+          ...(opts?.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
+        });
+        return { ...report, deliveries };
+      } catch (err) {
+        rt.logger.error("folio: the form delivery pass failed", err);
+        return { ...report, deliveriesFailed: true };
+      }
     },
     /**
      * The auth housekeeping sweep (`../../docs/specs/foundation/

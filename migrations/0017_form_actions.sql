@@ -63,3 +63,6 @@ create table form_refusals (
   created_at integer not null
 );
 create index form_refusals_throttle on form_refusals (ip_hash, created_at desc);
+-- The age prune (`created_at < ?`, every delivery pass) is not served by the throttle
+-- index, whose leading column is the address: without this it scans the whole table.
+create index form_refusals_age on form_refusals (created_at);

@@ -399,9 +399,20 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const sourced = incoming.some((f) => f.optionsFrom);
     if (sourced) checkOptionSources(incoming, brandOf(c));
 
+    // The brand whose actions' problems a save is checked against. A save of the fields
+    // alone needs it only when the form has attachments, and with no brand on the request
+    // that is `site_required` rather than a check against nothing, which refuses nothing.
+    let brand = c.var.brand;
+    if (body.actions !== undefined) brand = brandOf(c);
+    else if (!brand && body.fields !== undefined) {
+      const current = await formById(db, id, rt.logger, scopeOf(c));
+      if (current && current.actions.length > 0) brand = brandOf(c);
+    }
+
     const result = await updateForm(db, id, body, scopeOf(c), {
-      infos: (body.actions === undefined ? c.var.brand : brandOf(c))?.forms?.infos ?? new Map(),
-      mayConfigureActions: allows(c.var.actor, FORMS),
+      infos: brand?.forms?.infos ?? new Map(),
+      // `open` auth has no actors to hold a permission (`stories.ts`' `drafts` guard).
+      mayConfigureActions: rt.auth.mode !== "session" || allows(c.var.actor, FORMS),
       ...(rt.locales ? { locales: rt.locales } : {}),
     });
     if (!result) throw new FolioError("not_found", "Unknown form");

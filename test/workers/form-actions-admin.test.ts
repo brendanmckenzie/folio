@@ -569,6 +569,28 @@ describe("GET /forms/registry actions (decision 4)", () => {
       ).run();
     });
 
+    // Characterisation, not a red-without-the-fix test: an unscoped request to a scoped
+    // route is refused by `scopedActor` before the handler, so the handler's own
+    // `brandOf` for a fields-only save of a form with attachments is a second fence.
+    it("never saves fields of a form with attachments on a request with no brand", async () => {
+      await insertForm("frm_bbbbbbbbbbbb", [EMAIL, FIRST], COMPLETE);
+      const before = await stored("frm_bbbbbbbbbbbb");
+      const res = await call(
+        "/api/forms/frm_bbbbbbbbbbbb",
+        admin,
+        {
+          method: "PATCH",
+          body: {
+            expectedUpdatedAt: before.updated_at,
+            fields: [{ ...EMAIL, required: false }, FIRST],
+          },
+        },
+        branded,
+      );
+      expect(res.status).toBe(400);
+      expect(await stored("frm_bbbbbbbbbbbb")).toEqual(before);
+    });
+
     it("answers each brand's own actions, [] for none, and 400 site_required unscoped", async () => {
       const ids = async (site: string) =>
         (
