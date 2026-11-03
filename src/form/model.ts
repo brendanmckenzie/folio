@@ -236,7 +236,8 @@ export interface StatusView {
  * `closed` is its closed message, then the host's, then the default; `refused` is the
  * reply's message when the hook made the request, then the editor's text for the
  * reason, then for `<action>.error`, then the host's, then the default; everything
- * else is the reply's message, then the host's, then the default.
+ * else is the host's message, then the reply's, then the default: the reply always
+ * carries Folio's own default sentence and would otherwise hide the host's.
  */
 export function statusView(
   form: Pick<ResolvedForm, "successMessage" | "closedMessage" | "refusals">,
@@ -265,7 +266,7 @@ export function statusView(
       messages?.refused ||
       DEFAULT_STATUS_MESSAGES.refused;
   } else {
-    message = input.reply || messages?.[kind] || DEFAULT_STATUS_MESSAGES[kind];
+    message = messages?.[kind] || input.reply || DEFAULT_STATUS_MESSAGES[kind];
   }
   return {
     kind,
