@@ -22,6 +22,7 @@ import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from "../core/assets";
 import { MAX_SLUG } from "../core/story";
 import { conditionRefusal, type FieldCondition } from "../core/conditions";
 import type { Json } from "../core/doc";
+import { MAX_FORM_ACTIONS, MAX_REFUSAL_MESSAGE } from "../core/form-actions";
 import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
 import type { DocumentType } from "../core/schema";
@@ -2002,6 +2003,46 @@ const FORM_LAYOUT = v.object(
 );
 
 /**
+ * One attached action (form-actions.md decision 7). Every key of
+ * `FormActionAttachment` is named, because a `v.object` strips the rest and a key
+ * missing here is silently dropped before `updateForm` sees it. **Strings are
+ * deliberately not `bounded`**: that trims and refuses control characters, and a
+ * `textarea` setting holds newlines. The charsets, bounds and one-per-action rule are
+ * `validateFormActions`', run by `updateForm`, so this is the request's shape and size.
+ */
+const ACTION_KEY = v.pipe(v.string("must be a string"), v.maxLength(64, "is too long"));
+const ACTION_MESSAGES = v.record(
+  ACTION_KEY,
+  v.pipe(v.string("must be a string"), v.maxLength(MAX_REFUSAL_MESSAGE, "is too long")),
+);
+const FORM_ACTION = v.object(
+  {
+    action: required(48),
+    map: v.optional(v.record(ACTION_KEY, ACTION_KEY)),
+    settings: v.optional(
+      v.record(
+        ACTION_KEY,
+        v.union([
+          v.pipe(v.string("must be a string"), v.maxLength(2000, "is too long")),
+          v.boolean(),
+          v.pipe(v.number(), v.finite()),
+        ]),
+      ),
+    ),
+    messages: v.optional(ACTION_MESSAGES),
+    i18n: v.optional(
+      v.record(LOCALE_CODE, v.object({ messages: v.optional(ACTION_MESSAGES) }, OBJECT)),
+    ),
+    delivers: v.optional(v.literal(true)),
+  },
+  OBJECT,
+);
+const FORM_ACTIONS = v.pipe(
+  v.array(FORM_ACTION, "must be an array of actions"),
+  v.maxLength(MAX_FORM_ACTIONS, `must be ${MAX_FORM_ACTIONS} actions or fewer`),
+);
+
+/**
  * `{ label, name? }`. `name` is capped before `formSlug`, which truncates its
  * own output to 64 — the cap is so an unbounded string is never slugified, not a
  * description of the stored value.
@@ -2027,6 +2068,7 @@ export const FormPatchBody = v.object(
     name: v.optional(bounded(200)),
     fields: v.optional(FORM_FIELDS),
     layout: v.optional(FORM_LAYOUT),
+    actions: v.optional(FORM_ACTIONS),
     open: v.optional(v.boolean()),
     closesAt: v.optional(v.nullable(v.pipe(v.number(), v.finite()))),
     successMessage: v.optional(bounded(500)),

@@ -1115,6 +1115,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    */
   const buildBrand = (b: PreparedBrand): BrandRuntime => {
     const { registry, schema, types, globals, migrations, gate, describe, forms } = b;
+    /** The brand's forms config, which the descriptor loop's own `forms` shadows. */
+    const registeredForms = forms;
     const schemaId = latestMigrationId(migrations);
     const typeOf = (name: string | undefined) => typeByName(types, name);
     const fallbackType = defaultType(types);
@@ -1707,6 +1709,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
               ...(active ? { locale: active } : {}),
               ...(formPage !== undefined ? { page: formPage } : {}),
               sources: sourced.sources,
+              ...(registeredForms ? { actions: registeredForms.infos } : {}),
             }),
           ];
         }),

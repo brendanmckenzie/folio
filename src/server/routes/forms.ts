@@ -39,7 +39,7 @@ import {
   type SiteRef,
   sitesUnder,
 } from "../../core/sites";
-import { actorString, EDIT, FORMS, READ, SCOPE_ADMIN } from "../auth/roles";
+import { actorString, allows, EDIT, FORMS, READ, SCOPE_ADMIN } from "../auth/roles";
 import { purgeFormLayout } from "../cache-purge";
 import { FolioError } from "../errors";
 import {
@@ -219,6 +219,8 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const picker = c.req.query("chain") === "1";
     return c.json(
       await listForms(db, {
+        infos: c.var.brand?.forms?.infos ?? new Map(),
+        logger: rt.logger,
         chain: picker ? await requestChain(c, rt) : [scopeOf(c)],
         ...(picker && rt.sites && c.var.scope !== null
           ? { sites: sitesUnder(await rt.sites.registry(c.env), c.var.scope) }
@@ -308,6 +310,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               ...(locale ? { locale } : {}),
               ...(page ? { page: formPageQuery(page) } : {}),
               sources: sourced.sources,
+              ...(brand.forms ? { actions: brand.forms.infos } : {}),
             }),
           ];
         }),
@@ -334,7 +337,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ttl: source.ttl,
         localised: source.localised,
       })),
-      actions: [],
+      actions: [...(brand.forms?.infos.values() ?? [])],
     });
   });
 
@@ -378,7 +381,11 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const sourced = incoming.some((f) => f.optionsFrom);
     if (sourced) checkOptionSources(incoming, brandOf(c));
 
-    const result = await updateForm(db, id, body, scopeOf(c));
+    const result = await updateForm(db, id, body, scopeOf(c), {
+      infos: (body.actions === undefined ? c.var.brand : brandOf(c))?.forms?.infos ?? new Map(),
+      mayConfigureActions: allows(c.var.actor, FORMS),
+      ...(rt.locales ? { locales: rt.locales } : {}),
+    });
     if (!result) throw new FolioError("not_found", "Unknown form");
 
     // The saved host sources' missing or stale lists load in the background: the Save

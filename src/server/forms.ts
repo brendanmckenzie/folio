@@ -48,7 +48,15 @@ import {
   validateFormFields,
   validateFormLayout,
 } from "../core/forms";
-import type { LocaleContext } from "../core/locales";
+import {
+  attachmentProblems,
+  type FormActionAttachment,
+  type FormActionInfo,
+  normaliseFormActions,
+  refusalsOf,
+  validateFormActions,
+} from "../core/form-actions";
+import { type LocaleConfig, type LocaleContext, localeContext } from "../core/locales";
 import { CONTENT_SOURCE, contentOptionSettings, materialiseOptions } from "../core/option-sources";
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
 import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from "../core/sites";
@@ -59,6 +67,8 @@ import { FolioError } from "./errors";
 import { type Keyset, keysetWhere, orderBy, whereOf } from "./keyset";
 import { chainClause, storiesFor } from "./stories";
 import type { FolioLogger } from "./types";
+
+const NO_INFOS: ReadonlyMap<string, FormActionInfo> = new Map();
 
 /** A form as the builder reads it: the row, with its questions parsed. */
 export interface Form {
@@ -73,6 +83,12 @@ export interface Form {
   /** Sections (`forms.layout`): the home for slice 3's steps too. `{}` for a form
    *  with none. Screened on read by `readFormLayout`. */
   layout: FormLayout;
+  /**
+   * Attached form actions, in run order (`forms.actions`,
+   * `docs/specs/content-model/form-actions.md` decision 7). Screened on read by
+   * `readFormActions`: a column that cannot be parsed answers `[]`.
+   */
+  actions: FormActionAttachment[];
   version: number;
   /** The editor's switch. The *effective* state is this and the clock together —
    *  see `isOpen`, which is the one place the two are combined. */
@@ -105,6 +121,13 @@ export interface FormSummary {
   createdAt: number;
   updatedAt: number;
   questions: number;
+  /**
+   * Whether a registered action attached to this form has a problem against its
+   * questions (form-actions.md decision 13): a checking one refuses every visitor, a
+   * delivering one files a failed delivery per submission. Computed against the
+   * brand's registry, so false without one.
+   */
+  attention: boolean;
   /** Only under `?counts=1`: how many responses this form has collected. */
   responses?: number;
 }
@@ -161,23 +184,31 @@ function newFormId(): string {
   return `frm_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
-const COLS = `id, name, label, fields, layout, version, open, closes_at as closesAt,
+const COLS = `id, name, label, fields, layout, actions, version, open, closes_at as closesAt,
   closed_message as closedMessage, success_message as successMessage,
   submit_label as submitLabel, redirect_to as redirectTo,
   created_at as createdAt, updated_at as updatedAt`;
 
 const SUMMARY_COLS = `id, name, label, version, open, closes_at as closesAt,
   created_at as createdAt, updated_at as updatedAt,
-  json_array_length(fields) as questions`;
+  json_array_length(fields) as questions, actions,
+  case when actions <> '[]' then fields end as fieldsJson,
+  case when actions <> '[]' then layout end as layoutJson`;
 
-interface FormRow extends Omit<Form, "fields" | "layout" | "open"> {
+interface FormRow extends Omit<Form, "fields" | "layout" | "open" | "actions"> {
   fields: string;
   layout: string;
+  actions: string;
   open: number;
 }
 
-interface SummaryRow extends Omit<FormSummary, "open" | "responses"> {
+/** `fields` and `layout` are selected only for a form with attachments: the widest
+ *  column is not read for a list of forms that have no use for it. */
+interface SummaryRow extends Omit<FormSummary, "open" | "responses" | "attention"> {
   open: number;
+  actions: string;
+  fieldsJson: string | null;
+  layoutJson: string | null;
 }
 
 /**
@@ -260,13 +291,76 @@ function layoutFromInput(input: unknown, fields: readonly FormField[]): FormLayo
   }
 }
 
-function toForm(row: FormRow, logger: FolioLogger = console): Form {
-  const read = readLayout(row.id, row.layout, readFields(row.id, row.fields, logger), logger);
-  return { ...row, open: row.open !== 0, fields: read.fields, layout: read.layout };
+/**
+ * `forms.actions`, parsed and screened: `readFields`' posture. A column that cannot
+ * be read answers no attachments and logs one line, because the throw would take out
+ * the list of every form.
+ */
+function readFormActions(
+  id: string,
+  raw: string,
+  logger: FolioLogger = console,
+): FormActionAttachment[] {
+  try {
+    return validateFormActions(JSON.parse(raw));
+  } catch (err) {
+    logger.error(`folio: form ${id} has unreadable actions`, err);
+    return [];
+  }
 }
 
-function toSummary(row: SummaryRow): FormSummary {
-  return { ...row, open: row.open !== 0 };
+/** `validateFormActions` on the way *in*, refusals as the one error envelope. */
+function actionsFromInput(input: unknown): FormActionAttachment[] {
+  try {
+    return validateFormActions(input);
+  } catch (err) {
+    throw new FolioError(
+      "bad_request",
+      err instanceof Error ? err.message : "Invalid form actions",
+    );
+  }
+}
+
+function toForm(row: FormRow, logger: FolioLogger = console): Form {
+  const read = readLayout(row.id, row.layout, readFields(row.id, row.fields, logger), logger);
+  return {
+    ...row,
+    open: row.open !== 0,
+    fields: read.fields,
+    layout: read.layout,
+    actions: readFormActions(row.id, row.actions, logger),
+  };
+}
+
+/** Whether any registered attachment has a problem (`FormSummary.attention`). */
+function needsAttention(
+  row: SummaryRow,
+  infos: ReadonlyMap<string, FormActionInfo>,
+  logger: FolioLogger,
+): boolean {
+  if (row.actions === "[]" || infos.size === 0 || row.fieldsJson === null) return false;
+  const read = readLayout(
+    row.id,
+    row.layoutJson ?? "{}",
+    readFields(row.id, row.fieldsJson, logger),
+    logger,
+  );
+  return readFormActions(row.id, row.actions, logger).some((attachment) => {
+    const info = infos.get(attachment.action);
+    return (
+      info !== undefined &&
+      attachmentProblems(attachment, info, read.fields, read.layout).length > 0
+    );
+  });
+}
+
+function toSummary(
+  row: SummaryRow,
+  infos: ReadonlyMap<string, FormActionInfo>,
+  logger: FolioLogger,
+): FormSummary {
+  const { actions: _actions, fieldsJson: _fields, layoutJson: _layout, ...rest } = row;
+  return { ...rest, open: row.open !== 0, attention: needsAttention(row, infos, logger) };
 }
 
 /* ------------------------------------------------------------------ reads --- */
@@ -402,6 +496,12 @@ export interface FormRenderContext {
    * `unavailable`: nothing read its list.
    */
   sources?: ReadonlyMap<string, ResolvedOptionsFrom>;
+  /**
+   * The brand's registered actions (`ResolvedForms.infos`), which `refusals` is
+   * compiled from. Absent compiles no `refusals`: an attachment with no registry to
+   * read its codes from contributes nothing (form-actions.md decision 13).
+   */
+  actions?: ReadonlyMap<string, FormActionInfo>;
 }
 
 /** What one sourced question's list read as (`BrandRuntime.optionLists`' answer). */
@@ -622,6 +722,7 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
       ctx.sources?.get(field.name),
     ),
   );
+  const refusals = ctx.actions ? refusalsOf(form.actions ?? [], ctx.actions, ctx.locale) : {};
   return {
     id: form.id,
     name: form.name,
@@ -646,6 +747,9 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
     successMessage: form.successMessage,
     closedMessage: form.closedMessage,
     redirectTo: form.redirectTo,
+    // Absent unless a checking action is attached, so every other descriptor is
+    // byte-identical to what it was (form-actions.md decision 3).
+    ...(Object.keys(refusals).length > 0 ? { refusals } : {}),
   };
 }
 
@@ -711,6 +815,9 @@ export interface ListFormsOptions {
   /** Adds `responses` per row. Opt-in on its own, because it is a second query
    *  over a table that grows without bound while `forms` does not. */
   counts?: boolean;
+  /** The brand's registered actions, for `attention`. Absent means none. */
+  infos?: ReadonlyMap<string, FormActionInfo>;
+  logger?: FolioLogger;
 }
 
 export async function listForms(
@@ -739,7 +846,11 @@ export async function listForms(
       : null,
   ]);
 
-  let page = paginate(rows.results.map(toSummary), limit, (row) => [row.updatedAt, row.id]);
+  let page = paginate(
+    rows.results.map((row) => toSummary(row, opts.infos ?? NO_INFOS, opts.logger ?? console)),
+    limit,
+    (row) => [row.updatedAt, row.id],
+  );
 
   // After `paginate`, not before: the over-fetched row is discarded there, and
   // counting it would be one id of work for a row nobody is shown.
@@ -930,6 +1041,102 @@ export interface UpdateFormInput {
   closedMessage?: string;
   submitLabel?: string;
   redirectTo?: string | null;
+  /** Unparsed JSON — `validateFormActions` turns it into attachments. Absent keeps them. */
+  actions?: unknown;
+}
+
+/** What `updateForm` needs of the request beyond the body. */
+export interface UpdateFormContext {
+  /** The brand's registered actions. Absent means none: every attachment reads as unregistered. */
+  infos?: ReadonlyMap<string, FormActionInfo>;
+  /**
+   * Whether the caller holds `FORMS` (form-actions.md decision 8). Absent is false:
+   * the default has to be the one that refuses.
+   */
+  mayConfigureActions?: boolean;
+  /** For the refusals compared across locales (decision 18). Absent is the source alone. */
+  locales?: LocaleConfig;
+}
+
+/**
+ * The compiled `refusals` of a form in the source locale and every configured one,
+ * as one string to compare (decision 18). A mapping or a setting is in no page, so a
+ * save that moves only those compares equal and purges nothing.
+ */
+function refusalsKey(
+  form: Form,
+  infos: ReadonlyMap<string, FormActionInfo>,
+  locales: LocaleConfig | undefined,
+): string {
+  if (form.actions.length === 0) return "";
+  const contexts: (LocaleContext | undefined)[] = [undefined];
+  for (const { code } of locales?.available ?? []) {
+    const context = localeContext(locales, code);
+    if (context) contexts.push(context);
+  }
+  return JSON.stringify(contexts.map((locale) => refusalsOf(form.actions, infos, locale)));
+}
+
+/**
+ * The attachments this save stores (decisions 8 and 13).
+ *
+ * - **"Changed" is decided on normalised values, both sides.** Equal means the
+ *   *stored* value is written back untouched, so a deploy that dropped a setting
+ *   neither turns a label edit into a 403 nor rewrites the publisher's
+ *   configuration. Different needs `FORMS`, decided here before any write.
+ * - **A client's `delivers` is not believed.** A registered attachment's is
+ *   recomputed by `normaliseFormActions`; an unregistered one keeps its stored
+ *   counterpart's, or none.
+ * - **A save is refused only for a problem it adds**, by sentence, against the
+ *   attachment's stored problems: an editor can still close a form whose check has
+ *   started refusing, and a partial fix removes a problem and adds none.
+ */
+function nextActions(
+  current: Form,
+  fields: readonly FormField[],
+  layout: FormLayout,
+  raw: unknown,
+  infos: ReadonlyMap<string, FormActionInfo>,
+  ctx: UpdateFormContext,
+): FormActionAttachment[] {
+  let actions = current.actions;
+  if (raw !== undefined) {
+    const stored = new Map(current.actions.map((a) => [a.action, a]));
+    const incoming = actionsFromInput(raw).map((a) => {
+      if (infos.has(a.action)) return a;
+      if (!stored.has(a.action)) {
+        throw new FolioError("bad_request", `"${a.action}" is not an action this site provides`);
+      }
+      const { delivers: _ignored, ...rest } = a;
+      return stored.get(a.action)?.delivers ? { ...rest, delivers: true as const } : rest;
+    });
+    const added = new Set(incoming.filter((a) => !stored.has(a.action)).map((a) => a.action));
+    const normalised = normaliseFormActions(incoming, infos, added);
+    if (
+      JSON.stringify(normalised) !==
+      JSON.stringify(normaliseFormActions(current.actions, infos, new Set()))
+    ) {
+      if (!ctx.mayConfigureActions) {
+        throw new FolioError("forbidden", "Changing where responses go needs publisher access");
+      }
+      actions = normalised;
+    }
+  }
+
+  const refused: string[] = [];
+  for (const attachment of actions) {
+    const info = infos.get(attachment.action);
+    if (!info) continue;
+    const before = current.actions.find((a) => a.action === attachment.action);
+    const existing = new Set(
+      before ? attachmentProblems(before, info, current.fields, current.layout) : [],
+    );
+    for (const problem of attachmentProblems(attachment, info, fields, layout)) {
+      if (!existing.has(problem)) refused.push(`${info.label}: ${problem}`);
+    }
+  }
+  if (refused.length > 0) throw new FolioError("bad_request", refused.join(". "));
+  return actions;
 }
 
 export interface UpdateFormResult {
@@ -976,9 +1183,11 @@ export async function updateForm(
   /** The scope the form must be in: another scope's is absent (null), and a rename is
    * checked against this scope's names alone. */
   site: string = DEFAULT_SITE,
+  ctx: UpdateFormContext = {},
 ): Promise<UpdateFormResult | null> {
   const current = await formById(db, id, undefined, site);
   if (!current) return null;
+  const infos = ctx.infos ?? NO_INFOS;
 
   const fields = input.fields === undefined ? current.fields : fieldsFromInput(input.fields);
   // Logic is checked whenever the questions or the layout are in the save, against
@@ -1000,6 +1209,8 @@ export async function updateForm(
     JSON.stringify(fields) !== JSON.stringify(current.fields) ||
     JSON.stringify(layout) !== JSON.stringify(current.layout);
 
+  const actions = nextActions(current, fields, layout, input.actions, infos, ctx);
+
   const name = input.name === undefined ? current.name : formSlug(input.name);
   if (name !== current.name) {
     const taken = await formByName(db, name, site);
@@ -1012,6 +1223,7 @@ export async function updateForm(
     label: input.label ?? current.label,
     fields,
     layout,
+    actions,
     version,
     open: input.open ?? current.open,
     closesAt: input.closesAt === undefined ? current.closesAt : input.closesAt,
@@ -1024,7 +1236,7 @@ export async function updateForm(
 
   const result = await db
     .prepare(
-      `update forms set name = ?, label = ?, fields = ?, layout = ?, version = ?, open = ?, closes_at = ?,
+      `update forms set name = ?, label = ?, fields = ?, layout = ?, actions = ?, version = ?, open = ?, closes_at = ?,
          closed_message = ?, success_message = ?, submit_label = ?, redirect_to = ?, updated_at = ?
        where id = ? and updated_at = ? and site_id = ?`,
     )
@@ -1033,6 +1245,7 @@ export async function updateForm(
       next.label,
       JSON.stringify(next.fields),
       JSON.stringify(next.layout),
+      JSON.stringify(next.actions),
       next.version,
       next.open ? 1 : 0,
       next.closesAt,
@@ -1062,7 +1275,8 @@ export async function updateForm(
     next.successMessage !== current.successMessage ||
     next.closedMessage !== current.closedMessage ||
     next.submitLabel !== current.submitLabel ||
-    next.redirectTo !== current.redirectTo;
+    next.redirectTo !== current.redirectTo ||
+    refusalsKey(next, infos, ctx.locales) !== refusalsKey(current, infos, ctx.locales);
 
   return { form: next, structural, descriptorChanged };
 }

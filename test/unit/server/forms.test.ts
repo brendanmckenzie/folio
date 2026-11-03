@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { FormActionAttachment, FormActionInfo } from "../../../src/core/form-actions";
 import { FILE_ACCEPT, type FormField } from "../../../src/core/forms";
 import type { LocaleContext } from "../../../src/core/locales";
 import { formState } from "../../../src/core/form-logic";
@@ -45,6 +46,7 @@ function makeForm(over: Partial<Form> = {}): Form {
     label: "Contact us",
     fields: [NAME, EMAIL],
     layout: {},
+    actions: [],
     version: 3,
     open: true,
     closesAt: null,
@@ -472,6 +474,7 @@ describe("formById: a question this build cannot read costs that question (spec 
     label: "Contact",
     fields: typeof fields === "string" ? fields : JSON.stringify(fields),
     layout: "{}",
+    actions: "[]",
     version: 1,
     open: 1,
     closes_at: null,
@@ -587,5 +590,130 @@ describe("materialiseForm and a sourced question", () => {
       },
     };
     expect(labels(dated, "fr")).toEqual(["Zanzibar", "Egypte"]);
+  });
+});
+
+describe("compileForm: refusals (form-actions.md decision 3)", () => {
+  const check: FormActionInfo = {
+    id: "trip-code",
+    label: "Check the trip code",
+    inputs: [],
+    settings: {},
+    codes: [
+      { code: "unknown_trip", label: "Unknown", message: "We do not recognise that trip." },
+      { code: "error", label: "Could not process", message: "Could not process." },
+    ],
+    check: true,
+    deliver: false,
+  };
+  const deliverOnly: FormActionInfo = {
+    ...check,
+    id: "jambo",
+    codes: [],
+    check: false,
+    deliver: true,
+  };
+  const infos = new Map([check, deliverOnly].map((info) => [info.id, info]));
+  const attached: FormActionAttachment[] = [
+    { action: "trip-code", messages: { unknown_trip: "No such trip." } },
+    { action: "jambo", delivers: true },
+  ];
+
+  const BASE_KEYS = [
+    "action",
+    "closedMessage",
+    "enctype",
+    "fields",
+    "hidden",
+    "honeypot",
+    "id",
+    "method",
+    "name",
+    "open",
+    "redirectTo",
+    "sections",
+    "submitLabel",
+    "successMessage",
+    "version",
+  ];
+
+  it("adds exactly one key to the pinned set, and only for a checking action", () => {
+    const plain = compileForm(makeForm(), { base: BASE, page: "/contact" });
+    expect(Object.keys(plain).sort()).toEqual(BASE_KEYS);
+
+    // Attachments with no registry to read them against, a registry with none attached,
+    // and a delivering attachment alone: all byte-identical to the plain descriptor.
+    const form = makeForm({ actions: attached });
+    expect(Object.keys(compileForm(form, { base: BASE }))).not.toContain("refusals");
+    expect(Object.keys(compileForm(makeForm(), { base: BASE, actions: infos }))).not.toContain(
+      "refusals",
+    );
+    expect(
+      Object.keys(
+        compileForm(makeForm({ actions: [attached[1]!] }), { base: BASE, actions: infos }),
+      ),
+    ).not.toContain("refusals");
+
+    const checked = compileForm(form, { base: BASE, page: "/contact", actions: infos });
+    expect(Object.keys(checked).sort()).toEqual([...BASE_KEYS, "refusals"].sort());
+    expect(checked.refusals).toEqual({
+      "trip-code.unknown_trip": "No such trip.",
+      "trip-code.error": "Could not process.",
+    });
+  });
+
+  it("resolves the editor's text through the locale chain, then the declared message", () => {
+    const fr: LocaleContext = { code: "fr", fallbacks: [] };
+    const form = makeForm({
+      actions: [
+        {
+          action: "trip-code",
+          messages: { unknown_trip: "No such trip." },
+          i18n: { fr: { messages: { unknown_trip: "Voyage inconnu." } } },
+        },
+      ],
+    });
+    expect(compileForm(form, { base: BASE, actions: infos, locale: fr }).refusals).toEqual({
+      "trip-code.unknown_trip": "Voyage inconnu.",
+      "trip-code.error": "Could not process.",
+    });
+    expect(
+      compileForm(makeForm({ actions: [{ action: "trip-code" }] }), { base: BASE, actions: infos })
+        .refusals?.["trip-code.unknown_trip"],
+    ).toBe("We do not recognise that trip.");
+  });
+});
+
+describe("FormPatchBody keeps every attachment key", () => {
+  const everything: Required<FormActionAttachment> = {
+    action: "jambo",
+    map: { email: "email" },
+    settings: { pipeline: "sales", limit: 3, on: true },
+    messages: { unknown_trip: "No." },
+    i18n: { fr: { messages: { unknown_trip: "Non." } } },
+    delivers: true,
+  };
+
+  it("survives parseOrThrow unstripped, newlines in a setting included", () => {
+    const parsed = parseOrThrow(
+      FormPatchBody,
+      { expectedUpdatedAt: 1, actions: [everything] },
+      "body",
+    );
+    expect(parsed.actions?.[0]).toEqual(everything);
+    const lines = { ...everything, settings: { to: "a@b.c\nd@e.f " } };
+    expect(
+      parseOrThrow(FormPatchBody, { expectedUpdatedAt: 1, actions: [lines] }, "body").actions?.[0]
+        ?.settings,
+    ).toEqual({ to: "a@b.c\nd@e.f " });
+  });
+
+  it("refuses more than eight attachments and a settings value of the wrong type", () => {
+    const patch = (actions: unknown) =>
+      parseOrThrow(FormPatchBody, { expectedUpdatedAt: 1, actions }, "body");
+    expect(() => patch(Array.from({ length: 9 }, () => ({ action: "a" })))).toThrow();
+    expect(() => patch([{ action: "a", settings: { x: null } }])).toThrow();
+    expect(() => patch([{ action: "a", delivers: false }])).toThrow();
+    expect(() => patch("jambo")).toThrow();
   });
 });
