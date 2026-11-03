@@ -1039,6 +1039,25 @@ describe("formLayout: answers", () => {
     expect(open.sections[0]?.rows.map((r) => r.key)).toEqual(["heard", "more"]);
   });
 
+  it("keeps a row's key when a condition hides the row's first question", () => {
+    const form = resolved([
+      rf("travelling", 0, {
+        kind: "radio",
+        options: [
+          { value: "group", label: "Group" },
+          { value: "solo", label: "Solo" },
+        ],
+      }),
+      rf("company", 1, { showIf: { field: "travelling", eq: "group" } }),
+      rf("phone", 1),
+    ]);
+    const group = formLayout(form, { travelling: "group" }).sections[0]?.rows;
+    const solo = formLayout(form, { travelling: "solo" }).sections[0]?.rows;
+    expect(group?.map((r) => r.key)).toEqual(["travelling", "company"]);
+    expect(solo?.map((r) => r.key)).toEqual(["travelling", "company"]);
+    expect(solo?.[1]?.cells.map((c) => c.field.name)).toEqual(["phone"]);
+  });
+
   it("with answers keeps a held cell as shown: false, so its row-mates keep their width", () => {
     const form = resolved([
       rf("heard", 0, heardField),

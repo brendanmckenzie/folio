@@ -925,8 +925,11 @@ export interface LayoutCell {
   required: boolean;
 }
 
-/** One row: a stable `key` (the row's first field's name, unique across the
- *  form) and its cells, left to right in `fields`' own order. */
+/** One row: a stable `key` and its cells, left to right in `fields`' own order.
+ *  The key is the name of the first non-`hidden` question the row was built from,
+ *  whether or not conditions currently ask it, so hiding that question does not
+ *  move the key (and a host keying React on it does not remount the row-mates).
+ *  Each question is in exactly one row, so it is unique across the form. */
 export interface LayoutRow {
   key: string;
   cells: readonly LayoutCell[];
@@ -970,7 +973,7 @@ export function formLayout(form: ResolvedForm, answers?: Record<string, Json>): 
   // A descriptor a host cached across a deploy can predate `sections`.
   const defs = new Map((form.sections ?? []).map((s) => [s.name, s]));
   const inputs: ResolvedFormField[] = [];
-  const rows: { cells: LayoutCell[]; section: ResolvedFormSection | null }[] = [];
+  const rows: { key: string; cells: LayoutCell[]; section: ResolvedFormSection | null }[] = [];
   let openRow: number | null = null;
 
   for (const field of form.fields) {
@@ -1002,7 +1005,10 @@ export function formLayout(form: ResolvedForm, answers?: Record<string, Json>): 
     if (row !== null && row === openRow && last) {
       if (cell) last.cells.push(cell);
     } else {
-      rows.push({ cells: cell ? [cell] : [], section });
+      // The key is the question that opened the row, asked or not: a host keys
+      // React on it, and a key that moved when a condition hid the first cell
+      // would remount the sibling and drop what the visitor typed in it.
+      rows.push({ key: field.name, cells: cell ? [cell] : [], section });
       openRow = row;
     }
   }
@@ -1011,7 +1017,7 @@ export function formLayout(form: ResolvedForm, answers?: Record<string, Json>): 
   for (const row of rows) {
     if (!row.cells.some((c) => c.shown)) continue;
     if (row.section && state && !state.sections.has(row.section.name)) continue;
-    const layoutRow: LayoutRow = { key: row.cells[0]!.field.name, cells: row.cells };
+    const layoutRow: LayoutRow = { key: row.key, cells: row.cells };
     const group = groups[groups.length - 1];
     if (group && group.section?.name === row.section?.name) group.rows.push(layoutRow);
     else groups.push({ section: row.section, rows: [layoutRow] });
