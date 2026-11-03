@@ -2,7 +2,7 @@
 #
 # Run EVERY end-to-end script, each against its own fresh server and database.
 #
-#   ./scripts/e2e-all.sh                        # all 22
+#   ./scripts/e2e-all.sh                        # all 25
 #   ./scripts/e2e-all.sh scripts/sync-test.mjs scripts/space-test.mjs   # a subset
 #
 # A loop of reset-then-run, not one server for all of them. The scripts mutate
