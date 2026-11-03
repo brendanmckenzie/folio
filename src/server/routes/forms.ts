@@ -1287,7 +1287,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       sourced.form.fields,
       body,
       new Set(prepared.files.map((file) => file.field)),
-      form.layout.sections ?? [],
+      form.layout,
     );
     // What was not asked is dropped here, before anything is hashed or written: a
     // file on a question that did not apply is never put to R2, and a too-large one

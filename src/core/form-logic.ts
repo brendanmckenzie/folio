@@ -29,7 +29,7 @@ export const DATE_ANSWER = /^\d{4}-\d{2}-\d{2}$/;
 export const NUMBER_ANSWER = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
 /** The longest text `answerOf` will read as a number; the server's own cap. */
-const SCALAR_ANSWER_CHARS = 64;
+export const SCALAR_ANSWER_CHARS = 64;
 
 export interface LogicField {
   name: string;

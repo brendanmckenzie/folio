@@ -8,7 +8,7 @@ import {
 } from "../../../src/core/form-logic";
 import type { FormField, FormFieldKind, ResolvedForm } from "../../../src/core/forms";
 import { materialiseOptions } from "../../../src/core/option-sources";
-import { validateSubmission } from "../../../src/server/form-responses";
+import { checkSubmission } from "../../../src/core/form-answers";
 
 /**
  * The one engine (`docs/specs/content-model/form-logic.md` decisions 1, 2, 5, 12).
@@ -103,7 +103,10 @@ describe("parity with the validator", () => {
     it(`${field.kind}: answerOf equals what the validator stores`, () => {
       for (const raw of inputs) {
         const body = new Map<string, string[]>([[field.name, raw]]);
-        const { values, errors } = validateSubmission([field], body);
+        const { values, errors } = checkSubmission(
+          { fields: [field] },
+          { getAll: (n) => body.get(n) ?? [] },
+        );
         expect(errors, JSON.stringify(raw)).toEqual({});
         const stored = values[field.name];
         const answered = answerOf(field, raw);
