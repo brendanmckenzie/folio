@@ -195,7 +195,11 @@ interface SummaryRow extends Omit<FormSummary, "open" | "responses"> {
  */
 function readFields(id: string, raw: string, logger: FolioLogger = console): FormField[] {
   try {
-    return validateFormFields(JSON.parse(raw));
+    // Per question (spec 37 decision 19): one a build cannot read costs that
+    // question, not every answer on the form.
+    return validateFormFields(JSON.parse(raw), {
+      onInvalid: (name, err) => logger.error(`folio: form ${id} question ${name} unreadable`, err),
+    });
   } catch (err) {
     logger.error(`folio: form ${id} has unreadable fields`, err);
     return [];

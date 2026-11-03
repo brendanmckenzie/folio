@@ -14,6 +14,7 @@ import {
   scopedGlobalTag,
   scopedTypeTag,
   siteTag,
+  sourceTag,
   storyTag,
   typeTag,
 } from "../../../src/core/cache-tags";
@@ -475,5 +476,95 @@ describe("cacheTags on a multi-site render (decision 15)", () => {
       tags: ["site:alpha", "path:alpha:stores", "story:sty_page"],
       degraded: true,
     });
+  });
+});
+
+describe("cacheTags: option sources (spec 37 decision 5)", () => {
+  const sourcedForm = (...optionsFrom: object[]): Resolution =>
+    ({
+      stories: {},
+      assetBase: "/a",
+      forms: {
+        frm_a: {
+          id: "frm_a",
+          fields: optionsFrom.map((o, i) => ({ name: `q${i}`, kind: "select", optionsFrom: o })),
+        },
+      },
+    }) as never;
+  const content = { source: "content", types: ["trip"] };
+
+  it("adds type:trip and no story tags for the items", () => {
+    const { tags } = cacheTags(sourcedForm(content), { story: "sty_page" });
+    expect(tags).toContain(typeTag("trip"));
+    expect(tags.some((t) => t.startsWith("story:") && t !== "story:sty_page")).toBe(false);
+  });
+
+  it("does not repeat a type a collection already named", () => {
+    const withCollection = {
+      ...sourcedForm(content),
+      collections: { [queryKey({ type: "trip" }, 20)]: { items: [], total: 0 } },
+    } as never as Resolution;
+    const { tags } = cacheTags(withCollection, { story: "sty_page" });
+    expect(tags.filter((t) => t === typeTag("trip"))).toHaveLength(1);
+  });
+
+  it("adds the scoped type tags for every chain scope on a multi-site render", () => {
+    const resolution = {
+      ...sourcedForm(content),
+      path: "p",
+      site: {
+        id: "alpha",
+        name: "Alpha",
+        group: "north",
+        status: "live",
+        surface: "live",
+        chain: ["alpha", "north", "shared"],
+        layered: [],
+      },
+    } as never as Resolution;
+    const { tags } = cacheTags(resolution, { story: "sty_page" });
+    expect(tags).toContain(scopedTypeTag("trip", "alpha"));
+    expect(tags).toContain(scopedTypeTag("trip", "north"));
+    expect(tags).toContain(scopedTypeTag("trip", "shared"));
+    expect(tags).not.toContain(typeTag("trip"));
+  });
+
+  it("adds source:countries for a host source, and source:countries@brand with a site brand", () => {
+    const host = { source: "countries" };
+    expect(cacheTags(sourcedForm(host), { story: "sty_page" }).tags).toContain("source:countries");
+    expect(sourceTag("countries")).toBe("source:countries");
+    expect(sourceTag("countries", "takeoffgo")).toBe("source:countries@takeoffgo");
+    const branded = {
+      ...sourcedForm(host),
+      path: "p",
+      site: {
+        id: "alpha",
+        name: "Alpha",
+        group: null,
+        status: "live",
+        surface: "live",
+        chain: ["alpha"],
+        layered: [],
+        brand: "takeoffgo",
+      },
+    } as never as Resolution;
+    const { tags } = cacheTags(branded, { story: "sty_page" });
+    expect(tags).toContain("source:countries@takeoffgo");
+    expect(tags).not.toContain("source:countries");
+  });
+
+  it("emits no source or type tag for content, and the same set for an unsourced form", () => {
+    const plain = {
+      stories: {},
+      assetBase: "/a",
+      forms: { frm_a: { id: "frm_a", fields: [{ name: "q", kind: "text" }] } },
+    } as never as Resolution;
+    const { tags } = cacheTags(plain, { story: "sty_page" });
+    expect(tags).toEqual(["form:frm_a", "site", "story:sty_page"]);
+    expect(
+      cacheTags(sourcedForm(content), { story: "sty_page" }).tags.some((t) =>
+        t.startsWith("source:"),
+      ),
+    ).toBe(false);
   });
 });

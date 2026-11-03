@@ -26,6 +26,12 @@
 import { conditionRefusal, type FieldCondition, readCondition } from "./conditions";
 import type { Json } from "./doc";
 import { formState } from "./form-logic";
+import {
+  CONTENT_SOURCE,
+  contentOptionSettings,
+  type OptionsFrom,
+  readOptionsFrom,
+} from "./option-sources";
 
 /** The thirteen kinds a question on a form can be. */
 export type FormFieldKind =
@@ -119,6 +125,9 @@ export interface FormField {
    *  expression is refused at save time rather than at submit time. */
   pattern?: string;
   options?: readonly FormFieldOption[];
+  /** Where the options come from, for an option kind (`option-sources.ts`). With it,
+   *  `options` are typed extras beside the source's list and may be empty. */
+  optionsFrom?: OptionsFrom;
   accept?: FileAccept;
   maxBytes?: number;
   /** `hidden` only: the value the host's markup emits. */
@@ -296,7 +305,19 @@ function validateOneField(raw: Record<string, unknown>, kind: FormFieldKind): Fo
   }
 
   if (OPTION_KINDS.has(kind)) {
-    field.options = validateOptions(raw.options, name);
+    if (raw.optionsFrom !== undefined) {
+      const optionsFrom = readOptionsFrom(raw.optionsFrom, name);
+      if (optionsFrom.source === CONTENT_SOURCE && !contentOptionSettings(optionsFrom.settings)) {
+        throw new Error(`forms: field "${name}" has unusable content source settings`);
+      }
+      field.optionsFrom = optionsFrom;
+      // Extras may be empty, but each entry is still held to `validateOption`.
+      const seen = new Set<string>();
+      const extras = Array.isArray(raw.options) ? raw.options : [];
+      field.options = extras.map((item) => validateOption(item, name, seen));
+    } else {
+      field.options = validateOptions(raw.options, name);
+    }
   }
 
   if (kind === "file") {
@@ -363,7 +384,15 @@ function validateOneField(raw: Record<string, unknown>, kind: FormFieldKind): Fo
  * `RESERVED_PREFIX` — both are save-time failures, not narrowing, because a
  * legitimate write can never produce either.
  */
-export function validateFormFields(input: unknown): FormField[] {
+export function validateFormFields(
+  input: unknown,
+  opts: {
+    /** The read path's posture (spec 37 decision 19): a question that fails
+     *  validation, or repeats a name, is reported and dropped and the rest of the
+     *  form is kept. Absent, it throws. */
+    onInvalid?: (name: string, err: Error) => void;
+  } = {},
+): FormField[] {
   if (!Array.isArray(input)) {
     throw new Error("forms: fields must be an array");
   }
@@ -385,9 +414,22 @@ export function validateFormFields(input: unknown): FormField[] {
     // form instead of breaking it (parseScopes' rule, roles.ts:83).
     if (!isFormFieldKind(candidate.kind)) continue;
 
-    const field = validateOneField(candidate, candidate.kind);
+    let field: FormField;
+    try {
+      field = validateOneField(candidate, candidate.kind);
+    } catch (err) {
+      if (!opts.onInvalid) throw err;
+      opts.onInvalid(
+        typeof candidate.name === "string" ? candidate.name : "?",
+        err instanceof Error ? err : new Error(String(err)),
+      );
+      continue;
+    }
     if (seenNames.has(field.name)) {
-      throw new Error(`forms: duplicate field name "${field.name}"`);
+      const err = new Error(`forms: duplicate field name "${field.name}"`);
+      if (!opts.onInvalid) throw err;
+      opts.onInvalid(field.name, err);
+      continue;
     }
     seenNames.add(field.name);
     out.push(field);
@@ -551,20 +593,21 @@ function leafRefusal(leaf: Leaf, source: FormField): string | null {
         ? []
         : [(leaf as unknown as Record<string, Json>)[op] as Json];
   const declared = new Set((source.options ?? []).map((o) => o.value));
+  // A sourced question's list changes without a save, so a value outside the typed
+  // extras is not refusable here (decision 11): any well-formed option value will do.
+  const known = (v: Json) =>
+    typeof v === "string" &&
+    (declared.has(v) || (!!source.optionsFrom && v.length >= 1 && v.length <= 120));
 
   switch (source.kind) {
     case "select":
     case "radio":
       if (op === "includes") return `compares with "${op}", which it cannot answer`;
-      return values.every((v) => typeof v === "string" && declared.has(v))
-        ? null
-        : "compares with an option it does not have";
+      return values.every(known) ? null : "compares with an option it does not have";
     case "checkboxes":
       if (op !== "includes" && op !== "isSet")
         return `compares with "${op}", which it cannot answer`;
-      return values.every((v) => typeof v === "string" && declared.has(v))
-        ? null
-        : "compares with an option it does not have";
+      return values.every(known) ? null : "compares with an option it does not have";
     case "checkbox":
       if (op !== "eq") return `compares with "${op}", which it cannot answer`;
       return typeof values[0] === "boolean"
@@ -678,6 +721,7 @@ export const FORM_FIELD_KEYS: Record<keyof FormField, "shape" | "presentation"> 
   min: "shape",
   pattern: "shape",
   options: "shape",
+  optionsFrom: "shape",
   accept: "shape",
   maxBytes: "shape",
   value: "presentation",
@@ -711,6 +755,9 @@ export function shapeOf(fields: readonly FormField[], layout: FormLayout = {}): 
       showIf: f.showIf,
       sectionShowIf: f.section === undefined ? undefined : sectionShowIf.get(f.section),
       options: f.options?.map((o) => o.value),
+      optionsFrom: f.optionsFrom
+        ? { source: f.optionsFrom.source, settings: f.optionsFrom.settings }
+        : undefined,
       min: f.min,
       max: f.max,
       pattern: f.pattern,
@@ -846,6 +893,9 @@ export interface ResolvedFormField {
   min?: number;
   pattern?: string;
   options?: readonly FormFieldOption[];
+  /** Present on a sourced question: the engine reads `options`, which is already
+   *  materialised; this is for `cacheTags` and a host's own handling. */
+  optionsFrom?: ResolvedOptionsFrom;
   accept?: readonly string[];
   maxBytes?: number;
   value?: string;
@@ -870,6 +920,15 @@ export interface ResolvedFormField {
   /** `'query'`: seed this question from the page's query string
    *  (`prefillAnswers`). */
   prefill?: "query";
+}
+
+/** What a sourced question's descriptor says about its source. */
+export interface ResolvedOptionsFrom {
+  source: string;
+  /** `content` only: the one type listed, for `cacheTags`. */
+  types?: readonly string[];
+  /** The list could not be read: the question carries its typed extras only. */
+  unavailable?: true;
 }
 
 /**

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { FILE_ACCEPT, type FormField } from "../../../src/core/forms";
 import type { LocaleContext } from "../../../src/core/locales";
 import { formState } from "../../../src/core/form-logic";
-import { compileForm, type Form, LOCALE_INPUT, PAGE_INPUT } from "../../../src/server/forms";
+import {
+  compileForm,
+  type Form,
+  formById,
+  LOCALE_INPUT,
+  PAGE_INPUT,
+} from "../../../src/server/forms";
 import { FormPatchBody, parseOrThrow } from "../../../src/server/validate";
 
 /**
@@ -395,7 +401,9 @@ describe("FormPatchBody keeps every FormField key", () => {
   // Typed `Required<FormField>`: adding a key to `FormField` fails typecheck here
   // until the fixture sets it, which is what makes this a guard against
   // `v.object` stripping a new key without anybody noticing.
-  const everything: Required<FormField> = {
+  // `optionsFrom` is omitted until the phase that teaches `FORM_FIELD` to keep it
+  // (spec 37 phase 2): putting it back here is what proves that change.
+  const everything: Required<Omit<FormField, "optionsFrom">> = {
     name: "q",
     kind: "text",
     label: "Q",
@@ -440,5 +448,54 @@ describe("FormPatchBody keeps every FormField key", () => {
       patch({ layout: { sections: [{ name: "s", label: "S", showIf: { field: "a", eq: 1 } }] } })
         .layout,
     ).toEqual({ sections: [{ name: "s", label: "S", showIf: { field: "a", eq: 1 } }] });
+  });
+});
+
+describe("formById: a question this build cannot read costs that question (spec 37 decision 19)", () => {
+  const rowWith = (fields: unknown) => ({
+    id: "frm_0123456789ab",
+    name: "contact",
+    label: "Contact",
+    fields: typeof fields === "string" ? fields : JSON.stringify(fields),
+    layout: "{}",
+    version: 1,
+    open: 1,
+    closes_at: null,
+    closedMessage: "",
+    successMessage: "",
+    submitLabel: "",
+    redirectTo: null,
+    createdAt: 0,
+    updatedAt: 0,
+  });
+  const fakeDb = (row: unknown) =>
+    ({
+      prepare: () => ({ bind: () => ({ first: async () => row }) }),
+      batch: async () => [],
+    }) as never;
+  const logger = () => {
+    const errors: string[] = [];
+    return {
+      errors,
+      log: { error: (m: string) => errors.push(m), warn() {}, info() {}, debug() {} } as never,
+    };
+  };
+
+  it("keeps the rest of the form and logs the one dropped", async () => {
+    const { errors, log } = logger();
+    const form = await formById(
+      fakeDb(rowWith([NAME, { name: "trip", kind: "select", label: "Trip" }, EMAIL])),
+      "frm_0123456789ab",
+      log,
+    );
+    expect(form?.fields.map((f) => f.name)).toEqual(["full_name", "email"]);
+    expect(errors).toEqual(["folio: form frm_0123456789ab question trip unreadable"]);
+  });
+
+  it("still answers no questions for a column that is not JSON at all", async () => {
+    const { errors, log } = logger();
+    const form = await formById(fakeDb(rowWith("{nope")), "frm_0123456789ab", log);
+    expect(form?.fields).toEqual([]);
+    expect(errors).toEqual(["folio: form frm_0123456789ab has unreadable fields"]);
   });
 });

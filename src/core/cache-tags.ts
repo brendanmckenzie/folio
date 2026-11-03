@@ -17,6 +17,7 @@
  * that *can* be tested is a function in this file, and the one line that cannot
  * be is `server/cache-purge.ts`'s platform call.
  */
+import { CONTENT_SOURCE } from "./option-sources";
 import type { Resolution } from "./resolve";
 import { SHARED_SCOPE } from "./sites";
 
@@ -67,6 +68,10 @@ export const typeTag = (name: string) => `type:${encode(name)}`;
  * save purges this one tag with no lookup at all
  * (`../../docs/specs/content-model/forms.md` architecture decision 8). */
 export const formTag = (id: string) => `form:${encode(id)}`;
+/** A host option source's list (spec 37). Branded when the deployment is, because
+ *  two brands may register one source id and keep separate lists. */
+export const sourceTag = (id: string, brand?: string | null) =>
+  brand ? `source:${encode(id)}@${encode(brand)}` : `source:${encode(id)}`;
 
 /**
  * The scoped vocabulary, emitted only when the render carries `resolution.site`
@@ -224,6 +229,18 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
   for (const id of Object.keys(resolution.forms ?? {})) tags.add(formTag(id));
 
   const collections = collectionTypes(Object.keys(resolution.collections ?? {}));
+  // A sourced question tags like an index over its type (spec 37 decision 5): the
+  // type, never the items, so 500 trips do not spend the tag budget. A host source
+  // is tagged by its id, purged when its list changes.
+  for (const form of Object.values(resolution.forms ?? {})) {
+    for (const field of form.fields ?? []) {
+      const from = field.optionsFrom;
+      if (!from) continue;
+      for (const type of from.types ?? [])
+        if (!collections.types.includes(type)) collections.types.push(type);
+      if (from.source !== CONTENT_SOURCE) tags.add(sourceTag(from.source, site?.brand));
+    }
+  }
   if (site) {
     for (const scope of site.chain) {
       for (const type of collections.types) tags.add(scopedTypeTag(type, scope));

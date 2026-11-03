@@ -34,6 +34,7 @@ export {
   scopedTypeTag,
   SITE_TAG,
   siteTag,
+  sourceTag,
   storyTag,
   typeTag,
 } from "./cache-tags";
@@ -133,7 +134,21 @@ export type {
   ResolvedForm,
   ResolvedFormField,
   ResolvedFormSection,
+  ResolvedOptionsFrom,
 } from "./forms";
+export {
+  CONTENT_SOURCE,
+  contentOptionQuery,
+  contentOptionSettings,
+  hasUnavailableOptions,
+  MAX_OPTION_LABEL,
+  MAX_SOURCED_OPTIONS,
+  materialiseOptions,
+  optionListKey,
+  readOptionsFrom,
+  screenOptionLabel,
+} from "./option-sources";
+export type { ContentOptionSettings, OptionsFrom } from "./option-sources";
 
 // Full-text search (`../../docs/specs/content-model/full-text-search.md`). The
 // same rationale as `indexRowsFor` above: a host importer that writes
