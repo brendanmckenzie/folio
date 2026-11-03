@@ -1554,7 +1554,8 @@ yet.
 - **Retries, a delivery log or a dead-letter queue for the sink.** `hooks.ts`'s header
   refuses all three by name for publish hooks and the argument is unchanged: the hook
   is a function in the host's own Worker, and a host that wants durable delivery has a
-  Queue binding and a row in D1 that has already committed.
+  Queue binding and a row in D1 that has already committed. **Reversed for actions by
+  spec 36 (`form-actions.md`); still true of `hooks.submitted`.**
 - **Conditional logic** — showing a question based on an earlier answer.
   `core/conditions.ts`'s `FieldCondition` is the shape it would reuse, and it is a
   second evaluation surface (the host's markup, with no JavaScript) rather than a

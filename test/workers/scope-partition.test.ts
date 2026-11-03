@@ -813,6 +813,8 @@ describe("every id loader is a fence", () => {
     ["DELETE", "/api/forms/:id/responses/:rid", "read", "form", "skipUp"],
     ["POST", "/api/forms/:id/responses/delete", "read", "form", "skipUp"],
     ["GET", "/api/forms/:id/responses/:rid/file/:name", "read", "form", "skipUp"],
+    // Retry is `FORMS` on a response the reader can already see (form-actions.md decision 15).
+    ["POST", "/api/forms/:id/responses/:rid/deliveries/:action/retry", "read", "form", "skipUp"],
     ["GET", "/api/assets/:id", "read", "asset"],
     ["GET", "/api/assets/:id/usage", "read", "asset"],
     ["PATCH", "/api/assets/:id", "write", "asset"],
@@ -830,7 +832,8 @@ describe("every id loader is a fence", () => {
       .replace(":versionId", row)
       .replace(":id", row)
       .replace(":rid", RESPONSES[owner])
-      .replace(":name", "cv");
+      .replace(":name", "cv")
+      .replace(":action", "some-action");
   };
   /** A body each route accepts, so what answers is the fence and not the validator. */
   const BODIES: Record<string, unknown> = {

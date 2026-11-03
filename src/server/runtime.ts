@@ -68,6 +68,7 @@ import { cachePurgeHooks, type PurgeCapability } from "./cache-purge";
 import type { AuditContext } from "./audit";
 import { type ContentProjection, contentProjection } from "./content-index";
 import { type ResolvedDescribe, validateDescribe } from "./describe";
+import { logActionWarnings } from "./form-actions";
 import { type ResolvedForms, validateForms } from "./form-responses";
 import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
 import {
@@ -909,6 +910,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // a value that is either absent (default `console`, unchanged behaviour) or a
   // host's own object satisfying two methods.
   const logger: FolioLogger = config.logger ?? console;
+  // Decision 23 of form-actions.md: a warning, not a refusal, so it waits for a logger.
+  logActionWarnings(prepared, logger);
   // Not a `FolioConfig` key — see `FolioRuntime.formPurgeCapability`. No public
   // type names this, so a real `config` object can never carry it; the cast is
   // local to this one read.
@@ -1112,6 +1115,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    */
   const buildBrand = (b: PreparedBrand): BrandRuntime => {
     const { registry, schema, types, globals, migrations, gate, describe, forms } = b;
+    /** The brand's forms config, which the descriptor loop's own `forms` shadows. */
+    const registeredForms = forms;
     const schemaId = latestMigrationId(migrations);
     const typeOf = (name: string | undefined) => typeByName(types, name);
     const fallbackType = defaultType(types);
@@ -1704,6 +1709,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
               ...(active ? { locale: active } : {}),
               ...(formPage !== undefined ? { page: formPage } : {}),
               sources: sourced.sources,
+              ...(registeredForms ? { actions: registeredForms.infos } : {}),
             }),
           ];
         }),

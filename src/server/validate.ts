@@ -22,6 +22,7 @@ import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from "../core/assets";
 import { MAX_SLUG } from "../core/story";
 import { conditionRefusal, type FieldCondition } from "../core/conditions";
 import type { Json } from "../core/doc";
+import { ACTION_ID, MAX_FORM_ACTIONS, MAX_REFUSAL_MESSAGE } from "../core/form-actions";
 import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
 import type { DocumentType } from "../core/schema";
@@ -1808,6 +1809,20 @@ export function responseIdParam(raw: string | undefined): string {
 }
 
 /**
+ * The `:action` in the delivery retry route: a registered action's id, anchored to
+ * `ACTION_ID` the way `formIdParam` is to the form mint format, so a parameter that
+ * reaches a statement is screened by shape rather than by charset.
+ */
+const ACTION_ID_PARAM = v.pipe(
+  v.string("must be a string"),
+  v.regex(ACTION_ID, "must be a form action id"),
+);
+
+export function actionIdParam(raw: string | undefined): string {
+  return parseOrThrow(ACTION_ID_PARAM, raw, "action");
+}
+
+/**
  * A form field's slug from a path param — the `:name` in the gated download
  * route, which names the *question* rather than the object, because one question
  * holds one file (`../../docs/specs/content-model/forms.md` decision 15).
@@ -2002,6 +2017,46 @@ const FORM_LAYOUT = v.object(
 );
 
 /**
+ * One attached action (form-actions.md decision 7). Every key of
+ * `FormActionAttachment` is named, because a `v.object` strips the rest and a key
+ * missing here is silently dropped before `updateForm` sees it. **Strings are
+ * deliberately not `bounded`**: that trims and refuses control characters, and a
+ * `textarea` setting holds newlines. The charsets, bounds and one-per-action rule are
+ * `validateFormActions`', run by `updateForm`, so this is the request's shape and size.
+ */
+const ACTION_KEY = v.pipe(v.string("must be a string"), v.maxLength(64, "is too long"));
+const ACTION_MESSAGES = v.record(
+  ACTION_KEY,
+  v.pipe(v.string("must be a string"), v.maxLength(MAX_REFUSAL_MESSAGE, "is too long")),
+);
+const FORM_ACTION = v.object(
+  {
+    action: required(48),
+    map: v.optional(v.record(ACTION_KEY, ACTION_KEY)),
+    settings: v.optional(
+      v.record(
+        ACTION_KEY,
+        v.union([
+          v.pipe(v.string("must be a string"), v.maxLength(2000, "is too long")),
+          v.boolean(),
+          v.pipe(v.number(), v.finite()),
+        ]),
+      ),
+    ),
+    messages: v.optional(ACTION_MESSAGES),
+    i18n: v.optional(
+      v.record(LOCALE_CODE, v.object({ messages: v.optional(ACTION_MESSAGES) }, OBJECT)),
+    ),
+    delivers: v.optional(v.literal(true)),
+  },
+  OBJECT,
+);
+const FORM_ACTIONS = v.pipe(
+  v.array(FORM_ACTION, "must be an array of actions"),
+  v.maxLength(MAX_FORM_ACTIONS, `must be ${MAX_FORM_ACTIONS} actions or fewer`),
+);
+
+/**
  * `{ label, name? }`. `name` is capped before `formSlug`, which truncates its
  * own output to 64 — the cap is so an unbounded string is never slugified, not a
  * description of the stored value.
@@ -2027,6 +2082,7 @@ export const FormPatchBody = v.object(
     name: v.optional(bounded(200)),
     fields: v.optional(FORM_FIELDS),
     layout: v.optional(FORM_LAYOUT),
+    actions: v.optional(FORM_ACTIONS),
     open: v.optional(v.boolean()),
     closesAt: v.optional(v.nullable(v.pipe(v.number(), v.finite()))),
     successMessage: v.optional(bounded(500)),
@@ -2061,6 +2117,12 @@ export const FormOptionPreviewBody = v.strictObject(
 export type FormCreateInput = v.InferOutput<typeof FormCreateBody>;
 export type FormPatchInput = v.InferOutput<typeof FormPatchBody>;
 
+/** `?delivery=` on the responses table, the CSV and the bulk delete's captured filter. */
+const DELIVERY_FILTER = v.picklist(
+  ["failed", "pending", "skipped"],
+  "must be failed, pending or skipped",
+);
+
 /** An epoch-millisecond bound off a query string. */
 const TIMESTAMP = v.pipe(v.string(), v.transform(Number), v.number(), v.finite());
 
@@ -2079,6 +2141,10 @@ export function responseFilterQuery(req: {
   const from = req.query("from");
   const to = req.query("to");
   const q = req.query("q");
+  const delivery = req.query("delivery");
+  if (delivery !== undefined && delivery !== "") {
+    filter.delivery = parseOrThrow(DELIVERY_FILTER, delivery, "delivery");
+  }
   if (from !== undefined && from !== "") filter.from = parseOrThrow(TIMESTAMP, from, "from");
   if (to !== undefined && to !== "") filter.to = parseOrThrow(TIMESTAMP, to, "to");
   // Trimmed and bounded rather than refused, the `limit` side of this file's
@@ -2107,6 +2173,7 @@ const CAPTURED_RESPONSE_FILTER = v.object(
     from: v.optional(v.pipe(v.number("must be a number"), v.finite())),
     to: v.optional(v.pipe(v.number("must be a number"), v.finite())),
     q: v.optional(bounded(200)),
+    delivery: v.optional(DELIVERY_FILTER),
   },
   OBJECT,
 );

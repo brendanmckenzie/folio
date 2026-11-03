@@ -960,6 +960,11 @@ export interface ResolvedForm {
   successMessage: string;
   closedMessage: string;
   redirectTo: string | null;
+  /** Visitor-facing text for every `<action>.<code>` this form's checking actions can
+   *  refuse with, in the render's locale (form-actions.md decision 3). A host looks
+   *  `folio_reason` up here and never echoes it. Emitted only when non-empty, so a
+   *  form with no checking action keeps a byte-identical descriptor. */
+  refusals?: Readonly<Record<string, string>>;
 }
 
 /* ------------------------------------------------------------- formLayout --- */

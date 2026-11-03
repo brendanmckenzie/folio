@@ -71,6 +71,7 @@ const row = (over: Partial<FormRow> = {}): FormRow => ({
   createdAt: 0,
   updatedAt: 0,
   questions: 3,
+  attention: false,
   ...over,
 });
 

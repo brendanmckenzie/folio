@@ -1297,6 +1297,8 @@ describe("forms", () => {
       "site_id",
       // 0014: sections, as JSON.
       "layout",
+      // 0017: attachments, as JSON.
+      "actions",
     ]);
 
     const byName = new Map((await columnsOf("forms")).map((c) => [c.name, c]));
@@ -1456,6 +1458,145 @@ describe("option_lists", () => {
     await insert("");
     await insert("takeoffgo");
     await expect(insert("")).rejects.toThrow();
+  });
+});
+
+/**
+ * `forms.actions` and the two tables of `0017_form_actions.sql`
+ * (`docs/specs/content-model/form-actions.md`). No foreign keys and no CHECK, so a
+ * delete is an explicit batch and an enum-shaped column is screened on read.
+ */
+describe("forms.actions", () => {
+  it("is not null and defaults to an empty array, so an old row means no actions", async () => {
+    const col = (await columnsOf("forms")).find((c) => c.name === "actions");
+    expect(col?.notnull).toBe(1);
+    expect(col?.dflt_value).toBe("'[]'");
+    await env.DB.prepare("delete from forms").run();
+    await env.DB.prepare(
+      "insert into forms (id, name, label, created_at, updated_at) values ('f', 'f', 'F', 1, 1)",
+    ).run();
+    const row = await env.DB.prepare("select actions from forms").first<{ actions: string }>();
+    expect(row?.actions).toBe("[]");
+  });
+});
+
+describe("form_deliveries", () => {
+  beforeEach(async () => {
+    await env.DB.prepare("delete from form_deliveries").run();
+  });
+
+  it("has every column, in order", async () => {
+    expect((await columnsOf("form_deliveries")).map((c) => c.name)).toEqual([
+      "response_id",
+      "action",
+      "form_id",
+      "status",
+      "attempts",
+      "next_at",
+      "claim",
+      "host",
+      "inputs_map",
+      "reference",
+      "failure",
+      "detail",
+      "created_at",
+      "updated_at",
+    ]);
+  });
+
+  it("is keyed by response and action, in that order", async () => {
+    const pk = (await columnsOf("form_deliveries"))
+      .filter((c) => c.pk > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((c) => c.name);
+    expect(pk).toEqual(["response_id", "action"]);
+  });
+
+  it("is nullable where a row created failed or settled is, and defaults the rest", async () => {
+    const byName = new Map((await columnsOf("form_deliveries")).map((c) => [c.name, c]));
+    for (const name of ["next_at", "claim", "inputs_map", "reference", "failure", "detail"]) {
+      expect(byName.get(name)?.notnull, name).toBe(0);
+    }
+    for (const name of [
+      "response_id",
+      "action",
+      "form_id",
+      "status",
+      "attempts",
+      "host",
+      "created_at",
+      "updated_at",
+    ]) {
+      expect(byName.get(name)?.notnull, name).toBe(1);
+    }
+    expect(byName.get("status")?.dflt_value).toBe("'pending'");
+    expect(byName.get("attempts")?.dflt_value).toBe("0");
+    expect(byName.get("host")?.dflt_value).toBe("''");
+    await env.DB.prepare(
+      "insert into form_deliveries (response_id, action, form_id, created_at, updated_at) values ('r', 'a', 'f', 1, 1)",
+    ).run();
+    const row = await env.DB.prepare(
+      "select status, attempts, host, next_at, claim from form_deliveries",
+    ).first();
+    expect(row).toEqual({ status: "pending", attempts: 0, host: "", next_at: null, claim: null });
+  });
+
+  it("refuses a second delivery of one action for one response", async () => {
+    const insert = (response: string, action: string) =>
+      env.DB.prepare(
+        "insert into form_deliveries (response_id, action, form_id, created_at, updated_at) values (?, ?, 'f', 1, 1)",
+      )
+        .bind(response, action)
+        .run();
+    await insert("r", "a");
+    await insert("r", "b");
+    await insert("s", "a");
+    await expect(insert("r", "a")).rejects.toThrow();
+  });
+
+  it("has exactly the two secondary indexes, the due one partial on pending", async () => {
+    expect(await indexesOf("form_deliveries")).toEqual([
+      "form_deliveries_due",
+      "form_deliveries_form",
+    ]);
+    const due = await indexSql("form_deliveries_due");
+    expect(due).toMatch(/\(\s*next_at\s*\)/);
+    expect(due).toMatch(/where\s+status\s*=\s*'pending'/i);
+    expect(await indexSql("form_deliveries_form")).toMatch(/\(\s*form_id\s*,\s*status\s*\)/);
+  });
+
+  it("declares no foreign key and no check constraint", async () => {
+    const row = await env.DB.prepare(
+      "select sql from sqlite_master where name = 'form_deliveries'",
+    ).first<{ sql: string }>();
+    expect(row?.sql.toLowerCase()).not.toContain("references");
+    expect(row?.sql.toLowerCase()).not.toContain("check");
+  });
+});
+
+describe("form_refusals", () => {
+  it("has every column, in order, all not null", async () => {
+    const cols = await columnsOf("form_refusals");
+    expect(cols.map((c) => c.name)).toEqual(["ip_hash", "form_id", "created_at"]);
+    for (const c of cols) expect(c.notnull, c.name).toBe(1);
+  });
+
+  it("has no primary key, because a refusal has no identity", async () => {
+    expect((await columnsOf("form_refusals")).filter((c) => c.pk > 0)).toEqual([]);
+  });
+
+  it("has the throttle index, newest first within an address", async () => {
+    expect(await indexesOf("form_refusals")).toEqual([
+      "form_refusals_age",
+      "form_refusals_throttle",
+    ]);
+    expect(await indexSql("form_refusals_throttle")).toMatch(
+      /\(\s*ip_hash\s*,\s*created_at\s+desc\s*\)/i,
+    );
+  });
+
+  it("has an age index, so the prune does not scan the table", async () => {
+    expect(await indexSql("form_refusals_age")).toMatch(/\(\s*created_at\s*\)/i);
   });
 });
 
@@ -1765,6 +1906,7 @@ describe("the ledger", () => {
       "0014_form_logic.sql",
       "0015_draft_data.sql",
       "0016_option_sources.sql",
+      "0017_form_actions.sql",
     ]);
   });
 

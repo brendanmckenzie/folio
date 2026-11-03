@@ -19,7 +19,7 @@ import {
   validateHooks,
 } from "../../../src/server/hooks";
 import { normalisePath, redirectStatements } from "../../../src/server/redirects";
-import { formIdParam, responseFilterQuery } from "../../../src/server/validate";
+import { actionIdParam, formIdParam, responseFilterQuery } from "../../../src/server/validate";
 import { alarmHookCtx, validateAssets } from "../../../src/server/runtime";
 
 // ---------------------------------------------------------------------------
@@ -1479,6 +1479,23 @@ describe("assetFilterSql", () => {
  * screen between a query string and a store, so they are tested here rather
  * than only through the routes that will call them.
  */
+describe("actionIdParam and the delivery filter", () => {
+  it("anchors the retry route's action to ACTION_ID", () => {
+    expect(actionIdParam("jambo-enquiry")).toBe("jambo-enquiry");
+    for (const bad of ["Jambo", "1jambo", "jambo_x", "a".repeat(49), "", "a b", undefined]) {
+      expect(() => actionIdParam(bad)).toThrow();
+    }
+  });
+
+  it("parses ?delivery= to the three states and refuses anything else", () => {
+    const q = (delivery: string) =>
+      responseFilterQuery({ query: (k) => (k === "delivery" ? delivery : undefined) });
+    expect(q("failed")).toEqual({ delivery: "failed" });
+    expect(q("")).toEqual({});
+    expect(() => q("delivered")).toThrow();
+  });
+});
+
 describe("formIdParam", () => {
   it("accepts the mint format and nothing that merely looks like it", () => {
     expect(formIdParam("frm_0123456789ab")).toBe("frm_0123456789ab");

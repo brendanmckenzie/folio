@@ -20,6 +20,15 @@
 import type { Json } from "../../../core/doc";
 import type { Field } from "../../../core/fields";
 import {
+  type ActionInputInfo,
+  type ActionSettingValue,
+  attachmentProblems,
+  type FormActionAttachment,
+  type FormActionInfo,
+  INPUT_ACCEPTS,
+  MAX_FORM_ACTIONS,
+} from "../../../core/form-actions";
+import {
   checkFormLogic,
   type FormField,
   type FormFieldI18n,
@@ -268,14 +277,48 @@ function detachFirstRealAt(fields: FormField[], at: number): void {
 }
 
 /**
+ * The attachments and registry a question edit is checked against
+ * (`form-actions.md` decision 5). Absent means the form has none, which is every
+ * call that predates spec 36.
+ */
+export interface ActionContext {
+  attachments: readonly FormActionAttachment[];
+  infos: ReadonlyMap<string, FormActionInfo>;
+}
+
+/** The inputs of every attachment that read the question `name`, with the action's
+ *  label (its id when the registry no longer lists it). */
+export function actionReaders(
+  ctx: ActionContext | undefined,
+  name: string,
+): { action: string; label: string; input: string }[] {
+  const out: { action: string; label: string; input: string }[] = [];
+  for (const a of ctx?.attachments ?? []) {
+    const info = ctx?.infos.get(a.action);
+    for (const [input, question] of Object.entries(a.map ?? {})) {
+      if (question !== name) continue;
+      const declared = info?.inputs.find((i) => i.name === input);
+      out.push({
+        action: a.action,
+        label: info?.label ?? a.action,
+        input: (declared?.label ?? input).toLowerCase(),
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Why `name` cannot be removed, or null. A question another question's rule (or a
  * section's) names is not removable: the rule would dangle, and `checkFormLogic`
- * would refuse the save. The builder disables the button with this as the reason.
+ * would refuse the save. So is one an action reads (`form-actions.md` decision 5),
+ * with the action named. The builder disables the button with this as the reason.
  */
 export function removeRefusal(
   fields: readonly FormField[],
   layout: FormLayout,
   name: string,
+  actions?: ActionContext,
 ): string | null {
   const label = fields.find((f) => f.name === name)?.label || name;
   for (const f of fields) {
@@ -289,6 +332,41 @@ export function removeRefusal(
       return `Section "${s.label}" has a rule that depends on "${label}". Change that rule first.`;
     }
   }
+  const reader = actionReaders(actions, name)[0];
+  if (reader) {
+    return `${reader.label} reads its ${reader.input} from this question. Change the mapping first.`;
+  }
+  return null;
+}
+
+/**
+ * Why `next` cannot replace the question `name`, or null: a retype to a kind the
+ * input does not accept, or a required input's question made optional or
+ * conditional, would leave an attachment with a problem it did not have
+ * (decision 5). Only problems about this question count, and only new ones: a
+ * question an already-broken attachment reads can still be edited.
+ */
+export function changeRefusal(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+  next: FormField,
+  actions?: ActionContext,
+): string | null {
+  if (!actions || actions.attachments.length === 0) return null;
+  const after = fields.map((f) => (f.name === name ? next : f));
+  for (const a of actions.attachments) {
+    const info = actions.infos.get(a.action);
+    if (!info) continue;
+    const reads = Object.values(a.map ?? {}).includes(name);
+    if (!reads) continue;
+    const before = new Set(attachmentProblems(a, info, fields, layout));
+    for (const problem of attachmentProblems(a, info, after, layout)) {
+      if (!before.has(problem)) {
+        return `${info.label} reads this question: ${problem}. Change the mapping first.`;
+      }
+    }
+  }
   return null;
 }
 
@@ -299,8 +377,9 @@ export function removeField(
   fields: readonly FormField[],
   name: string,
   layout: FormLayout = {},
+  actions?: ActionContext,
 ): FormField[] {
-  if (removeRefusal(fields, layout, name) !== null) return [...fields];
+  if (removeRefusal(fields, layout, name, actions) !== null) return [...fields];
   const index = fields.findIndex((f) => f.name === name);
   if (index === -1) return [...fields];
   // A removed `hidden` question was never anyone's predecessor (`rowsOf`
@@ -686,8 +765,9 @@ export function renameField(
   layout: FormLayout,
   from: string,
   to: string,
-): { fields: FormField[]; layout: FormLayout } {
-  if (from === to) return { fields: [...fields], layout };
+  actions: readonly FormActionAttachment[] = [],
+): { fields: FormField[]; layout: FormLayout; actions: FormActionAttachment[] } {
+  if (from === to) return { fields: [...fields], layout, actions: [...actions] };
   const rewrite = (field: FormField): FormField => {
     const next: FormField = field.name === from ? { ...field, name: to } : { ...field };
     if (field.showIf) next.showIf = renameInCondition(field.showIf, from, to);
@@ -697,9 +777,18 @@ export function renameField(
   const sections = layout.sections?.map((s) =>
     s.showIf ? { ...s, showIf: renameInCondition(s.showIf, from, to) } : s,
   );
+  // An action's mapping follows the rename, in the same save (decision 5).
+  const follow = (a: FormActionAttachment): FormActionAttachment => {
+    if (!a.map || !Object.values(a.map).includes(from)) return a;
+    return {
+      ...a,
+      map: Object.fromEntries(Object.entries(a.map).map(([k, v]) => [k, v === from ? to : v])),
+    };
+  };
   return {
     fields: fields.map(rewrite),
     layout: sections ? { ...layout, sections } : layout,
+    actions: actions.map(follow),
   };
 }
 
@@ -1160,4 +1249,223 @@ export function closesAtFromInput(value: string): number | null {
   if (value.trim() === "") return null;
   const ms = new Date(value).getTime();
   return Number.isFinite(ms) ? ms : null;
+}
+
+/* --------------------------------------------------------------- actions --- */
+
+/**
+ * The reducers behind the Actions section (`form-actions.md` phase 5). Pure, and
+ * each returns a new array: the builder holds the draft, the server is the one
+ * validator (`validateFormActions`, `attachmentProblems`), and nothing here is a
+ * second copy of it beyond what saves a round trip.
+ */
+
+/** The registered actions an editor may still attach: one attachment per action
+ *  (decision 7), and none at all once the form is full. */
+export function offerableActions(
+  infos: readonly FormActionInfo[],
+  attachments: readonly FormActionAttachment[],
+): FormActionInfo[] {
+  if (attachments.length >= MAX_FORM_ACTIONS) return [];
+  const used = new Set(attachments.map((a) => a.action));
+  return infos.filter((info) => !used.has(info.id));
+}
+
+/** A fresh attachment: each setting's declared `default` written in, which is all
+ *  `default` ever means (`fields.ts`), and nothing else. Already attached is a no-op. */
+export function attachAction(
+  attachments: readonly FormActionAttachment[],
+  info: FormActionInfo,
+): FormActionAttachment[] {
+  if (attachments.some((a) => a.action === info.id)) return [...attachments];
+  if (attachments.length >= MAX_FORM_ACTIONS) return [...attachments];
+  const settings: Record<string, ActionSettingValue> = {};
+  for (const [name, def] of Object.entries(info.settings)) {
+    const fallback = (def as { default?: unknown }).default;
+    if (
+      typeof fallback === "string" ||
+      typeof fallback === "number" ||
+      typeof fallback === "boolean"
+    ) {
+      settings[name] = fallback;
+    }
+  }
+  return [
+    ...attachments,
+    { action: info.id, ...(Object.keys(settings).length > 0 ? { settings } : {}) },
+  ];
+}
+
+export function detachAction(
+  attachments: readonly FormActionAttachment[],
+  action: string,
+): FormActionAttachment[] {
+  return attachments.filter((a) => a.action !== action);
+}
+
+/** Moves an attachment one step; a no-op past either end. Order is run order. */
+export function moveAction(
+  attachments: readonly FormActionAttachment[],
+  action: string,
+  direction: -1 | 1,
+): FormActionAttachment[] {
+  const from = attachments.findIndex((a) => a.action === action);
+  const to = from + direction;
+  if (from === -1 || to < 0 || to >= attachments.length) return [...attachments];
+  const next = [...attachments];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved as FormActionAttachment);
+  return next;
+}
+
+function replaceAttachment(
+  attachments: readonly FormActionAttachment[],
+  action: string,
+  change: (a: FormActionAttachment) => FormActionAttachment,
+): FormActionAttachment[] {
+  return attachments.map((a) => (a.action === action ? change(a) : a));
+}
+
+/** The attachment with `key` set to `value`, or without the key when `value` is empty. */
+function tidy(
+  a: FormActionAttachment,
+  key: "map" | "settings" | "messages" | "i18n",
+  value: object,
+): FormActionAttachment {
+  const rest: FormActionAttachment = { ...a };
+  delete rest[key];
+  return Object.keys(value).length > 0 ? ({ ...rest, [key]: value } as FormActionAttachment) : rest;
+}
+
+/** Maps `input` onto `question`; an empty question unmaps it. */
+export function withMapping(
+  attachments: readonly FormActionAttachment[],
+  action: string,
+  input: string,
+  question: string,
+): FormActionAttachment[] {
+  return replaceAttachment(attachments, action, (a) => {
+    const map = { ...a.map };
+    if (question === "") delete map[input];
+    else map[input] = question;
+    return tidy(a, "map", map);
+  });
+}
+
+/** Sets one setting; undefined or empty text clears it (unset, not the empty string). */
+export function withActionSetting(
+  attachments: readonly FormActionAttachment[],
+  action: string,
+  name: string,
+  value: Json | undefined,
+): FormActionAttachment[] {
+  return replaceAttachment(attachments, action, (a) => {
+    const settings = { ...a.settings };
+    if (
+      value === undefined ||
+      value === null ||
+      value === "" ||
+      typeof value === "object" ||
+      (typeof value === "number" && !Number.isFinite(value))
+    ) {
+      delete settings[name];
+    } else {
+      settings[name] = value;
+    }
+    return tidy(a, "settings", settings);
+  });
+}
+
+/**
+ * The editor's text for one refusal code, in the source locale or (when `locale`
+ * differs from `source`) as that locale's translation. Empty text clears it, so the
+ * code falls back to the next in `refusalsOf`'s chain.
+ */
+export function withMessage(
+  attachments: readonly FormActionAttachment[],
+  action: string,
+  code: string,
+  text: string,
+  locale: string,
+  source: string,
+): FormActionAttachment[] {
+  return replaceAttachment(attachments, action, (a) => {
+    if (locale === "" || locale === source) {
+      const messages = { ...a.messages };
+      if (text === "") delete messages[code];
+      else messages[code] = text;
+      return tidy(a, "messages", messages);
+    }
+    const i18n = { ...a.i18n };
+    const messages = { ...i18n[locale]?.messages };
+    if (text === "") delete messages[code];
+    else messages[code] = text;
+    if (Object.keys(messages).length > 0) i18n[locale] = { messages };
+    else delete i18n[locale];
+    return tidy(a, "i18n", i18n);
+  });
+}
+
+/** The editor's text for a code in `locale` ("" when unwritten). */
+export function messageText(
+  a: FormActionAttachment,
+  code: string,
+  locale: string,
+  source: string,
+): string {
+  if (locale === "" || locale === source) return a.messages?.[code] ?? "";
+  return a.i18n?.[locale]?.messages?.[code] ?? "";
+}
+
+/** The questions an input may be fed from (decision 5's table), in form order. */
+export function compatibleQuestions(
+  input: Pick<ActionInputInfo, "kind">,
+  fields: readonly FormField[],
+): FormField[] {
+  const accepts = INPUT_ACCEPTS[input.kind] ?? [];
+  return fields.filter((f) => accepts.includes(f.kind));
+}
+
+/**
+ * Problems the draft has that the saved form did not, per attachment, as sentences
+ * naming the action. This is decision 13's rule restated for the Save button: a form
+ * that already had a problem can still be saved (closed, renamed), and only a change
+ * that makes an attachment worse is held back. The server says the same on PATCH.
+ */
+export function addedActionProblems(
+  saved: {
+    fields: readonly FormField[];
+    layout: FormLayout;
+    actions: readonly FormActionAttachment[];
+  } | null,
+  draft: {
+    fields: readonly FormField[];
+    layout: FormLayout;
+    actions: readonly FormActionAttachment[];
+  },
+  infos: ReadonlyMap<string, FormActionInfo>,
+): string[] {
+  const out: string[] = [];
+  for (const a of draft.actions) {
+    const info = infos.get(a.action);
+    if (!info) continue;
+    const was = saved?.actions.find((s) => s.action === a.action);
+    const before = new Set(
+      was && saved ? attachmentProblems(was, info, saved.fields, saved.layout) : [],
+    );
+    for (const problem of attachmentProblems(a, info, draft.fields, draft.layout)) {
+      if (!before.has(problem)) out.push(`${info.label}: ${problem}`);
+    }
+  }
+  return out;
+}
+
+/** Every problem an attachment has now, for showing in place. Unregistered: none to compute. */
+export function problemsOf(
+  a: FormActionAttachment,
+  info: FormActionInfo | undefined,
+  fields: readonly FormField[],
+  layout: FormLayout,
+): string[] {
+  return info ? attachmentProblems(a, info, fields, layout) : [];
 }

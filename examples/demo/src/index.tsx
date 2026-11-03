@@ -1,4 +1,12 @@
-import { createFolio, type FolioGate, magicLink, passkeys, Shell, trusted } from "folio/server";
+import {
+  createFolio,
+  type FolioGate,
+  formAction,
+  magicLink,
+  passkeys,
+  Shell,
+  trusted,
+} from "folio/server";
 import { dataOf, resolveAsset, toSchemaIndex, type Doc, type Resolution } from "folio/core";
 // `folio/engine` is the entry point for host-side tooling that manipulates
 // documents — a sync job is exactly the case its doc comment names. Ordinary
@@ -92,6 +100,58 @@ const devIdentity = trusted<Env>({
     if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") return null;
     const email = req.headers.get("x-folio-dev-identity");
     return email ? { email } : null;
+  },
+});
+
+/**
+ * content-model/form-actions.md. Two actions a publisher can attach to a form in the
+ * builder; `scripts/form-actions-test.mjs` drives both end to end.
+ *
+ * `demoGuard` is a `check`: it runs before the response is stored, is a read with no
+ * side effects, and refuses with a declared code whose text the editor writes. A
+ * thrown check or a missed deadline is refused too (it fails closed), so there is
+ * nothing here to catch.
+ */
+const demoGuard = formAction({
+  id: "demo-guard",
+  label: "Demo guard",
+  description: "Refuses an email address on blocked.example.",
+  inputs: { email: { kind: "email", label: "Email", required: true } },
+  codes: {
+    blocked: {
+      label: "Blocked address",
+      message: "That address cannot be used here.",
+    },
+  },
+  check({ inputs }) {
+    return inputs.email.toLowerCase().endsWith("@blocked.example")
+      ? { ok: false, code: "blocked" }
+      : { ok: true };
+  },
+});
+
+/**
+ * A `deliver`: runs after the response is stored, never changes what the visitor is
+ * told, and is retried from `scheduled()` and by the Retry button in Responses. It
+ * logs the payload the way a real one would post it, and throws while its `fail`
+ * setting is on so the failure path can be seen without a vendor.
+ */
+const demoWebhook = formAction({
+  id: "demo-webhook",
+  label: "Demo webhook",
+  description: "Logs the answers; fails while its Fail setting is on.",
+  inputs: {
+    email: { kind: "email", label: "Email", required: true },
+    name: { kind: "text", label: "Name" },
+  },
+  settings: {
+    fail: { kind: "boolean", label: "Fail", help: "Throw instead of delivering", default: false },
+  },
+  deliver({ inputs, settings, key, attempt, form }) {
+    if (settings.fail) throw new Error("the demo webhook is set to fail");
+    console.log(
+      `folio: demo-webhook ${key} (attempt ${attempt}) for ${form.name}: ${JSON.stringify(inputs)}`,
+    );
   },
 });
 
@@ -212,6 +272,8 @@ const folio = createFolio<Env>({
     // hash it counts carries the hour it was made in, so it stops being
     // computable from an address once that hour passes (decision 10).
     ratePerHour: 20,
+    // content-model/form-actions.md: registered here, attached per form in the builder.
+    actions: [demoGuard, demoWebhook],
     /**
      * content-model/form-option-sources.md. A question's choices can come from a
      * list the host owns: this one is a static list so the demo needs no network.

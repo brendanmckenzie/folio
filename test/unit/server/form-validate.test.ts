@@ -68,6 +68,7 @@ function makeForm(fields: FormField[]): Form {
     label: "Contact us",
     fields,
     layout: {},
+    actions: [],
     version: 1,
     open: true,
     closesAt: null,

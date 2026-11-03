@@ -11,7 +11,7 @@ import {
 } from "../../../core/query";
 import type { DocumentType, SchemaIndex } from "../../../core/schema";
 import { Button } from "../Button";
-import { Field, Input, Select } from "../Field";
+import { Field, Input, Select, Textarea } from "../Field";
 import css from "./OptionSourceEditor.module.css";
 import { DocumentPicker } from "./fields/DocumentPicker";
 import fieldsCss from "./fields/fields.module.css";
@@ -349,7 +349,9 @@ function ContentSettings({
  * One declared setting of a host source, drawn with the same `Input` and `Select`
  * primitives `Control` uses, for the four kinds a source may declare. Not `Control`
  * itself: that needs a document's `FieldEnv`, `Resolution` and richtext chrome, which a
- * form builder has none of, for the sake of four scalar inputs.
+ * form builder has none of, for the sake of four scalar inputs. A form action's
+ * settings (`form-actions.md` decision 6) are drawn by it too, which adds `textarea`
+ * and `date` to the four.
  */
 export function SettingControl({
   name,
@@ -417,6 +419,24 @@ export function SettingControl({
     );
   }
 
+  if (def.kind === "textarea") {
+    return (
+      <Field {...common} required={required}>
+        {(id) => (
+          <Textarea
+            id={id}
+            rows={3}
+            value={typeof value === "string" ? value : ""}
+            disabled={!editable}
+            spellCheck={false}
+            onChange={(e) => onChange(e.target.value === "" ? undefined : e.target.value)}
+            onBlur={(e) => onCommit(e.target.value === "" ? undefined : e.target.value)}
+          />
+        )}
+      </Field>
+    );
+  }
+
   const numeric = def.kind === "number";
   const parse = (text: string): Json | undefined => {
     if (text === "") return undefined;
@@ -431,7 +451,7 @@ export function SettingControl({
       {(id) => (
         <Input
           id={id}
-          type={numeric ? "number" : "text"}
+          type={numeric ? "number" : def.kind === "date" ? "date" : "text"}
           value={value === undefined ? "" : String(value)}
           disabled={!editable}
           spellCheck={false}

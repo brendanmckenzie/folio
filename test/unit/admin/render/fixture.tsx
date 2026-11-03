@@ -461,7 +461,7 @@ function bodyFor(url: string): unknown {
   // there *is* an id — the bare `/forms` is the list route and wants the page
   // envelope like every other list.
   if (path === `${API}/forms/registry`) {
-    return { sources: served.registrySources ?? [], actions: [] };
+    return { sources: served.registrySources ?? [], actions: served.registryActions ?? [] };
   }
   if (path.startsWith(`${API}/forms/`)) {
     if (path.endsWith("/option-preview"))
@@ -475,7 +475,15 @@ function bodyFor(url: string): unknown {
         }
       );
     if (path.endsWith("/usage")) return { published: [], total: 0, responses: 0, files: 0 };
-    if (path.endsWith("/responses")) return EMPTY_PAGE;
+    if (path.endsWith("/retry")) return { delivery: served.retried };
+    // One response, in full: the drawer's read for its deliveries (form-actions.md decision 21).
+    if (/\/responses\/[^/]+$/.test(path)) {
+      return {
+        ...((served.responses as { rows: unknown[] } | undefined)?.rows[0] as object),
+        deliveries: served.deliveries ?? [],
+      };
+    }
+    if (path.endsWith("/responses")) return served.responses ?? EMPTY_PAGE;
     const form = (served.form ?? FORM) as typeof FORM;
     return { form, ...form };
   }
@@ -534,6 +542,14 @@ const served: {
   registrySources?: unknown[];
   /** What `POST /forms/:id/option-preview` answers. */
   preview?: unknown;
+  /** What `GET /forms/registry` lists as `actions` (form-actions.md decision 4). */
+  registryActions?: unknown[];
+  /** The page `GET /forms/:id/responses` answers. */
+  responses?: unknown;
+  /** The full deliveries `GET /forms/:id/responses/:rid` answers. */
+  deliveries?: unknown[];
+  /** What a Retry answers as `delivery`. */
+  retried?: unknown;
 } = {};
 
 export function serve(over: typeof served): void {
@@ -547,6 +563,10 @@ export function resetServed(): void {
   delete served.form;
   delete served.registrySources;
   delete served.preview;
+  delete served.registryActions;
+  delete served.responses;
+  delete served.deliveries;
+  delete served.retried;
 }
 
 /**

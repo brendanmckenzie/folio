@@ -17,8 +17,18 @@
  * reason there ever should be — the CSV's own de-fanging lives server-side, in
  * `form-responses.ts`, because the file is written there.
  */
-import type { FormField } from "../../../core/forms";
-import type { ResponseRow } from "../../../server/form-responses";
+import {
+  attachmentProblems,
+  type FormActionAttachment,
+  type FormActionInfo,
+} from "../../../core/form-actions";
+import type { FormField, FormLayout } from "../../../core/forms";
+import type { DeliverySummary, ResponseRow } from "../../../server/form-responses";
+import type {
+  DeliveryFailureCategory,
+  DeliveryRow,
+  DeliveryStatus,
+} from "../../../server/form-actions";
 import type { ResponseFilter } from "../../../server/forms";
 import type { Confirmation } from "./content-model";
 
@@ -39,7 +49,20 @@ export interface ResponsesUrl {
   /** Inclusive, as a calendar day — the *whole* of that day (see `bounds`). */
   to: string;
   q: string;
+  /** Only responses with a delivery in this state (`form-actions.md` decision 21).
+   *  Absent is every response. */
+  delivery?: DeliveryFilter;
 }
+
+export const DELIVERY_FILTERS = ["failed", "pending", "skipped"] as const;
+export type DeliveryFilter = (typeof DELIVERY_FILTERS)[number];
+
+/** The filter box's wording; `pending` reads as retrying because that is what it is. */
+export const DELIVERY_FILTER_LABELS: Record<DeliveryFilter, string> = {
+  failed: "Failed",
+  pending: "Retrying",
+  skipped: "Skipped",
+};
 
 export const BLANK_RESPONSES_URL: ResponsesUrl = { from: "", to: "", q: "" };
 
@@ -49,23 +72,30 @@ export const BLANK_RESPONSES_URL: ResponsesUrl = { from: "", to: "", q: "" };
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
 export function parseResponsesUrl(query: Readonly<Record<string, string>>): ResponsesUrl {
+  const delivery = DELIVERY_FILTERS.find((one) => one === query.delivery);
   return {
     from: DAY.test(query.from ?? "") ? (query.from ?? "") : "",
     to: DAY.test(query.to ?? "") ? (query.to ?? "") : "",
     q: query.q ?? "",
+    ...(delivery ? { delivery } : {}),
   };
 }
 
 /** The inverse, as the query object `href` takes. Defaults are `undefined` so
  *  they leave the URL rather than sitting in it. */
 export function responsesQuery(url: ResponsesUrl): Record<string, string | undefined> {
-  return { from: url.from || undefined, to: url.to || undefined, q: url.q || undefined };
+  return {
+    from: url.from || undefined,
+    to: url.to || undefined,
+    q: url.q || undefined,
+    delivery: url.delivery || undefined,
+  };
 }
 
 /** Telling "nobody has answered yet" from "nothing matches" — offering *clear
  *  filters* under the first is offering to clear nothing. */
 export function isNarrowed(url: ResponsesUrl): boolean {
-  return url.from !== "" || url.to !== "" || url.q.trim() !== "";
+  return url.from !== "" || url.to !== "" || url.q.trim() !== "" || !!url.delivery;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -91,7 +121,9 @@ function bounds(day: string): number | undefined {
  * their select-all is guarded by and the set a bulk delete walks are the same
  * three clauses.
  */
-export function responseFilterOf(url: ResponsesUrl): ResponseFilter {
+export function responseFilterOf(url: ResponsesUrl): ResponseFilter & {
+  delivery?: DeliveryFilter;
+} {
   const from = bounds(url.from);
   const to = bounds(url.to);
   const q = url.q.trim();
@@ -99,6 +131,7 @@ export function responseFilterOf(url: ResponsesUrl): ResponseFilter {
     ...(from === undefined ? {} : { from }),
     ...(to === undefined ? {} : { to: to + DAY_MS }),
     ...(q ? { q } : {}),
+    ...(url.delivery ? { delivery: url.delivery } : {}),
   };
 }
 
@@ -118,6 +151,7 @@ export function responsesParams(
   if (filter.from !== undefined) params.set("from", String(filter.from));
   if (filter.to !== undefined) params.set("to", String(filter.to));
   if (filter.q) params.set("q", filter.q);
+  if (filter.delivery) params.set("delivery", filter.delivery);
   if (opts.count) params.set("count", "1");
   if (opts.cursor) params.set("cursor", opts.cursor);
   return params;
@@ -548,4 +582,226 @@ export function deleteOneWarning(response: ResponseRow): string {
       ? ""
       : ` The ${files === 1 ? "file" : `${files} files`} attached to it ${files === 1 ? "goes" : "go"} too.`;
   return `Submitted ${submittedExact(response.createdAt)}. This cannot be undone — nothing recreates it.${attached}`;
+}
+
+/* ------------------------------------------------------------ deliveries --- */
+
+/*
+ * `form-actions.md` decisions 15 and 21. The wire types are the server's, imported as
+ * types only (a value import would pull workerd code into a Node test).
+ */
+export type { DeliveryFailureCategory, DeliveryRow, DeliveryStatus, DeliverySummary };
+
+/** `MAX_DELIVERY_ATTEMPTS` (`server/deliveries.ts`), for "Retrying (3 of 8)". */
+export const DELIVERY_ATTEMPTS = 8;
+
+const STATUS_TEXT: Record<DeliveryStatus, string> = {
+  pending: "Retrying",
+  delivered: "Delivered",
+  skipped: "Skipped",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+/** A delivery's status in a table cell: `Delivered`, `Retrying (3 of 8)`, `Failed`,
+ *  `Skipped`, `Cancelled`. A `pending` row nothing has attempted yet is `Queued`. */
+export function deliveryStatusText(d: Pick<DeliverySummary, "status" | "attempts">): string {
+  if (d.status === "pending") {
+    return d.attempts > 0 ? `Retrying (${d.attempts} of ${DELIVERY_ATTEMPTS})` : "Queued";
+  }
+  return STATUS_TEXT[d.status] ?? "Unknown";
+}
+
+export type DeliveryTone = "ok" | "warn" | "danger" | "neutral";
+
+export function deliveryTone(status: DeliveryStatus): DeliveryTone {
+  switch (status) {
+    case "delivered":
+      return "ok";
+    case "pending":
+      return "warn";
+    case "failed":
+      return "danger";
+    default:
+      return "neutral";
+  }
+}
+
+/** One cell badge per delivery. The action's label leads only when there are several,
+ *  so the common single-action form reads `Delivered` rather than `File in Jambo: Delivered`. */
+export function deliveryBadges(
+  deliveries: readonly DeliverySummary[] | undefined,
+  labelOf: (action: string) => string,
+): { key: string; text: string; title: string; tone: DeliveryTone }[] {
+  const list = deliveries ?? [];
+  return list.map((d) => {
+    const status = deliveryStatusText(d);
+    return {
+      key: d.action,
+      text: list.length > 1 ? `${labelOf(d.action)}: ${status}` : status,
+      title: `${labelOf(d.action)}: ${status}`,
+      tone: deliveryTone(d.status),
+    };
+  });
+}
+
+/**
+ * A failure category in words an editor can act on. **Only Folio's own categories are
+ * phrased here; nothing a third party or a thrown error said ever is.** A thrown value
+ * is never stored (decision 15), and the phrasing for it points at the Worker's logs.
+ */
+export function failureText(failure: DeliveryFailureCategory | null): string | null {
+  switch (failure) {
+    case null:
+      return null;
+    case "threw":
+      return "The action threw an error. Details are in the Worker's logs.";
+    case "timeout":
+      return "The action did not answer in time.";
+    case "malformed":
+      return "The action returned an answer Folio could not read.";
+    case "refused":
+      return "The other system refused this data.";
+    case "not_registered":
+      return "This site's code no longer provides the action.";
+    case "incomplete":
+      return "The action's questions or settings were incomplete when this was submitted.";
+    case "predates_mapping":
+      return "This response was submitted before the current mapping, so it has no answer for a question the action needs. It cannot be sent again.";
+    case "no_brand":
+      return "No brand on this deployment serves the site this response came from.";
+    case "gave_up":
+      return `Gave up after ${DELIVERY_ATTEMPTS} attempts.`;
+    default:
+      return "The delivery failed.";
+  }
+}
+
+/**
+ * The action's own words, which is the only free text a delivery row may show: what a
+ * `{ skipped }` or `{ failed }` returned for display. For a thrown, timed-out or
+ * malformed failure the row has no detail by construction, and this refuses one anyway
+ * (a row written by anything else is not trusted to have kept that promise).
+ */
+export function deliveryDetail(
+  d: Pick<DeliveryRow, "status" | "failure" | "detail">,
+): string | null {
+  if (d.detail === null || d.detail === "") return null;
+  if (d.status === "skipped") return d.detail;
+  if (d.status === "failed" && d.failure === "refused") return d.detail;
+  return null;
+}
+
+/** When the next attempt is due, for a `pending` row. */
+export function nextAttemptText(
+  d: Pick<DeliveryRow, "status" | "nextAt">,
+  now: number = Date.now(),
+): string | null {
+  if (d.status !== "pending" || d.nextAt === null) return null;
+  if (d.nextAt <= now) return "due now";
+  const minutes = Math.ceil((d.nextAt - now) / 60_000);
+  if (minutes < 60) return `in ${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return `in ${hours}h`;
+}
+
+/**
+ * Whether Retry is offered (decision 15): `failed` and `skipped`, and a `pending` row
+ * whose next attempt is already due (a future `next_at` is a backoff or another
+ * runner's lease, and the route refuses both). Not for `predates_mapping`, which no
+ * retry can fix. The server decides again, on the row as it stands.
+ */
+export function canRetryDelivery(
+  d: Pick<DeliveryRow, "status" | "failure" | "nextAt">,
+  now: number = Date.now(),
+): boolean {
+  if (d.failure === "predates_mapping") return false;
+  if (d.status === "failed" || d.status === "skipped") return true;
+  return d.status === "pending" && d.nextAt !== null && d.nextAt <= now;
+}
+
+/** `POST {base}/api/forms/:id/responses/:rid/deliveries/:action/retry`. */
+export function retryHref(
+  apiBase: string,
+  formId: string,
+  responseId: string,
+  action: string,
+): string {
+  return `${apiBase}/forms/${encodeURIComponent(formId)}/responses/${encodeURIComponent(
+    responseId,
+  )}/deliveries/${encodeURIComponent(action)}/retry`;
+}
+
+/** What the toast says once a Retry's inline attempt has answered. */
+export function retryNotice(label: string, d: Pick<DeliveryRow, "status" | "failure">): string {
+  switch (d.status) {
+    case "delivered":
+      return `${label}: delivered.`;
+    case "skipped":
+      return `${label}: skipped.`;
+    case "pending":
+      return `${label}: that attempt failed and it will be tried again.`;
+    default:
+      return `${label}: still failing. ${failureText(d.failure) ?? ""}`.trim();
+  }
+}
+
+/* --------------------------------------------------------------- banners --- */
+
+export type ResponsesBanner =
+  | { kind: "failed"; text: string }
+  | { kind: "overdue"; text: string }
+  | { kind: "attention"; text: string; action: string };
+
+export const OVERDUE_BANNER =
+  "Retries are not running. Check that your Worker declares a cron trigger and calls folio.runSchedules().";
+
+/** `failedDeliveries` is the page's fenced count (`?count=1`); it is the whole filter's
+ *  worth, not the shown rows'. */
+export function failedBanner(failed: number | undefined): string | null {
+  if (!failed || failed < 1) return null;
+  return failed === 1
+    ? "1 delivery failed."
+    : `${failed.toLocaleString("en-US")} deliveries failed.`;
+}
+
+/** One line per attached action that no longer satisfies its registration
+ *  (decision 13), naming the action and its problems. Unregistered actions are not a
+ *  problem to compute and are skipped, matching `FormSummary.attention`. */
+export function attentionLines(
+  attachments: readonly FormActionAttachment[],
+  infos: ReadonlyMap<string, FormActionInfo>,
+  fields: readonly FormField[],
+  layout: FormLayout,
+): { action: string; text: string }[] {
+  const out: { action: string; text: string }[] = [];
+  for (const a of attachments) {
+    const info = infos.get(a.action);
+    if (!info) continue;
+    const problems = attachmentProblems(a, info, fields, layout);
+    if (problems.length === 0) continue;
+    out.push({
+      action: a.action,
+      text: `${info.label} needs attention: ${problems.join("; ")}.${
+        info.check ? " Visitors are being refused until it is fixed." : ""
+      }`,
+    });
+  }
+  return out;
+}
+
+/** The banners, in the order a publisher needs them. */
+export function responsesBanners(input: {
+  failedDeliveries: number | undefined;
+  /** Pending deliveries more than ten minutes past `next_at`, fenced like the list. */
+  overdueDeliveries: number | undefined;
+  filter: DeliveryFilter | undefined;
+  attention: readonly { action: string; text: string }[];
+}): ResponsesBanner[] {
+  const out: ResponsesBanner[] = [];
+  for (const line of input.attention) out.push({ kind: "attention", ...line });
+  const failed = failedBanner(input.failedDeliveries);
+  if (failed && input.filter !== "failed") out.push({ kind: "failed", text: failed });
+  if ((input.overdueDeliveries ?? 0) > 0) out.push({ kind: "overdue", text: OVERDUE_BANNER });
+  return out;
 }

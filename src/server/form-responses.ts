@@ -58,6 +58,14 @@ import { DEFAULT_SITE } from "../core/sites";
 import { readCappedBody, safeFilename, sniffContentType } from "./assets";
 import { hashToken } from "./auth/secrets";
 import { bindChunks, type FolioDb } from "./db";
+import {
+  type DeliveryFailureCategory,
+  type DeliveryRow,
+  type DeliveryStatus,
+  type FormAction,
+  validateActions,
+} from "./form-actions";
+import type { FormActionInfo } from "../core/form-actions";
 import { chainClause } from "./stories";
 import { FolioError, rethrow } from "./errors";
 import { LIKE_ESCAPE, likePattern } from "./like";
@@ -711,23 +719,56 @@ export function throttleHashes(ip: string, formId: string, now: number): Promise
 }
 
 /**
- * How many responses either bucket has collected in the last hour.
+ * How many **attempts** either bucket has made in the last hour: the stored
+ * responses plus the refused attempts (`form-actions.md` decision 23). A refusal
+ * stores nothing, so counting only `form_responses` made a refusing form an
+ * unthrottled endpoint.
  *
- * Three binds, never a caller-sized list, and served by `form_responses_throttle`
- * — the partial index, which holds only the rows with an address behind them.
- * Like `recentChallengeCount`, this is a *partial* answer and says so: it bounds
- * a script, not a botnet.
+ * One statement over two tables, six binds, never a caller-sized list; each half is
+ * served by its own throttle index (`form_responses_throttle`, the partial index that
+ * holds only rows with an address behind them, and `form_refusals_throttle`). Like
+ * `recentChallengeCount`, this is a *partial* answer and says so: it bounds a script,
+ * not a botnet.
  */
 export async function recentSubmissionCount(
   db: FolioDb,
   hashes: readonly [string, string],
   now: number = Date.now(),
 ): Promise<number> {
+  const since = now - RATE_WINDOW_MS;
   const row = await db
-    .prepare("select count(*) as n from form_responses where ip_hash in (?, ?) and created_at > ?")
-    .bind(hashes[0], hashes[1], now - RATE_WINDOW_MS)
+    .prepare(
+      `select (select count(*) from form_responses where ip_hash in (?, ?) and created_at > ?)
+            + (select count(*) from form_refusals where ip_hash in (?, ?) and created_at > ?) as n`,
+    )
+    .bind(hashes[0], hashes[1], since, hashes[0], hashes[1], since)
     .first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+/**
+ * Records one refused attempt for the rate limit (decision 23): the hour-bucketed
+ * hash the rate check computed, the form, and when. No answers and no id. The caller
+ * passes a hash only when the request had an address and the brand's limit is on, so
+ * an unthrottled request records nothing, exactly as it counts nothing.
+ */
+export async function recordRefusal(
+  db: FolioDb,
+  hash: string,
+  formId: string,
+  now: number = Date.now(),
+): Promise<void> {
+  await db
+    .prepare("insert into form_refusals (ip_hash, form_id, created_at) values (?, ?, ?)")
+    .bind(hash, formId, now)
+    .run();
+  // Pruned here as well as by the delivery pass, so a deployment with no cron does not
+  // keep every refused attempt for ever. The hash is bucketed by the hour, so an
+  // address's own rows cannot be the ones to age out: the age index serves this range.
+  await db
+    .prepare("delete from form_refusals where created_at < ?")
+    .bind(now - 2 * RATE_WINDOW_MS)
+    .run();
 }
 
 /* --------------------------------------------------------------- uploads --- */
@@ -1096,6 +1137,12 @@ export interface NewResponse {
   unasked: readonly string[];
   /** As `FormResponse.optionLabels`. Default `{}`. */
   optionLabels?: Readonly<Record<string, Readonly<Record<string, string>>>>;
+  /**
+   * The delivery rows this response owes (`form-actions.md` decision 9), committed in
+   * the same batch as the row. Empty or absent keeps the single statement a form with
+   * no delivering action has always issued.
+   */
+  deliveries?: readonly NewDelivery[];
   now?: number;
   /**
    * The site the submission arrived on — the live host that served the page the form
@@ -1105,6 +1152,20 @@ export interface NewResponse {
    * with no `sites`.
    */
   site?: string;
+}
+
+/** One delivery row written with its response. */
+export interface NewDelivery {
+  action: string;
+  /** `pending` with `nextAt` now, or `failed` with a `failure` category and no snapshot. */
+  status: "pending" | "failed";
+  nextAt: number | null;
+  /** The hostname that received the submission (decision 14). */
+  host: string;
+  /** The attachment's input-to-question mapping as it stood at submit (decision 11);
+   *  null for a row created `failed`. */
+  inputsMap: Readonly<Record<string, string>> | null;
+  failure: string | null;
 }
 
 export interface InsertedResponse {
@@ -1166,7 +1227,7 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
     page: input.page,
   };
 
-  const result = await db
+  const insert = db
     .prepare(
       `insert into form_responses
          (id, form_id, version, created_at, data, locale, page, ip_hash, body_hash, files, site_id, unasked, option_labels)
@@ -1194,10 +1255,41 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
       input.bodyHash,
       now - DUPLICATE_WINDOW_MS,
       input.site ?? DEFAULT_SITE,
-    )
-    .run();
+    );
 
-  return { response, stored: (result.meta.changes ?? 0) > 0 };
+  const owed = input.deliveries ?? [];
+  if (owed.length === 0) {
+    const result = await insert.run();
+    return { response, stored: (result.meta.changes ?? 0) > 0 };
+  }
+
+  // A D1 batch is one transaction: the response and its delivery rows commit together
+  // or not at all, and a collapsed duplicate (the `not exists` fired) never inserted
+  // its id, so the `where exists` below writes none (decision 9).
+  const results = await db.batch([
+    insert,
+    ...owed.map((delivery) =>
+      db
+        .prepare(
+          `insert into form_deliveries
+             (response_id, action, form_id, status, attempts, next_at, host, inputs_map, failure, created_at, updated_at)
+           select ?1, ?2, ?3, ?4, 0, ?5, ?6, ?7, ?8, ?9, ?9
+           where exists (select 1 from form_responses where id = ?1)`,
+        )
+        .bind(
+          response.id,
+          delivery.action,
+          response.formId,
+          delivery.status,
+          delivery.nextAt,
+          delivery.host,
+          delivery.inputsMap === null ? null : JSON.stringify(delivery.inputsMap),
+          delivery.failure,
+          now,
+        ),
+    ),
+  ]);
+  return { response, stored: (results[0]?.meta.changes ?? 0) > 0 };
 }
 
 /**
@@ -1324,13 +1416,32 @@ export interface ResponseRow {
   unasked: string[];
   /** Screened on read: `{}` for every row written before `0016`. */
   optionLabels: Record<string, Record<string, string>>;
+  /** One compact entry per delivery this response owes (decision 21). `[]` with none. */
+  deliveries: DeliverySummary[];
 }
+
+/** A delivery as the responses table shows it: enough for one status per action. */
+export interface DeliverySummary {
+  action: string;
+  status: DeliveryStatus;
+  attempts: number;
+}
+
+/** `GET …/responses/:rid`: the row, with each delivery in full. */
+export type ResponseDetail = Omit<ResponseRow, "deliveries"> & { deliveries: DeliveryRow[] };
 
 /** The columns every reader here projects. `ip_hash` and `body_hash` are absent
  *  from the *statement*, not filtered afterwards — the narrower read is the one
  *  that cannot leak. */
 const RESPONSE_COLS = `id, form_id as formId, version, created_at as createdAt,
   data, locale, page, files, unasked, option_labels as optionLabels`;
+
+/** `RESPONSE_COLS` for the list, plus its deliveries in the same statement
+ *  (decision 21): a correlated `json_group_array` served by `form_deliveries`' primary
+ *  key prefix, so a page of fifty rows is still one statement. */
+const LIST_COLS = `${RESPONSE_COLS},
+  (select json_group_array(json_object('action', d.action, 'status', d.status, 'attempts', d.attempts))
+     from form_deliveries d where d.response_id = form_responses.id) as deliveries`;
 
 interface ResponseDbRow {
   id: string;
@@ -1343,6 +1454,8 @@ interface ResponseDbRow {
   files: string;
   unasked: string;
   optionLabels: string;
+  /** Only the list selects it. */
+  deliveries?: string | null;
 }
 
 /** One answer, or nothing. Arrays are screened element by element, because a
@@ -1449,6 +1562,103 @@ function readOptionLabels(raw: string): Record<string, Record<string, string>> {
   return labels;
 }
 
+const DELIVERY_STATUSES: ReadonlySet<string> = new Set([
+  "pending",
+  "delivered",
+  "skipped",
+  "failed",
+  "cancelled",
+]);
+const DELIVERY_FAILURES: ReadonlySet<string> = new Set([
+  "threw",
+  "timeout",
+  "malformed",
+  "refused",
+  "not_registered",
+  "incomplete",
+  "predates_mapping",
+  "no_brand",
+  "gave_up",
+]);
+
+/** The list's `json_group_array`, screened: an entry that is not a delivery is not one,
+ *  and a malformed column answers `[]` rather than failing the page. */
+function readDeliverySummaries(raw: string | null | undefined): DeliverySummary[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const out: DeliverySummary[] = [];
+    for (const item of parsed) {
+      if (item === null || typeof item !== "object") continue;
+      const { action, status, attempts } = item as Record<string, unknown>;
+      if (typeof action !== "string" || typeof status !== "string") continue;
+      out.push({
+        action,
+        status: (DELIVERY_STATUSES.has(status) ? status : "failed") as DeliveryStatus,
+        attempts: typeof attempts === "number" ? attempts : 0,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+interface DeliveryDbRow {
+  action: string;
+  status: string;
+  attempts: number;
+  nextAt: number | null;
+  reference: string | null;
+  failure: string | null;
+  detail: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+const DELIVERY_COLS = `action, status, attempts, next_at as nextAt, reference, failure, detail,
+  created_at as createdAt, updated_at as updatedAt`;
+
+function toDelivery(row: DeliveryDbRow): DeliveryRow {
+  return {
+    action: row.action,
+    status: (DELIVERY_STATUSES.has(row.status) ? row.status : "failed") as DeliveryStatus,
+    attempts: row.attempts,
+    nextAt: row.nextAt,
+    reference: row.reference,
+    failure:
+      row.failure !== null && DELIVERY_FAILURES.has(row.failure)
+        ? (row.failure as DeliveryFailureCategory)
+        : null,
+    detail: row.detail,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** Every delivery a response owes, in action order. */
+export async function deliveriesOf(db: FolioDb, responseId: string): Promise<DeliveryRow[]> {
+  const { results } = await db
+    .prepare(`select ${DELIVERY_COLS} from form_deliveries where response_id = ? order by action`)
+    .bind(responseId)
+    .all<DeliveryDbRow>();
+  return results.map(toDelivery);
+}
+
+/** One delivery, or null. */
+export async function deliveryOf(
+  db: FolioDb,
+  responseId: string,
+  action: string,
+): Promise<DeliveryRow | null> {
+  const row = await db
+    .prepare(`select ${DELIVERY_COLS} from form_deliveries where response_id = ? and action = ?`)
+    .bind(responseId, action)
+    .first<DeliveryDbRow>();
+  return row ? toDelivery(row) : null;
+}
+
 function toResponse(row: ResponseDbRow): ResponseRow {
   return {
     id: row.id,
@@ -1461,6 +1671,7 @@ function toResponse(row: ResponseDbRow): ResponseRow {
     files: readFiles(row.files),
     unasked: readUnasked(row.unasked),
     optionLabels: readOptionLabels(row.optionLabels),
+    deliveries: readDeliverySummaries(row.deliveries),
   };
 }
 
@@ -1504,6 +1715,13 @@ function responseFilterSql(
   if (filter.to !== undefined) {
     clauses.push("created_at < ?");
     binds.push(filter.to);
+  }
+  if (filter.delivery !== undefined) {
+    // An `exists` on the form's deliveries, served by the primary key's prefix (decision 21).
+    clauses.push(
+      "exists (select 1 from form_deliveries d where d.response_id = form_responses.id and d.status = ?)",
+    );
+    binds.push(filter.delivery);
   }
   if (filter.q) {
     // `option_labels` as well, so "Serengeti" finds a response that stored only the
@@ -1578,6 +1796,43 @@ export interface ResponsePage extends Page<ResponseRow> {
   /** When this form's first surviving response arrived, or null when it has
    *  none. Absent unless `count` was asked for. */
   oldest?: number | null;
+  /**
+   * Under `count`: how many of this form's deliveries are `failed`, **inside the site
+   * fence** (decision 21): the same `sitesClause` as the list, through the response
+   * the delivery is about. Not narrowed by the filter, because it is a banner about
+   * the form.
+   */
+  failedDeliveries?: number;
+  /** Under `count`: pending deliveries more than ten minutes past `next_at`, fenced
+   *  the same way. Nonzero means nothing is running the retries. */
+  overdueDeliveries?: number;
+}
+
+/** How late a `pending` delivery must be before the screen says retries are not running. */
+export const DELIVERY_OVERDUE_MS = 10 * 60 * 1000;
+
+/**
+ * Failed and overdue delivery counts for one form, **inside the site fence**: joined
+ * to `form_responses` by primary key so a reader scoped to one site of a shared form
+ * counts only the deliveries of responses it can already see (decision 21).
+ */
+export async function deliveryCounts(
+  db: FolioDb,
+  formId: string,
+  sites?: readonly string[],
+  now: number = Date.now(),
+): Promise<{ failed: number; overdue: number }> {
+  const within = sitesClause(sites, "r.site_id");
+  const row = await db
+    .prepare(
+      `select coalesce(sum(d.status = 'failed'), 0) as failed,
+              coalesce(sum(d.status = 'pending' and d.next_at < ?), 0) as overdue
+         from form_deliveries d join form_responses r on r.id = d.response_id
+        where d.form_id = ? and d.status in ('failed', 'pending')${within.sql}`,
+    )
+    .bind(now - DELIVERY_OVERDUE_MS, formId, ...within.binds)
+    .first<{ failed: number; overdue: number }>();
+  return { failed: row?.failed ?? 0, overdue: row?.overdue ?? 0 };
 }
 
 /**
@@ -1604,7 +1859,7 @@ export async function listResponses(
   const [rows, counted] = await Promise.all([
     db
       .prepare(
-        `select ${RESPONSE_COLS} from form_responses
+        `select ${LIST_COLS} from form_responses
          ${whereOf(...clauses, resume.sql)} ${orderBy(RESPONSES_ORDER)} limit ?`,
       )
       .bind(...binds, ...resume.binds, limit + 1)
@@ -1621,14 +1876,21 @@ export async function listResponses(
               .bind(formId, ...within.binds)
               .first<{ oldest: number | null }>();
           })(),
+          deliveryCounts(db, formId, opts.sites),
         ])
       : null,
   ]);
 
   const page = paginate(rows.results.map(toResponse), limit, (row) => [row.createdAt, row.id]);
   if (!counted) return page;
-  const [total, oldest] = counted;
-  return { ...page, total, oldest: oldest?.oldest ?? null };
+  const [total, oldest, deliveries] = counted;
+  return {
+    ...page,
+    total,
+    oldest: oldest?.oldest ?? null,
+    failedDeliveries: deliveries.failed,
+    overdueDeliveries: deliveries.overdue,
+  };
 }
 
 /**
@@ -1643,7 +1905,7 @@ export async function responseById(
   formId: string,
   id: string,
   sites?: readonly string[],
-): Promise<ResponseRow | null> {
+): Promise<ResponseDetail | null> {
   const within = sitesClause(sites);
   const row = await db
     .prepare(
@@ -1651,7 +1913,42 @@ export async function responseById(
     )
     .bind(id, formId, ...within.binds)
     .first<ResponseDbRow>();
-  return row ? toResponse(row) : null;
+  if (!row) return null;
+  const { deliveries: _summaries, ...response } = toResponse(row);
+  return { ...response, deliveries: await deliveriesOf(db, id) };
+}
+
+/**
+ * A response as a **delivery** reads it: the immutable row (no statement updates
+ * `form_responses.data`), its files and the site that received it, which is the key
+ * to its brand in the cron (`form-actions.md` decisions 11 and 12). Null when it is
+ * gone, which a delivery treats as "drop the row".
+ */
+export async function responseForDelivery(
+  db: FolioDb,
+  id: string,
+): Promise<{ response: FormResponse; files: SubmittedFile[]; site: string } | null> {
+  const row = await db
+    .prepare(`select ${RESPONSE_COLS}, site_id as site from form_responses where id = ?`)
+    .bind(id)
+    .first<ResponseDbRow & { site: string }>();
+  if (!row) return null;
+  const read = toResponse(row);
+  return {
+    response: {
+      id: read.id,
+      formId: read.formId,
+      version: read.version,
+      createdAt: read.createdAt,
+      data: read.data,
+      unasked: read.unasked,
+      optionLabels: read.optionLabels,
+      locale: read.locale,
+      page: read.page,
+    },
+    files: read.files,
+    site: row.site,
+  };
 }
 
 /* -------------------------------------------------------------- deleting --- */
@@ -1694,14 +1991,40 @@ export async function deleteResponse(
   if (!row) return { deleted: false, files: 0 };
 
   const keys = uploadKeysOf(row.files);
-  const result = await db
-    .prepare(`delete from form_responses where id = ? and form_id = ?${within.sql}`)
-    .bind(id, formId, ...within.binds)
-    .run();
-  if ((result.meta.changes ?? 0) === 0) return { deleted: false, files: 0 };
+  const [, result] = await db.batch(deleteResponseStatements(db, formId, id, sites));
+  if ((result?.meta.changes ?? 0) === 0) return { deleted: false, files: 0 };
 
   await sweepUploads(bucket, keys, logger);
   return { deleted: true, files: keys.length };
+}
+
+/**
+ * **The one place a response's delete is spelled** (`form-actions.md` decision 20): the
+ * response's deliveries first, then the response, in one batch. `form_deliveries` has no
+ * foreign key, so a delete path that issues only the second statement leaves delivery
+ * rows (and their stored mapping and any `detail`) behind for ever. Both single and
+ * bulk deletes use this; a fourth path must too. The deliveries go only when the
+ * response is one the caller may see (the same `sitesClause`), and the response goes
+ * second so the guard still finds it.
+ */
+function deleteResponseStatements(
+  db: FolioDb,
+  formId: string,
+  id: string,
+  sites?: readonly string[],
+): D1PreparedStatement[] {
+  const within = sitesClause(sites);
+  return [
+    db
+      .prepare(
+        `delete from form_deliveries where response_id = ? and form_id = ?
+         and exists (select 1 from form_responses where id = ? and form_id = ?${within.sql})`,
+      )
+      .bind(id, formId, id, formId, ...within.binds),
+    db
+      .prepare(`delete from form_responses where id = ? and form_id = ?${within.sql}`)
+      .bind(id, formId, ...within.binds),
+  ];
 }
 
 /**
@@ -1870,11 +2193,7 @@ export async function deleteResponses(
       continue;
     }
     try {
-      const within = sitesClause(opts.sites);
-      await db
-        .prepare(`delete from form_responses where id = ? and form_id = ?${within.sql}`)
-        .bind(row.id, formId, ...within.binds)
-        .run();
+      await db.batch(deleteResponseStatements(db, formId, row.id, opts.sites));
       keys.push(...uploadKeysOf(row.files));
       report.done++;
     } catch (e) {
@@ -2419,6 +2738,13 @@ export interface FolioForms<Env> {
    * `load` (decision 6).
    */
   sources?: Readonly<Record<string, FolioOptionSource<Env>>>;
+  /**
+   * Submission actions an editor may attach to a form, by their own `id`
+   * (`docs/specs/content-model/form-actions.md` decision 1). Per brand, because
+   * `forms` is; the array's order is the builder's picker order. Define each with
+   * `formAction()`.
+   */
+  actions?: readonly FormAction<Env>[];
 }
 
 /** The field kinds a source's `settings` may use: the ones the builder can draw. */
@@ -2477,9 +2803,13 @@ export interface ResolvedForms {
   ratePerHour: number;
   /** `config.sources`, defaulted, keyed by id. Empty when the host registers none. */
   sources: ReadonlyMap<string, ResolvedOptionSource>;
+  /** `config.actions`, keyed by id, methods bound. Empty when the host registers none. */
+  actions: ReadonlyMap<string, FormAction<unknown>>;
+  /** The JSON half of each action, for the builder (`actionInfoOf`). Never functions. */
+  infos: ReadonlyMap<string, FormActionInfo>;
 }
 
-const FORMS_KEYS = ["verify", "ratePerHour", "sources"];
+const FORMS_KEYS = ["verify", "ratePerHour", "sources", "actions"];
 
 export const DEFAULT_SOURCE_TTL = 3600;
 export const MIN_SOURCE_TTL = 60;
@@ -2523,10 +2853,13 @@ export function validateForms<Env>(forms: FolioForms<Env> | undefined): Resolved
     );
   }
 
+  const { actions, infos } = validateActions(forms.actions);
   return {
     config: forms as FolioForms<unknown>,
     ratePerHour,
     sources: validateSources(forms.sources),
+    actions,
+    infos,
   };
 }
 

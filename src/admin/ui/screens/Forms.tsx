@@ -18,6 +18,9 @@ import {
   type FormRow,
   formStatus,
   questionsLabel,
+  ATTENTION_HINT,
+  ATTENTION_LABEL,
+  needsAttention,
   responsesLabel,
   statusHint,
   updatedLabel,
@@ -127,9 +130,16 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
       cell: (row) => {
         const status = formStatus(row);
         return (
-          <Badge tone={status === "open" ? "ok" : "neutral"} title={statusHint(row)}>
-            {status === "open" ? "Open" : "Closed"}
-          </Badge>
+          <span className={css.statusCell}>
+            <Badge tone={status === "open" ? "ok" : "neutral"} title={statusHint(row)}>
+              {status === "open" ? "Open" : "Closed"}
+            </Badge>
+            {needsAttention(row) ? (
+              <Badge tone="warn" title={ATTENTION_HINT}>
+                {ATTENTION_LABEL}
+              </Badge>
+            ) : null}
+          </span>
         );
       },
     },

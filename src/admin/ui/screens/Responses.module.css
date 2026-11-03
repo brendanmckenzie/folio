@@ -333,3 +333,83 @@
   font-size: var(--text-xs);
   color: var(--fg-subtle);
 }
+
+/* ------------------------------------------------------------ deliveries --- */
+
+.deliveryCell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* A banner reads as a note above the table, not as an error screen. */
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--state-warn-bg, var(--bg-inset));
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+
+.deliveries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.deliveriesHeading {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.delivery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.deliveryHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.deliveryName {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.deliveryFacts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.deliveryFacts div {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.deliveryFacts dt {
+  flex: 0 0 7rem;
+  color: var(--fg-subtle);
+}
+
+.deliveryFacts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

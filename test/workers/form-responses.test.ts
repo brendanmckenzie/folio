@@ -205,6 +205,7 @@ describe("listResponses", () => {
     expect(Object.keys(row as ResponseRow).sort()).toEqual([
       "createdAt",
       "data",
+      "deliveries",
       "files",
       "formId",
       "id",

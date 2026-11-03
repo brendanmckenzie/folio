@@ -67,6 +67,7 @@ const row = (over: Partial<ResponseRow> = {}): ResponseRow => ({
   files: [],
   unasked: [],
   optionLabels: {},
+  deliveries: [],
   ...over,
 });
 
