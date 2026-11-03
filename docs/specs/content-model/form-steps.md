@@ -582,9 +582,10 @@ error page from every form.
 
 The hook's `status.message` is chosen in this order. `ok` is `form.successMessage`.
 `closed` is `form.closedMessage`, then `messages.closed`, then the default. `refused` follows spec 36's lookup chain over
-`form.refusals`, then `messages.refused`. Every other status uses the JSON reply's
-`message` when the hook made the request, then `messages[kind]`, then
-`DEFAULT_STATUS_MESSAGES[kind]`. **The host's per-status copy is one `messages`
+`form.refusals`, then `messages.refused`. Every other status uses `messages[kind]`, then the JSON reply's
+`message` when the hook made the request, then
+`DEFAULT_STATUS_MESSAGES[kind]`. The host's text goes first because the reply always
+carries Folio's own default sentence. **The host's per-status copy is one `messages`
 option**, written once per site, and it replaces both hosts' maps.
 
 **Rejected: editor-written messages for `rate`, `verify`, `invalid` and `error`,

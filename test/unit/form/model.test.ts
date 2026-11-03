@@ -131,6 +131,17 @@ describe("statusView", () => {
       statusView({ ...f, closedMessage: "Gone" }, { kind: "closed" }, { closed: "x" }).message,
     ).toBe("Gone");
   });
+  it("a host's message beats the server reply for rate, verify, error and invalid", () => {
+    for (const kind of ["rate", "verify", "error", "invalid"] as const) {
+      expect(statusView(f, { kind, reply: "Server." }, { [kind]: "Host." }).message).toBe("Host.");
+      expect(statusView(f, { kind, reply: "Server." }).message).toBe("Server.");
+    }
+  });
+  it("refused keeps the editor's text ahead of the host's", () => {
+    expect(statusView(f, { kind: "refused", reason: "a.bad" }, { refused: "Host." }).message).toBe(
+      "Bad one.",
+    );
+  });
   it("refused follows the reason, then <action>.error, then the host, then the default", () => {
     expect(statusView(f, { kind: "refused", reason: "a.bad" }).message).toBe("Bad one.");
     expect(statusView(f, { kind: "refused", reason: "a.gone" }).message).toBe("A failed.");
@@ -148,9 +159,9 @@ describe("statusView", () => {
       "Server.",
     );
   });
-  it("the reply wins, then the host's copy, then the default", () => {
-    expect(statusView(f, { kind: "rate", reply: "R" }, { rate: "H" }).message).toBe("R");
-    expect(statusView(f, { kind: "rate" }, { rate: "H" }).message).toBe("H");
+  it("the host's copy wins, then the reply, then the default", () => {
+    expect(statusView(f, { kind: "rate", reply: "R" }, { rate: "H" }).message).toBe("H");
+    expect(statusView(f, { kind: "rate", reply: "R" }).message).toBe("R");
     expect(statusView(f, { kind: "verify" }).message).toBe("We could not verify that submission.");
   });
 });

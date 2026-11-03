@@ -2359,7 +2359,8 @@ holds on the same change.
 (`fields: { required: '…' }`). It replaces a host's own map; the defaults are
 `DEFAULT_STATUS_MESSAGES`, which the submit route's texts now come from too. For a
 `refused` result the text is the form's `refusals[reason]` first, then the action's
-`error` text, then `messages.refused`.
+`error` text, then `messages.refused`. For every other status a `messages` entry wins
+over the server's reply text, which is only Folio's default sentence.
 
 **Degradation.** Every engine call sits in one `try`. A descriptor the engine cannot
 read, or any throw, makes the hook log to the console, set `f.degraded` and fall back to
