@@ -105,6 +105,31 @@ export type { OutboundRef } from "./refs";
 // builder and the submit route, none of which should each carry their own
 // reading of what a valid `FormField` is.
 export { answersFrom, formState, prefillAnswers } from "./form-logic";
+// Form actions (`../../docs/specs/content-model/form-actions.md`): the attachment
+// vocabulary the builder and the server share.
+export {
+  ACTION_CODE,
+  ACTION_ID,
+  ACTION_INPUT_NAME,
+  attachmentProblems,
+  DEFAULT_ERROR_MESSAGE,
+  INPUT_ACCEPTS,
+  MAX_FORM_ACTIONS,
+  normaliseFormActions,
+  refusalsOf,
+  RESERVED_CODE,
+  validateFormActions,
+  validateSettings,
+} from "./form-actions";
+export type {
+  ActionCodeInfo,
+  ActionInputInfo,
+  ActionInputKind,
+  ActionSettingDef,
+  ActionSettingValue,
+  FormActionAttachment,
+  FormActionInfo,
+} from "./form-actions";
 export type { FormState } from "./form-logic";
 export {
   FILE_ACCEPT,
