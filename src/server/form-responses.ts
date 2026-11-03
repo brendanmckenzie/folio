@@ -50,6 +50,7 @@ import {
   type ResponseValue,
   type SubmissionCheck,
 } from "../core/form-answers";
+import { SCALAR_ANSWER_CHARS } from "../core/form-logic";
 import {
   type FileAccept,
   FILE_ACCEPT,
@@ -124,9 +125,6 @@ const DEFAULT_ANSWER_CHARS = 2_000;
 /** An option value is capped at 120 characters by `validate.ts`, so a
  *  `checkboxes` question's whole answer is bounded by how many it offers. */
 const OPTION_VALUE_CHARS = 120;
-
-/** A `number` or `date` answer, generously. */
-const SCALAR_ANSWER_CHARS = 64;
 
 /**
  * Bytes allowed for everything that is not an answer: Folio's own hidden inputs,

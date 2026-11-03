@@ -2,6 +2,7 @@ import { createExecutionContext, env, SELF, waitOnExecutionContext } from "cloud
 import { beforeEach, describe, expect, it } from "vitest";
 import { defineBlock, text } from "../../src/core";
 import { answersFrom, formState } from "../../src/core/form-logic";
+import { statusLocation } from "../../src/core/form-status";
 import { honeypotName } from "../../src/core/forms";
 import { createFolio } from "../../src/server";
 import { type FolioForms, ipHash, RATE_WINDOW_MS } from "../../src/server/form-responses";
@@ -831,6 +832,101 @@ describe("conditional questions", () => {
         "state",
         "street",
       ]);
+    });
+  });
+
+  describe("a step that does not apply is not asked (spec 38)", () => {
+    const fields = [
+      { name: "travelling", kind: "checkbox", label: "Travelling", step: "you" },
+      { name: "passport", kind: "text", label: "Passport", required: true, step: "trip" },
+      { name: "notes", kind: "text", label: "Notes", step: "trip" },
+    ];
+    const layout = {
+      steps: [
+        { name: "you", label: "You" },
+        { name: "trip", label: "Trip", showIf: { field: "travelling", eq: true } },
+      ],
+    };
+
+    it("requires and stores none of it over a native POST, and lists it as unasked", async () => {
+      const form = await makeForm("StepNative", fields, { layout });
+      const res = await submit(form.id, { _folio_page: "/c", passport: "stray", notes: "n" });
+      expect(locationOf(res).searchParams.get("folio_status")).toBe("ok");
+      expect(await stored(form.id)).toEqual({
+        data: { travelling: false },
+        unasked: ["passport", "notes"],
+      });
+    });
+
+    it("requires it once the step applies, over JSON", async () => {
+      const form = await makeForm("StepJson", fields, { layout });
+      const refused = await submitJson(form.id, { travelling: true });
+      expect(refused.status).toBe(422);
+      expect(Object.keys((await refused.json<{ fields: object }>()).fields)).toEqual(["passport"]);
+      const accepted = await submitJson(form.id, { travelling: false });
+      expect(accepted.status).toBe(200);
+    });
+
+    it("asks and requires exactly what formState says of the compiled stepped form", async () => {
+      const form = await makeForm("StepParity", fields, { layout });
+      const compiled = compileForm(form, { base: "/folio" });
+      const names = form.fields.map((f) => f.name);
+      const bodies: Record<string, string>[] = [
+        {},
+        { passport: "stray" },
+        { travelling: "1" },
+        { travelling: "1", passport: "P1", notes: "x" },
+      ];
+      for (const body of bodies) {
+        const state = formState(
+          compiled,
+          answersFrom(form, { getAll: (n) => (n in body ? [body[n]] : []) }),
+        );
+        const expectedInvalid = [...state.required].filter((n) => !(n in state.answers)).sort();
+        await env.DB.prepare("delete from form_responses").run();
+        const res = await submitJson(form.id, body);
+        if (expectedInvalid.length > 0) {
+          expect(res.status, JSON.stringify(body)).toBe(422);
+          expect(Object.keys((await res.json<{ fields: object }>()).fields).sort()).toEqual(
+            expectedInvalid,
+          );
+        } else {
+          expect(res.status, JSON.stringify(body)).toBe(200);
+          expect((await stored(form.id)).unasked, JSON.stringify(body)).toEqual(
+            names.filter((n) => !state.asked.has(n)),
+          );
+        }
+      }
+    });
+  });
+
+  describe("the 303's Location is core's statusLocation", () => {
+    it("matches byte for byte for ok, invalid, closed and an unknown form", async () => {
+      const form = await makeForm("Loc", [EMAIL_FIELD]);
+      const from = `${ORIGIN}/folio/f/${form.id}`;
+      const ok = await submit(form.id, { email: "a@b.co", _folio_page: "/c?x=1" });
+      expect(ok.headers.get("location")).toBe(
+        statusLocation("/c?x=1", from, { kind: "ok", form: form.name }),
+      );
+      const bad = await submit(form.id, { _folio_page: "/c" });
+      expect(bad.headers.get("location")).toBe(
+        statusLocation("/c", from, { kind: "invalid", form: form.name, invalid: ["email"] }),
+      );
+      await SELF.fetch(`${API}/forms/${form.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ expectedUpdatedAt: form.updatedAt, open: false }),
+      });
+      const closed = await submit(form.id, { _folio_page: "/c" });
+      expect(closed.headers.get("location")).toBe(
+        statusLocation("/c", from, { kind: "closed", form: form.name }),
+      );
+      const missing = await submit("frm_000000000000", { _folio_page: "/c" });
+      expect(
+        new URL(missing.headers.get("location") as string).searchParams.get("folio_status"),
+      ).toBe("error");
+      expect(
+        new URL(missing.headers.get("location") as string).searchParams.has("folio_form"),
+      ).toBe(false);
     });
   });
 

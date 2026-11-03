@@ -24,7 +24,7 @@ import { conditionRefusal, type FieldCondition } from "../core/conditions";
 import type { Json } from "../core/doc";
 import { ACTION_ID, MAX_FORM_ACTIONS, MAX_REFUSAL_MESSAGE } from "../core/form-actions";
 import { PRINTABLE } from "../core/form-answers";
-import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS } from "../core/forms";
+import { MAX_FORM_FIELDS, MAX_FORM_SECTIONS, MAX_FORM_STEPS } from "../core/forms";
 import { decodeCursor } from "../core/pagination";
 import type { DocumentType } from "../core/schema";
 import {
@@ -1991,12 +1991,35 @@ const FORM_SECTION = v.object(
   OBJECT,
 );
 
+/** One step of `forms.layout`: a section's shape, a page rather than a heading. */
+const FORM_STEP = v.object(
+  {
+    name: FIELD_NAME,
+    label: required(200),
+    help: v.optional(bounded(500)),
+    showIf: v.optional(FORM_CONDITION),
+    i18n: v.optional(
+      v.record(
+        LOCALE_CODE,
+        v.object({ label: v.optional(bounded(200)), help: v.optional(bounded(500)) }, OBJECT),
+      ),
+    ),
+  },
+  OBJECT,
+);
+
 const FORM_LAYOUT = v.object(
   {
     sections: v.optional(
       v.pipe(
         v.array(FORM_SECTION, "must be an array of sections"),
         v.maxLength(MAX_FORM_SECTIONS, `must be ${MAX_FORM_SECTIONS} sections or fewer`),
+      ),
+    ),
+    steps: v.optional(
+      v.pipe(
+        v.array(FORM_STEP, "must be an array of steps"),
+        v.maxLength(MAX_FORM_STEPS, `must be ${MAX_FORM_STEPS} steps or fewer`),
       ),
     ),
   },

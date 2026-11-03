@@ -21,6 +21,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { wasRefused } from "../../core/bulk";
 import { NO_STORE } from "../../core/cache-tags";
+import { DEFAULT_STATUS_MESSAGES, type SubmitStatus, statusLocation } from "../../core/form-status";
 import { type FormField, honeypotName } from "../../core/forms";
 import { isKnownLocale } from "../../core/locales";
 import {
@@ -923,17 +924,9 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
 /* ------------------------------------------------------ the public route --- */
 
-/**
- * What the redirect's `folio_status` says happened, and what a JSON caller reads
- * back as `status` (`../../../docs/specs/content-model/forms.md` decision 6).
- *
- * Six tokens rather than "it worked" and "it did not", because a host has
- * something different and true to say about each: a closed form is not a
- * validation error, a rate limit is not a captcha failure, and telling a genuine
- * visitor behind a shared NAT that their message was "invalid" is the one wrong
- * answer available.
- */
-type SubmitStatus = "ok" | "invalid" | "closed" | "rate" | "verify" | "refused" | "error";
+/* `SubmitStatus` is core's (`../../core/form-status`): the route that writes the
+ * vocabulary and the code that reads it cannot drift. Six tokens plus success
+ * (`../../../docs/specs/content-model/forms.md` decision 6). */
 
 interface Reply {
   json: boolean;
@@ -973,16 +966,12 @@ interface Reply {
  * is served it as a hit.
  */
 function locationFor(reply: Reply): string {
-  const url = new URL(reply.target, reply.from);
-  url.searchParams.set("folio_status", reply.status);
-  if (reply.form) url.searchParams.set("folio_form", reply.form.name);
-  if (reply.invalid?.length) url.searchParams.set("folio_invalid", reply.invalid.join(","));
-  // The reason is identifiers from code, never text or a per-submission value, so a
-  // refused page stays as cacheable as `?folio_status=ok` (decision 1).
-  if (reply.status === "refused" && reply.reason) {
-    url.searchParams.set("folio_reason", reply.reason);
-  }
-  return url.toString();
+  return statusLocation(reply.target, reply.from, {
+    kind: reply.status,
+    form: reply.form?.name,
+    invalid: reply.invalid,
+    reason: reply.reason,
+  });
 }
 
 /**
@@ -1089,6 +1078,8 @@ function refererPath(req: Request): string {
  *  9a. **The engine decides what was asked** (`validateSubmission`, spec 35): an
  *     answer or a file for a question that was not is dropped here, before
  *     anything is hashed or written.
+ *      9a also gates a question on its step (spec 38): a question on an unreachable
+ *      step is unasked.
  *  9b. **A refusal on a question whose list is unavailable** is `source_unavailable`
  *     (503), not `invalid` (spec 37).
  *
@@ -1196,7 +1187,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ...reply,
         status: "closed",
         code: "closed",
-        message: form.closedMessage || "This form is closed.",
+        message: form.closedMessage || DEFAULT_STATUS_MESSAGES.closed,
         httpStatus: 409,
       });
     }
@@ -1222,7 +1213,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ...reply,
         status: "verify",
         code: "verify",
-        message: "We could not verify that submission.",
+        message: DEFAULT_STATUS_MESSAGES.verify,
         httpStatus: 403,
       });
     }
@@ -1243,7 +1234,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           ...reply,
           status: "rate",
           code: "rate",
-          message: "Too many submissions from this address. Try again later.",
+          message: DEFAULT_STATUS_MESSAGES.rate,
           httpStatus: 429,
         });
       }
@@ -1335,7 +1326,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         invalid,
         fields: refusals,
         code: "invalid",
-        message: "Some answers need another look.",
+        message: DEFAULT_STATUS_MESSAGES.invalid,
         httpStatus: 422,
       });
     }
