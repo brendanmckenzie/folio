@@ -888,7 +888,7 @@ export function expiredLinkPage(): Promise<Response> {
  * collide on one entry, in the direction that serves an unpublished draft to the
  * public. `?_folio=draft` makes that worse rather than better: it looks exactly
  * like the published page, so a cached copy of it is indistinguishable from the
- * real thing. Belt and braces: the README also tells a host not to cache a request
+ * real thing. Belt and braces: the handbook also tells a host not to cache a request
  * carrying `_folio=`, because the failure mode is bad enough to be worth saying
  * twice.
  */
