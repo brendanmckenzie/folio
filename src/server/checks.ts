@@ -118,6 +118,8 @@ interface AuthoringContext {
   gaps: Map<string, { field: string; locale: string }[]>;
   /** Whether `blok` has a child in `slot`, for a required `blocks` field. */
   hasChildren: (uid: string, slot: string) => boolean;
+  /** The configured locale codes; empty on a single-locale site. */
+  declared: ReadonlySet<string>;
 }
 
 export type AuthoringCheck = (blok: Blok, def: BlockSchema, ctx: AuthoringContext) => Draft[];
@@ -125,12 +127,23 @@ export type AuthoringCheck = (blok: Blok, def: BlockSchema, ctx: AuthoringContex
 const labelOf = (def: BlockSchema | undefined, field: string): string =>
   def?.fields[field]?.label ?? field;
 
-/** Every stored value of a field: the source, then each locale's override. */
-function storedByLocale(blok: Blok, name: string): { locale?: string; value: Json }[] {
+/**
+ * Every stored value of a field: the source, then each **configured** locale's
+ * override. An override under a locale the site does not declare is drift, reported
+ * once per blok and code as `unknown-locale` (`fix: "schema"`); a per-value finding on
+ * it would point at `patch_fields`, which refuses that locale, and an agent would loop
+ * check, patch, `unsupported`, check.
+ */
+function storedByLocale(
+  blok: Blok,
+  name: string,
+  declared: ReadonlySet<string>,
+): { locale?: string; value: Json }[] {
   const out: { locale?: string; value: Json }[] = [];
   const source = blok.data[name];
   if (source !== undefined) out.push({ value: source });
   for (const [locale, map] of Object.entries(blok.i18n ?? {})) {
+    if (!declared.has(locale)) continue;
     const value = map[name];
     if (value !== undefined) out.push({ locale, value });
   }
@@ -172,7 +185,7 @@ const requiredEmpty: AuthoringCheck = (blok, def, ctx) => {
 };
 
 /** An image with no alt text (decision 16). Skips `decorative` fields and non-images. */
-const altMissing: AuthoringCheck = (blok, def) => {
+const altMissing: AuthoringCheck = (blok, def, ctx) => {
   const out: Draft[] = [];
   const wants = (value: unknown): boolean => {
     const a = asAsset(value);
@@ -182,7 +195,7 @@ const altMissing: AuthoringCheck = (blok, def) => {
     if (field.kind !== "asset" && field.kind !== "multiasset") continue;
     if (field.decorative) continue;
     const label = field.label ?? name;
-    for (const { locale, value } of storedByLocale(blok, name)) {
+    for (const { locale, value } of storedByLocale(blok, name, ctx.declared)) {
       // An override in a field that is not translatable is the drift
       // `translated-not-translatable` reports; its alt text is not this check's.
       if (locale !== undefined && !field.translatable) continue;
@@ -219,11 +232,11 @@ const altMissing: AuthoringCheck = (blok, def) => {
 };
 
 /** A prose value outside its field's advisory `length` (decisions 3 and 4), per stored value. */
-const lengthOutside: AuthoringCheck = (blok, def) => {
+const lengthOutside: AuthoringCheck = (blok, def, ctx) => {
   const out: Draft[] = [];
   for (const [name, field] of Object.entries(def.fields)) {
     if (!PROSE.has(field.kind)) continue;
-    for (const { locale, value } of storedByLocale(blok, name)) {
+    for (const { locale, value } of storedByLocale(blok, name, ctx.declared)) {
       const problem = lengthProblem(field, value);
       if (!problem) continue;
       out.push({
@@ -482,12 +495,14 @@ export async function checkDocument(
       }
     }
   }
+  const declared = new Set((ctx.locales?.available ?? []).map((l) => l.code));
   const authoring: AuthoringContext = {
     locales: ctx.locales,
     bare: ctx.bare,
     matchers: avoidMatchers(brand.writing),
     gaps,
     hasChildren: (uid, slot) => slots.has(`${uid}\u0000${slot}`),
+    declared,
   };
 
   const placed: { blok: Blok; draft: Draft }[] = [];
@@ -506,12 +521,22 @@ export async function checkDocument(
         add(fromAudit(finding, def));
       }
     }
+    // The audit's `unknown-locale` is silent with no `LocaleConfig`, so on a
+    // single-locale site every override is reported here instead, once per code:
+    // the same drift finding, and the only one, since the steps below skip them.
+    if (!ctx.locales) {
+      for (const [code, map] of Object.entries(blok.i18n ?? {})) {
+        if (Object.values(map).some((v) => v !== null)) {
+          add(fromAudit({ check: "unknown-locale", type: blok.type, field: code }, def));
+        }
+      }
+    }
     if (!def) continue;
 
     // 2. Every stored value against its field's shape.
     for (const [name, field] of Object.entries(def.fields)) {
       if (field.kind === "blocks") continue;
-      for (const { locale, value } of storedByLocale(blok, name)) {
+      for (const { locale, value } of storedByLocale(blok, name, declared)) {
         const reason = fieldShapeError(field, value);
         if (!reason) continue;
         add({

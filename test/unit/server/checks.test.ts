@@ -347,14 +347,30 @@ describe("checkDocument", () => {
     expect(en.findings.every((f) => f.locale === undefined)).toBe(true);
   });
 
-  it("never reports locale checks on a single-locale site", async () => {
+  it("reports an undeclared locale's overrides once, as schema drift, and nothing patch_fields would refuse", async () => {
+    // Configured en/fr/de; `xx` is not. Over-long, mis-shaped and alt-less values in it
+    // would each point at patch_fields, which answers `unsupported` for `xx`.
     const doc = sound();
-    doc.bloks.h!.i18n = { xx: { heading: "Hi" } };
-    const { c } = ctx({ locales: undefined });
-    const { findings } = await checkDocument(doc, brand(), c);
-    for (const name of ["translation-missing", "translated-not-translatable", "unknown-locale"]) {
+    doc.bloks.h!.i18n!.xx = { heading: "Far too long a heading", body: 5 as unknown as Json };
+    const configured = (await checkDocument(doc, brand(), ctx().c)).findings.filter(
+      (f) => f.locale === "xx",
+    );
+    expect(configured).toEqual([
+      expect.objectContaining({ check: "unknown-locale", uid: "h", field: null, fix: "schema" }),
+    ]);
+
+    // A single-locale site: the audit's own check is silent with no LocaleConfig, so the
+    // check reports the drift itself, still once per code, and no locale checks fire.
+    const single = sound();
+    single.bloks.h!.i18n = { de: { heading: "Willkommen zu Hause" } };
+    const { findings } = await checkDocument(single, brand(), ctx({ locales: undefined }).c);
+    expect(findings.filter((f) => f.uid === "h" && f.locale !== undefined)).toEqual([
+      expect.objectContaining({ check: "unknown-locale", locale: "de", fix: "schema" }),
+    ]);
+    for (const name of ["translation-missing", "translated-not-translatable", "length-over"]) {
       expect(only(findings, name)).toEqual([]);
     }
+    expect(findings.every((f) => f.fix !== "patch_fields" || f.locale === undefined)).toBe(true);
   });
 
   it("carries the audit's checks, unknown-locale with the code in locale", async () => {

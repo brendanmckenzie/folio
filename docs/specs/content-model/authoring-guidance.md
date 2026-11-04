@@ -1331,6 +1331,17 @@ documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships
 16. **Phase 3's commit lists the route in `NOT_TOOLS`** so the tree stays green between
     the route and the tool; phase 4 removes it.
 
+17. **An override under an undeclared locale is reported once, as drift, and never
+    per value** (review finding 1). Every per-value step (`field-shape`, `length-*`,
+    `alt-missing`) reads only the source and the *configured* locales' overrides, so no
+    finding sends an agent to `patch_fields` with a locale it refuses as `unsupported`
+    (a check, patch, refuse loop). The drift is `unknown-locale` (`warning`,
+    `fix: "schema"`), one per blok and code. With locales configured that is the audit's
+    own finding; on a single-locale site, where the audit's check is silent, the check
+    emits the same finding itself. This reverses the Edge cases line "a single-locale
+    site: `unknown-locale` never fires": an `i18n` map on a site with no locales is drift
+    too, and saying nothing left the agent nothing true to act on.
+
 **Verified by breaking it.** Each boundary was disabled and a test went red, then
 restored: putting `writing` on the manifest (`schema.test.ts`, `multi-brand-entry.test.ts`);
 dropping `writing` from `BRAND_KEYS` (`multi-brand.test.ts`); appending the voice to the
