@@ -10,19 +10,19 @@
  * own error envelope. **A verb that is not a v1 route cannot be a tool**, and a
  * tool cannot quietly reach further than the API does.
  *
- * **Fifteen rows, not one per block type** (decision 7). MCP clients discover a
+ * **Sixteen route-backed rows, not one per block type** (decision 7). MCP clients discover a
  * tool list once per session and cache it, so a list generated from a host's
  * manifest changes shape when the host deploys a block and two sessions against
  * one site disagree about what exists. `get_schema` reports the fields;
  * `write_content` takes them.
  *
- * **`preview_document` is the sixteenth row, and it is the one tool that is
+ * **`preview_document` is the seventeenth row, and it is the one tool that is
  * *not* a v1 route** — it is `?_folio=draft` plus a `browser` binding
  * (decisions 5, 5a), so it has no `method`/`path` at all. Both fields are
  * optional for exactly that one row; `test/unit/mcp/tools.test.ts`'s
  * route-round-trip skips a tool with no path, and `routes/mcp.ts`'s
  * `tools/call` branches to `../mcp/shot.ts`'s `previewDocument` instead of the
- * internal-dispatch path the other fifteen share.
+ * internal-dispatch path the other sixteen share.
  */
 import {
   type Access,
@@ -126,7 +126,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "get_schema",
     description:
-      "The site manifest: every document type, every block and the fields it declares, and the configured locales. Read this before writing content.",
+      "The site manifest: every document type, every block and the fields it declares, with any `help`, `guidance` and `length` the site wrote for them, the configured locales, and the brand's `writing` guide when it has one. Read this before writing content.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     method: "GET",
     path: "/schema",
@@ -230,6 +230,32 @@ export const MCP_TOOLS: readonly McpTool[] = [
     },
     method: "GET",
     path: "/documents/:id",
+    query: ["status", "locale"],
+    need: READ,
+  },
+  /**
+   * `GET /documents/:id/check` (`authoring-guidance.md` decisions 8 and 12). Not
+   * `narrowed`: its `need` is the route's own `READ`, and the default draft check
+   * is refused by the route naming `content:read:draft`, the v1 pattern
+   * `get_document`'s `?status=draft` already follows. `status`'s enum is pinned
+   * against the route's `CHECK_STATUS` by `tools.test.ts`.
+   */
+  {
+    name: "check_document",
+    description:
+      "Check a document for problems you can fix: values that do not fit their field, empty required fields, images with no alt text, links and references to missing or unpublished documents, untranslated fields, and the site's writing guidance (length limits, terms the brand avoids). Each finding gives the block uid, field and locale that patch_fields takes, and `fix` says which tool repairs it; `schema` means only a code change can, so tell your person. Checks the draft unless `status` is `published`. Advisory: nothing here blocks a publish.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: ID,
+        status: { type: "string", enum: ["draft", "published"], description: "Default draft." },
+        locale: { type: "string", description: "Limit the per-locale checks to this locale." },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    method: "GET",
+    path: "/documents/:id/check",
     query: ["status", "locale"],
     need: READ,
   },

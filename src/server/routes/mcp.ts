@@ -83,13 +83,19 @@ const META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
  * `instructions` is the one place a server can address the model in prose rather
  * than through a tool description, so it carries the two things that are true of
  * every tool here and are not visible from any single one: the list is filtered by
- * what the credential may do, and a write is a real edit that people see. On a
- * deployment with `sites` a scoped session gains a fourth (`instructionsFor`).
+ * what the credential may do, and a write is a real edit that people see; and,
+ * since spec 40, that the schema carries guidance and a check exists to run before
+ * a publish. On a deployment with `sites` a scoped session gains a fifth
+ * (`instructionsFor`).
  */
 const INSTRUCTIONS = [
   "Folio is a block-based CMS. Documents are trees of typed blocks; call get_schema first to learn the site’s block and field shapes before writing.",
   "The tools offered are already filtered to what this credential may do, so anything listed is permitted and nothing else exists to try.",
   "Writes go through the same log a human editor’s keystrokes do: an edit appears live in any open editor, is attributed to this token in the activity trail, and is undoable. Publishing is a separate, explicit step.",
+  // Static, and nothing of the brand's guide: `server/discover` answers without a
+  // credential (`authoring-guidance.md` decision 6), so the guide itself rides only
+  // on get_schema.
+  "Blocks and fields may carry `help`, `guidance` and `length`, and get_schema’s `writing` is the brand’s voice; follow them, then call check_document and fix what it reports before publishing.",
 ];
 
 export function mcpRoutes<Env>(

@@ -37,11 +37,17 @@ const user = (role: Role): UserActor => ({
 
 const named = (actor: Parameters<typeof toolsFor>[0]) => toolsFor(actor).map((tool) => tool.name);
 
+/**
+ * `check_document` is a read at `READ`, the route's own `need`, so a content:read
+ * token is offered it and the route refuses its draft default naming
+ * `content:read:draft` (`authoring-guidance.md` decision 12).
+ */
 const READS = [
   "get_schema",
   "search_documents",
   "query_documents",
   "get_document",
+  "check_document",
   "list_versions",
 ];
 /**
