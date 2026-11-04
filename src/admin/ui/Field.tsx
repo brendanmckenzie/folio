@@ -17,6 +17,13 @@ interface FieldProps {
   /** Right of the label. A locale note, a peer's name, "shared". */
   note?: ReactNode;
   /**
+   * A length counter at the label's end: `42 / 60`. `over` draws it in the warning
+   * colour. Advisory, so nothing is refused (`authoring-guidance.md` decision 14).
+   */
+  count?: { text: string; over: boolean };
+  /** Under the help line: a field's "Writing guide" disclosure. */
+  detail?: ReactNode;
+  /**
    * The control sits **beside** the label rather than under it, with the help text
    * under the label. For a boolean and nothing else: every other control fills the
    * column, and a 16px checkbox under its own label reads as a field whose value has
@@ -37,7 +44,17 @@ interface FieldProps {
  * inventing an id, and an unlabelled input in a CMS is a field nobody can
  * describe to a translator.
  */
-export function Field({ label, help, error, required, note, inline, children }: FieldProps) {
+export function Field({
+  label,
+  help,
+  error,
+  required,
+  note,
+  count,
+  detail,
+  inline,
+  children,
+}: FieldProps) {
   const id = useId();
   return (
     <div className={inline ? `${css.field} ${css.inline}` : css.field}>
@@ -49,6 +66,9 @@ export function Field({ label, help, error, required, note, inline, children }: 
           </span>
         ) : null}
         {note ? <span className={css.note}>{note}</span> : null}
+        {count ? (
+          <span className={count.over ? `${css.count} ${css.over}` : css.count}>{count.text}</span>
+        ) : null}
       </label>
       {children(id)}
       {error ? (
@@ -56,6 +76,7 @@ export function Field({ label, help, error, required, note, inline, children }: 
       ) : help ? (
         <p className={css.help}>{help}</p>
       ) : null}
+      {detail ?? null}
     </div>
   );
 }

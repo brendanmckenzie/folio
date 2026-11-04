@@ -13,8 +13,10 @@ import {
   fieldWarning,
   type FieldLayerInput,
   fieldWatchers,
+  guidanceOf,
   isEditable,
   isInlineControl,
+  lengthCounter,
   sourceText,
   watcherLabel,
   writeLocale,
@@ -81,8 +83,29 @@ export function FieldRow(props: Props) {
   const value = notOwn ? layer.value : boundValue(blok, name, mode, locale);
   const editable = isEditable(mode, readOnly) && !notOwn;
   const watchers = fieldWatchers(peers, blok.uid, name);
-  const warning = fieldWarning(field, value);
+  const warning = fieldWarning(field, value, name);
   const label = field.label ?? name;
+  // Both pure (`inspector-model.ts`), so the count the counter shows and the count
+  // `check_document` reports are one function's answer (`authoring-guidance.md`
+  // decision 14). Null for a field with neither, which draws nothing new.
+  const count = lengthCounter(field, value);
+  const guide = guidanceOf(field);
+  // The field's writing guide, under `help` and closed by default: the inspector is
+  // dense and an editor needs it once. A native `<details>`, already inside the
+  // `.folio-ui` scope this panel sits in, so no portal and no focus handling.
+  const guideDisclosure = guide ? (
+    <details className={css.guide}>
+      <summary>Writing guide</summary>
+      {guide.tone ? <p>{guide.tone}</p> : null}
+      {guide.examples.length ? (
+        <ul>
+          {guide.examples.map((example) => (
+            <li key={example}>{example}</li>
+          ))}
+        </ul>
+      ) : null}
+    </details>
+  ) : null;
 
   const source = mode === "translate" ? (blok.data[name] ?? null) : null;
   const sourceColumn =
@@ -150,6 +173,8 @@ export function FieldRow(props: Props) {
         label={label}
         {...(field.required ? { required: true } : {})}
         {...(field.help ? { help: field.help } : {})}
+        {...(count ? { count } : {})}
+        {...(guideDisclosure ? { detail: guideDisclosure } : {})}
         {...(mode === "shared" || watchers.length || layer ? { note } : {})}
         // The same predicate that lays this row out *across* rather than down also
         // asks `Field` to put the label beside the box, because for a boolean those

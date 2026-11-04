@@ -59,6 +59,27 @@
   font-size: var(--text-xs);
 }
 
+/* A field's "Writing guide" disclosure (`authoring-guidance.md` decision 14): quiet,
+   closed by default, the help line's size. */
+.guide {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.guide > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.guide > p,
+.guide > ul {
+  margin: var(--space-1) 0 0;
+}
+
+.guide > ul {
+  padding-left: var(--space-4);
+}
+
 /* The wrapper that carries `disabled` for a shared field. `display: contents` so
    it is invisible when it is not doing anything — a bare fieldset arrives with a
    border and a margin. */

@@ -87,6 +87,16 @@
   color: var(--fg-accent);
 }
 
+/* The block's own `help` (`authoring-guidance.md` decision 5), above the derived
+   description: the same one-line measure, one step stronger in colour. */
+.help {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .description {
   overflow: hidden;
   font-size: var(--text-xs);

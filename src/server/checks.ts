@@ -176,7 +176,7 @@ const altMissing: AuthoringCheck = (blok, def) => {
   const out: Draft[] = [];
   const wants = (value: unknown): boolean => {
     const a = asAsset(value);
-    return a !== null && a.contentType.startsWith("image/") && !a.alt.trim();
+    return a?.contentType.startsWith("image/") === true && !a.alt.trim();
   };
   for (const [name, field] of Object.entries(def.fields)) {
     if (field.kind !== "asset" && field.kind !== "multiasset") continue;

@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { externalUpdate } from "../../../src/admin/ui/screens/fields/useRichtext";
 import {
+  fieldWarning,
   fieldWatchers,
+  guidanceOf,
+  lengthCounter,
   visibleEntries,
   watcherLabel,
 } from "../../../src/admin/ui/screens/inspector-model";
 import type { Field } from "../../../src/core/fields";
+import { lengthMessage, lengthProblem } from "../../../src/core/guidance";
 import type { Presence } from "../../../src/core/protocol";
 
 /*
@@ -376,5 +380,56 @@ const inspectorTakesAnEditorSlot: (slot: EditorSlot) => InspectorProps = (slot) 
 describe("the 7a seam", () => {
   it("is a type-level assertion, and this keeps the import from reading as dead", () => {
     expect(typeof inspectorTakesAnEditorSlot).toBe("function");
+  });
+});
+
+/* ---------------------------------------------- authoring guidance (spec 40) --- */
+
+describe("the inspector and check_document agree on length (authoring-guidance.md decision 14)", () => {
+  const heading: Field = { kind: "text", label: "Heading", length: { max: 60 } };
+
+  it("counts against the limit, and turns over past it", () => {
+    expect(lengthCounter(heading, "x".repeat(42))).toEqual({ text: "42 / 60", over: false });
+    // 61 code points (122 UTF-16 units), so a `.length` count would disagree with the check.
+    expect(lengthCounter(heading, "🦁".repeat(61))).toEqual({ text: "61 / 60", over: true });
+    expect(lengthCounter(heading, null)).toEqual({ text: "0 / 60", over: false });
+  });
+
+  it("counts words against a word limit, and a minimum alone", () => {
+    const words: Field = { kind: "textarea", length: { max: 40, unit: "words" } };
+    expect(lengthCounter(words, "find your next safari")).toEqual({
+      text: "4 / 40 words",
+      over: false,
+    });
+    const least: Field = { kind: "text", length: { min: 20 } };
+    expect(lengthCounter(least, "short")).toEqual({ text: "5 (min 20)", over: true });
+    expect(lengthCounter(least, "")).toEqual({ text: "0 (min 20)", over: false });
+  });
+
+  it("draws no counter for a field with no length", () => {
+    expect(lengthCounter({ kind: "text" }, "anything")).toBeNull();
+    expect(lengthCounter({ kind: "number" }, 5)).toBeNull();
+  });
+
+  it("warns with the very sentence check_document's length-over carries", () => {
+    const value = "🦁".repeat(61);
+    expect(fieldWarning(heading, value, "heading")).toBe(
+      lengthMessage("Heading", lengthProblem(heading, value)!),
+    );
+    expect(fieldWarning(heading, value, "heading")).toBe(
+      "Heading is 61 characters; the limit is 60.",
+    );
+    // An unlabelled field is named as check_document names it, by its key.
+    expect(fieldWarning({ kind: "text", length: { max: 1 } }, "ab", "title")).toBe(
+      "title is 2 characters; the limit is 1.",
+    );
+  });
+
+  it("shows a writing guide only when a field declares one", () => {
+    expect(
+      guidanceOf({ guidance: { tone: "Second person.", examples: ["Find your next safari"] } }),
+    ).toEqual({ tone: "Second person.", examples: ["Find your next safari"] });
+    expect(guidanceOf({ guidance: { examples: [] } })).toBeNull();
+    expect(guidanceOf({})).toBeNull();
   });
 });

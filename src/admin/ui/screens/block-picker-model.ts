@@ -48,6 +48,13 @@ export interface PickerEntry {
   /** Absent for the plain block. Passed straight to `useBlocks.add`. */
   preset?: string;
   label: string;
+  /**
+   * The block's own `help`, when it declares one (`authoring-guidance.md`
+   * decision 5): what the block is for and when to choose it, drawn as the entry's
+   * first line. **Beside the derived description, not instead of it** — the two
+   * answer different questions, and the derived one still cannot drift.
+   */
+  help?: string;
   /** What you get, derived from the schema. See the file header. */
   description: string;
   /** The block type this entry belongs to — the group's heading. */
@@ -155,11 +162,13 @@ export function entriesFor(schema: SchemaIndex, allow: readonly string[]): Picke
     const def = schema[type];
     const label = def?.label ?? type;
     const fieldTerms = def ? fieldTermsOf(def) : "";
+    const help = def?.help ? { help: def.help } : {};
     if (!def?.presetsOnly) {
       entries.push({
         id: type,
         type,
         label,
+        ...help,
         description: bareDescription(schema, def),
         group: label,
         bare: true,
@@ -172,6 +181,7 @@ export function entriesFor(schema: SchemaIndex, allow: readonly string[]): Picke
         type,
         preset: preset.name,
         label: preset.label,
+        ...help,
         description: presetDescription(schema, def, label, preset),
         group: label,
         bare: false,

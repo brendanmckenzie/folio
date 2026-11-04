@@ -26,6 +26,7 @@
 import { matches } from "../../../core/conditions";
 import type { Blok, Doc, Json } from "../../../core/doc";
 import { type Field, isBlankValue } from "../../../core/fields";
+import { lengthMessage, lengthProblem, measureText } from "../../../core/guidance";
 import { type LayerState, layerStates, mergeLayers } from "../../../core/layers";
 import { isTranslatable } from "../../../core/locales";
 import type { Mutation } from "../../../core/mutations";
@@ -339,7 +340,7 @@ export function isInlineControl(kind: Field["kind"]): boolean {
  * red asterisk with no message at all, so "is this field satisfied" had no single
  * answer anywhere.
  */
-export function fieldWarning(field: Field, value: Json): string | null {
+export function fieldWarning(field: Field, value: Json, name?: string): string | null {
   if (field.kind === "references") {
     const n = asStoryIds(value).length;
     if (field.min !== undefined && n < field.min) {
@@ -354,8 +355,50 @@ export function fieldWarning(field: Field, value: Json): string | null {
     if (field.min !== undefined && value < field.min) return `Must be at least ${field.min}.`;
     if (field.max !== undefined && value > field.max) return `Must be at most ${field.max}.`;
   }
+  // Advisory, like everything here: the same sentence `check_document`'s
+  // `length-over` / `length-under` carries, from the same `lengthMessage`
+  // (`authoring-guidance.md` decision 14), so a person and an agent are told the
+  // same thing about the same value.
+  const length = lengthProblem(field, value);
+  // Labelled as `check_document` labels it, `label ?? name`, so the two sentences match.
+  if (length) return lengthMessage(field.label ?? name ?? "This field", length);
   if (field.required && isBlankValue(field, value)) return "Required — this is still empty.";
   return null;
+}
+
+/**
+ * The counter beside a field's label when it declares a `length`
+ * (`authoring-guidance.md` decision 14): `42 / 60`, `12 / 40 words`, or against a
+ * minimum alone `12 (min 20)`. Measured by `core/guidance.ts`'s `measureText`, the
+ * function `check_document` measures with, so the two cannot disagree by one.
+ * `over` is outside either bound with something typed; an empty field counts 0 and
+ * is never `over`, because emptiness is `required`'s to report.
+ *
+ * Null for a field with no `length`, which is what keeps the inspector of a host
+ * that declares none exactly as it was.
+ */
+export function lengthCounter(field: Field, value: Json): { text: string; over: boolean } | null {
+  if (field.kind !== "text" && field.kind !== "textarea" && field.kind !== "richtext") return null;
+  const length = field.length;
+  if (!length || (length.max === undefined && length.min === undefined)) return null;
+  const n = measureText(field, value) ?? 0;
+  const words = length.unit === "words" ? " words" : "";
+  const text =
+    length.max !== undefined ? `${n} / ${length.max}${words}` : `${n}${words} (min ${length.min})`;
+  return { text, over: lengthProblem(field, value) !== null };
+}
+
+/**
+ * What a field's "Writing guide" disclosure shows (`authoring-guidance.md`
+ * decision 14): its tone and its examples, or null when it declares neither, so no
+ * empty disclosure is ever drawn.
+ */
+export function guidanceOf(
+  field: Pick<Field, "guidance">,
+): { tone: string | null; examples: readonly string[] } | null {
+  const tone = field.guidance?.tone?.trim() || null;
+  const examples = (field.guidance?.examples ?? []).filter((e) => e.trim() !== "");
+  return tone || examples.length ? { tone, examples } : null;
 }
 
 /**

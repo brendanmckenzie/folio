@@ -380,3 +380,26 @@ describe("where ⌘⇧A lands", () => {
     });
   });
 });
+
+describe("a block's own help (authoring-guidance.md decision 5)", () => {
+  const guided: SchemaIndex = {
+    ...schema,
+    button: { ...button, help: "A single call to action. Use one per section." },
+  };
+
+  it("leads every entry of a block that declares it, bare and preset alike", () => {
+    const entries = entriesFor(guided, ["button", "image"]);
+    expect(entries.filter((e) => e.type === "button").map((e) => e.help)).toEqual([
+      "A single call to action. Use one per section.",
+      "A single call to action. Use one per section.",
+      "A single call to action. Use one per section.",
+    ]);
+    expect(entries.find((e) => e.type === "image")).not.toHaveProperty("help");
+  });
+
+  it("keeps the derived description exactly as it was", () => {
+    expect(entriesFor(guided, ["button"]).map((e) => e.description)).toEqual(
+      entriesFor(schema, ["button"]).map((e) => e.description),
+    );
+  });
+});

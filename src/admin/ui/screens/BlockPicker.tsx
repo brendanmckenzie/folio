@@ -205,6 +205,7 @@ function Picker({
                         kind of thing would imply otherwise. */}
                     {entry.bare ? null : <Badge tone="accent">Preset</Badge>}
                   </span>
+                  {entry.help ? <span className={css.help}>{entry.help}</span> : null}
                   <span className={css.description}>{entry.description}</span>
                 </button>
               ))}

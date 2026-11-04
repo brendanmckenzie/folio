@@ -25,6 +25,28 @@
   color: var(--fg-subtle);
 }
 
+/*
+ * A field's advisory length counter (`authoring-guidance.md` decision 14). Pushed to
+ * the label's end; after a `.note`, the note's own `margin-left: auto` has already
+ * taken the space, so the counter simply follows it. Tabular figures so the label
+ * does not shimmer as the count changes width.
+ */
+.count {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+}
+
+.note + .count {
+  margin-left: var(--space-1);
+}
+
+.over {
+  color: var(--state-warn-fg);
+}
+
 .help,
 .error {
   margin: 0;
