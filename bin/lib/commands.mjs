@@ -159,6 +159,7 @@ export async function upgradeCommand(argv, rt) {
       pin,
       packageManager: project.packageManager,
       wranglerBin: project.wranglerBin,
+      folioDir: project.folioDir,
       root: project.root,
       typecheck: Boolean(project.pkg.scripts?.typecheck),
       agentsFile,

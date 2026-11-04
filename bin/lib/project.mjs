@@ -60,10 +60,35 @@ export function readProject(dir, { config, persistTo, readers = {} } = {}) {
       ? { field: "devDependencies", spec: pkg.devDependencies.folio }
       : null;
 
-  const lock = LOCKFILES.find(([f]) => existsSync(path.join(root, f)));
+  // A workspace member's lockfile is the workspace root's, at or above the package
+  // and no higher than the repository (review M4).
+  const lock = findUp(
+    root,
+    (d) => {
+      const hit = LOCKFILES.find(([f]) => existsSync(path.join(d, f)));
+      return hit ? [path.relative(root, path.join(d, hit[0])), hit[1]] : null;
+    },
+    { stopAtGit: true },
+  );
   const fromField = /^(pnpm|npm|yarn|bun)@/.exec(pkg.packageManager ?? "")?.[1];
   const packageManager = fromField ?? lock?.[1] ?? "npm";
   const lockfile = lock?.[0] ?? null;
+
+  // Where Node resolves `folio` and the wrangler binary from: the package's own
+  // node_modules, else a hoisting workspace root above it. Relative to `root`, so
+  // fix steps and `rm -rf` name the copy that is actually installed.
+  const folioDir =
+    findUp(root, (d) =>
+      existsSync(path.join(d, "node_modules", "folio", "package.json"))
+        ? path.relative(root, path.join(d, "node_modules", "folio"))
+        : null,
+    ) ?? path.join("node_modules", "folio");
+  const wranglerBin =
+    findUp(root, (d) =>
+      existsSync(path.join(d, "node_modules", ".bin", "wrangler"))
+        ? path.relative(root, path.join(d, "node_modules", ".bin", "wrangler"))
+        : null,
+    ) ?? path.join("node_modules", ".bin", "wrangler");
 
   const wranglerConfig = config
     ? path.resolve(root, config)
@@ -87,20 +112,20 @@ export function readProject(dir, { config, persistTo, readers = {} } = {}) {
     dep,
     packageManager,
     lockfile,
-    installed: readInstalled(root),
+    folioDir,
+    installed: readInstalled(path.resolve(root, folioDir)),
     wranglerConfig,
     viteConfig,
     persistTo: persistTo ? path.resolve(root, persistTo) : null,
-    /** As the spec's fix steps spell it: relative, run with `cwd: root`. */
-    wranglerBin: "node_modules/.bin/wrangler",
+    /** Relative, run with `cwd: root`. */
+    wranglerBin,
     loadWrangler: memo(readers.wrangler ?? (() => hostTool(require, "wrangler"))),
     loadVite: memo(readers.vite ?? (() => hostTool(require, "vite"))),
   };
 }
 
-/** The Folio in `node_modules`, as installed, or `null` when there is none. */
-export function readInstalled(root) {
-  const dir = path.join(root, "node_modules", "folio");
+/** The Folio installed at `dir` (a `node_modules/folio`), or `null` when there is none. */
+export function readInstalled(dir) {
   let pkg;
   try {
     pkg = JSON.parse(readFileSync(path.join(dir, "package.json"), "utf8"));
@@ -156,11 +181,12 @@ export function isFile(p) {
 export function gitDirty(project, files, run) {
   const inside = run(["git", "rev-parse", "--is-inside-work-tree"], { cwd: project.root });
   if (inside.status !== 0 || inside.stdout.trim() !== "true") return { repo: false, dirty: [] };
-  const status = run(["git", "status", "--porcelain", "--", ...files], { cwd: project.root });
-  const dirty = status.stdout
-    .split("\n")
-    .filter(Boolean)
-    .map((l) => l.slice(3).trim());
+  // One file at a time, so the answer is in the caller's own spelling: porcelain
+  // prints repository-relative paths, which differ from a workspace member's.
+  const dirty = files.filter(
+    (f) =>
+      run(["git", "status", "--porcelain", "--", f], { cwd: project.root }).stdout.trim() !== "",
+  );
   return { repo: true, dirty };
 }
 
@@ -185,4 +211,16 @@ async function hostTool(require, name) {
 export function committedFile(project, rel, run) {
   const r = run(["git", "show", `HEAD:./${rel}`], { cwd: project.root });
   return r.status === 0 ? r.stdout : null;
+}
+
+/**
+ * The first non-null `test(dir)` from `start` upwards: Node's own walk. With
+ * `stopAtGit`, the directory holding `.git` is the last one tried.
+ */
+function findUp(start, test, { stopAtGit = false } = {}) {
+  for (let d = start; ; d = path.dirname(d)) {
+    const hit = test(d);
+    if (hit) return hit;
+    if ((stopAtGit && existsSync(path.join(d, ".git"))) || d === path.dirname(d)) return null;
+  }
 }

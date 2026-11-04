@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
@@ -542,5 +543,69 @@ describe("doctor's --persist-to", () => {
     const { by } = await check(root, { run: rec.run, only: ["d1.local"] }, { persistTo: "state" });
     expect(by["d1.local"].status).toBe("pass");
     expect(rec.calls[0]?.argv.slice(-2)).toEqual(["--persist-to", path.join(root, "state")]);
+  });
+});
+
+describe("a hoisted workspace (npm/yarn workspaces, review M4)", () => {
+  /** node_modules, the lockfile and .git at the workspace root; the site in packages/site. */
+  function mono() {
+    const root = host({ wrangler: null, vite: null });
+    mkdirSync(path.join(root, ".git"));
+    mkdirSync(path.join(root, "node_modules/.bin"), { recursive: true });
+    writeFileSync(path.join(root, "node_modules/.bin/wrangler"), "");
+    const site = path.join(root, "packages/site");
+    mkdirSync(path.join(site, "src/blocks"), { recursive: true });
+    writeFileSync(
+      path.join(site, "package.json"),
+      JSON.stringify({
+        name: "site",
+        dependencies: { folio: `github:brendanmckenzie/folio#v${CLI_VERSION}` },
+      }),
+    );
+    writeFileSync(path.join(site, "src/blocks/index.ts"), "export const blocks = [];\n");
+    writeFileSync(path.join(site, "vite.config.mjs"), viteWithApi());
+    writeFileSync(
+      path.join(site, "wrangler.jsonc"),
+      JSON.stringify({
+        ...starterWrangler(),
+        d1_databases: [
+          {
+            binding: "DB",
+            database_name: "folio",
+            database_id: "x",
+            migrations_dir: "../../node_modules/folio/migrations",
+          },
+        ],
+      }),
+    );
+    return { root, site };
+  }
+
+  it("finds the hoisted copy, the root's wrangler binary and the root's lockfile", async () => {
+    const { site } = mono();
+    const project = readProject(site) as {
+      folioDir: string;
+      wranglerBin: string;
+      lockfile: string;
+      installed: { version: string } | null;
+    };
+    expect(project.folioDir).toBe(path.join("..", "..", "node_modules", "folio"));
+    expect(project.wranglerBin).toBe(path.join("..", "..", "node_modules", ".bin", "wrangler"));
+    expect(project.lockfile).toBe(path.join("..", "..", "package-lock.json"));
+    expect(project.installed?.version).toBe(CLI_VERSION);
+    const { by } = await check(site);
+    expect(by["package.installed"].status).toBe("pass");
+    expect(by["wrangler.d1"].status).toBe("pass");
+    expect(by["d1.local"].fix?.[0]).toMatchObject({
+      kind: "run",
+      argv: [
+        path.join("..", "..", "node_modules", ".bin", "wrangler"),
+        "d1",
+        "migrations",
+        "apply",
+        "folio",
+        "--local",
+      ],
+    });
   });
 });

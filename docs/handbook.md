@@ -2020,7 +2020,8 @@ only when it is asked to.
 ### `folio doctor`
 
 Read-only and offline by default. It reads the host's `package.json`, the Folio
-in `node_modules` (not the copy the CLI runs from), and the wrangler and Vite
+in `node_modules` (not the copy the CLI runs from; in an npm or yarn workspace, the
+copy hoisted to the workspace root, found the way Node finds it), and the wrangler and Vite
 configs through the host's own `wrangler` and `vite`. It reads local D1 with
 `wrangler d1 execute --local --json` and a `select`, and only when the local state
 directory already exists, because wrangler creates an empty database on first

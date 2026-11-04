@@ -198,7 +198,7 @@ function hopPlan(input, releases, { stop, repairTo = null }) {
             status: "pending",
           },
         ]),
-    run("remove-installed", ["rm", "-rf", "node_modules/folio"]),
+    run("remove-installed", ["rm", "-rf", input.folioDir ?? "node_modules/folio"]),
     run("install", [input.packageManager, "install"]),
   ];
 
@@ -227,7 +227,12 @@ function hopPlan(input, releases, { stop, repairTo = null }) {
   }
   if (input.agentsFile) {
     steps.push(
-      run("agents", ["node", "node_modules/folio/bin/folio.mjs", "agents", input.agentsFile]),
+      run("agents", [
+        "node",
+        `${input.folioDir ?? "node_modules/folio"}/bin/folio.mjs`,
+        "agents",
+        input.agentsFile,
+      ]),
     );
   }
   if (input.typecheck) steps.push(run("typecheck", [input.packageManager, "run", "typecheck"]));

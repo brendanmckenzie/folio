@@ -200,6 +200,20 @@ describe("upgrade plans, 1.2.3 to 1.4.0", () => {
     ]);
   });
 
+  it("removes and runs the hoisted copy a workspace actually installed (review M4)", () => {
+    const steps = (
+      plan({ folioDir: "../../node_modules/folio", agentsFile: "AGENTS.md" }).hops[0] as Hop
+    ).steps;
+    expect(steps.find((s) => s.id === "remove-installed")?.argv).toEqual([
+      "rm",
+      "-rf",
+      "../../node_modules/folio",
+    ]);
+    expect(steps.find((s) => s.id === "agents")?.argv?.[1]).toBe(
+      "../../node_modules/folio/bin/folio.mjs",
+    );
+  });
+
   it("adds the agents step when the host carries the markers", () => {
     const steps = (plan({ agentsFile: "CLAUDE.md" }).hops[0] as Hop).steps;
     expect(steps.find((s) => s.id === "agents")?.argv).toEqual([

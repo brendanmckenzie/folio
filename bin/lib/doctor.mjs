@@ -73,7 +73,7 @@ export async function doctor(project, opts) {
   };
   const ids = opts.only?.length ? CHECK_IDS.filter((id) => opts.only.includes(id)) : CHECK_IDS;
   const checks = [];
-  for (const id of ids) checks.push(normalise(await need(id)));
+  for (const id of ids) checks.push(normalise(await need(id), project.folioDir));
   const summary = { pass: 0, warn: 0, fail: 0, skip: 0 };
   for (const c of checks) summary[c.status]++;
   return {
@@ -89,7 +89,11 @@ export async function doctor(project, opts) {
 }
 
 /** A `warn` or `fail` with no fix is a bug in this file, so it is caught here rather than shipped. */
-function normalise(check) {
+function normalise(check, folioDir = "node_modules/folio") {
+  // Docs anchors name the shipped files where this project has them installed.
+  const at = (d) => (d?.startsWith("node_modules/folio/") ? `${folioDir}/${d.slice(19)}` : d);
+  if (check.docs) check.docs = at(check.docs);
+  for (const f of check.fix ?? []) if (f.docs) f.docs = at(f.docs);
   if ((check.status === "warn" || check.status === "fail") && !check.fix?.length) {
     throw new Error(`doctor: check ${check.id} answered ${check.status} with no fix`);
   }
@@ -131,7 +135,7 @@ function addCommand(project, spec, dev = false) {
 
 function reinstall(ctx) {
   return [
-    ctx.run({ argv: ["rm", "-rf", "node_modules/folio"] }),
+    ctx.run({ argv: ["rm", "-rf", ctx.project.folioDir] }),
     ctx.run({ argv: installCommand(ctx.project) }),
   ];
 }
@@ -185,7 +189,7 @@ async function readWrangler(project, opts) {
 export function folioDatabases(config, configDir, project) {
   const target =
     project.installed?.migrationsDir ??
-    realOrResolved(path.join(project.root, "node_modules", "folio", "migrations"));
+    realOrResolved(path.join(project.root, project.folioDir, "migrations"));
   return (config.d1_databases ?? []).filter(
     (d) => d.migrations_dir && realOrResolved(path.resolve(configDir, d.migrations_dir)) === target,
   );
@@ -455,7 +459,7 @@ const CHECKS = {
     }
     const rel = path.relative(
       w.configDir,
-      path.join(ctx.project.root, "node_modules/folio/migrations"),
+      path.join(ctx.project.root, ctx.project.folioDir, "migrations"),
     );
     const copied = (w.config.d1_databases ?? []).find((d) => {
       if (!d.migrations_dir) return false;

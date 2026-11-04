@@ -1246,6 +1246,12 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
 - **Every answer carries `ok`, and a refusal is `{ schema, …, ok: false, error: {
   message, fix } }`** in all four schemas. The output examples above had no shape
   for a refusal; this is additive.
+- **A hoisted workspace resolves like Node does** (review M4). With npm or yarn
+  workspaces `node_modules` sits at the workspace root, and the CLI looked only in
+  the package's own. The installed Folio and `node_modules/.bin/wrangler` are now
+  found by walking up from the package, the lockfile likewise (no higher than the
+  directory holding `.git`), and every fix step, `rm -rf`, docs link and the dirty
+  check name the paths actually found. pnpm links per package, so it was unaffected.
 - **`--json` stdout is guarded for the whole run** (review M3, L5). Loading the
   host's Vite config runs it in-process, and a `console.log` there (dotenv's banner)
   landed in front of the JSON. Under `--json`, `bin/folio.mjs` points
