@@ -1,4 +1,3 @@
-import { lazy, Suspense } from "react";
 import type { Json } from "../../../../core/doc";
 import type { Field as FieldDef } from "../../../../core/fields";
 import {
@@ -17,18 +16,8 @@ import css from "./fields.module.css";
 import { FormField } from "./FormField";
 import { LinkField } from "./LinkField";
 import { ReferenceField, ReferencesField } from "./ReferenceField";
+import { LazyRichText } from "./LazyRichText";
 import type { FieldChrome } from "./RichTextField";
-
-/**
- * The rich-text field is a separate chunk: TipTap and ProseMirror are over half the
- * admin's JavaScript and most screens have no prose field. **Nothing else may import
- * `RichTextField` or `useRichtext` for a value** (the `FieldChrome` type above is
- * erased), or the split saves nothing. Its CSS module is `fields.module.css`, which
- * the rest of the fields share, so it stays in the entry's one stylesheet.
- */
-const RichTextField = lazy(() =>
-  import("./RichTextField").then((m) => ({ default: m.RichTextField })),
-);
 
 /**
  * Everything a control needs that is the same for every field in the panel. The
@@ -247,22 +236,20 @@ export function Control(props: ControlProps) {
 
     case "richtext":
       return (
-        <Suspense fallback={<div className={css.rtPending} aria-busy="true" />}>
-          <RichTextField
-            value={value}
-            {...(props.describedBy ? { describedBy: props.describedBy } : {})}
-            {...(props.invalid ? { invalid: true } : {})}
-            limits={field}
-            editable={editable}
-            onChange={onChange}
-            chrome={props.chrome}
-            stories={env.resolution.stories}
-            apiBase={env.apiBase}
-            mount={env.mount}
-            expanded={props.expanded}
-            onExpand={props.onExpand}
-          />
-        </Suspense>
+        <LazyRichText
+          value={value}
+          {...(props.describedBy ? { describedBy: props.describedBy } : {})}
+          {...(props.invalid ? { invalid: true } : {})}
+          limits={field}
+          editable={editable}
+          onChange={onChange}
+          chrome={props.chrome}
+          stories={env.resolution.stories}
+          apiBase={env.apiBase}
+          mount={env.mount}
+          expanded={props.expanded}
+          onExpand={props.onExpand}
+        />
       );
 
     case "asset":

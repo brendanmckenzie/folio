@@ -166,7 +166,14 @@ export function RichTextField({
     editor.commands.focus();
   }, [editor, expanded]);
 
-  if (!editor) return <p className={css.note}>Loading editor…</p>;
+  if (!editor)
+    return (
+      // The same reservation the chunk's Suspense fallback made, so the height holds
+      // through `immediatelyRender: false`'s first render too.
+      <div className={css.rtPending} aria-busy="true">
+        <p className={css.note}>Loading editor…</p>
+      </div>
+    );
 
   const marks = new Set<string>(limits.marks ?? RICHTEXT_MARKS);
   const nodes = new Set<string>(limits.nodes ?? RICHTEXT_NODES);
