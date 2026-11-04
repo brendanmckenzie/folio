@@ -1342,6 +1342,10 @@ documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships
     site: `unknown-locale` never fires": an `i18n` map on a site with no locales is drift
     too, and saying nothing left the agent nothing true to act on.
 
+18. **A required field with no stored key is one finding** (review finding 2):
+    `required-empty`, the warning. The audit's `missing-field` for the same field is
+    dropped, so `counts` do not count one absent required field as two problems.
+
 **Verified by breaking it.** Each boundary was disabled and a test went red, then
 restored: putting `writing` on the manifest (`schema.test.ts`, `multi-brand-entry.test.ts`);
 dropping `writing` from `BRAND_KEYS` (`multi-brand.test.ts`); appending the voice to the

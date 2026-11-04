@@ -518,6 +518,15 @@ export async function checkDocument(
         if (finding.check === "date-invalid") continue;
         // A bare layer leaves fields out on purpose: absent means inherited.
         if (ctx.bare && finding.check === "missing-field") continue;
+        // A required field with no key is `required-empty`'s finding (a warning, the
+        // stronger of the two); saying it twice would count one problem as two.
+        if (
+          finding.check === "missing-field" &&
+          finding.field &&
+          def?.fields[finding.field]?.required
+        ) {
+          continue;
+        }
         add(fromAudit(finding, def));
       }
     }

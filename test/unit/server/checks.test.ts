@@ -244,6 +244,16 @@ describe("checkDocument", () => {
     ]);
   });
 
+  it("reports a required field with no stored key once, as required-empty, not also missing-field", async () => {
+    const doc = sound();
+    delete doc.bloks.root!.data.title;
+    const { findings, counts } = await checkDocument(doc, brand(), ctx().c);
+    expect(
+      findings.filter((f) => f.uid === "root" && f.field === "title").map((f) => f.check),
+    ).toEqual(["required-empty"]);
+    expect(counts).toEqual({ error: 0, warning: 1, info: 0 });
+  });
+
   it("reports alt-missing for an image, not a decorative field and not a PDF", async () => {
     const doc = sound();
     doc.bloks.h!.data.image = image(" ");
