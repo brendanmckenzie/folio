@@ -372,12 +372,18 @@ export function fieldWarning(field: Field, value: Json, name?: string): string |
  * minimum alone `12 (min 20)`. Measured by `core/guidance.ts`'s `measureText`, the
  * function `check_document` measures with, so the two cannot disagree by one.
  * `over` is outside either bound with something typed; an empty field counts 0 and
- * is never `over`, because emptiness is `required`'s to report.
+ * is never `over`, because emptiness is `required`'s to report. `near` is the early
+ * cue: within the limit but at `NEAR_LIMIT` of a `max` or more, so the counter
+ * changes before the sentence below it appears rather than at the same keystroke.
+ * Never both, and never against a minimum alone, which has nothing to approach.
  *
  * Null for a field with no `length`, which is what keeps the inspector of a host
  * that declares none exactly as it was.
  */
-export function lengthCounter(field: Field, value: Json): { text: string; over: boolean } | null {
+export function lengthCounter(
+  field: Field,
+  value: Json,
+): { text: string; over: boolean; near: boolean } | null {
   if (field.kind !== "text" && field.kind !== "textarea" && field.kind !== "richtext") return null;
   const length = field.length;
   if (!length || (length.max === undefined && length.min === undefined)) return null;
@@ -385,8 +391,17 @@ export function lengthCounter(field: Field, value: Json): { text: string; over: 
   const words = length.unit === "words" ? " words" : "";
   const text =
     length.max !== undefined ? `${n} / ${length.max}${words}` : `${n}${words} (min ${length.min})`;
-  return { text, over: lengthProblem(field, value) !== null };
+  const over = lengthProblem(field, value) !== null;
+  const near = !over && length.max !== undefined && n >= length.max * NEAR_LIMIT;
+  return { text, over, near };
 }
+
+/**
+ * The share of a `length.max` at which the counter turns to its near-limit state. 90%,
+ * because the spec names no threshold: a heading of 60 turns at 54, which leaves about
+ * a word of room, and a 160-character description at 144.
+ */
+export const NEAR_LIMIT = 0.9;
 
 /**
  * What a field's "Writing guide" disclosure shows (`authoring-guidance.md`

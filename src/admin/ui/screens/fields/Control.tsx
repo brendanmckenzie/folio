@@ -45,6 +45,11 @@ export interface ControlProps {
    * a description of the input and never part of its name.
    */
   describedBy?: string;
+  /**
+   * The value is past its `length` limit. The prose controls carry it as
+   * `aria-invalid`, beside the warning sentence `describedBy` now names.
+   */
+  invalid?: boolean;
   /** The field's declared name. Never read from the selection — an input can issue
    * its write long after it rendered (an upload finishing is the case). */
   name: string;
@@ -92,6 +97,7 @@ export function Control(props: ControlProps) {
         <Textarea
           id={id}
           aria-describedby={props.describedBy}
+          aria-invalid={props.invalid ? true : undefined}
           rows={field.rows ?? 4}
           placeholder={field.placeholder}
           value={String(value ?? "")}
@@ -232,6 +238,7 @@ export function Control(props: ControlProps) {
         <RichTextField
           value={value}
           {...(props.describedBy ? { describedBy: props.describedBy } : {})}
+          {...(props.invalid ? { invalid: true } : {})}
           limits={field}
           editable={editable}
           onChange={onChange}
@@ -293,6 +300,7 @@ export function Control(props: ControlProps) {
         <Input
           id={id}
           aria-describedby={props.describedBy}
+          aria-invalid={props.invalid ? true : undefined}
           type="text"
           placeholder={field.kind === "text" ? field.placeholder : undefined}
           value={String(value ?? "")}

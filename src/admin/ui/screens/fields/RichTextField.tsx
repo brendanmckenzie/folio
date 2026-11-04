@@ -31,8 +31,10 @@ export interface FieldChrome {
 
 interface Props {
   value: Json;
-  /** The length counter's id, as the prose surface's `aria-describedby`. */
+  /** The length counter's and the warning's ids, as the prose surface's `aria-describedby`. */
   describedBy?: string;
+  /** Past its `length` limit: the prose surface's `aria-invalid`. */
+  invalid?: boolean;
   limits: RichtextLimits;
   editable: boolean;
   onChange: (value: Json) => void;
@@ -126,6 +128,7 @@ export function RichTextField({
   expanded,
   onExpand,
   describedBy,
+  invalid,
 }: Props) {
   const [linking, setLinking] = useState(false);
   const { editor, behind } = useRichtext(
@@ -135,6 +138,7 @@ export function RichTextField({
     onChange,
     css.surface,
     describedBy,
+    invalid,
   );
 
   /**

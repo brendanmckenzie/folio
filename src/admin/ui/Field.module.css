@@ -51,8 +51,15 @@
   color: var(--fg-subtle);
 }
 
-.over {
+/* Two states past rest. Near the limit is the warning colour, an early cue with no
+   sentence of its own; over it is the danger colour of the sentence `FieldRow` draws
+   under the control, so the counter and the sentence in one field agree. */
+.near {
   color: var(--state-warn-fg);
+}
+
+.over {
+  color: var(--state-danger-fg);
 }
 
 .help,

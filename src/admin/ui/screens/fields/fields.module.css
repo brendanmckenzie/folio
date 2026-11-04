@@ -66,9 +66,15 @@
   color: var(--fg-subtle);
 }
 
+/* At least 24 x 24 CSS px, WCAG 2.2's target size minimum: at the help line's 11px the
+   bare summary was 16px tall. The line height makes the row, so the label stays
+   centred in it and the disclosure marker keeps its `list-item` display. */
 .guide > summary {
   cursor: pointer;
   width: fit-content;
+  min-inline-size: 24px;
+  min-block-size: 24px;
+  line-height: 24px;
 }
 
 .guide > p,
