@@ -82,6 +82,14 @@ sequence because the dependency graph is the same one.
 | 36 | [Form actions](content-model/form-actions.md) | content model | L | — | `0017` (landed) | owner, 2026-11-03 |
 | 37 | [Form option sources](content-model/form-option-sources.md) | content model | L | #54 | `0016` (landed) | owner, 2026-11-03 |
 | 38 | [Form steps and the folio/form hook](content-model/form-steps.md) | content model | L | #55 | none | owner, 2026-11-03 |
+| 39 | [Agent suggestions, and agents in the room](editing/agent-suggestions.md) | editing | L | 6 | `0018` (claimed) | owner, 2026-11-04 |
+| 40 | [Authoring guidance and content checks](content-model/authoring-guidance.md) | content model | L | — | none | owner, 2026-11-04 |
+| 41 | [An agent-friendly CLI](foundation/agent-cli.md) | foundation | M | — | none | owner, 2026-11-04 |
+| 42 | [The command palette](editing/command-palette.md) | editing | M | — | none | owner, 2026-11-04 |
+
+**39–42 are `draft`** (2026-11-04) and build in the order 40 and 41 (v1.4, sharing no
+source file), then 39 (v1.5: `PROTOCOL_VERSION` 6 and `0018`), then 42, after a UI review
+of the core flows and after 39, whose changes to `EditorShell.tsx` it rebases onto.
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were
