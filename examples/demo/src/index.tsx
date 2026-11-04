@@ -512,7 +512,7 @@ export default {
     // session: served by a replica near the visitor rather than by the primary
     // wherever it is, and all of them agreeing on one version of the database.
     // `folio.published(env, …)` and friends still exist and each open their own
-    // session — right for a cron, wrong for a page (`README.md`, "Reads and
+    // session — right for a cron, wrong for a page (`docs/handbook.md`, "Reads and
     // replicas"). The `req` is what makes `draftAt` possible at all.
     const reader = folio.reader(env, req);
     // The inverse of `route` above, and this project's job rather than Folio's:

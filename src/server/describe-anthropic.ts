@@ -22,7 +22,7 @@
  * `fetch`, because no API key exists in the repository and a suite that needed
  * one would be a suite nobody could run. The request shape below is written
  * from the documented Messages API and the response reader is written to
- * survive being wrong about it — but *proven* it is not, and the README says so
+ * survive being wrong about it — but *proven* it is not, and the handbook says so
  * where a host will read it. Treat the first live run as the test.
  *
  * Three things it deliberately does not do:
