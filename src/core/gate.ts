@@ -74,7 +74,7 @@ export function isUngated(
  * whichever slot the children were in — and every `richtext` field the root
  * itself declares is nulled, in `data` and in every locale of `i18n`. What
  * survives is the root's scalars, assets, links and references, which is page
- * metadata by the sanctioned model (`README.md`'s "page metadata lives on the
+ * metadata by the sanctioned model (`docs/handbook.md`'s "page metadata lives on the
  * root block") and the same set a `collection` item draws a card from.
  *
  * The host renders `<Page doc={page.doc}>` unchanged and puts its paywall where

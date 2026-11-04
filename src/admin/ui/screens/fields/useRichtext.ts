@@ -56,7 +56,7 @@ import { asLink } from "../../../../core/values";
  *     behaviour: another editor over the socket, an undo, or a version restore.
  *
  * This is not a merge and does not pretend to be one: last write still wins
- * (CRDTs are out of scope, and `README.md` says why). What it fixes is that
+ * (CRDTs are out of scope, and `docs/handbook.md` says why). What it fixes is that
  * last-write-wins was *unusable* with two people in one prose field, rather than
  * merely lossy — and it costs nothing, because the deferred value is never
  * snapshotted. `'defer'` simply skips this pass; the effect re-runs on blur and

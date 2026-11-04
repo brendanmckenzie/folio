@@ -10,7 +10,7 @@
  * There is no bootstrap route, and that is on purpose: an endpoint that creates
  * the first admin is an endpoint that creates an admin, and no check it could
  * make would be worth more than `wrangler d1 execute`. Seeding the first row is
- * a deploy step (see README).
+ * a deploy step (see the handbook).
  */
 import { Hono } from "hono";
 import * as v from "valibot";
