@@ -166,3 +166,27 @@ describe("the length counter's states", () => {
     expect(colour(fieldSheet, ".near")).toBe("var(--state-warn-fg)");
   });
 });
+
+describe("the Writing guide disclosure", () => {
+  it("is a target of at least 24 x 24 CSS px (WCAG 2.2 target size minimum)", () => {
+    const rule =
+      sheet("src/admin/ui/screens/fields/fields.module.css").match(
+        /\n\.guide > summary \{([^}]*)\}/,
+      )?.[1] ?? "";
+    const px = (prop: string) => Number(rule.match(new RegExp(`${prop}:\\s*(\\d+)px`))?.[1] ?? 0);
+    // happy-dom lays nothing out, so the rule is read where it is written. The line
+    // height is what gives the one-line summary its height; the minimums hold it there.
+    expect(px("min-block-size")).toBeGreaterThanOrEqual(24);
+    expect(px("line-height")).toBeGreaterThanOrEqual(24);
+    expect(px("min-inline-size")).toBeGreaterThanOrEqual(24);
+  });
+
+  it("renders as a summary inside the field when the field has guidance", () => {
+    const view = row(
+      { ...heading, guidance: { tone: "Second person.", examples: ["Find your next safari"] } },
+      "",
+    );
+    const summary = view.container.querySelector("details > summary");
+    expect(summary?.textContent).toBe("Writing guide");
+  });
+});
