@@ -182,62 +182,78 @@ export function FieldRow(props: Props) {
         // and its label stranded above it is not a field anybody reads as on or off.
         {...(isInlineControl(field.kind) ? { inline: true } : {})}
       >
-        {(id, describedBy) => (
-          // Down the row for every kind but one. See `isInlineControl`: a 16px
-          // checkbox leaves the rest of its row empty, so its warning goes beside it.
-          <div className={isInlineControl(field.kind) ? css.row : css.stack}>
-            {/*
+        {(id, countId) => {
+          // The warning is part of the control's description, after the counter, so a
+          // screen reader hears "82 / 60, Heading is 82 characters; the limit is 60."
+          // on focus rather than a bare count. Over a length limit the control is also
+          // `aria-invalid`; advisory still (nothing is refused), but it is the state
+          // assistive technology has a word for.
+          const warnId = `${id}-warn`;
+          const describedBy = [countId, warning ? warnId : null].filter(Boolean).join(" ");
+          const invalid = count?.over === true;
+          return (
+            // Down the row for every kind but one. See `isInlineControl`: a 16px
+            // checkbox leaves the rest of its row empty, so its warning goes beside it.
+            <div className={isInlineControl(field.kind) ? css.row : css.stack}>
+              {/*
               A nested fieldset is what disables an arbitrary input tree without every
               control learning about locales: `mode === 'shared'` turns the whole thing
               off, which is `localisation.md` decision 4's editor half — no
               locale-scoped `set` can leave here. `display: contents` keeps it out of
               the layout.
             */}
-            <fieldset className={css.control} disabled={!editable}>
-              <Control
-                id={id}
-                {...(describedBy ? { describedBy } : {})}
-                name={name}
-                field={field}
-                value={value}
-                editable={editable}
-                env={env}
-                chrome={{
-                  label,
-                  ...(mode === "source" ? {} : { note: shortNote(mode, props.sourceLabel) }),
-                  ...(sourceColumn ? { source: sourceColumn } : {}),
-                }}
-                expanded={props.expanded}
-                onExpand={props.onExpand}
-                onChange={(next) => props.onChange(blok.uid, name, next, writeLocale(mode, locale))}
-              />
-            </fieldset>
+              <fieldset className={css.control} disabled={!editable}>
+                <Control
+                  id={id}
+                  {...(describedBy ? { describedBy } : {})}
+                  {...(invalid ? { invalid } : {})}
+                  name={name}
+                  field={field}
+                  value={value}
+                  editable={editable}
+                  env={env}
+                  chrome={{
+                    label,
+                    ...(mode === "source" ? {} : { note: shortNote(mode, props.sourceLabel) }),
+                    ...(sourceColumn ? { source: sourceColumn } : {}),
+                  }}
+                  expanded={props.expanded}
+                  onExpand={props.onExpand}
+                  onChange={(next) =>
+                    props.onChange(blok.uid, name, next, writeLocale(mode, locale))
+                  }
+                />
+              </fieldset>
 
-            {/* Outside the fieldset above, which disables everything in it: these are
+              {/* Outside the fieldset above, which disables everything in it: these are
                 how a field that is not editable becomes so. */}
-            {layer && layer.actions.length > 0 ? (
-              <div className={css.layerActions}>
-                {layer.actions.map(({ action, label: text }) => (
-                  <Button
-                    key={action}
-                    size="sm"
-                    variant={action === "remove" ? "danger" : "subtle"}
-                    onClick={() => layer.onAction(action)}
-                  >
-                    {text}
-                  </Button>
-                ))}
-              </div>
-            ) : null}
+              {layer && layer.actions.length > 0 ? (
+                <div className={css.layerActions}>
+                  {layer.actions.map(({ action, label: text }) => (
+                    <Button
+                      key={action}
+                      size="sm"
+                      variant={action === "remove" ? "danger" : "subtle"}
+                      onClick={() => layer.onAction(action)}
+                    >
+                      {text}
+                    </Button>
+                  ))}
+                </div>
+              ) : null}
 
-            {/*
+              {/*
               The warning, here rather than through `Field`'s own `error` slot. `error`
               *replaces* `help`, and a field's help text is usually the thing that says
               how to satisfy the warning — so the two have to be able to coexist.
             */}
-            {warning ? <p className={css.warn}>{warning}</p> : null}
+              {warning ? (
+                <p id={warnId} className={css.warn}>
+                  {warning}
+                </p>
+              ) : null}
 
-            {/*
+              {/*
               The source value as a **second read-only column**, not a placeholder
               (`localisation.md`'s resolved open question): a placeholder cannot show
               richtext formatting, so richtext would have needed the column anyway, and
@@ -247,9 +263,10 @@ export function FieldRow(props: Props) {
               own copy at the same measure — two of them, one behind a scrim, would be
               the same sentence twice.
             */}
-            {props.expanded ? null : sourceColumn}
-          </div>
-        )}
+              {props.expanded ? null : sourceColumn}
+            </div>
+          );
+        }}
       </Field>
     </div>
   );

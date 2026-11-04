@@ -389,10 +389,18 @@ describe("the inspector and check_document agree on length (authoring-guidance.m
   const heading: Field = { kind: "text", label: "Heading", length: { max: 60 } };
 
   it("counts against the limit, and turns over past it", () => {
-    expect(lengthCounter(heading, "x".repeat(42))).toEqual({ text: "42 / 60", over: false });
+    expect(lengthCounter(heading, "x".repeat(42))).toEqual({
+      text: "42 / 60",
+      over: false,
+      near: false,
+    });
     // 61 code points (122 UTF-16 units), so a `.length` count would disagree with the check.
-    expect(lengthCounter(heading, "🦁".repeat(61))).toEqual({ text: "61 / 60", over: true });
-    expect(lengthCounter(heading, null)).toEqual({ text: "0 / 60", over: false });
+    expect(lengthCounter(heading, "🦁".repeat(61))).toEqual({
+      text: "61 / 60",
+      over: true,
+      near: false,
+    });
+    expect(lengthCounter(heading, null)).toEqual({ text: "0 / 60", over: false, near: false });
   });
 
   it("counts words against a word limit, and a minimum alone", () => {
@@ -400,10 +408,24 @@ describe("the inspector and check_document agree on length (authoring-guidance.m
     expect(lengthCounter(words, "find your next safari")).toEqual({
       text: "4 / 40 words",
       over: false,
+      near: false,
     });
     const least: Field = { kind: "text", length: { min: 20 } };
-    expect(lengthCounter(least, "short")).toEqual({ text: "5 (min 20)", over: true });
-    expect(lengthCounter(least, "")).toEqual({ text: "0 (min 20)", over: false });
+    expect(lengthCounter(least, "short")).toEqual({ text: "5 (min 20)", over: true, near: false });
+    expect(lengthCounter(least, "")).toEqual({ text: "0 (min 20)", over: false, near: false });
+  });
+
+  it("turns near the limit at 90% of the max, and gives way to over past it", () => {
+    expect(lengthCounter(heading, "x".repeat(53))?.near).toBe(false);
+    expect(lengthCounter(heading, "x".repeat(54))?.near).toBe(true);
+    expect(lengthCounter(heading, "x".repeat(60))).toEqual({
+      text: "60 / 60",
+      over: false,
+      near: true,
+    });
+    expect(lengthCounter(heading, "x".repeat(61))).toMatchObject({ over: true, near: false });
+    // A minimum alone has nothing to approach.
+    expect(lengthCounter({ kind: "text", length: { min: 20 } }, "x".repeat(25))?.near).toBe(false);
   });
 
   it("draws no counter for a field with no length", () => {

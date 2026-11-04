@@ -1368,6 +1368,28 @@ documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships
     source as content too. Pinned by `test/workers/settings-audit.test.ts` (calling
     `auditSettings` over D1) and `guidance.test.ts`.
 
+21. **A field's warning is part of its control's description, and over a limit the
+    control is `aria-invalid`** (browser check on the v1.4.0 branch). The over-limit
+    sentence was a bare `<p>` that no control pointed at, so a screen reader heard
+    "82 / 60" and never the sentence saying it was over. `FieldRow` gives the warning an
+    id and appends it after the counter's in `aria-describedby` (the "Required" warning
+    takes the same path), and the text and textarea inputs and the prose surface carry
+    `aria-invalid="true"` while the counter is `over`. Only the length case is invalid:
+    an empty required field on a fresh block is not an error worth announcing on every
+    focus. The prose surface follows the value because `useEditor` re-applies
+    `editorProps` through `setOptions` on each render. Pinned by
+    `test/unit/admin/render/field-row-limits.test.tsx`.
+22. **The counter has a near-limit state, at 90% of `max`** (`NEAR_LIMIT` in
+    `inspector-model.ts`). The spec named no threshold and the counter was binary, grey
+    until the flip past the limit. `lengthCounter` answers `near` while within the limit
+    and at 90% or more of a `max` (a 60-character heading turns at 54); never with
+    `over`, and never against a minimum alone. Near draws in `--state-warn-fg`; over now
+    draws in `--state-danger-fg`, the colour of the over-limit sentence, where it was
+    amber and disagreed with the red sentence under it.
+23. **The "Writing guide" summary is a 24 x 24 CSS px target**, WCAG 2.2's minimum; at
+    the help line's 11px it measured 81 x 16. A 24px line height and 24px minimums on
+    both axes, keeping the `list-item` display so the marker stays.
+
 **Verified by breaking it.** Each boundary was disabled and a test went red, then
 restored: putting `writing` on the manifest (`schema.test.ts`, `multi-brand-entry.test.ts`);
 dropping `writing` from `BRAND_KEYS` (`multi-brand.test.ts`); appending the voice to the
