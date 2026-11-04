@@ -107,6 +107,8 @@ const NOT_TOOLS: readonly string[] = [
    * editorial act rather than a step in a write.
    */
   "POST /documents/:id/versions",
+  /** Spec 40's content check; `check_document` lands in the next commit. */
+  "GET /documents/:id/check",
 ];
 
 describe("the tool table", () => {

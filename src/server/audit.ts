@@ -48,6 +48,7 @@
  * because the spec's own route example names them.
  */
 import type { Blok, Doc } from "../core/doc";
+import { isBlankValue } from "../core/fields";
 import { isIndexableKind } from "../core/index-projection";
 import { isBareLayer, mergeLayers } from "../core/layers";
 import { isTranslatable, type LocaleConfig } from "../core/locales";
@@ -1142,7 +1143,13 @@ export async function auditSettings(
   return out;
 }
 
-/** The `required` fields of `blok` that hold nothing: no key, `null`, `''`, or no children. */
+/**
+ * The `required` fields of `blok` that hold nothing: no children for a slot, and
+ * otherwise `isBlankValue`, the one blank rule the inspector and `check_document`
+ * also read (`../../docs/specs/content-model/authoring-guidance.md` decision 15).
+ * A whitespace-only setting or an empty richtext document is empty here too, which
+ * is what the inspector already said about the same field.
+ */
 function requiredEmpty(def: BlockSchema | undefined, blok: Blok, doc: Doc): string[] {
   if (!def) return [];
   return Object.entries(def.fields)
@@ -1151,8 +1158,7 @@ function requiredEmpty(def: BlockSchema | undefined, blok: Blok, doc: Doc): stri
       if (field.kind === "blocks") {
         return !Object.values(doc.bloks).some((b) => b.parent === blok.uid && b.slot === name);
       }
-      const value = blok.data[name];
-      return value === undefined || value === null || value === "";
+      return isBlankValue(field, blok.data[name]);
     })
     .map(([name]) => name);
 }

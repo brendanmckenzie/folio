@@ -166,6 +166,29 @@ describe("the /api partition", () => {
   });
 
   /**
+   * `check` (`authoring-guidance.md` decision 8) is a v1 route only: the admin's
+   * per-field half of it is `fieldWarning`, live in the inspector, and the admin's
+   * `{base}/api` has no check route to drift from this one. A promise, so it is
+   * here rather than in `INTERNAL`.
+   */
+  it("answers GET /documents/:id/check under /api/v1 and nowhere under /api", async () => {
+    // Routed: a 404 here is the fence's `not_found` envelope, so look at the code.
+    const v1 = await SELF.fetch(`${BASE}/api/v1/documents/sty_nobody/check`);
+    expect(((await v1.json()) as { error?: { message?: string } }).error?.message).toBe(
+      "Unknown document",
+    );
+    for (const path of [
+      "/folio/api/documents/sty_nobody/check",
+      "/folio/api/v2/documents/sty_nobody/check",
+    ]) {
+      const res = await SELF.fetch(`${ORIGIN}${path}`);
+      expect([path, res.status]).toEqual([path, 404]);
+      const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      expect([path, body.error?.message]).not.toEqual([path, "Unknown document"]);
+    }
+  });
+
+  /**
    * `mcp` is **not** an `/api` segment at all, and that is decision 8 of
    * `docs/specs/platform/mcp-server.md` rather than an oversight: every route
    * under `/api` answers `errors.ts`'s single envelope, and `{base}/mcp` answers
@@ -313,6 +336,7 @@ describe("the v1 route list", () => {
     "GET /assets",
     "GET /documents",
     "GET /documents/:id",
+    "GET /documents/:id/check",
     "GET /documents/:id/versions",
     "GET /documents/by-path",
     "GET /documents/by-path/:path{.*}",

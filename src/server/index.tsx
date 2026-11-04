@@ -127,6 +127,8 @@ export type { SpaceEvent, SpacePresence } from "../core/protocol";
  */
 export type { WriteResult } from "./write";
 export type { ApiDocument, ApiDocumentMeta } from "./routes/api/documents";
+/** What `GET {base}/api/v1/documents/:id/check` answers (`authoring-guidance.md`). */
+export type { ContentCheck, ContentCheckReport, ContentCheckSeverity } from "./checks";
 export { API_VERSION } from "./routes/api";
 export type { DocumentKind, DocumentType } from "../core/schema";
 export type { Migration } from "../core/migrate";
