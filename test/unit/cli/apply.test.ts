@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { cleanup, host } from "./fixtures";
@@ -212,5 +212,118 @@ describe("the pin edit", () => {
 
   it("refuses to guess when the string is not there exactly once", () => {
     expect(() => rewritePin("{}", { spec: OLD }, "x")).toThrow(/found 0/);
+  });
+});
+
+const { resolveFrom } = await lib<{
+  resolveFrom: (at: {
+    installed: { version: string | null; hasDist: boolean } | null;
+    pinned: string | null;
+    committed: string | null;
+  }) => { from: string | null; repair: boolean };
+}>("plan");
+
+describe("a rerun after an interrupted --apply (review M2)", () => {
+  const cliRun = (root: string, args: string[]) => {
+    const r = spawnSync("node", [path.join(REPO_ROOT, "bin/folio.mjs"), ...args], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    return { status: r.status, json: JSON.parse(r.stdout || "null") };
+  };
+  const target = JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")).version;
+  const interrupt = (root: string) => {
+    // What `pin` then `remove-installed` leave behind before `install` finishes.
+    const file = path.join(root, "package.json");
+    writeFileSync(
+      file,
+      rewritePin(
+        readFileSync(file, "utf8"),
+        { spec: OLD },
+        `github:brendanmckenzie/folio#v${target}`,
+      ),
+    );
+    rmSync(path.join(root, "node_modules/folio"), { recursive: true, force: true });
+  };
+
+  it("trusts the installed copy only when it is whole, else the committed pin", () => {
+    const whole = { version: "1.2.3", hasDist: true };
+    expect(resolveFrom({ installed: whole, pinned: "1.2.3", committed: "1.2.3" })).toEqual({
+      from: "1.2.3",
+      repair: false,
+    });
+    expect(resolveFrom({ installed: null, pinned: "1.4.0", committed: "1.2.3" })).toEqual({
+      from: "1.2.3",
+      repair: false,
+    });
+    expect(
+      resolveFrom({
+        installed: { version: "1.2.3", hasDist: false },
+        pinned: "1.4.0",
+        committed: "1.2.3",
+      }).from,
+    ).toBe("1.2.3");
+    expect(resolveFrom({ installed: null, pinned: "1.4.0", committed: "1.4.0" })).toEqual({
+      from: "1.4.0",
+      repair: true,
+    });
+    expect(resolveFrom({ installed: null, pinned: null, committed: null })).toEqual({
+      from: null,
+      repair: false,
+    });
+  });
+
+  it("plans the rest of the upgrade from the committed pin, not 'nothing to do'", () => {
+    const root = committedHost();
+    interrupt(root);
+    const r = cliRun(root, ["upgrade", "--json"]);
+    expect(r.status).toBe(0);
+    expect(r.json).toMatchObject({ from: "1.2.3", to: target });
+    expect(r.json.hops).toHaveLength(1);
+    expect(r.json.hops[0].steps.map((s: Step) => s.id)).toContain("install");
+  });
+
+  it("repairs the local half once the rewritten pin was committed", () => {
+    const root = committedHost();
+    interrupt(root);
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "pin"], {
+      cwd: root,
+    });
+    const r = cliRun(root, ["upgrade", "--json"]);
+    expect(r.status).toBe(0);
+    const hop = r.json.hops[0];
+    expect(hop).toMatchObject({ repair: true, to: target });
+    expect(hop.steps.map((s: Step) => s.id)).toEqual(
+      expect.arrayContaining(["remove-installed", "install", "d1-local", "typecheck", "doctor"]),
+    );
+    expect(hop.steps.map((s: Step) => s.id)).not.toContain("pin");
+  });
+
+  it("lets --apply resume over its own uncommitted pin edit, and nothing else", async () => {
+    const root = committedHost();
+    interrupt(root);
+    const project = readProject(root);
+    const resumed = planUpgrade({
+      ledger: readLedger(REPO_ROOT),
+      cliVersion: target,
+      from: "1.2.3",
+      pin: project.dep.spec,
+      packageManager: "npm",
+      wranglerBin: "node_modules/.bin/wrangler",
+      root,
+      typecheck: true,
+      agentsFile: null,
+      databases: [{ env: null, database_name: "folio", binding: "DB" }],
+    });
+    const rec = recordingRunner();
+    expect(
+      await applyPlan(resumed, project, { run: rec.run, doctor: async () => ({ ok: true }) }),
+    ).toBe(true);
+    // Any other change to package.json is still refused.
+    const text = readFileSync(path.join(root, "package.json"), "utf8");
+    writeFileSync(path.join(root, "package.json"), text.replace('"host"', '"other"'));
+    await expect(
+      applyPlan(resumed, readProject(root), { run: rec.run, doctor: async () => ({ ok: true }) }),
+    ).rejects.toThrow(/Uncommitted changes in package\.json/);
   });
 });

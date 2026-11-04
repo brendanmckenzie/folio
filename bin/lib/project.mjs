@@ -180,3 +180,9 @@ async function hostTool(require, name) {
   }
   return { module, version };
 }
+
+/** A file as committed at `HEAD`, or `null` (not a repository, or not committed). */
+export function committedFile(project, rel, run) {
+  const r = run(["git", "show", `HEAD:./${rel}`], { cwd: project.root });
+  return r.status === 0 ? r.stdout : null;
+}

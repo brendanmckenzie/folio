@@ -6,12 +6,14 @@
  * It refuses to start unless `package.json` and the lockfile are committed (or
  * `--allow-dirty`), because the rollback of an applied plan is `git checkout` of
  * those two files plus a reinstall, and that rollback has to exist before anything
- * runs. Every step is idempotent, so a rerun after an interruption starts again
- * from the pin edit and converges.
+ * runs. Its own pin edit is the one uncommitted change it accepts, so a rerun after
+ * an interruption is not refused for it. Every step is idempotent, and the plan
+ * reads where the upgrade began from the committed pin when the installed copy is
+ * not whole (`resolveFrom`), so a rerun picks up the remaining work.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { gitDirty } from "./project.mjs";
+import { committedFile, gitDirty } from "./project.mjs";
 import { PlanRefusal } from "./plan.mjs";
 import { tail } from "./run.mjs";
 
@@ -39,6 +41,10 @@ export async function applyPlan(
         `${project.root} is not a git repository, so an applied plan would have no rollback. Commit it to git first, or pass --allow-dirty.`,
       );
     }
+    // The pin rewritten to this plan's target, and nothing else, is this command's own
+    // edit from a run that stopped part-way: HEAD still holds the rollback (review M2).
+    const own = (file) => file === "package.json" && onlyPinMoved(project, run, plan);
+    git.dirty = git.dirty.filter((f) => !own(f));
     if (git.dirty.length) {
       throw new PlanRefusal(
         `Uncommitted changes in ${git.dirty.join(", ")}. Commit them first, so \`git checkout\` can undo this upgrade, or pass --allow-dirty.`,
@@ -105,4 +111,20 @@ export function rewritePin(text, dep, after) {
 
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Whether package.json differs from HEAD only in a folio pin naming one of the plan's hops. */
+function onlyPinMoved(project, run, plan) {
+  try {
+    const head = JSON.parse(committedFile(project, "package.json", run) ?? "null");
+    const now = JSON.parse(readFileSync(path.join(project.root, "package.json"), "utf8"));
+    const field = project.dep?.field;
+    if (!head || !field || !head[field]?.folio) return false;
+    const targets = plan.hops.map((h) => `github:brendanmckenzie/folio#v${h.to}`);
+    if (!targets.includes(now[field]?.folio)) return false;
+    head[field].folio = now[field].folio;
+    return JSON.stringify(head) === JSON.stringify(now);
+  } catch {
+    return false;
+  }
 }

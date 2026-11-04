@@ -28,9 +28,9 @@ import {
 } from "./doctor.mjs";
 import { readLedger } from "./ledger.mjs";
 import { classifyPin } from "./pin.mjs";
-import { PlanRefusal, planUpgrade, UPGRADE_SCHEMA } from "./plan.mjs";
+import { PlanRefusal, planUpgrade, resolveFrom, UPGRADE_SCHEMA } from "./plan.mjs";
 import { PREVIEW_SCHEMA, PreviewError, parseViewport, previewBlock } from "./preview.mjs";
-import { readProject } from "./project.mjs";
+import { committedFile, readProject } from "./project.mjs";
 import { describeFix, noteStream, renderChecks, shellQuote, writeJson } from "./report.mjs";
 import { run as realRun } from "./run.mjs";
 import { compare, parse as parseVersion } from "./semver.mjs";
@@ -127,8 +127,20 @@ export async function upgradeCommand(argv, rt) {
   const ledger = readLedger(rt.pkgRoot);
 
   const pin = project.dep?.spec ?? null;
-  const pinned = pin ? classifyPin(pin) : null;
-  const from = project.installed?.version ?? (pinned?.kind === "tag" ? pinned.version : null);
+  const tagOf = (spec) => {
+    const p = spec ? classifyPin(spec) : null;
+    return p?.kind === "tag" ? p.version : null;
+  };
+  let committedSpec = null;
+  try {
+    const head = JSON.parse(committedFile(project, "package.json", run) ?? "null");
+    committedSpec = head?.dependencies?.folio ?? head?.devDependencies?.folio ?? null;
+  } catch {}
+  const { from, repair } = resolveFrom({
+    installed: project.installed,
+    pinned: tagOf(pin),
+    committed: tagOf(committedSpec),
+  });
   const agentsFile =
     ["AGENTS.md", "CLAUDE.md"].find((f) => {
       const file = path.join(project.root, f);
@@ -152,6 +164,7 @@ export async function upgradeCommand(argv, rt) {
       agentsFile,
       base,
       deployed,
+      repair,
       ...(await databasesByEnvironment(project)),
       env: values.env ?? null,
       config: values.config ?? null,
@@ -245,9 +258,12 @@ function renderPlan(plan) {
     return `${lines.join("\n")}\n`;
   }
   plan.hops.forEach((hop, i) => {
-    lines.push(
-      `Hop ${i + 1}${plan.hops.length > 1 ? ` of ${plan.hops.length}` : ""}: to v${hop.to} (${hop.releases.map((r) => `v${r}`).join(", ")})`,
-    );
+    if (hop.repair)
+      lines.push(`Repair: finish the local half of an upgrade to v${hop.to} that stopped part-way`);
+    else
+      lines.push(
+        `Hop ${i + 1}${plan.hops.length > 1 ? ` of ${plan.hops.length}` : ""}: to v${hop.to} (${hop.releases.map((r) => `v${r}`).join(", ")})`,
+      );
     if (hop.rollForwardOnly)
       lines.push(
         "  Roll-forward only: an older pin cannot be redeployed over the migrated database.",

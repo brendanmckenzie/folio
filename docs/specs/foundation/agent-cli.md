@@ -1258,6 +1258,13 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
   internal.
 - **A copied `migrations_dir` is detected** as a D1 entry whose directory holds
   `0001_init.sql` but is not the package's; the fix is the `migrations_dir` snippet.
+- **A rerun after an interrupted `--apply` resumes** (review M2). `from` used to
+  fall back to the already-rewritten pin, so a run stopped after `pin` and
+  `remove-installed` read as "Already at the target. Nothing to do." `resolveFrom`
+  now trusts the installed copy only when it is present, built and the pinned
+  version; otherwise the committed pin (`git show HEAD:./package.json`) names the
+  start, and when that already names the target the plan is a `repair` hop of the
+  local steps. `--apply` accepts its own pin edit as the only uncommitted change.
 - **Databases are identified by `database_id`, not `database_name`** (review H1).
   Phase 4.1's de-duplication by name dropped an environment that reused another's
   name for a different database, and then told the operator to deploy over an

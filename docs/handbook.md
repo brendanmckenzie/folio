@@ -2125,8 +2125,14 @@ release is the step that cannot be undone.
 changes, or the project is not in git, because `git checkout` of those two files
 and a reinstall is the rollback, and the rollback has to exist first. It stops at
 the first failed step; each step's `status` becomes `done` or `failed` (with
-`exitCode` and the last 40 lines of output). Every step is idempotent, so a rerun
-after an interruption converges.
+`exitCode` and the last 40 lines of output). Every step is idempotent, and a rerun
+after an interruption picks up what is left: when `node_modules/folio` is missing,
+unbuilt or not the version the pin names, the plan starts from the pin committed
+at `HEAD` rather than from the already-rewritten one, and `--apply` accepts its own
+uncommitted pin edit (and nothing else) without `--allow-dirty`. When the committed
+pin already names the target, the plan is a `repair` hop: the local half again, and
+a deploy step that says to run `doctor --remote` first, because the release the
+upgrade started from is no longer known.
 
 A release can declare that another must be **deployed** first
 (`requiresDeployed`). What a deployment runs is not something this machine knows:

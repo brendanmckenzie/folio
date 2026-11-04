@@ -100,7 +100,10 @@ export function planUpgrade(input) {
     hops: [],
     claimed: (ledger.claimed ?? []).map((c) => ({ file: c.file, rule: c.rule })),
   };
-  if (compare(to, from) === 0) return base;
+  if (compare(to, from) === 0) {
+    if (input.repair) base.hops = [hopPlan(input, [], { stop: null, repairTo: to })];
+    return base;
+  }
 
   const releases = releasesBetween(ledger, from, to);
   const gate = releases.findIndex(
@@ -121,6 +124,28 @@ export function planUpgrade(input) {
 }
 
 /**
+ * Where an upgrade starts from, and whether the project is mid-upgrade (review M2).
+ *
+ * The installed copy is the answer when it is whole: present, built, and the
+ * version the pin names. When it is not, the pin may already have been rewritten
+ * by an `--apply` that stopped part-way, so the pin is not evidence either: the
+ * committed pin (`HEAD:package.json`) names where the upgrade began. When nothing
+ * says more than the target itself, the plan is a `repair` of the local half.
+ *
+ * @param {{ installed: { version: string | null, hasDist: boolean } | null,
+ *   pinned: string | null, committed: string | null }} at versions named by tag pins
+ * @returns {{ from: string | null, repair: boolean }}
+ */
+export function resolveFrom({ installed, pinned, committed }) {
+  const whole =
+    installed?.version && installed.hasDist && (!pinned || installed.version === pinned);
+  if (whole) return { from: installed.version, repair: false };
+  if (committed && pinned && committed !== pinned) return { from: committed, repair: false };
+  const from = installed?.version ?? committed ?? pinned ?? null;
+  return { from, repair: Boolean(from) };
+}
+
+/**
  * Whether a deployment is known to run `version` or later. Only a version the
  * deployed server reported counts (review M1): the installed copy says what this
  * machine has, not what any deployment runs, so it is never used here.
@@ -129,9 +154,9 @@ function provenDeployed(deployed, version) {
   return Boolean(deployed && parseVersion(deployed) && compare(deployed, version) >= 0);
 }
 
-function hopPlan(input, releases, { stop }) {
+function hopPlan(input, releases, { stop, repairTo = null }) {
   const { ledger } = input;
-  const to = releases.at(-1).version;
+  const to = repairTo ?? releases.at(-1).version;
   const versions = new Set(releases.map((r) => r.version));
   const migrations = Object.entries(ledger.migrations)
     .filter(([, m]) => versions.has(m.release))
@@ -160,15 +185,19 @@ function hopPlan(input, releases, { stop }) {
   });
 
   const steps = [
-    {
-      id: "pin",
-      phase: "local",
-      kind: "edit",
-      file: "package.json",
-      before: input.pin,
-      after: `${SPEC}#v${to}`,
-      status: "pending",
-    },
+    ...(repairTo
+      ? []
+      : [
+          {
+            id: "pin",
+            phase: "local",
+            kind: "edit",
+            file: "package.json",
+            before: input.pin,
+            after: `${SPEC}#v${to}`,
+            status: "pending",
+          },
+        ]),
     run("remove-installed", ["rm", "-rf", "node_modules/folio"]),
     run("install", [input.packageManager, "install"]),
   ];
@@ -279,9 +308,11 @@ function hopPlan(input, releases, { stop }) {
       id: "deploy",
       phase: "deploy",
       kind: "manual",
-      text: migrations.length
-        ? `Deploy the Worker${envs.length > 1 ? ` to each environment (${envs.join(", ")})` : ""}, after the remote migrations above.`
-        : "Deploy the Worker. This hop brings no migrations.",
+      text: repairTo
+        ? `This finishes an upgrade to v${to} that stopped part-way, and the release it started from is not known, so neither are the migrations each deployment still needs. Run \`npx folio doctor --remote\` (with --env for each environment) and apply what it reports before deploying.`
+        : migrations.length
+          ? `Deploy the Worker${envs.length > 1 ? ` to each environment (${envs.join(", ")})` : ""}, after the remote migrations above.`
+          : "Deploy the Worker. This hop brings no migrations.",
     });
   }
 
@@ -318,6 +349,7 @@ function hopPlan(input, releases, { stop }) {
 
   return {
     to,
+    ...(repairTo ? { repair: true } : {}),
     releases: releases.map((r) => r.version),
     rollForwardOnly: releases.some((r) => r.rollback === "none"),
     migrations: migrations.map(({ file, release, apply }) => ({ file, release, apply })),
