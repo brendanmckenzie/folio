@@ -239,6 +239,8 @@ async function init(argv) {
 
   Then open http://localhost:5173/folio/login and sign in as ${email}.
   There is no mail binding, so the link is logged to your terminal.
+
+  npx folio doctor checks the project and names the fix for anything wrong.
 `);
 }
 

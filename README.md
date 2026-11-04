@@ -108,6 +108,14 @@ Prefer to do it by hand, or adding Folio to a project that already exists?
 [`AGENTS.md`](AGENTS.md) is the integration guide — it is written for a coding
 agent and reads perfectly well as a checklist for a person.
 
+**Keeping a project healthy.** `npx folio doctor` checks a project (the pin, the
+installed package, the wrangler bindings, the local D1 migrations) and attaches the
+command that fixes each finding. `npx github:brendanmckenzie/folio#<tag> upgrade`
+plans an upgrade to that release, and `--apply` runs the local half of it.
+`npx folio add block <name> --into page.body` scaffolds a block and makes it
+insertable. Every command answers JSON with `--json`, for the agent you already
+use; see [the command line](docs/handbook.md#the-command-line).
+
 **Requirements:** Node 20.19+ or 22.12+ (Vite's floor), a Cloudflare account,
 React 19, and Vite 7 or 8.
 

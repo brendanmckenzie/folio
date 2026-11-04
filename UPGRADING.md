@@ -16,6 +16,18 @@ after.
 
 ## The procedure
 
+Or let the CLI do the local half. Run the target release's own CLI, so the plan
+comes from that release's ledger:
+
+```bash
+npx github:brendanmckenzie/folio#<new-tag> upgrade           # the plan; changes nothing
+npx github:brendanmckenzie/folio#<new-tag> upgrade --apply   # steps 3 to 5, then a doctor
+```
+
+`--apply` refuses uncommitted changes to `package.json` or the lockfile, because
+`git checkout` of those two files is its rollback. It prints step 7's remote
+migrations and the deploy, in order, and never runs them. By hand:
+
 ```bash
 # 1. Find the tag you want: an exact vX.Y.Z, never a branch, never a short SHA,
 #    never a #semver: range (see below).

@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 41
 > **Size:** M. Seven new modules under `bin/lib/`, one JSON ledger, one additive property on the Vite plugin, and the smoke-test and docs changes that keep them honest. No `src/server` change, no admin change.
-> **Status:** draft
+> **Status:** review (built 2026-11-04 on `feat/agent-cli`; the consumer smoke test and `scripts/cli-test.mjs` are not yet run)
 > **Wire version:** none. Nothing here crosses the socket or the admin↔preview frame; `PROTOCOL_VERSION` stays at 5
 > **Migration:** none. The CLI reads `d1_migrations` and writes nothing to D1 except through `wrangler d1 migrations apply --local`, which is the command a host already runs
 > **Build sequence:** v1.4.0, beside spec 40 (authoring guidance and content checks). The two share no source file; both edit `AGENTS.md` and `README.md`, so whichever merges second rebases its prose. Nothing here waits on spec 39.
@@ -1206,3 +1206,87 @@ including `add block`'s output passing the host's own `tsc` and `vite build`.
 - **Scaffolding anything but a block** (a document type, a form action, a brand).
   Each touches `createFolio`'s config in the host's Worker entry, which decision 4
   keeps the CLI from parsing.
+
+## Implementation notes
+
+Built 2026-11-04 on `feat/agent-cli` in the plan's order, one commit per phase:
+`9ae4504` (phase 0, the `bin/lib/` split), `63b57f7` (1, the plugin's `api`),
+`1cddce0` (2, the ledger), `687b4cf` (3, `doctor`), `61ca7cc` (4, `upgrade`),
+`12e7c85` (5, `add block` and `preview block`), `0f04aee` (6, the smoke-test stages
+and `scripts/cli-test.mjs`), then the documentation. No `src/server` or admin file
+changed. The unit suite under `test/unit/cli/` is twelve test files and two helpers.
+
+**Verified beyond the unit tests**, against a copy of the starter in a scratch
+directory with a real local D1 and a real `vite dev` on a free port: `doctor`'s
+`d1.local` against a real `wrangler d1 execute` (pass, then a deleted
+`d1_migrations` row reported as pending), `server.mounted` and `server.schema`
+against the running Worker, `add block quote --into page.body` followed by the
+host's `tsc` and `vite build` (the block reached both bundles), and `preview block`
+end to end: the HTML held `<section class="quote" …>`, the scratch draft was gone
+afterwards, `--keep` left it in state `draft`, a second run reused it, and `add block
+banner --preview` waited out the reload and rendered. The consumer smoke test stages
+and `scripts/cli-test.mjs` were written and syntax-checked but not run on the branch.
+
+**Where the spec was wrong or ambiguous, and what was done.**
+
+- **"Seven new modules" is seventeen.** `args`, `report`, `run`, `project`,
+  `upgrading` (phase 0), `ledger`, `semver`, `pin`, `d1`, `mcp`, `doctor`, `plan`,
+  `apply`, `scan`, `blocks`, `preview`, and `commands` (the four commands' flag
+  handling and output, so `bin/folio.mjs` stays dispatch, `init` and `agents`).
+- **Fixtures are built in code, not checked in under `test/fixtures/cli/`.**
+  `test/unit/cli/fixtures.ts` writes each host into a temporary directory. A
+  single-quoted, semicolon-free blocks module is one of the cases `add block` must
+  handle, and biome reformats everything under `test/`. The host's `wrangler` and
+  `vite` are symlinks to `examples/starter`'s, so the CLI reaches them through
+  `createRequire` exactly as it reaches a real host's.
+- **Under vitest, `createRequire` from a temporary directory still resolves the
+  workspace's `wrangler`**, so "the host's wrangler is unresolvable" is tested by
+  injecting a reader that throws (the readers are injectable for this reason), not
+  by leaving the symlink out.
+- **Every answer carries `ok`, and a refusal is `{ schema, …, ok: false, error: {
+  message, fix } }`** in all four schemas. The output examples above had no shape
+  for a refusal; this is additive.
+- **`doctor` takes `--base`.** Decision 13 names `--base` as the explicit form for a
+  plugin that predates `api`, and the server checks need a base path when the plugin
+  cannot supply one.
+- **`server.mounted` warns when exactly one of discover and login fails**, either
+  way round. The table specified only the discover-fails case.
+- **The local-state guard is per directory, not per database.** `d1.local` runs the
+  `select` only when `.wrangler/state/v3/d1` (or `--persist-to`'s) exists; if it
+  exists but this database has never been touched, wrangler creates its file. A
+  per-database check would need wrangler's hashing of the local file name, which is
+  internal.
+- **A copied `migrations_dir` is detected** as a D1 entry whose directory holds
+  `0001_init.sql` but is not the package's; the fix is the `migrations_dir` snippet.
+- **Remote step ids are `d1-remote:<env>`, with the top level as `top-level`**, each
+  `before: "deploy"`, followed by one `deploy` step naming every environment. The
+  example's `before: "deploy:staging"` named a step that did not exist. A hop with a
+  `with-deploy` migration interleaves `d1-remote:<env>` and `deploy:<env>` instead.
+- **`upgrade --env` restricts the local database step as well as the remote ones**
+  (decision 7's "per environment's local database when `--env` is given").
+- **`upgrade` reads `from` from `node_modules/folio`, falling back to a tag pin's
+  version** when nothing is installed, and refuses when neither exists.
+- **The preview's scratch draft is found by `path`**, because `ApiDocumentMeta`
+  carries no `slug`; a top-level page's path is its slug.
+- **The ledger's in-progress 1.4.0 has no `date` and no headings yet.** The ledger
+  test requires a date on every release at or below `package.json`'s version and
+  requires each release's `headings` to equal the `###` headings naming its tag, so
+  the version-bump PR must add both, and adding the release's `UPGRADING.md` heading
+  without the ledger entry fails `pnpm test`.
+- **`slug()`'s pin found a broken link.** `UPGRADING.md`'s `0014` row linked
+  `#conditional-questions-sections-and-prefill-2026-10-19`, an anchor that stopped
+  existing when the heading gained `(v1.1.0)`; it is fixed.
+- **A usage error from `init` or `agents` now exits 2**, where it exited 1, under
+  decision 14's codes. Their flags and every other behaviour are unchanged.
+- **`npx folio` runs the installed copy only.** In a directory without Folio
+  installed, npx resolves the npm registry's unrelated `folio`. The handbook says so
+  and spells the uninstalled form `npx github:brendanmckenzie/folio#vX.Y.Z`.
+- **The smoke test's fresh-install `doctor` stage requires Node to satisfy
+  `engines.node`**, or `node.version` fails beside `d1.local`. CI runs `.nvmrc`'s
+  26.13.0; a local `release.mjs` run under another Node fails at that stage, which is
+  the check doing its job.
+- **The workspace's own `dist/` predates `api` until `pnpm build` runs**, so `doctor`
+  in `examples/starter` warns on `vite.plugin` until then; a consumer install builds
+  `dist/` in `prepare` and never sees it.
+- **`CLAUDE.md` is not edited on this branch.** Its "The two ledgers" and
+  "Releasing" step 1 changes are left to the orchestrator.
