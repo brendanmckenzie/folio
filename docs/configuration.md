@@ -844,13 +844,13 @@ surface at all.
     { "name": "SPACE", "class_name": "SpaceDO" }
   ]},
 
-  // `new_sqlite_classes` cannot be changed for an already-deployed class, and
-  // SpaceDO holds no storage at all — presence lives in socket attachments.
-  // Getting this wrong is not fixable in place, which is why each class gets
-  // its own tag rather than sharing one.
+  // The backend of an already-deployed class cannot be changed. SpaceDO holds no
+  // storage at all (presence lives in socket attachments), so either backend
+  // works for it, but Cloudflare no longer creates new KV-backed namespaces:
+  // declare both as SQLite. Each class gets its own tag.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
-    { "tag": "v2", "new_classes": ["SpaceDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["SpaceDO"] }
   ],
 
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "folio-media" }],

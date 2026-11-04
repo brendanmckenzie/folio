@@ -91,14 +91,13 @@
   "images": {
     "binding": "IMAGES"
   },
-  // SQLite-backed DOs must be declared as such at creation; this cannot be
-  // changed for an already-deployed class. Hence a second tag for SpaceDO rather
-  // than an edit to v1 — and `new_classes`, not `new_sqlite_classes`, because
-  // SpaceDO holds no storage at all: presence lives in socket attachments and
-  // nothing it knows outlives the sockets (live-collaboration.md decision 1). A
-  // smaller commitment than StoryDO's, and equally permanent.
+  // A DO's backend is fixed at creation; this cannot be changed for an
+  // already-deployed class. Hence a second tag for SpaceDO rather than an edit
+  // to v1. SpaceDO holds no storage at all (presence lives in socket
+  // attachments, live-collaboration.md decision 1), so either backend works for
+  // it, but Cloudflare no longer creates new KV-backed namespaces: SQLite.
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
-    { "tag": "v2", "new_classes": ["SpaceDO"] }
+    { "tag": "v2", "new_sqlite_classes": ["SpaceDO"] }
   ]
 }

@@ -8,6 +8,27 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.3.1
+
+A patch release: nothing to run or edit on an existing host. No migration, no code
+change to `SpaceDO`.
+
+### Changed
+
+- **`SpaceDO` is declared with `new_sqlite_classes` for new hosts.** The guidance in
+  `docs/`, `UPGRADING.md`, both examples and the Workers test config said `new_classes`, a
+  key-value-backed namespace. Since 2026-07-09 Cloudflare refuses to create new
+  KV-backed namespaces on an account that has none, and Workers Free has only ever
+  allowed SQLite-backed ones, so a fresh account could not deploy. `SpaceDO` stores
+  nothing durable, so the backend is immaterial to it. A host that already deployed it
+  under `new_classes` keeps that migration; a host that has never deployed it can
+  switch its `v2` entry in place. See
+  [SpaceDO migration (v1.3.1)](UPGRADING.md#spacedo-migration-v131).
+
+### Breaking changes
+
+None.
+
 ## 1.3.0
 
 A minor release with two migrations, `0016` and `0017`. **Apply both before you deploy

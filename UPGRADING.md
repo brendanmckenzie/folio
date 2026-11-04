@@ -1042,14 +1042,17 @@ the binding and a **second** migration tag:
 ]},
 "migrations": [
   { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
-  { "tag": "v2", "new_classes": ["SpaceDO"] }
+  { "tag": "v2", "new_sqlite_classes": ["SpaceDO"] }
 ]
 ```
 
-`new_classes`, not `new_sqlite_classes`: `SpaceDO` holds no storage at all —
-presence lives in socket attachments and nothing it knows outlives them. That
-distinction **cannot be changed for an already-deployed class**, which is why
-each gets its own tag rather than sharing one.
+`SpaceDO` holds no storage at all (presence lives in socket attachments and
+nothing it knows outlives them), so either backend works for it. It is
+`new_sqlite_classes` because Cloudflare no longer creates new KV-backed
+namespaces on an account that has none, and Workers Free never has. A deployed
+class's backend **cannot be changed**, which is why each class gets its own tag
+rather than sharing one. See [SpaceDO migration (v1.3.1)](#spacedo-migration-v131)
+if you already declared it with `new_classes`.
 
 Without the binding, Folio degrades cleanly: per-story presence, and a tree you
 refresh yourself. No error, no retry loop.
@@ -1067,6 +1070,22 @@ npx github:brendanmckenzie/folio#<new-tag> agents
 Or copy it by hand out of `node_modules/folio/AGENTS.md`.
 
 ---
+
+### SpaceDO migration (v1.3.1)
+
+New hosts now declare `SpaceDO` with `new_sqlite_classes` (above), because since
+2026-07-09 Cloudflare refuses to create a new KV-backed Durable Object namespace
+on an account that has none, and Workers Free has only ever allowed SQLite-backed
+classes. `SpaceDO` stores nothing durable, so the code is identical on both
+backends and no Folio code changed. What to do depends on your `wrangler.jsonc`:
+
+- **You have never deployed `SpaceDO`** (a fresh account, or a Worker that has not
+  shipped yet): change the `v2` entry in place from `"new_classes": ["SpaceDO"]` to
+  `"new_sqlite_classes": ["SpaceDO"]`. Nothing has recorded the old value, so this
+  is not a migration of anything.
+- **You already deployed `SpaceDO` under `new_classes`**: leave the migration as it
+  is. A deployed class's backend cannot be changed by a migration, and editing the
+  tag does not convert it. The class keeps working exactly as before. Nothing to do.
 
 ## Rolling back
 

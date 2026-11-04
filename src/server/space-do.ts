@@ -331,9 +331,11 @@ export function createSpaceDO<Env>(
  * convention, so `export { SpaceDO } from 'folio/server'` works for every host
  * that already names its D1 binding `DB`.
  *
- * **A host declaring this class uses `new_classes`, not `new_sqlite_classes`** —
- * it holds no storage, which is a smaller commitment than `StoryDO` made and
- * cannot be changed afterwards either way. See README.
+ * **A new host declares this class with `new_sqlite_classes`**, like `StoryDO`.
+ * It holds no storage, so the backend is immaterial to it, but Cloudflare no
+ * longer creates new KV-backed namespaces on accounts without one, and Workers
+ * Free never has. A host that already deployed it under `new_classes` keeps that
+ * migration: a deployed class's backend cannot be changed. See UPGRADING.md.
  */
 export const SpaceDO = createSpaceDO<DefaultSpaceEnv>({ db: (env) => env.DB });
 export type SpaceDO = InstanceType<typeof SpaceDO>;

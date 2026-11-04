@@ -788,7 +788,7 @@ seconds and is always slightly wrong.
 
 ```
 "durable_objects": { "bindings": [ …, { "name": "SPACE", "class_name": "SpaceDO" } ]},
-"migrations": [ …, { "tag": "v2", "new_classes": ["SpaceDO"] } ]
+"migrations": [ …, { "tag": "v2", "new_sqlite_classes": ["SpaceDO"] } ]
 ```
 
 ```tsx
@@ -1807,11 +1807,11 @@ without an Images binding assets simply serve at their original size.
 Before deploying, run `wrangler d1 create folio` and put the real id in
 `wrangler.jsonc`, then `pnpm db:remote` to apply the migrations against it, and
 `wrangler r2 bucket create folio-media` for uploads. Note that
-`new_sqlite_classes` cannot be changed for an already-deployed Durable Object
-class — and that `SpaceDO` is declared with **`new_classes`**, not
-`new_sqlite_classes`, because it holds no storage at all. Getting that
-distinction wrong is not fixable in place either, so both classes get their own
-migration tag rather than sharing one:
+the backend of an already-deployed Durable Object class cannot be changed.
+Declare both classes with **`new_sqlite_classes`**: `StoryDO` needs it, and
+`SpaceDO` holds no storage at all so either backend works for it, but Cloudflare
+no longer creates new KV-backed namespaces (and Workers Free never has). Each
+class gets its own migration tag:
 
 ```jsonc
 "durable_objects": { "bindings": [
@@ -1820,7 +1820,7 @@ migration tag rather than sharing one:
 ]},
 "migrations": [
   { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
-  { "tag": "v2", "new_classes": ["SpaceDO"] }
+  { "tag": "v2", "new_sqlite_classes": ["SpaceDO"] }
 ]
 ```
 
