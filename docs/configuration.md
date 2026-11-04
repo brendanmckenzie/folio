@@ -185,6 +185,39 @@ chain is followed to its end.
 > Changing `default` later is a **content migration** (swap `data` with
 > `i18n[new]`), not a config edit. Nothing here rewrites documents.
 
+#### `writing: WritingGuide`
+
+The brand's writing guide, for agents: its voice, and the terms it does not use.
+Absent by default, and absent changes nothing.
+
+```ts
+writing: {
+  voice: 'Plain words, second person, short sentences. Say what it does before why.',
+  avoid: [
+    { term: 'cheap', use: 'good value', reason: 'We sell on quality.' },
+    { term: 'synergy', use: 'working together' },
+  ],
+},
+```
+
+| Key | | Meaning |
+| --- | --- | --- |
+| `voice` | required | Voice, audience, tone, house style. Markdown, 1 to 16,000 characters, served to agents verbatim. Folio never judges it. |
+| `avoid` | | At most 200 `{ term, use?, reason? }`, terms distinct ignoring case. `check_document` reports each `term` found in source-locale prose (`term-avoided`), case-insensitively and on word boundaries, with `use` as the suggestion. |
+
+**Served only on the gated `GET {base}/api/v1/schema`**, as `writing` beside the
+manifest, which is what the MCP `get_schema` tool reads. It is never in the open
+`{base}/api/schema` manifest or the MCP instructions, both of which answer without
+a credential, so it is the place for anything a brand would rather not publish.
+With [`brands`](#many-brands-in-one-deployment) it is a brand key.
+
+The per-block and per-field keys that go with it (`help` and `guidance` on a
+block, `guidance` on any field, `length` on `text`, `textarea` and `richtext`,
+`decorative` on `asset` and `multiasset`) are declared in `defineBlock` rather than
+here, and are public like `help`: the handbook's
+[Writing guidance and content checks](handbook.md#writing-guidance-and-content-checks)
+covers them.
+
 ---
 
 ### Routing and rendering
@@ -407,6 +440,7 @@ id out of the registry, and the repair is SQL (`UPGRADING.md`).
 | `gate` | optional | This brand's visitor gate, validated against this brand's root blocks. |
 | `forms` | optional | `verify`, `ratePerHour` and `actions` for a submission on this brand's live hosts, and its option sources. |
 | `describe` | optional | This brand's describer, `onUpload` and `concurrency`. |
+| `writing` | optional | This brand's [writing guide](#writing-writingguide). `get_schema` on one of this brand's scopes answers this brand's guide and no other. |
 | `migrations` | optional | This brand's content migrations. **Each id starts `<brand>/`.** `migrate` runs a brand's list over that brand's sites only. |
 
 Each key means what the same key means at the top of a single-brand config, for this
@@ -1044,13 +1078,17 @@ you can recognise one:
 | An unknown key in `hooks` (or in `hooks.await`) | A typo means a hook that silently never fires |
 | `migrations` whose declared order and sort order disagree | Documents would migrate in an order depending on which comparison ran |
 | A `presets` entry naming a field the block does not declare | The preset would silently do nothing |
+| `length` on a field that is not `text`, `textarea` or `richtext`; a `length.min` that is not a whole number of 0 or more, a `max` that is not one of 1 or more or is below `min`, a `unit` other than `characters` or `words` | A limit the host believes in and nothing would ever report |
+| `decorative` on a field that is not `asset` or `multiasset`, or not a boolean | An opt-out from a check the field never ran |
+| A block `help` over 500 characters; `guidance` that is not `{ tone?, examples? }`, a `tone` over 500 characters, more than 10 `examples` or one outside 1–500 characters (an existing field `help` is not capped) | Guidance is served to every agent session; the caps keep it a guide |
+| `writing` with no `voice`, a `voice` over 16,000 characters, more than 200 `avoid` terms, two terms equal ignoring case, an unknown key | A malformed guide would surface on an agent's first check rather than at deploy |
 | `sites.admin` that is not an origin (a path, a non-`https:` scheme off localhost) | Sign-in and passkeys bind to it; a wrong one is found by the first person to sign in |
 | `sites.settings` naming a type that is not a declared `singleton` | The settings layers would resolve to nothing, in silence |
 | `sites` without `route` | Every site's URLs are absolute, and a default relative `route` would resolve against the admin origin |
 | A layered global or settings type whose layer id (`sng_<name>:<scope>`) cannot fit 64 characters for a 32-character scope id | Creating a layer for a long-named scope would fail on whichever editor did it first |
 | With `sites`: a provider with `provision.role`, `provision: { create: true }` without `roleFrom`, or a `roleFromClaim` with `default` | Each is a role on every site for somebody the directory admits, or a created person with nowhere to work |
 | `brands` without `sites`, empty, or a brand id not shaped like a site id (lowercase letters, digits, hyphens, at most 32 characters) | A brand is a property of a site row, and the id is what the row stores and what a preview bundle is named after |
-| A key that belongs in a brand (`blocks`, `types`, `globals`, `previewCss`, `previewWrap`, `gate`, `forms`, `describe`, `migrations`, `root`) at the top beside `brands`, or `sites.settings` | It would be validated against no registry, or an arbitrary one |
+| A key that belongs in a brand (`blocks`, `types`, `globals`, `previewCss`, `previewWrap`, `gate`, `forms`, `describe`, `writing`, `migrations`, `root`) at the top beside `brands`, or `sites.settings` | It would be validated against no registry, or an arbitrary one |
 | `assets.brands` whose keys differ from `brands`', or `assets.preview` at the top with `brands` | A brand with no preview bundle, or a bundle for a brand that does not exist |
 | A brand migration id without its `<brand>/` prefix | `schema_migrations` is keyed by id alone, so two brands' `0001` would collide |
 | `sites` with `auth: 'open'` | Not refused: it logs a warning, because every scope is then editable and every preview origin shows drafts to anyone who reaches it |

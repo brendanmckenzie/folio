@@ -19,7 +19,10 @@ export const page = defineBlock({
     description: textarea({
       label: "Meta description",
       rows: 3,
-      help: "Shown in search results. Around 150 characters.",
+      help: "Shown in search results.",
+      // A limit belongs in `length`, not in `help`'s prose: the inspector counts
+      // against it and an agent's check_document reports it. Advisory, never refused.
+      length: { max: 160 },
     }),
     noindex: boolean({ label: "Hide from search engines" }),
     // The body slot. `allow` is the whole of "what can go on a page" — add a

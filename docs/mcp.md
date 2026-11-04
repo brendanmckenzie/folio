@@ -12,7 +12,7 @@ state on your behalf. The cost of implementing one revision is that a client whi
 *only* speak a handshake-based revision (`2025-11-25` or earlier) cannot connect; it gets
 a `400` naming what would work. Current clients negotiate this automatically.
 
-Sixteen tools, each one an existing v1 route dispatched internally (see
+Seventeen tools, sixteen of them an existing v1 route dispatched internally (see
 `docs/specs/platform/mcp-server.md` decision 2). So an assistant can do what a person can
 do, an agent's edit appears live in an open editor, and it lands in the activity trail
 attributed to the token rather than to whoever minted it.
@@ -32,7 +32,7 @@ Scopes, and what each buys:
 
 | Scope | Tools it unlocks |
 | --- | --- |
-| `content:read` | `get_schema`, `search_documents`, `query_documents`, `get_document`, `list_versions` |
+| `content:read` | `get_schema`, `search_documents`, `query_documents`, `get_document`, `check_document`, `list_versions` |
 | `content:read:draft` | the above, plus `preview_document` |
 | `content:write` | the above, plus `create_document`, `write_content`, `patch_fields`, `move_document`, `duplicate_document`, `restore_version` |
 | `publish` | the reads, plus `publish_document`, `unpublish_document` |
@@ -43,6 +43,10 @@ Two of those are worth knowing rather than discovering:
 
 - **`assets:write` implies no content access at all**, which is the whole reason it is a
   separate scope. A token holding only it gets one tool.
+- **`check_document` checks the draft by default, which needs `content:read:draft`.** A
+  `content:read` token is offered it and is refused that call naming the scope; it can
+  still check the published copy with `status: "published"`. Every token that can write
+  can read drafts, so a writing agent never meets the refusal.
 - **`delete_document` needs `admin`, not `content:write`**, although its route accepts
   `content:write`. A delete is the one action in the list whose mistake no other tool call
   can undo. A script that means to delete asks for `admin`; an assistant helping with copy
@@ -241,6 +245,28 @@ over MCP:
 
 A double create is refused as a `conflict` by a unique index rather than making two pages,
 which is why no tool asks a model to remember an idempotency key.
+
+## 6. Checking before publishing
+
+`get_schema` hands an agent what the site wrote about how to fill it in: each block's
+and field's `help`, any `guidance` (tone and examples) and `length`, and the brand's
+`writing` guide, its voice and the terms it avoids. The instructions tell an agent to
+follow them and to check its work before publishing. The loop is:
+
+1. **Write**: `create_document`, `write_content` or `patch_fields`.
+2. **Check**: `check_document` with the document's `id`. Each finding carries the block
+   `uid`, the `field`, and for one locale's value the `locale`; `fix` says which tool
+   repairs it.
+3. **Patch**: for a `patch_fields` finding, call `patch_fields` with
+   `{ id, bloks: [{ uid, fields: { [field]: newValue } }], locale }`. A `write_content`
+   finding is structural (an unknown block, an empty required slot). A `schema` finding
+   is drift only a code change or a content migration can clear: tell your person rather
+   than trying a write that will be refused.
+4. **Check again**, until nothing you can fix is left, then publish or hand over.
+
+Findings are errors, then warnings, then info, and the check is advisory throughout:
+nothing in it stops `publish_document`. The check names and what each means are in the
+handbook's [Checking a document](handbook.md#checking-a-document).
 
 ## See also
 

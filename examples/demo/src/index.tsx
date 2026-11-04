@@ -157,6 +157,17 @@ const demoWebhook = formAction({
 
 const folio = createFolio<Env>({
   blocks,
+  // The brand's voice, for agents (`docs/specs/content-model/authoring-guidance.md`
+  // decision 6): served on the gated `get_schema` only, never on the open manifest.
+  // `avoid` is the one part `check_document` checks.
+  writing: {
+    voice:
+      "Folio's demo site speaks plainly to the person reading it: second person, short sentences, no superlatives. Say what a thing does before saying why it matters.",
+    avoid: [
+      { term: "leverage", use: "use" },
+      { term: "best-in-class", use: "a specific claim you can back up" },
+    ],
+  },
   // document-types.md: four shapes of document, not one. `root: 'page'` still
   // works and is sugar for exactly the first entry here; this spells it out
   // because the point of the demo is to show what a real host declares.

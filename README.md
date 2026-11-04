@@ -182,6 +182,9 @@ Grouped roughly the way you meet them.
   in-process `folio.write()` for your own Worker.
 - **An MCP server** at `{base}/mcp`, so an assistant can read and write content
   with a scoped credential.
+- **Writing guidance and content checks**: `help`, `guidance` and advisory `length`
+  on blocks and fields, a per-brand `writing` guide, and `check_document`, which tells
+  an agent what to fix and where before anything is published.
 - **Content migrations** — pure functions from a document to a list of
   mutations, applied through the same log the editor writes to, plus a drift
   audit that tells you which schema changes have stranded data.

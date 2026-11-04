@@ -68,6 +68,9 @@ The three rules broken most often:
 
 After bumping the pinned tag, `rm -rf node_modules/folio` before installing.
 
+When writing content through Folio's MCP tools, call `check_document` after writing
+and before publishing, and fix what it reports.
+
 If `createFolio` has `brands`, check the brand map in this file and in each
 `app/brands/<brand>/CLAUDE.md` before you edit a block, type or route, and never import
 from one brand's directory into another's.
@@ -202,6 +205,28 @@ never by echoing `folio_reason`. `submitted` stays for fire-and-forget work.
 
 **3. Add the Vite plugin.** `folio/vite` supplies the admin entry, the client
 build and the asset constants. Do not hand-roll them.
+
+**Write guidance into the schema for the people and agents who fill it in**
+(spec 40, `docs/handbook.md` "Writing guidance and content checks"). An agent reads
+all of it in `get_schema` and an editor sees it in the inspector, so write it once:
+
+- A field's `help` is its purpose, one line. A block's `help` (at most 500
+  characters) says what the block is for and when to choose it over its
+  neighbours; it leads the block picker entry.
+- `guidance: { tone, examples }` on a block or a field is how to write it: the
+  register, what to lead with, and up to ten real values that fit. Examples an
+  agent can imitate beat adjectives.
+- `length: { max, min?, unit? }` on `text`, `textarea` and `richtext` is a limit
+  the inspector counts against and `check_document` reports. Advisory: a value
+  over it is still saved and published.
+- `decorative: true` on an image field that carries no information (a background
+  under a gradient), so it is not reported for missing alt text.
+- `writing: { voice, avoid }` in `createFolio` (per brand with `brands`) is the
+  brand's voice, served to agents on the gated `get_schema` only, and the terms it
+  does not use, which the check reports with their replacement.
+
+`help` and `guidance` ride in the unauthenticated manifest, like labels. Anything a
+brand would not publish belongs in `writing`.
 
 ## A multi-site host
 
@@ -416,6 +441,9 @@ that site's brand.
   It defaults to 5 sign-in links per address per hour, and requests past it are dropped
   quietly, so the sixth scripted login in local dev never gets a link.
 - **Pin an exact tag.** A branch, a short SHA or a `#semver:` range will resolve differently later.
+- **Declare a length rather than writing one into `help`.** `help: "Around 150
+  characters"` is prose nobody counts; `length: { max: 160 }` is a counter in the
+  inspector and a `length-over` finding an agent can fix.
 
 ## Do not
 

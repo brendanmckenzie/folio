@@ -53,7 +53,7 @@ implies nothing at all beyond itself.
 
 | Method | Path | Scope | Answers |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/schema` | `content:read` | `Manifest` — types, blocks, locales. Under `~<site>` on a multi-site deployment it adds `scope: { id, name, kind, brand }`; on a deployment with `brands` it is that brand's manifest, and with no scope it is `400 site_required` |
+| `GET` | `/api/v1/schema` | `content:read` | `Manifest` — types, blocks, locales. Under `~<site>` on a multi-site deployment it adds `scope: { id, name, kind, brand }`; on a deployment with `brands` it is that brand's manifest, and with no scope it is `400 site_required`. Adds `writing` (the brand's [writing guide](configuration.md#writing-writingguide)) when the brand declares one |
 | `GET` | `/api/v1/search` | `content:read` | `Page<DocumentMeta>` — keyset, **reaches drafts** |
 | `GET` | `/api/v1/documents` | `content:read` | `ContentPage` — a query over published content |
 | `GET` | `/api/v1/documents/:id` | `content:read` (+`:draft`) | `Document` |
@@ -69,6 +69,7 @@ implies nothing at all beyond itself.
 | `POST` | `/api/v1/documents/:id/unpublish` | `publish` | `{ story: DocumentMeta }` |
 | `POST` | `/api/v1/documents/:id/versions` | `publish` | `VersionMeta`, `201` |
 | `GET` | `/api/v1/documents/:id/versions` | `content:read` | `{ versions: VersionMeta[] }` |
+| `GET` | `/api/v1/documents/:id/check` | `content:read` (+`:draft` by default) | `ContentCheckReport` |
 | `GET` | `/api/v1/assets` | `content:read` | `{ assets: AssetRow[] }` |
 | `POST` | `/api/v1/assets?filename=…` | `assets:write` | `{ asset, value }`, `201` |
 
@@ -198,6 +199,92 @@ singleton) is a `404` here by design — it has no path.
 
 `GET /documents/:id` for a document with nothing published answers `404` with a
 message naming `?status=draft`, rather than an empty document.
+
+`GET /schema` carries the brand's `writing` guide, `{ voice, avoid? }`, beside the
+manifest when the brand declares one, and no `writing` key when it does not. This
+route is the only place it is served: the admin's open `{base}/api/schema` never
+carries it.
+
+### `GET /documents/:id/check`
+
+What is wrong with one document, and where, in terms `PATCH /documents/:id/fields`
+takes. Advisory: nothing here blocks a publish.
+
+| Parameter | Effect |
+| --- | --- |
+| `?status=draft` | The default. Checks the live draft, and needs `content:read:draft` |
+| `?status=published` | Checks the published snapshot at `content:read`; `404` when nothing is published. Any other value is `400` |
+| `?locale=fr` | Per-locale findings for that locale only; source-locale findings are always reported. An undeclared locale is `unsupported`, as on `GET /documents/:id` |
+
+The document is read through the same scope fence as `GET /documents/:id` (outside
+it is `404`), and every link and reference target in one read within the request's
+chain, so a target on another site reads exactly like a deleted one. No target's
+draft is opened.
+
+```json
+{
+  "id": "sty_8f2c",
+  "source": "draft",
+  "counts": { "error": 1, "warning": 1, "info": 0 },
+  "findings": [
+    {
+      "check": "link-broken",
+      "severity": "error",
+      "message": "Target links to a document that does not exist on this site.",
+      "uid": "b41e9a0c",
+      "type": "button",
+      "field": "target",
+      "path": "body[0].actions[0]",
+      "fix": "patch_fields",
+      "detail": { "target": "sty_dead", "reason": "missing" }
+    },
+    {
+      "check": "length-over",
+      "severity": "warning",
+      "message": "Heading is 74 characters; the limit is 60.",
+      "uid": "0c1d77aa",
+      "type": "hero",
+      "field": "heading",
+      "locale": "fr",
+      "path": "body[0]",
+      "fix": "patch_fields",
+      "detail": { "length": 74, "max": 60, "unit": "characters" }
+    }
+  ],
+  "truncated": false
+}
+```
+
+`{ uid, field, locale }` is a `PATCH /fields` call:
+`{ bloks: [{ uid, fields: { [field]: value } }], locale }`, the root block
+included. `path` uses the grammar a refused write's error does (`body[0]` is the
+first child of the root's `body` slot); `''` is the root. `fix` is `patch_fields`,
+`write_content` (structure: `PUT /content`) or `schema` (drift only a code change or
+a content migration clears). `counts` cover every finding; `findings` are errors,
+then warnings, then info, each in document order, at most 500, with `truncated`.
+
+| `check` | Severity | `detail` |
+| --- | --- | --- |
+| `unknown-type` | error | |
+| `field-shape` | error | `{ reason }` |
+| `link-broken` | error | `{ target, reason: "missing" \| "unrouted" \| "type" }` |
+| `reference-broken` | error | `{ target, reason: "missing" \| "type" }` |
+| `required-empty` | warning | |
+| `alt-missing` | warning | `{ index }` for a `multiasset` entry |
+| `length-over` | warning | `{ length, max, unit }` |
+| `length-under` | warning | `{ length, min, unit }` |
+| `term-avoided` | warning | `{ term, use? }` |
+| `link-unpublished` | warning | `{ target, state }` |
+| `reference-unpublished` | warning | `{ target, state }` |
+| `orphan-key` | warning | |
+| `translated-not-translatable` | warning | |
+| `unknown-locale` | warning | (`field` is null; `locale` is the code) |
+| `missing-field` | info | |
+| `translation-missing` | info | |
+
+The `check` names are part of `v1`: one may be added, never renamed or removed. The
+`message` text is not. The
+[handbook](handbook.md#checking-a-document) says what each one means.
 
 ---
 

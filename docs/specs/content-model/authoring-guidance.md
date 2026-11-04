@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 40
 > **Size:** L
-> **Status:** draft
+> **Status:** built (2026-11-04, `feat/authoring-guidance`), ships in `v1.4.0`
 > **Wire version:** none. Nothing here crosses the socket or the admin↔preview frame. Guidance rides inside the block schemas the manifest already serves over HTTP, and a check is an HTTP read. `PROTOCOL_VERSION` stays at 5
 > **Migration:** none. Guidance is code (`defineBlock`, `createFolio`), and a check is computed on read from the document and one `stories` lookup. Nothing is stored
 > **Release:** `v1.4.0`, a minor. Every change to the exports surface is additive: new optional keys on `defineBlock` and on the field builders, one new optional `createFolio` key, one new `{base}/api/v1` route, one new key on the v1 `/schema` answer, one new MCP tool. Ships beside spec 41 (agent CLI), which touches `AGENTS.md` and `bin/folio.mjs agents` too (Dependencies)
@@ -1255,3 +1255,96 @@ unknown top-level `writing`, so a JS host is not broken by a downgrade.
   reason.
 - **Exporting `checkDocument` from `folio/engine`.** The v1 route is the contract. A
   second contract surface for the same shape can be added later as a minor.
+
+## Implementation notes
+
+Built 2026-11-04 on `feat/authoring-guidance` in the plan's order, phases 1 to 5 each
+committed separately and phase 6 (the demo, the starter, the end-to-end loop and the
+documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships in
+`v1.4.0` beside spec 41.
+
+**Where the spec was wrong or ambiguous, and what was done.**
+
+1. **An undeclared `?locale=` is `unsupported`, which is `501`, not `422`.** The route
+   reuses `askedLocale`, so it answers exactly what `GET /documents/:id` answers for
+   the same locale; the workers test pins the two together rather than a number.
+2. **The `path` grammar elides `fields.` for a slot.** `NestedError`'s paths come from
+   `childPath`, which writes `body[0].actions[0]`, not `fields.body[0].actions[0]`; a
+   field inside a blok is `body[0].fields.heading`. `nestedPaths` uses the same helper,
+   and `nested.test.ts` pins both that a path followed into `toNested`'s output lands on
+   its blok and that it prefixes a refused write's `NestedError.path`. The docs' example
+   uses the real grammar.
+3. **`translation-missing` reads `translationStatus` once per locale, not per blok.**
+   `translationStatus` walks a whole document; calling it from a per-blok check would
+   walk it once per blok. `checkDocument` computes the gaps per non-source locale (only
+   `?locale=`'s when one is given) and the `AUTHORING_CHECKS` entry reads them by uid, so
+   the rule is still the publish dialog's.
+4. **`isEmptySource` gains the asset arm.** It now *is* `isBlankValue`, whose asset case
+   (an `asset` value with neither a key nor a usable url is blank) the old private copy
+   lacked. A translatable `asset` whose source is unreadable no longer counts as work a
+   translator owes. Nothing else about the translation walk changed.
+5. **`fieldWarning` takes the field's name.** `check_document` labels a finding
+   `label ?? name`; the inspector's `fieldWarning(field, value)` had no name to fall back
+   on, so it gained an optional third argument and `FieldRow` passes it. The length case
+   is answered before `required`'s, which cannot fire for the same value (an empty value
+   is never measured).
+6. **`Field` gained two props, not one.** `count` is the counter at the label's end, as
+   planned; `detail` draws the "Writing guide" disclosure *under* the help line, which
+   the plan's "rendered by `FieldRow`" could not do without it, since `Field` draws the
+   help after the control.
+7. **`validateWriting` refuses more than the caps the spec lists**: an unknown key on
+   the guide or on a term, a blank `voice`, a `term` over 100 characters, and a `use` or
+   `reason` over 500. Each is the same kind of refusal as the listed ones and is in
+   `docs/configuration.md`'s table.
+8. **`alt-missing` reads an override only on a `translatable` field.** An override on an
+   untranslatable field is `translated-not-translatable`'s finding; reporting its alt text
+   as well would say one problem twice.
+9. **`term-avoided` is one finding per term per field**, however often the term occurs,
+   because the fix is one rewrite of that value.
+10. **Only reachable bloks are checked.** The walk is `nestedPaths`, so a blok no path
+    from the root reaches (an orphan left by an old log) has no `path` and is skipped; it
+    renders nowhere and `patch_fields` on it would change nothing anyone sees.
+11. **A link target of an undeclared type is not `unrouted`.** "Not a `page` kind" is read
+    off the brand's declared types; a row whose type the brand no longer declares is
+    judged only on presence, state and the field's `types`.
+12. **The status parser is a picklist.** `?status=` is screened by a new `CHECK_STATUS`
+    in `validate.ts` (a misspelt value is `400`, never a silent draft check), and
+    `tools.test.ts` pins `check_document`'s enum against it, as `search_documents`' is
+    against `STORY_STATE`.
+13. **Where the tests landed.** The per-brand guide test is in
+    `multi-brand-entry.test.ts`, because `multi-brand.test.ts` mounts no API routes; its
+    construction refusals are in `multi-brand.test.ts`. The sanctioned settings-audit
+    change is pinned in `multi-site.test.ts`'s settings test, because `requiredEmpty` is
+    private and `auditSettings` needs D1, so `server/audit.test.ts` could not reach it.
+    The "no Durable Object for a deleted target" assertion watches the story
+    namespace's `idFromName`, which `FolioRuntime.stub` is the one caller of, rather than
+    spying on `stub` itself, so it runs through `createFolio` unchanged. The mcp
+    tools/scopes unit tests count `check_document` among the reads.
+14. **`scope-partition.test.ts`'s page block gained a `link` field**, so the cross-site
+    link case has an edge to follow.
+15. **The instructions say "the site's voice", not "the brand's voice".** The sentence
+    the spec gives would put the word "brand" into every deployment's instructions, and
+    `multi-brand.test.ts` pins that a deployment with no `brands` names no brand there.
+    The sentence is "Blocks and fields may carry `help`, `guidance` and `length`, and
+    get_schema's `writing`, when present, is the site's voice; follow them, then call
+    check_document and fix what it reports before publishing."
+16. **Phase 3's commit lists the route in `NOT_TOOLS`** so the tree stays green between
+    the route and the tool; phase 4 removes it.
+
+**Verified by breaking it.** Each boundary was disabled and a test went red, then
+restored: putting `writing` on the manifest (`schema.test.ts`, `multi-brand-entry.test.ts`);
+dropping `writing` from `BRAND_KEYS` (`multi-brand.test.ts`); appending the voice to the
+MCP instructions (`multi-brand-entry.test.ts`); passing `null` for the chain
+(`scope-partition.test.ts`'s cross-site link); bypassing `load` (the fence table's walk);
+reading targets once per edge (`checks.test.ts`, unit and workers); addressing a target's
+object (`checks.test.ts`); reading targets off the raw binding rather than the session
+(`checks.test.ts`); dropping the draft access check (`checks.test.ts`); the old blank
+rule in the settings audit (`multi-site.test.ts`); `toSchemaIndex` always carrying `help`
+(`block-registry.test.ts`); `blokTargets` skipping overrides (`refs.test.ts`); and a
+UTF-16 `.length` count in the counter (`inspector.test.ts`).
+
+**Not verified here.** `scripts/mcp-test.mjs` gains the write, check, patch, check loop
+but was not run on this branch (the end-to-end tier shares one port and one database,
+and runs on the merged branch). The inspector's counter, disclosure and block help, and
+the picker's help line, are pinned by Node tests of the model functions; nobody has
+looked at them in a browser yet.
