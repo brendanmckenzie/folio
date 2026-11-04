@@ -246,6 +246,8 @@ describe("upgrade plans, other ranges", () => {
   });
 
   it("stops at a requiresDeployed release unless a deployment proves the version (review M1)", () => {
+    // The newest real release, so a patch release does not move the goalposts.
+    const newest = ledger.releases.at(-1)?.version as string;
     const fixture = {
       ...ledger,
       releases: [
@@ -255,23 +257,23 @@ describe("upgrade plans, other ranges", () => {
           rollback: "safe",
           migrations: [],
           headings: [],
-          requiresDeployed: "1.4.0",
+          requiresDeployed: newest,
         },
       ],
     };
     const p = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.3.1" });
-    expect(p.hops.map((h) => h.to)).toEqual(["1.4.0"]);
-    expect(p.stop).toMatchObject({ before: "1.5.0", requiresDeployed: "1.4.0", deployed: null });
+    expect(p.hops.map((h) => h.to)).toEqual([newest]);
+    expect(p.stop).toMatchObject({ before: "1.5.0", requiresDeployed: newest, deployed: null });
     expect(p.hops[0]?.steps.at(-1)).toMatchObject({ id: "next-hop", phase: "post-deploy" });
     expect(p.hops[0]?.steps.find((s) => s.id === "pin")).toMatchObject({
-      after: "github:brendanmckenzie/folio#v1.4.0",
+      after: `github:brendanmckenzie/folio#v${newest}`,
     });
     // Installed at or past the gate proves nothing about what is deployed.
-    const installed = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.4.0" });
+    const installed = plan({ ledger: fixture, cliVersion: "1.5.0", from: newest });
     expect(installed.hops).toEqual([]);
     expect(installed.stop?.before).toBe("1.5.0");
-    // A deployment that reports 1.4.0 or later is the proof.
-    const proven = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.4.0", deployed: "1.4.0" });
+    // A deployment that reports the newest release or later is the proof.
+    const proven = plan({ ledger: fixture, cliVersion: "1.5.0", from: newest, deployed: newest });
     expect(proven.stop).toBeUndefined();
     expect(proven.hops.map((h) => h.to)).toEqual(["1.5.0"]);
     // An older deployment does not count.

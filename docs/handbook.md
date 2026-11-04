@@ -53,7 +53,7 @@ never swallow one of yours.
 The README's quick start is:
 
 ```bash
-npx github:brendanmckenzie/folio#v1.3.1 init my-site
+npx github:brendanmckenzie/folio#v1.4.0 init my-site
 cd my-site && npm install
 npm run db:local && npm run db:seed
 npm run dev
@@ -5563,7 +5563,7 @@ Folio follows [semver](https://semver.org/) from `1.0.0`. A release is an annota
 git tag, `vX.Y.Z`, on a commit that has merged to `main`:
 
 ```
-npm install github:brendanmckenzie/folio#v1.3.1
+npm install github:brendanmckenzie/folio#v1.4.0
 ```
 
 There is no npm package: `folio` is taken on the registry by an unrelated project,
@@ -5585,7 +5585,7 @@ tag is never moved or deleted once pushed.
 is valid npm syntax and is deliberately unsupported: it resolves against whatever
 tags exist at install time, which turns an upgrade into something that happens to
 you on the next fresh install, and here every upgrade is a decision. Pin
-`#v1.3.1` (or the current tag), and move it by editing the tag. Never pin a branch
+`#v1.4.0` (or the current tag), and move it by editing the tag. Never pin a branch
 or a short SHA either; both resolve differently later.
 
 **Your lockfile still pins a commit.** npm resolves the tag to a SHA and records
