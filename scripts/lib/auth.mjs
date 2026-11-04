@@ -13,7 +13,8 @@
  * worse *and* read worse. Nothing else in these scripts changes as a result.
  */
 
-const DEFAULT_BASE = "http://localhost:5199";
+// `scripts/e2e.sh` hands each run its own port through FOLIO_E2E_BASE, so several can run at once.
+const DEFAULT_BASE = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 
 /** The admin seeded by examples/demo/seed.sql. */
 export const DEMO_ADMIN = "demo@example.com";

@@ -24,7 +24,7 @@
 
 import { signInGlobally } from "./lib/auth.mjs";
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 // Unversioned, internal: story lifecycle (`/stories`, `/story/:id/publish`).
 const API = `${BASE}/api`;

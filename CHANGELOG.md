@@ -8,6 +8,26 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.4.1
+
+A patch release: nothing to run or edit on an existing host. No migration, no wire
+change, no change to the `exports` surface or to any `createFolio()` key.
+
+### Changed
+
+- **The release gates run in parallel.** The end-to-end sweep runs its 26 scripts several
+  at a time, each against its own dev server, port and state directory, and
+  `release.yml` runs the tag check, tests, biome and typecheck, the sweep and the
+  consumer smoke test as separate jobs that the release job needs. Nothing a check
+  asserts changed. For a contributor: `scripts/e2e.sh` picks a free port and a fresh
+  state directory instead of using 5199 and `examples/demo/.wrangler/state`, and no longer
+  kills other vite processes. The demo's `vite.config.ts` reads `FOLIO_E2E_PORT` and
+  `FOLIO_E2E_STATE`, which are unset in a normal `pnpm dev`.
+
+### Breaking changes
+
+None.
+
 ## 1.4.0
 
 A minor release for agents working on a Folio site: guidance and content checks in the

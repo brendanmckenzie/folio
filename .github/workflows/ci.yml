@@ -19,8 +19,10 @@ permissions:
   contents: read
 
 jobs:
+  # `check` and `test` are separate jobs so they run on two runners at once: the workers
+  # test project (real workerd) is the long pole, and the rest finishes well inside it.
   check:
-    name: biome, typecheck, build, test
+    name: biome, typecheck, build
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -56,7 +58,29 @@ jobs:
       - name: build
         run: pnpm build
 
-      # Unit tests in Node plus the workers project in real workerd.
+  test:
+    name: test
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # worker-configuration.d.ts is gitignored.
+      - name: generate Worker types
+        run: pnpm --filter demo cf-typegen
+
+      # Unit tests in Node plus the workers project in real workerd, alone on its runner.
       - name: test
         run: pnpm test
 
@@ -221,22 +245,23 @@ jobs:
   # The one status a ruleset requires. Every job above must pass.
   gate:
     if: always()
-    needs: [check, lint, evals]
+    needs: [check, test, lint, evals]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: every needed job passed
         env:
           CHECK: ${{ needs.check.result }}
+          TEST: ${{ needs.test.result }}
           LINT: ${{ needs.lint.result }}
           EVALS: ${{ needs.evals.result }}
         run: |
-          echo "check=$CHECK lint=$LINT evals=$EVALS"
-          # `check` and `lint` must succeed. `evals` is the one job that may be skipped: it is
+          echo "check=$CHECK test=$TEST lint=$LINT evals=$EVALS"
+          # `check`, `test` and `lint` must succeed. `evals` is the one job that may be skipped: it is
           # skipped when no LLM task changed and on a fork PR, which gets no secret. A failed or
           # cancelled `evals` still fails the gate.
-          if [ "$CHECK" != success ] || [ "$LINT" != success ]; then
-            echo "::error::check or lint did not succeed"
+          if [ "$CHECK" != success ] || [ "$TEST" != success ] || [ "$LINT" != success ]; then
+            echo "::error::check, test or lint did not succeed"
             exit 1
           fi
           case "$EVALS" in

@@ -17,7 +17,7 @@ import { signInGlobally } from "./lib/auth.mjs";
 
 await signInGlobally();
 
-const API = "http://localhost:5199/folio/api";
+const API = `${process.env.FOLIO_E2E_BASE ?? "http://localhost:5199"}/folio/api`;
 
 const results = [];
 const check = (label, ok, detail = "") => {

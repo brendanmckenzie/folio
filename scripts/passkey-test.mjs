@@ -18,7 +18,7 @@ import "./lib/ts-resolve.mjs";
 import { DEMO_ADMIN, sessionCookieFrom, signInGlobally } from "./lib/auth.mjs";
 import { createAuthenticator, ES256 } from "../test/lib/synthetic-authenticator.ts";
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 

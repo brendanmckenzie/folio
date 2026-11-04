@@ -48,7 +48,7 @@ An editor sees a Hero with a heading box, a two-option dropdown and a slot that 
 ## Quick start
 
 ```bash
-npx github:brendanmckenzie/folio#v1.3.1 init my-site
+npx github:brendanmckenzie/folio#v1.4.0 init my-site
 cd my-site && npm install
 npm run db:local && npm run db:seed
 npm run dev
@@ -119,7 +119,7 @@ Working on Folio itself? [`CLAUDE.md`](https://github.com/brendanmckenzie/folio/
 Folio installs from git, not npm. Pin an exact release tag:
 
 ```
-npm install github:brendanmckenzie/folio#v1.3.1
+npm install github:brendanmckenzie/folio#v1.4.0
 ```
 
 It follows [semver](https://semver.org/) from 1.0.0: a major version removes or narrows the `exports` surface or a `createFolio()` key, a minor adds to them (D1 migrations arrive in minors), a patch fixes. Never pin a range or a branch. [`UPGRADING.md`](UPGRADING.md) is the procedure, and the [handbook](docs/handbook.md#versioning-and-installing) has the reasoning.

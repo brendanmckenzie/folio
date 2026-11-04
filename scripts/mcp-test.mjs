@@ -42,7 +42,7 @@ import "./lib/ts-resolve.mjs";
 
 import { signInGlobally } from "./lib/auth.mjs";
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 // The admin's own internal JSON — unversioned on purpose
 // (docs/specs/foundation/pagination.md decision 3) — is what mints a token
 // and reads the activity trail, neither of which is part of the v1 contract.

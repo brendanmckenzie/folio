@@ -35,7 +35,7 @@ const ADMIN_ID = "usr_demoadmin1";
 
 const { PROTOCOL_VERSION } = await import(new URL("../src/core/protocol.ts", import.meta.url));
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 
@@ -79,10 +79,10 @@ function socket(name, url, cookie) {
 }
 
 const storySocket = (name, storyId, cookie) =>
-  socket(name, `ws://localhost:5199/folio/api/story/${storyId}/socket`, cookie);
+  socket(name, `${HTTP.replace(/^http/, "ws")}/folio/api/story/${storyId}/socket`, cookie);
 
 const spaceSocket = (name, cookie) =>
-  socket(name, "ws://localhost:5199/folio/api/space/socket", cookie);
+  socket(name, `${HTTP.replace(/^http/, "ws")}/folio/api/space/socket`, cookie);
 
 /* ------------------------------------------------------------------ setup --- */
 

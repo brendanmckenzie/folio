@@ -53,7 +53,7 @@ never swallow one of yours.
 The README's quick start is:
 
 ```bash
-npx github:brendanmckenzie/folio#v1.3.1 init my-site
+npx github:brendanmckenzie/folio#v1.4.0 init my-site
 cd my-site && npm install
 npm run db:local && npm run db:seed
 npm run dev
@@ -5268,8 +5268,10 @@ than lingering. One is a regression guard rather than a feature test: **per-bloc
 presence on a story socket still works and now names a field**, because the space
 channel duplicates the selection and must not have replaced anything.
 
-Every script runs against a live dev server on port 5199 (and the engine tests
-against the production build via `vite preview`). They sign in first, through
+Every script runs against a live dev server (and the engine tests
+against the production build via `vite preview`). `scripts/e2e.sh` starts it on a free
+port with its own state directory and passes the origin as `FOLIO_E2E_BASE`; run by hand
+against `pnpm dev`, the scripts fall back to port 5199. They sign in first, through
 `scripts/lib/auth.mjs`: the demo's `send` logs the link and stashes it at a
 localhost-only `/dev/last-signin`, which is the stand-in for a mailbox that lets
 these run with no mail credentials at all.
@@ -5561,7 +5563,7 @@ Folio follows [semver](https://semver.org/) from `1.0.0`. A release is an annota
 git tag, `vX.Y.Z`, on a commit that has merged to `main`:
 
 ```
-npm install github:brendanmckenzie/folio#v1.3.1
+npm install github:brendanmckenzie/folio#v1.4.0
 ```
 
 There is no npm package: `folio` is taken on the registry by an unrelated project,
@@ -5583,7 +5585,7 @@ tag is never moved or deleted once pushed.
 is valid npm syntax and is deliberately unsupported: it resolves against whatever
 tags exist at install time, which turns an upgrade into something that happens to
 you on the next fresh install, and here every upgrade is a decision. Pin
-`#v1.3.1` (or the current tag), and move it by editing the tag. Never pin a branch
+`#v1.4.0` (or the current tag), and move it by editing the tag. Never pin a branch
 or a short SHA either; both resolve differently later.
 
 **Your lockfile still pins a commit.** npm resolves the tag to a SHA and records
