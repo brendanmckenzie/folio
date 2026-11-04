@@ -144,7 +144,7 @@ export async function upgradeCommand(argv, rt) {
       typecheck: Boolean(project.pkg.scripts?.typecheck),
       agentsFile,
       base: await basePathOf(project),
-      databases: await databasesByEnvironment(project),
+      ...(await databasesByEnvironment(project)),
       env: values.env ?? null,
       config: values.config ?? null,
     });

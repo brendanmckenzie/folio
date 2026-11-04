@@ -90,7 +90,8 @@ export const groupWebWrangler = () => {
   const db = (name: string) => ({
     binding: "FOLIO_DB",
     database_name: name,
-    database_id: "11111111-1111-1111-1111-111111111111",
+    // A database per environment, so a database id per environment too.
+    database_id: `id-${name}`,
     migrations_dir: "node_modules/folio/migrations",
   });
   const dos = {

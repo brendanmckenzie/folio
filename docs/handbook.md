@@ -2103,8 +2103,15 @@ that release's tag), and its steps in three phases:
   local-D1 checks. This is all `--apply` runs.
 - **`deploy`**: one `wrangler d1 migrations apply <db> --remote [--env <e>]` per
   Folio database across the top level and every named environment, then the
-  deploy. A migration applied with the deploy (`0011`) pairs each remote apply with
-  an immediate deploy of that environment instead.
+  deploy. A database is identified by its `database_id` (its name only when there is
+  no id), so two environments that reuse a name for different databases get a step
+  each, and two that bind one database share a step. The order is named
+  environments first, then the top level, then environments named like
+  `production`: staging proves a release before production takes it. A migration
+  applied with the deploy (`0011`) pairs each remote apply with an immediate deploy
+  of that environment instead. A hop that brings migrations is refused when an
+  environment (or the `--env` named) has no Folio database, because the plan could
+  not say where they go.
 - **`post-deploy`**: a reindex where a migration needs one (`?drafts=1` for
   `0015`), and any manual step a migration records.
 

@@ -36,7 +36,13 @@ type Ledger = {
   releases: { version: string; requiresDeployed?: string; [k: string]: unknown }[];
   [k: string]: unknown;
 };
-type Db = { env: string | null; database_name: string; binding: string };
+type Db = {
+  env: string | null;
+  envs?: (string | null)[];
+  database_name: string;
+  database_id?: string | null;
+  binding: string;
+};
 
 const { planUpgrade, PlanRefusal } = await lib<{
   planUpgrade: (input: Record<string, unknown>) => Plan;
@@ -44,7 +50,9 @@ const { planUpgrade, PlanRefusal } = await lib<{
 }>("plan");
 const { readLedger } = await lib<{ readLedger: (root: string) => Ledger }>("ledger");
 const { databasesByEnvironment } = await lib<{
-  databasesByEnvironment: (project: unknown) => Promise<Db[]>;
+  databasesByEnvironment: (
+    project: unknown,
+  ) => Promise<{ databases: Db[]; missing: (string | null)[] }>;
 }>("doctor");
 const { readProject } = await lib<{ readProject: (dir: string) => unknown }>("project");
 const { releaseHeadings } = await lib<{
@@ -55,10 +63,18 @@ afterAll(cleanup);
 
 const ledger = readLedger(REPO_ROOT);
 const upgrading = readFileSync(path.join(REPO_ROOT, "UPGRADING.md"), "utf8");
+/** What databasesByEnvironment answers for groupWebWrangler(): staging first, production last. */
+const db = (env: string | null, name: string, id = `id-${name}`, envs = [env]): Db => ({
+  env,
+  envs,
+  database_name: name,
+  database_id: id,
+  binding: "FOLIO_DB",
+});
 const threeEnvs: Db[] = [
-  { env: null, database_name: "group-web-folio", binding: "FOLIO_DB" },
-  { env: "staging", database_name: "group-web-folio-staging", binding: "FOLIO_DB" },
-  { env: "production", database_name: "group-web-folio-production", binding: "FOLIO_DB" },
+  db("staging", "group-web-folio-staging"),
+  db(null, "group-web-folio"),
+  db("production", "group-web-folio-production"),
 ];
 
 function plan(over: Record<string, unknown> = {}): Plan {
@@ -96,7 +112,7 @@ describe("upgrade plans, 1.2.3 to 1.4.0", () => {
     expect(p.mode).toBe("plan");
     expect(p.hops).toHaveLength(1);
     expect(hop.to).toBe("1.4.0");
-    expect(hop.releases).toEqual(["1.2.4", "1.3.0", "1.3.1", "1.4.0"]);
+    expect(hop.releases).toEqual(["1.2.4", "1.3.0", "1.3.1", "1.3.2", "1.4.0"]);
     expect(hop.rollForwardOnly).toBe(true);
     expect(p.pin).toEqual({
       before: "github:brendanmckenzie/folio#v1.2.3",
@@ -112,7 +128,9 @@ describe("upgrade plans, 1.2.3 to 1.4.0", () => {
   });
 
   it("lists every heading naming one of the releases, with its tag's URL", () => {
-    const want = ["1.2.4", "1.3.0", "1.3.1", "1.4.0"].flatMap((v) => releaseHeadings(upgrading, v));
+    const want = ["1.2.4", "1.3.0", "1.3.1", "1.3.2", "1.4.0"].flatMap((v) =>
+      releaseHeadings(upgrading, v),
+    );
     expect(hop.read.map((r) => r.heading)).toEqual(want);
     expect(hop.read.find((r) => r.heading === "v1.3.0 is roll-forward only")?.url).toBe(
       "https://github.com/brendanmckenzie/folio/blob/v1.3.0/UPGRADING.md#v130-is-roll-forward-only",
@@ -144,11 +162,11 @@ describe("upgrade plans, 1.2.3 to 1.4.0", () => {
     ]);
   });
 
-  it("prints three remote applies, local: false, in config order, before the deploy", () => {
+  it("prints three remote applies, local: false, staging first, before the deploy", () => {
     const deploy = hop.steps.filter((s) => s.phase === "deploy");
     expect(deploy.map((s) => s.id)).toEqual([
-      "d1-remote:top-level",
       "d1-remote:staging",
+      "d1-remote:top-level",
       "d1-remote:production",
       "deploy",
     ]);
@@ -157,7 +175,7 @@ describe("upgrade plans, 1.2.3 to 1.4.0", () => {
       expect(s.status).toBeUndefined();
       expect(s.argv).toContain("--remote");
     }
-    expect(deploy[1]?.argv?.slice(-3)).toEqual(["--remote", "--env", "staging"]);
+    expect(deploy[0]?.argv?.slice(-3)).toEqual(["--remote", "--env", "staging"]);
   });
 
   it("names the claimed 0012 and its rule", () => {
@@ -250,10 +268,10 @@ describe("upgrade plans, other ranges", () => {
     };
     const hop = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.4.0" }).hops[0] as Hop;
     expect(hop.steps.filter((s) => s.phase === "deploy").map((s) => s.id)).toEqual([
-      "d1-remote:top-level",
-      "deploy:top-level",
       "d1-remote:staging",
       "deploy:staging",
+      "d1-remote:top-level",
+      "deploy:top-level",
       "d1-remote:production",
       "deploy:production",
     ]);
@@ -274,9 +292,88 @@ describe("upgrade refusals", () => {
   });
 });
 
-describe("upgrade's environments, from a real wrangler config", () => {
-  it("finds one Folio database per environment in config order", async () => {
+describe("upgrade's environments, identified by database id (review H1, M5, L4)", () => {
+  const cfg = (dbs: Record<string, { name: string; id?: string } | null>) => {
+    const entry = (d: { name: string; id?: string }) => ({
+      binding: "FOLIO_DB",
+      database_name: d.name,
+      ...(d.id ? { database_id: d.id } : {}),
+      migrations_dir: "node_modules/folio/migrations",
+    });
+    const base = groupWebWrangler();
+    const top = dbs.top;
+    const env = Object.fromEntries(
+      Object.entries(dbs)
+        .filter(([k]) => k !== "top")
+        .map(([k, d]) => [k, { ...base.env.staging, d1_databases: d ? [entry(d)] : [] }]),
+    );
+    return { ...base, d1_databases: top ? [entry(top)] : [], env };
+  };
+
+  it("finds one Folio database per environment, staging first and production last", async () => {
     const root = host({ wrangler: groupWebWrangler() });
-    expect(await databasesByEnvironment(readProject(root))).toEqual(threeEnvs);
+    expect(await databasesByEnvironment(readProject(root))).toEqual({
+      databases: threeEnvs,
+      missing: [],
+    });
+  });
+
+  it("keeps two environments that reuse a database_name for different ids apart", async () => {
+    const root = host({
+      wrangler: cfg({
+        top: { name: "site-db", id: "a" },
+        staging: { name: "site-db", id: "b" },
+        production: { name: "site-db", id: "a" },
+      }),
+    });
+    const found = await databasesByEnvironment(readProject(root));
+    expect(found.databases).toEqual([
+      db("staging", "site-db", "b"),
+      db(null, "site-db", "a", [null, "production"]),
+    ]);
+    // --env staging gets its own local and remote steps.
+    const hop = plan({ ...found, env: "staging" }).hops[0] as Hop;
+    expect(hop.steps.find((s) => s.id === "d1-local")?.argv?.slice(-3)).toEqual([
+      "--local",
+      "--env",
+      "staging",
+    ]);
+    expect(
+      hop.steps.filter((s) => s.id.startsWith("d1-remote")).map((s) => s.argv?.slice(-3)),
+    ).toEqual([["--remote", "--env", "staging"]]);
+    // Without --env: one apply per database, and the deploy names all three environments.
+    const all = (plan(found).hops[0] as Hop).steps.filter((s) => s.phase === "deploy");
+    expect(all.map((s) => s.id)).toEqual(["d1-remote:staging", "d1-remote:top-level", "deploy"]);
+    expect(all.at(-1)?.text).toContain("staging, the top level, production");
+  });
+
+  it("applies the local database under the environment it came from when the top level has none", async () => {
+    const root = host({
+      wrangler: cfg({ staging: { name: "s", id: "s" }, production: { name: "p", id: "p" } }),
+    });
+    const found = await databasesByEnvironment(readProject(root));
+    expect(found.missing).toEqual([]);
+    const hop = plan(found).hops[0] as Hop;
+    expect(hop.steps.find((s) => s.id === "d1-local")?.argv).toEqual([
+      "node_modules/.bin/wrangler",
+      "d1",
+      "migrations",
+      "apply",
+      "s",
+      "--local",
+      "--env",
+      "staging",
+    ]);
+  });
+
+  it("refuses a hop with migrations when an environment has no Folio database", async () => {
+    const root = host({ wrangler: cfg({ top: { name: "t", id: "t" }, staging: null }) });
+    const found = await databasesByEnvironment(readProject(root));
+    expect(found.missing).toEqual(["staging"]);
+    expect(refusal(found).message).toMatch(/staging has no Folio database/);
+    expect(refusal({ ...found, env: "staging" }).message).toMatch(/staging has no Folio database/);
+    expect(refusal({ databases: [], missing: [] }).message).toMatch(/declares no Folio database/);
+    // A hop with no migrations has nothing to apply anywhere, so it plans.
+    expect(plan({ ...found, from: "1.3.1" }).hops).toHaveLength(1);
   });
 });

@@ -1258,6 +1258,13 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
   internal.
 - **A copied `migrations_dir` is detected** as a D1 entry whose directory holds
   `0001_init.sql` but is not the package's; the fix is the `migrations_dir` snippet.
+- **Databases are identified by `database_id`, not `database_name`** (review H1).
+  Phase 4.1's de-duplication by name dropped an environment that reused another's
+  name for a different database, and then told the operator to deploy over an
+  unmigrated database. The name is used only when no id is given. Environments are
+  ordered named first, top level, then `prod*`, matching "staging, then production";
+  the local apply runs under the environment its database came from; and a hop with
+  migrations is refused when an environment has no Folio database.
 - **Remote step ids are `d1-remote:<env>`, with the top level as `top-level`**, each
   `before: "deploy"`, followed by one `deploy` step naming every environment. The
   example's `before: "deploy:staging"` named a step that did not exist. A hop with a

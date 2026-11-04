@@ -36,8 +36,9 @@ export class PlanRefusal extends Error {
  *   ledger: any, cliVersion: string, from: string | null, to?: string | null,
  *   pin: string | null, packageManager: string, wranglerBin: string, root: string,
  *   typecheck: boolean, agentsFile: string | null, base?: string,
- *   databases: { env: string | null, database_name: string, binding: string }[],
- *   env?: string | null, config?: string | null,
+ *   databases: { env: string | null, envs?: (string | null)[], database_name: string,
+ *     database_id?: string | null, binding: string }[],
+ *   missing?: (string | null)[], env?: string | null, config?: string | null,
  * }} input
  */
 export function planUpgrade(input) {
@@ -178,10 +179,16 @@ function hopPlan(input, releases, { last, final }) {
     run("install", [input.packageManager, "install"]),
   ];
 
-  // The local database: the named environment's under --env, else the top level's.
-  const localDb =
-    input.databases.find((d) => d.env === (input.env ?? null)) ??
-    (input.env ? null : input.databases[0]);
+  // The local database: the named environment's under --env, else the top level's,
+  // else the first environment's, always applied under the environment it came from
+  // so wrangler resolves the same binding (review M5).
+  const envsOf = (d) => d.envs ?? [d.env];
+  const localEnv =
+    input.env ??
+    (input.databases.some((d) => envsOf(d).includes(null))
+      ? null
+      : (input.databases[0]?.env ?? null));
+  const localDb = input.databases.find((d) => envsOf(d).includes(localEnv));
   if (localDb) {
     steps.push(
       run("d1-local", [
@@ -191,7 +198,7 @@ function hopPlan(input, releases, { last, final }) {
         "apply",
         localDb.database_name,
         "--local",
-        ...envFlags(input.env),
+        ...envFlags(localEnv),
       ]),
     );
   }
@@ -209,8 +216,37 @@ function hopPlan(input, releases, { last, final }) {
     status: "pending",
   });
 
-  // The remote half, printed and never run.
-  const remotes = input.env ? input.databases.filter((d) => d.env === input.env) : input.databases;
+  // The remote half, printed and never run. One step per database (by id), applied
+  // under the first environment that binds it; with --env, only that environment's.
+  const remotes = input.env
+    ? input.databases
+        .filter((d) => envsOf(d).includes(input.env))
+        .map((d) => ({ ...d, env: input.env, envs: [input.env] }))
+    : input.databases;
+  const missing = input.env ? (remotes.length ? [] : [input.env]) : (input.missing ?? []);
+  if (migrations.length && (remotes.length === 0 || missing.length)) {
+    const named = missing.map((e) => e ?? "the top level").join(", ");
+    throw new PlanRefusal(
+      remotes.length === 0 && !missing.length
+        ? `v${to} brings ${migrations.length} migration(s), and the wrangler config declares no Folio database to apply them to.`
+        : `v${to} brings ${migrations.length} migration(s), and ${named} has no Folio database in the wrangler config, so the plan cannot say where to apply them.`,
+      [
+        {
+          kind: "run",
+          local: true,
+          cwd: input.root,
+          argv: [
+            "npx",
+            "folio",
+            "doctor",
+            ...(missing[0] ? ["--env", missing[0]] : []),
+            "--check",
+            "wrangler.d1",
+          ],
+        },
+      ],
+    );
+  }
   const withDeploy = migrations.filter((m) => m.apply === "with-deploy");
   const remoteStep = (d) => ({
     id: `d1-remote:${d.env ?? "top-level"}`,
@@ -244,7 +280,7 @@ function hopPlan(input, releases, { last, final }) {
     if (migrations.length) {
       for (const d of remotes) steps.push({ ...remoteStep(d), before: "deploy" });
     }
-    const envs = [...new Set(remotes.map((d) => d.env ?? "the top level"))];
+    const envs = [...new Set(remotes.flatMap((d) => envsOf(d).map((e) => e ?? "the top level")))];
     steps.push({
       id: "deploy",
       phase: "deploy",

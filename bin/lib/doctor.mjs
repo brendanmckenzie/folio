@@ -1094,28 +1094,41 @@ export function headingUrl(version, heading) {
 }
 
 /**
- * Folio's database in every environment the wrangler config declares: the top
- * level first, then each named `env` in the order the file gives them, de-duplicated
- * by `database_name`. For `upgrade`'s remote steps. `[]` when the config cannot be
- * read, which `doctor` reports on its own.
+ * Folio's database in every environment the wrangler config declares, for
+ * `upgrade`'s local and remote steps. A database is identified by `database_id`
+ * (its name only when no id is given): two environments that reuse a
+ * `database_name` for different databases are two databases, and two that bind the
+ * same id are one, listed under both (spec 41 review, H1).
+ *
+ * Ordered the way `UPGRADING.md` applies migrations, staging before production:
+ * named environments first, then the top level (wrangler's default deploy target,
+ * usually production), then environments named like production. `missing` names
+ * every environment with no Folio database, which `upgrade` refuses to plan around.
+ *
+ * @returns {Promise<{ databases: { env: string | null, envs: (string | null)[],
+ *   database_name: string, database_id: string | null, binding: string }[],
+ *   missing: (string | null)[] }>}
  */
 export async function databasesByEnvironment(project) {
+  const none = { databases: [], missing: [] };
   let tool;
   try {
     tool = await project.loadWrangler();
   } catch {
-    return [];
+    return none;
   }
-  if (!project.wranglerConfig || !existsSync(project.wranglerConfig)) return [];
+  if (!project.wranglerConfig || !existsSync(project.wranglerConfig)) return none;
   const configDir = path.dirname(project.wranglerConfig);
   let names = [];
   try {
     const raw = tool.module.experimental_readRawConfig({ config: project.wranglerConfig });
     names = Object.keys(raw.rawConfig?.env ?? {});
   } catch {}
-  const out = [];
-  const seen = new Set();
-  for (const env of [null, ...names]) {
+  const prod = (n) => /^prod/i.test(n);
+  const order = [...names.filter((n) => !prod(n)), null, ...names.filter(prod)];
+  const byKey = new Map();
+  const missing = [];
+  for (const env of order) {
     let config;
     try {
       config = tool.module.unstable_readConfig(
@@ -1123,13 +1136,28 @@ export async function databasesByEnvironment(project) {
         {},
       );
     } catch {
+      missing.push(env);
       continue;
     }
-    for (const d of folioDatabases(config, configDir, project)) {
-      if (seen.has(d.database_name)) continue;
-      seen.add(d.database_name);
-      out.push({ env, database_name: d.database_name, binding: d.binding });
+    const d = folioDatabases(config, configDir, project)[0];
+    if (!d) {
+      // A top level with no Folio database beside named environments that have one
+      // is a layout, not a gap: only a named environment can be missing.
+      if (env !== null || names.length === 0) missing.push(env);
+      continue;
+    }
+    const key = d.database_id ? `id:${d.database_id}` : `name:${d.database_name}`;
+    const seen = byKey.get(key);
+    if (seen) seen.envs.push(env);
+    else {
+      byKey.set(key, {
+        env,
+        envs: [env],
+        database_name: d.database_name,
+        database_id: d.database_id ?? null,
+        binding: d.binding,
+      });
     }
   }
-  return out;
+  return { databases: [...byKey.values()], missing };
 }
