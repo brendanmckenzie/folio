@@ -731,7 +731,7 @@ inherited.
   `content:read:draft` (`ensureAccess(READ_DRAFT)`).
 - Query: `status` (`draft` | `published`, default `draft`; anything else is
   `400 bad_request`), `locale` (optional, screened by `localeQuery` and checked
-  against the declared set like `GET /documents/:id`'s: unknown is `422 unsupported`).
+  against the declared set like `GET /documents/:id`'s: unknown is `501 unsupported`).
   With `locale`, `translation-missing` and every per-locale finding are limited to that
   locale. Source-locale findings are always reported.
 - Fence: `load(c, id, 'read')`. Outside the fence is `404 not_found`, never `403`.
@@ -1265,7 +1265,8 @@ documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships
 
 **Where the spec was wrong or ambiguous, and what was done.**
 
-1. **An undeclared `?locale=` is `unsupported`, which is `501`, not `422`.** The route
+1. **An undeclared `?locale=` is `unsupported`, which is `501`, not `422`** (the Wire
+   section above is corrected to match; `FolioErrorStatus` has no 422). The route
    reuses `askedLocale`, so it answers exactly what `GET /documents/:id` answers for
    the same locale; the workers test pins the two together rather than a number.
 2. **The `path` grammar elides `fields.` for a slot.** `NestedError`'s paths come from
