@@ -22,6 +22,7 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parse, UsageError } from "./lib/args.mjs";
+import { doctorCommand } from "./lib/commands.mjs";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = "https://github.com/brendanmckenzie/folio";
@@ -50,9 +51,27 @@ folio — a Cloudflare-native block CMS
   folio agents [file]     Write the Folio instruction block into your AGENTS.md
                           or CLAUDE.md, replacing an existing one in place
 
+  folio doctor [dir]      Check a project: Node, the pin, the installed package,
+                          the wrangler bindings, local (and --remote) D1
+                          migrations, and a running server (--url). Writes nothing
+
 Options for init:
   --email <address>       Address seeded as the first admin (default ${DEFAULT_EMAIL})
   --force                 Write into a directory that is not empty
+
+Options for doctor:
+  --json                  One JSON value (schema folio.doctor/1) on stdout
+  --env <name>            Read this wrangler environment
+  --config <path>         The wrangler config, if not wrangler.jsonc/json/toml
+  --persist-to <dir>      Where local D1 state lives, if not .wrangler/state
+  --remote                Also read the deployed database (needs Cloudflare credentials)
+  --url <origin>          Also check a running server at this origin
+  --base <path>           Folio's base path, if the Vite plugin cannot say
+  --site <id>             The site to read the schema of, on a multi-site deployment
+  --check <id>            Run only this check (repeatable)
+  FOLIO_TOKEN             A token with content:read, for the schema check
+
+Exit codes: 0 success, 1 a failure found or hit, 2 a usage error.
 
   ${REPO}
 `;
@@ -81,8 +100,14 @@ async function main() {
   }
   if (command === "init") return init(argv.slice(1));
   if (command === "agents") return agents(argv.slice(1));
+  if (command === "doctor") return doctorCommand(argv.slice(1), runtime());
 
   throw new UsageError(`unknown command "${command}". Try \`folio --help\`.`);
+}
+
+/** What the library commands need from this copy of the CLI. */
+function runtime() {
+  return { cliVersion: VERSION, pkgRoot: PKG_ROOT };
 }
 
 // --- init -----------------------------------------------------------------

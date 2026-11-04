@@ -362,6 +362,7 @@ function smokeTest(sha) {
       "docs/api.md",
       "docs/mcp.md",
       "bin/folio.mjs",
+      "bin/lib/doctor.mjs",
       "upgrade-ledger.json",
       "examples/starter/package.json",
       "examples/starter/src/index.tsx",
