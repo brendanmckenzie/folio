@@ -251,7 +251,7 @@ function blocksArray(tokens) {
   let k = starts[0] + 1;
   while (k < tokens.length && !(tokens[k].v === "=" && tokens[k].depth === 0)) k++;
   const open = tokens[k + 1];
-  if (!open || open.v !== "[" || open.close === undefined) {
+  if (open?.v !== "[" || open.close === undefined) {
     return { error: "`blocks` is not an array literal" };
   }
   for (let j = k + 2; j < open.close; j++) {
