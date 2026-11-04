@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Plugin, UserConfig } from "vite";
 
@@ -59,6 +59,12 @@ export interface FolioPluginOptions {
   blocks: string | Readonly<Record<string, string>>;
   /** Must match `basePath` passed to `createFolio`. Default `/folio`. */
   basePath?: string;
+  /**
+   * Compile the admin from `src/admin` through this project's own Vite instead of
+   * serving the prebuilt bundle. Only Folio's own demo sets it, for HMR: a consumer's
+   * install does not ship `src/admin`, so it has nothing to compile.
+   */
+  adminFromSource?: boolean;
 }
 
 /**
@@ -66,7 +72,10 @@ export interface FolioPluginOptions {
  * components, and serves the prebuilt admin from the package.
  *
  * The admin is *not* rebuilt per project: it is schema-driven and ships
- * compiled, so a project's block code never enters that bundle.
+ * compiled (`scripts/build-admin.mjs` writes `dist/admin/`), so a project's
+ * block code never enters that bundle and the editor's dependencies never
+ * enter its `node_modules`. `build` emits those files at the build root and
+ * `serve` answers them from `dist/`; `adminFromSource` opts out, for Folio's demo.
  */
 export function folio(options: FolioPluginOptions): Plugin[] {
   const base = options.basePath ?? "/folio";
@@ -86,7 +95,11 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       }
     }
   }
-  const entryPairs = brandBlocks ? brandEntryStylesheets(brandIds) : ENTRY_STYLESHEETS;
+  const prebuilt = !options.adminFromSource;
+  // A prebuilt admin is not a chunk in this build, so there is no hoisted CSS to import.
+  const entryPairs = (brandBlocks ? brandEntryStylesheets(brandIds) : ENTRY_STYLESHEETS).filter(
+    ([entry]) => !(prebuilt && entry === "folio-admin.js"),
+  );
 
   const resolveModule = (blocks: string) =>
     blocks.startsWith(".") ? path.resolve(root, blocks) : blocks;
@@ -106,7 +119,9 @@ export function folio(options: FolioPluginOptions): Plugin[] {
     config(userConfig, { command }) {
       const isDev = command === "serve";
       // In dev these are served by Vite's module graph, not as built files.
-      const admin = isDev ? `/@fs${adminEntry()}` : "/folio-admin.js";
+      const admin = isDev && !prebuilt ? `/@fs${adminEntry()}` : "/folio-admin.js";
+      // The prebuilt stylesheet is a real file in dev too; only source mode has Vite inject it.
+      const adminCss = isDev && !prebuilt ? [] : ["/folio-admin.css"];
       const preview = isDev ? `/@id/__x00__${VIRTUAL_PREVIEW}` : "/folio-preview.js";
       noSplit = cssBundledIntoOne(userConfig);
       if (brandBlocks && noSplit) {
@@ -124,7 +139,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
         ? {
             admin,
             devClient: isDev ? "/@vite/client" : undefined,
-            adminCss: isDev ? [] : ["/folio-admin.css"],
+            adminCss,
             brands: Object.fromEntries(
               brandIds.map((b) => [
                 b,
@@ -139,7 +154,10 @@ export function folio(options: FolioPluginOptions): Plugin[] {
             admin,
             preview,
             devClient: isDev ? "/@vite/client" : undefined,
-            adminCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : "/folio-admin.css"],
+            adminCss:
+              prebuilt || isDev
+                ? adminCss
+                : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : "/folio-admin.css"],
             previewCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : "/folio-preview.css"],
           };
       return {
@@ -188,75 +206,6 @@ export function folio(options: FolioPluginOptions): Plugin[] {
             },
           },
           client: {
-            /**
-             * `@tiptap/react` imports `useSyncExternalStore` **by name** from
-             * `use-sync-external-store/shim`, which is CommonJS. Pre-bundled,
-             * esbuild inlines it and the named import works; loaded raw, the
-             * browser throws
-             *
-             *   SyntaxError: The requested module '…/use-sync-external-store/
-             *   shim/index.js' does not provide an export named
-             *   'useSyncExternalStore'
-             *
-             * and the admin never mounts — a blank page whose only clue is one
-             * console line naming two packages the host has never heard of.
-             *
-             * It is not pre-bundled by default because Vite's dep scanner
-             * crawls the *host's* entries, and the admin entry is a file inside
-             * `node_modules`. Every dependency reached only from there is
-             * invisible to it.
-             *
-             * **Every tiptap package the admin imports has to be named here, not
-             * just the one that needed interop.** This list used to be
-             * `['@tiptap/react']`, on the reasoning that the rest would come
-             * along inside the same optimised bundle. They do not: the admin
-             * imports `@tiptap/core`, `@tiptap/starter-kit` and the two extra
-             * marks *directly*, and an unlisted dependency of a file under
-             * `node_modules` is served raw. So `useEditor` came from the
-             * optimised chunk — with `prosemirror-state` bundled inside it —
-             * while `StarterKit` came from `/node_modules/@tiptap/starter-kit/
-             * dist/index.js`, which imports its own.
-             *
-             * Two copies of `prosemirror-state` means two copies of the
-             * module-level counter behind `createKey`, so each hands out
-             * `plugin$` for its first unkeyed plugin. Put both in one editor and
-             * ProseMirror throws
-             *
-             *   RangeError: Adding different instances of a keyed plugin (plugin$)
-             *
-             * on mount, which unmounts the admin: a white screen from clicking
-             * any block with a richtext field. Dev only — the build resolves one
-             * copy — which is the worst place for it, because dev is where the
-             * editor is used.
-             *
-             * `@tiptap/pm` must **not** be added here: it has no `.` export,
-             * only subpaths, so naming it fails config resolution outright with
-             * `Missing "." specifier`.
-             */
-            optimizeDeps: {
-              include: [
-                "@tiptap/react",
-                "@tiptap/core",
-                "@tiptap/starter-kit",
-                "@tiptap/extension-subscript",
-                "@tiptap/extension-superscript",
-              ],
-            },
-            /**
-             * The same hazard for anything that still escapes pre-bundling: one
-             * `prosemirror-state` in the graph, whichever route reaches it.
-             * Belt and braces, and it costs nothing when the list above is
-             * already doing its job.
-             */
-            resolve: {
-              dedupe: [
-                "@tiptap/core",
-                "@tiptap/pm",
-                "prosemirror-state",
-                "prosemirror-view",
-                "prosemirror-model",
-              ],
-            },
             build: {
               rollupOptions: {
                 input: {
@@ -265,7 +214,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
                     ? userConfig.build.rollupOptions.input
                     : {}),
                   ...previewInputs,
-                  "folio-admin": adminEntry(),
+                  ...(prebuilt ? {} : { "folio-admin": adminEntry() }),
                 },
                 output: {
                   entryFileNames: (chunk: { name: string }) =>
@@ -325,11 +274,39 @@ export function folio(options: FolioPluginOptions): Plugin[] {
     generateBundle: {
       order: "post",
       handler(_options, bundle) {
+        if (
+          prebuilt &&
+          (this as { environment?: { name: string } }).environment?.name === "client"
+        ) {
+          // At the root under the names `__FOLIO_ASSETS__` carries; split chunks
+          // import each other relatively, so they sit beside the entry.
+          for (const [name, source] of adminFiles()) {
+            this.emitFile({ type: "asset", fileName: name, source });
+          }
+        }
         if (noSplit) return;
         for (const [entry, stylesheet] of entryPairs) {
           importHoistedCss(this, bundle as unknown as Bundle, entry, stylesheet);
         }
       },
+    },
+
+    /**
+     * Dev answers the prebuilt admin from `dist/admin/`, at the same root paths a
+     * build emits it. In source mode Vite's module graph serves it instead.
+     */
+    configureServer(server) {
+      if (!prebuilt) return;
+      server.middlewares.use((req, res, next) => {
+        const name = (req.url ?? "").split("?")[0]?.slice(1) ?? "";
+        const file = /^folio-admin[\w.-]*\.(js|css)$/.test(name)
+          ? adminFiles().get(name)
+          : undefined;
+        if (!file) return next();
+        res.setHeader("Content-Type", name.endsWith(".css") ? "text/css" : "text/javascript");
+        res.setHeader("Cache-Control", "no-cache");
+        res.end(file);
+      });
     },
 
     resolveId(id) {
@@ -595,23 +572,34 @@ function entryName(id: string): string {
 }
 
 /**
- * `src/admin/main.tsx`, wherever the package sits. The admin ships as **source**,
- * not as a prebuilt bundle: it is an entry point of the *host's* client build (see
- * `config` above, which puts it in `rollupOptions.input`), so the host's Vite owns
- * transpiling its TSX and its `*.module.css`. That is not an assumption — a project
- * reaching this plugin has Vite by construction.
+ * The prebuilt admin: `dist/admin/folio-admin*.{js,css}`, read fresh each call so a
+ * rebuild in a linked checkout is picked up without restarting the server.
+ *
+ * `dist/vite.js` sits one directory below the package root and `src/vite/index.ts`
+ * two, which is the same walk `adminEntry` makes.
+ */
+function adminFiles(): Map<string, string> {
+  const dir = import.meta.dirname;
+  const dist = path.resolve(dir, path.basename(dir) === "vite" ? "../../dist" : ".", "admin");
+  if (!existsSync(path.join(dist, "folio-admin.js"))) {
+    throw new Error(
+      `folio: the prebuilt admin is missing (${dist}). Run \`pnpm build\` in the Folio checkout, ` +
+        "or pass `adminFromSource: true` to compile it from `src/admin`.",
+    );
+  }
+  return new Map(
+    readdirSync(dist)
+      .filter((n) => n.startsWith("folio-admin") && /\.(js|css)$/.test(n))
+      .map((n) => [n, readFileSync(path.join(dist, n), "utf8")]),
+  );
+}
+
+/**
+ * `src/admin/main.tsx`, for `adminFromSource` only (Folio's own demo). Not the
+ * `./admin-entry` export: that names the prebuilt file now. `dist/vite.js` is one
+ * directory below the package root; `src/vite/index.ts` is two.
  */
 function adminEntry(): string {
-  const require = createRequire(import.meta.url);
-  try {
-    // Package self-reference. Works from `src/vite/index.ts` and from the built
-    // `dist/vite.js`, since both sit inside the package whose `exports` names the
-    // subpath, and `./admin-entry` is unconditional in that map.
-    return require.resolve("folio/admin-entry");
-  } catch {
-    // A resolver with no self-reference support. `dist/vite.js` is one directory
-    // below the package root; `src/vite/index.ts` is two.
-    const dir = import.meta.dirname;
-    return path.resolve(dir, path.basename(dir) === "vite" ? "../.." : "..", "src/admin/main.tsx");
-  }
+  const dir = import.meta.dirname;
+  return path.resolve(dir, path.basename(dir) === "vite" ? "../.." : "..", "src/admin/main.tsx");
 }

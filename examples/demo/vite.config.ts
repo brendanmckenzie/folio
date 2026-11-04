@@ -12,11 +12,39 @@ const stateDir = process.env.FOLIO_E2E_STATE;
 export default defineConfig({
   server: { port, strictPort: true },
   preview: { port, strictPort: true },
+  environments: {
+    client: {
+      // Source-mode admin only (see `adminFromSource` below). The dep scanner crawls the
+      // host's entries and the admin sits outside them, so without this `@tiptap/react`'s
+      // CommonJS `use-sync-external-store` is served raw and the admin never mounts, and
+      // tiptap's packages split across two optimised copies of `prosemirror-state`
+      // ("Adding different instances of a keyed plugin"). A consumer never hits either:
+      // the prebuilt bundle has them inlined. `@tiptap/pm` has no `.` export; not listed.
+      optimizeDeps: {
+        include: [
+          "@tiptap/react",
+          "@tiptap/core",
+          "@tiptap/starter-kit",
+          "@tiptap/extension-subscript",
+          "@tiptap/extension-superscript",
+        ],
+      },
+      resolve: {
+        dedupe: [
+          "@tiptap/core",
+          "@tiptap/pm",
+          "prosemirror-state",
+          "prosemirror-view",
+          "prosemirror-model",
+        ],
+      },
+    },
+  },
   plugins: [
     react(),
-    // Generates the preview entry from this project's blocks and adds the
-    // library's prebuilt admin to the client build.
-    folio({ blocks: "./src/blocks/index.ts" }),
+    // Generates the preview entry from this project's blocks. The demo compiles the
+    // admin from `src/admin` (HMR); a consumer gets the prebuilt `dist/admin/`.
+    folio({ blocks: "./src/blocks/index.ts", adminFromSource: true }),
     cloudflare({
       viteEnvironment: { name: "ssr" },
       // A sweep runs several servers at once. They would race for the inspector's

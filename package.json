@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "pnpm --filter demo dev",
     "build": "pnpm run build:js && pnpm run build:types",
-    "build:js": "esbuild core=src/core/index.ts engine=src/core/engine.ts server=src/server/index.tsx vite=src/vite/index.ts form=src/form/index.ts --bundle --splitting --format=esm --platform=neutral --packages=external --target=es2022 --sourcemap --sources-content=false --outdir=dist --tsconfig=tsconfig.json",
+    "build:js": "node scripts/build-admin.mjs && esbuild core=src/core/index.ts engine=src/core/engine.ts server=src/server/index.tsx vite=src/vite/index.ts form=src/form/index.ts --bundle --splitting --format=esm --platform=neutral --packages=external --target=es2022 --sourcemap --sources-content=false --outdir=dist --tsconfig=tsconfig.json",
     "build:types": "tsc -p tsconfig.build.json",
     "build:demo": "pnpm --filter demo build",
     "clean": "rm -rf dist",
@@ -29,6 +29,7 @@
   "files": [
     "dist",
     "src",
+    "!src/admin",
     "migrations",
     "bin",
     "evals",
@@ -73,7 +74,7 @@
     },
     "./render": "./src/preview/Render.tsx",
     "./preview": "./src/preview/mount.tsx",
-    "./admin-entry": "./src/admin/main.tsx"
+    "./admin-entry": "./dist/admin/folio-admin.js"
   },
   "peerDependencies": {
     "react": "^19.3.1",
@@ -81,13 +82,6 @@
     "vite": "^8.1.6 ^8.1.6"
   },
   "dependencies": {
-    "@floating-ui/dom": "^1.8.0",
-    "@tiptap/core": "^3.32.0",
-    "@tiptap/extension-subscript": "^3.32.0",
-    "@tiptap/extension-superscript": "^3.32.0",
-    "@tiptap/pm": "^3.32.0",
-    "@tiptap/react": "^3.32.0",
-    "@tiptap/starter-kit": "^3.32.0",
     "fractional-indexing": "^4.0.0",
     "hono": "^4.13.13",
     "valibot": "^1.5.0"
@@ -98,8 +92,15 @@
     "@cloudflare/workers-types": "^5.20261030.1",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
+    "@floating-ui/dom": "^1.8.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/react": "^16.3.3",
+    "@tiptap/core": "^3.32.0",
+    "@tiptap/extension-subscript": "^3.32.0",
+    "@tiptap/extension-superscript": "^3.32.0",
+    "@tiptap/pm": "^3.32.0",
+    "@tiptap/react": "^3.32.0",
+    "@tiptap/starter-kit": "^3.32.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

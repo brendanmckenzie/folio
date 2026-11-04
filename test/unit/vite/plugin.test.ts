@@ -41,7 +41,7 @@ interface FolioAssets {
 }
 
 function runConfig(userConfig: UserConfig, command: "build" | "serve" = "build"): HookResult {
-  const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+  const plugin = folio({ blocks: "./src/blocks/index.ts", adminFromSource: true })[0] as Plugin;
   const hook = plugin.config as unknown as ConfigHook;
   const result = hook.call(plugin, userConfig, { command, mode: "production" });
   if (!result) throw new Error("config() returned nothing");
@@ -126,7 +126,7 @@ describe("the Vite plugin, a CSS strategy it could not see", () => {
   });
 
   function configure(userConfig: UserConfig, resolved: ReturnType<typeof resolvedWith>) {
-    const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+    const plugin = folio({ blocks: "./src/blocks/index.ts", adminFromSource: true })[0] as Plugin;
     const hook = plugin.config as unknown as ConfigHook;
     hook.call(plugin, userConfig, { command: "build", mode: "production" });
     const after = plugin.configResolved as unknown as (r: unknown) => void;
@@ -169,7 +169,7 @@ const chunk = (imports: string[], css: string[] = []) => ({
  * second alone would test a plugin no build can produce.
  */
 function generate(userConfig: UserConfig, bundle: FakeBundle) {
-  const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+  const plugin = folio({ blocks: "./src/blocks/index.ts", adminFromSource: true })[0] as Plugin;
   const hook = plugin.config as unknown as ConfigHook;
   hook.call(plugin, userConfig, { command: "build", mode: "production" });
 
@@ -315,7 +315,7 @@ describe("the Vite plugin, one preview bundle per brand", () => {
   };
 
   function brandPlugin(): Plugin {
-    return folio({ blocks: brands })[0] as Plugin;
+    return folio({ blocks: brands, adminFromSource: true })[0] as Plugin;
   }
 
   function brandConfig(userConfig: UserConfig = {}, command: "build" | "serve" = "build") {
@@ -442,7 +442,7 @@ describe("the Vite plugin, the string form is what it was", () => {
   });
 
   it("keeps the one preview entry", () => {
-    const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+    const plugin = folio({ blocks: "./src/blocks/index.ts", adminFromSource: true })[0] as Plugin;
     const hook = plugin.config as unknown as ConfigHook;
     const r = hook.call(plugin, {}, { command: "build", mode: "production" }) as {
       environments: { client: { build: { rollupOptions: { input: Record<string, string> } } } };
@@ -495,5 +495,47 @@ describe("the Vite plugin, its api for tools (agent-cli.md decision 13)", () => 
 
   it("exposes a custom base path", () => {
     expect(api({ blocks: "./b.ts", basePath: "/cms" })).toMatchObject({ basePath: "/cms" });
+  });
+});
+
+describe("the Vite plugin, the prebuilt admin (the default)", () => {
+  const prebuilt = (command: "build" | "serve", userConfig: UserConfig = {}) => {
+    const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+    const hook = plugin.config as unknown as ConfigHook;
+    return hook.call(plugin, userConfig, { command, mode: "production" }) as unknown as {
+      define: Record<string, string>;
+      environments: {
+        client: { build: { rollupOptions: { input: Record<string, string> } } } & Record<
+          string,
+          unknown
+        >;
+      };
+    };
+  };
+
+  it("adds no admin entry to the host's build: it is emitted, not compiled", () => {
+    const { client } = prebuilt("build").environments;
+    expect(Object.keys(client.build.rollupOptions.input)).toEqual(["folio-preview"]);
+  });
+
+  it("carries no tiptap pre-bundling, because the editor is inlined in the bundle", () => {
+    const { client } = prebuilt("serve").environments;
+    expect(client.optimizeDeps).toBeUndefined();
+    expect(client.resolve).toBeUndefined();
+  });
+
+  it("links the same unhashed files in dev as in a build, because dev serves them as files", () => {
+    for (const command of ["build", "serve"] as const) {
+      const assets = JSON.parse(prebuilt(command).define.__FOLIO_ASSETS__ as string);
+      expect(assets.admin).toBe("/folio-admin.js");
+      expect(assets.adminCss).toEqual(["/folio-admin.css"]);
+    }
+  });
+
+  it("keeps the admin stylesheet out of the single bundle when code splitting is off", () => {
+    const { define } = prebuilt("build", { build: { cssCodeSplit: false } });
+    const assets = JSON.parse(define.__FOLIO_ASSETS__ as string);
+    expect(assets.adminCss).toEqual(["/folio-admin.css"]);
+    expect(assets.previewCss).toEqual(["/folio-client.css"]);
   });
 });
