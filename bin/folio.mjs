@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 /**
- * Folio's CLI. Two commands, no dependencies.
+ * Folio's CLI. Five commands, no dependencies.
  *
- *   folio init [dir]     scaffold a new host project
- *   folio agents [file]  write (or refresh) the agent instruction block
+ *   folio init [dir]            scaffold a new host project
+ *   folio agents [file]         write (or refresh) the agent instruction block
+ *   folio doctor [dir]          check a host project, writing nothing
+ *   folio upgrade [dir]         plan (or --apply the local half of) an upgrade
+ *   folio add block <name>      scaffold a block and register it
+ *     (and `folio preview block <name>`, which renders one through a running server)
  *
  * Reachable without an npm registry, because Folio has no npm package:
  *
@@ -14,6 +18,12 @@
  * the thing it writes compiles — and rewrites four things: the project name,
  * the `folio` dependency (a workspace link becomes this release's tag), the seeded
  * admin's address, and the migrations path.
+ *
+ * The other commands live in `bin/lib/`, plain ESM a unit test can import. Their
+ * argument is in `docs/specs/foundation/agent-cli.md`: they inspect the host's
+ * installed Folio and read its config through its own wrangler and vite, and
+ * `upgrade` plans from this copy's `upgrade-ledger.json`, which is why
+ * `npx github:…#vX.Y.Z upgrade` is how you upgrade to vX.Y.Z.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -22,7 +32,12 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parse, UsageError } from "./lib/args.mjs";
-import { doctorCommand, upgradeCommand } from "./lib/commands.mjs";
+import {
+  addBlockCommand,
+  doctorCommand,
+  previewBlockCommand,
+  upgradeCommand,
+} from "./lib/commands.mjs";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = "https://github.com/brendanmckenzie/folio";
@@ -50,15 +65,19 @@ folio — a Cloudflare-native block CMS
                           directory, which must be empty)
   folio agents [file]     Write the Folio instruction block into your AGENTS.md
                           or CLAUDE.md, replacing an existing one in place
-
   folio doctor [dir]      Check a project: Node, the pin, the installed package,
                           the wrangler bindings, local (and --remote) D1
                           migrations, and a running server (--url). Writes nothing
-
   folio upgrade [dir]     Plan the upgrade from the installed Folio to this CLI's
                           release. A dry run unless --apply, which runs only the
                           local steps; remote migrations and deploys are printed,
                           never run
+  folio add block <name>  Scaffold <name>.tsx beside your blocks module and list
+                          it there; --into <block>.<field> also makes it
+                          insertable
+  folio preview block <name>
+                          Render one block through a running server (--url) and
+                          save the PNG or HTML; needs FOLIO_TOKEN
 
 Options for init:
   --email <address>       Address seeded as the first admin (default ${DEFAULT_EMAIL})
@@ -83,6 +102,26 @@ Options for upgrade:
   --allow-dirty           Apply over uncommitted package.json or lockfile changes
   --env <name>            Restrict the printed remote steps to one environment
   --config <path>         The wrangler config, if not wrangler.jsonc/json/toml
+
+Options for add block:
+  --json                  One JSON value (schema folio.add-block/1) on stdout
+  --into <block>.<field>  Add it to that root's blocks({ allow: [...] })
+  --label <text>          The editor's label (default: from the name)
+  --brand <id>            The brand's blocks module, when there are several
+  --blocks <path>         The blocks module, if the Vite plugin cannot say
+  --dry-run               Print the diffs and write nothing
+  --preview               Then preview it (takes the preview flags below)
+
+Options for preview block:
+  --json                  One JSON value (schema folio.preview-block/1) on stdout
+  --url <origin>          The running server (required)
+  --site <id>             The site, on a multi-site deployment
+  --base <path>           Folio's base path, if the Vite plugin cannot say
+  --into <block>.<field>  The root field to place it in
+  --fields <json>         The block's field values (default: each text field's label)
+  --viewport <w>x<h>      The browser size, where a screenshot is taken
+  --keep                  Keep the scratch draft afterwards
+  FOLIO_TOKEN             A token with content:read, content:read:draft, content:write
 
 Exit codes: 0 success, 1 a failure found or hit, 2 a usage error.
 
@@ -115,6 +154,8 @@ async function main() {
   if (command === "agents") return agents(argv.slice(1));
   if (command === "doctor") return doctorCommand(argv.slice(1), runtime());
   if (command === "upgrade") return upgradeCommand(argv.slice(1), runtime());
+  if (command === "add") return addBlockCommand(argv.slice(1), runtime());
+  if (command === "preview") return previewBlockCommand(argv.slice(1), runtime());
 
   throw new UsageError(`unknown command "${command}". Try \`folio --help\`.`);
 }
