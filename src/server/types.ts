@@ -93,7 +93,7 @@ export interface FolioBindings {
    * the socket, and no route 500s for want of a binding. A library that
    * hard-requires a new binding breaks every existing host on upgrade, and this
    * one needs a `wrangler.jsonc` migration tag as well as a binding
-   * (`new_classes`, since the class holds no storage).
+   * (`new_sqlite_classes`, like `StoryDO`; the class holds no storage either way).
    */
   space?: DurableObjectNamespace<SpaceDO>;
   /** R2 bucket for uploads. Without it the media library is read-only. */

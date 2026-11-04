@@ -10,8 +10,8 @@ import { blocks } from "./blocks";
  * `StoryDO` holds one document's live draft and its mutation log — that is what
  * makes editing multiplayer and undoable. `SpaceDO` is the space channel: one
  * instance for the whole site, holding no storage at all, carrying who is where
- * and broadcasting structural events. It is declared with `new_classes` rather
- * than `new_sqlite_classes` in wrangler.jsonc for exactly that reason.
+ * and broadcasting structural events. It is declared with `new_sqlite_classes`
+ * in wrangler.jsonc like `StoryDO`; the backend is immaterial to it.
  */
 export { SpaceDO, StoryDO } from "folio/server";
 

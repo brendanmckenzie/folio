@@ -114,8 +114,9 @@ export type { StoryDOConfig, StoryDOInstance } from "./story-do";
  * binds it as `SPACE` to get cross-story presence and structural events; without
  * it everything that channel carries is simply absent.
  *
- * **Declared with `new_classes`, not `new_sqlite_classes`** — it holds no storage
- * at all. See README.
+ * **Declared with `new_sqlite_classes`** for a new host, although it holds no
+ * storage at all: Cloudflare no longer creates new KV-backed namespaces. A host
+ * that deployed it under `new_classes` keeps that. See UPGRADING.md.
  */
 export { SpaceDO };
 export type { SpaceEvent, SpacePresence } from "../core/protocol";

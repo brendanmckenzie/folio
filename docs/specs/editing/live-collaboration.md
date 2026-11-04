@@ -134,9 +134,10 @@ unloads. Same discipline as `StoryDO`, deliberately: frame-size check before
 `joined` flag as the broadcast membership test, and an exception never allowed out of
 a hibernatable handler.
 
-It holds no SQLite storage, which means `new_classes` rather than
-`new_sqlite_classes` in the host's `wrangler.jsonc` — a smaller commitment than
-`StoryDO`, and a note worth putting in the README beside the existing warning.
+It holds no storage, so its backend is immaterial. The host's `wrangler.jsonc`
+declares it with `new_sqlite_classes`, as it does `StoryDO`: this spec first said
+`new_classes`, but Cloudflare no longer creates new KV-backed namespaces
+(v1.3.1).
 
 Identity comes from the session, attached by the Worker before the upgrade, exactly
 as `../foundation/identity-and-access.md` does it for `StoryDO`. The space channel
@@ -269,8 +270,8 @@ None.
 ]},
 "migrations": [
   { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
-  // SpaceDO holds no storage, so it is not a SQLite class.
-  { "tag": "v2", "new_classes": ["SpaceDO"] }
+  // SpaceDO holds no storage; SQLite because new KV-backed classes are refused.
+  { "tag": "v2", "new_sqlite_classes": ["SpaceDO"] }
 ]
 ```
 
@@ -616,7 +617,7 @@ quarantine reasoning, and the space object's per-story presence.
 `createStoryDO` is — a Durable Object is constructed with the raw host env and
 never sees `createFolio`'s config. The `db` there is *not* storage: the object
 persists nothing of its own and reads `sessions` only to notice a revocation on an
-already-open socket. `wrangler.jsonc` therefore declares it with **`new_classes`**,
+already-open socket. `wrangler.jsonc` therefore declares it with **`new_sqlite_classes`**,
 under its own `v2` tag; a test pins that no storage and no alarm exist after a busy
 session.
 

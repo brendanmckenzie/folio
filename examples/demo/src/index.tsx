@@ -20,9 +20,9 @@ import { migrations } from "./migrations";
 
 // Two Durable Object classes now. SpaceDO is the space channel
 // (editing/live-collaboration.md): one instance for the whole site, no storage at
-// all, carrying who is where and broadcasting structural events. It is declared
-// with `new_classes` rather than `new_sqlite_classes` in wrangler.jsonc for
-// exactly that reason.
+// all, carrying who is where and broadcasting structural events. It is still
+// declared with `new_sqlite_classes` in wrangler.jsonc, because Cloudflare no
+// longer creates new KV-backed namespaces.
 export { SpaceDO, StoryDO } from "folio/server";
 
 declare const __FOLIO_ASSETS__: {
