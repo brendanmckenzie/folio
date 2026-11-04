@@ -1246,6 +1246,12 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
 - **Every answer carries `ok`, and a refusal is `{ schema, …, ok: false, error: {
   message, fix } }`** in all four schemas. The output examples above had no shape
   for a refusal; this is additive.
+- **`--json` stdout is guarded for the whole run** (review M3, L5). Loading the
+  host's Vite config runs it in-process, and a `console.log` there (dotenv's banner)
+  landed in front of the JSON. Under `--json`, `bin/folio.mjs` points
+  `process.stdout.write` at stderr and writes only the answer to the real stdout;
+  child processes are always captured. Usage errors and unexpected failures answer
+  `{ schema, ok: false, error: { kind, message, fix: [] } }` too.
 - **`doctor` takes `--base`.** Decision 13 names `--base` as the explicit form for a
   plugin that predates `api`, and the server checks need a base path when the plugin
   cannot supply one.

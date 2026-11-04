@@ -1994,7 +1994,10 @@ stderr. Every answer starts with a `schema` string: `folio.doctor/1`,
 a fix kind or an optional field keeps the number; removing or renaming a field, or
 changing what one means, bumps it, and the bump is listed under Breaking changes in
 `CHANGELOG.md` even in a minor release. Check `schema` before you read the rest.
-A refusal has the same `schema`, with `ok: false` and `error: { message, fix }`.
+A refusal has the same `schema`, with `ok: false` and `error: { message, fix }`, and
+so do a usage error (exit 2, `error.kind: "usage"`) and an unexpected failure (exit 1,
+`error.kind: "internal"`). Anything else that would reach stdout during the run (the
+host's Vite config logging as it loads, a child process) goes to stderr instead.
 
 ### Fixes, and the `local` rule
 

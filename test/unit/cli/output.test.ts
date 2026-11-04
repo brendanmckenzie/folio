@@ -89,18 +89,44 @@ describe("--json answers", () => {
     expect(r.status).toBe(1);
   });
 
-  it("usage errors exit 2 and leave stdout empty", () => {
+  it("usage errors exit 2 and still answer one JSON refusal (review L5)", () => {
     const root = blocksHost();
+    for (const [args, schema] of [
+      [["doctor", "--json", "--check", "nope"], "folio.doctor/1"],
+      [["upgrade", "--json", "--to", "latest"], "folio.upgrade/1"],
+      [["add", "block", "Quote", "--json"], "folio.add-block/1"],
+      [["add", "block", "hero", "--json"], "folio.add-block/1"],
+      [
+        ["add", "block", "quote", "--json", "--brand", "x", "--blocks", "nope.ts"],
+        "folio.add-block/1",
+      ],
+      [["preview", "block", "hero", "--json"], "folio.preview-block/1"],
+    ] as const) {
+      const r = cli([...args], root);
+      expect(r.status, args.join(" ")).toBe(2);
+      expect(json(r.stdout), args.join(" ")).toMatchObject({
+        schema,
+        ok: false,
+        error: { kind: "usage" },
+      });
+    }
+  });
+
+  it("keeps the host's own console output off stdout (review M3)", () => {
+    const root = blocksHost();
+    const vite = readFileSync(path.join(root, "vite.config.mjs"), "utf8");
+    writeFileSync(
+      path.join(root, "vite.config.mjs"),
+      `console.log("[dotenv@17.0.0] injecting env (0) from .env");\nprocess.stdout.write("loading config\\n");\n${vite}`,
+    );
     for (const args of [
-      ["doctor", "--json", "--check", "nope"],
-      ["upgrade", "--json", "--to", "latest"],
-      ["add", "block", "Quote", "--json"],
-      ["add", "block", "quote", "--json", "--brand", "x", "--blocks", "nope.ts"],
-      ["preview", "block", "hero", "--json"],
+      ["doctor", "--json", "--check", "blocks.module"],
+      ["upgrade", "--json"],
+      ["add", "block", "quote", "--json", "--dry-run"],
     ]) {
       const r = cli(args, root);
-      expect(r.status, args.join(" ")).toBe(2);
-      expect(r.stdout, args.join(" ")).toBe("");
+      expect(() => JSON.parse(r.stdout), args.join(" ")).not.toThrow();
+      expect(r.stderr, args.join(" ")).toContain("injecting env");
     }
   });
 });

@@ -8,17 +8,19 @@ import { spawnSync } from "node:child_process";
 
 /**
  * @typedef {{ status: number | null, stdout: string, stderr: string, error?: Error }} RunResult
- * @typedef {(argv: string[], opts?: { cwd?: string, env?: Record<string, string>, inherit?: boolean }) => RunResult} Runner
+ * @typedef {(argv: string[], opts?: { cwd?: string, env?: Record<string, string> }) => RunResult} Runner
  */
 
 /** @type {Runner} */
-export function run(argv, { cwd, env, inherit = false } = {}) {
+export function run(argv, { cwd, env } = {}) {
   const [command, ...args] = argv;
   const result = spawnSync(command, args, {
     cwd,
     env: env ? { ...process.env, ...env } : process.env,
     encoding: "utf8",
-    stdio: inherit ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
+    // Always captured, never inherited: a child writing to our stdout would break
+    // `--json`, whose stdout is one document (review M3).
+    stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: 64 * 1024 * 1024,
   });
   return {

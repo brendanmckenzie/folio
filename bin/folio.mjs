@@ -129,18 +129,53 @@ Exit codes: 0 success, 1 a failure found or hit, 2 a usage error.
   ${REPO}
 `;
 
+/** The schema each `--json` command answers in, including when it fails. */
+const JSON_SCHEMAS = {
+  doctor: "folio.doctor/1",
+  upgrade: "folio.upgrade/1",
+  add: "folio.add-block/1",
+  preview: "folio.preview-block/1",
+};
+
+/**
+ * Under `--json`, stdout is the one JSON document and nothing else (spec 41
+ * decision 14). The host's Vite config runs in this process when the CLI loads it,
+ * and a `console.log` there (dotenv's banner is the common one) would otherwise land
+ * in front of the JSON. So for the whole run, writes to stdout go to stderr, and only
+ * the final answer is written to the real stdout (review M3).
+ */
+const argv = process.argv.slice(2);
+const jsonSchema = argv.includes("--json") ? JSON_SCHEMAS[argv[0]] : undefined;
+const realStdout = { write: process.stdout.write.bind(process.stdout) };
+if (jsonSchema) process.stdout.write = process.stderr.write.bind(process.stderr);
+
 main().then(
   (code) => {
     if (typeof code === "number") process.exitCode = code;
   },
   (err) => {
+    const usage = err instanceof UsageError;
     console.error(`\nfolio: ${err.message}\n`);
-    process.exit(err instanceof UsageError ? 2 : 1);
+    // A usage error or an unexpected one still answers JSON, so an agent that parses
+    // stdout before it reads the exit code gets a refusal rather than nothing (L5).
+    if (jsonSchema) {
+      realStdout.write(
+        `${JSON.stringify(
+          {
+            schema: jsonSchema,
+            ok: false,
+            error: { kind: usage ? "usage" : "internal", message: err.message, fix: [] },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    }
+    process.exit(usage ? 2 : 1);
   },
 );
 
 async function main() {
-  const argv = process.argv.slice(2);
   const command = argv[0];
 
   if (!command || command === "-h" || command === "--help" || command === "help") {
@@ -163,7 +198,7 @@ async function main() {
 
 /** What the library commands need from this copy of the CLI. */
 function runtime() {
-  return { cliVersion: VERSION, pkgRoot: PKG_ROOT };
+  return { cliVersion: VERSION, pkgRoot: PKG_ROOT, stdout: realStdout };
 }
 
 // --- init -----------------------------------------------------------------
