@@ -2087,6 +2087,7 @@ npx github:brendanmckenzie/folio#vX.Y.Z upgrade --apply  # the local half
 | `--apply` | Run the first hop's local steps |
 | `--allow-dirty` | Apply over uncommitted changes to `package.json` or the lockfile |
 | `--env <name>` | The local database and the printed remote steps for one environment only |
+| `--url <origin>` | A deployment whose reported version can clear a `requiresDeployed` gate |
 | `--config <path>` | The wrangler config |
 | `--json` | One `folio.upgrade/1` value on stdout |
 
@@ -2125,9 +2126,16 @@ changes, or the project is not in git, because `git checkout` of those two files
 and a reinstall is the rollback, and the rollback has to exist first. It stops at
 the first failed step; each step's `status` becomes `done` or `failed` (with
 `exitCode` and the last 40 lines of output). Every step is idempotent, so a rerun
-after an interruption converges. A release can declare that another must be
-deployed first (`requiresDeployed`); the plan then splits into hops, `--apply`
-runs only the first, and the plan says to deploy before running `upgrade` again.
+after an interruption converges.
+
+A release can declare that another must be **deployed** first
+(`requiresDeployed`). What a deployment runs is not something this machine knows:
+the installed copy says what is installed here, never what any deployment runs, so
+it is never used as the proof. The plan stops before such a release and carries a
+`stop` saying to deploy and verify the earlier release, then rerun. Rerun with
+`--url <a deployment>` and the plan continues past the gate only when that server
+reports a version at or above the one required. A plan stopped before it reaches
+any release answers `ok: false` and exits 1, so it never reads as "nothing to do".
 
 It refuses a target below the installed version (a downgrade is
 [Rolling back](../UPGRADING.md#rolling-back)), an installed version below 1.0.0, and

@@ -75,9 +75,7 @@ export async function applyPlan(
       return false;
     }
   }
-  if (plan.hops.length > 1) {
-    plan.next = `Deploy v${hop.to} everywhere, then run upgrade again for the next hop.`;
-  }
+  if (plan.stop) plan.next = plan.stop.text;
   return true;
 }
 

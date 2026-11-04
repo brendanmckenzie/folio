@@ -33,7 +33,8 @@ import { PREVIEW_SCHEMA, PreviewError, parseViewport, previewBlock } from "./pre
 import { readProject } from "./project.mjs";
 import { describeFix, noteStream, renderChecks, shellQuote, writeJson } from "./report.mjs";
 import { run as realRun } from "./run.mjs";
-import { parse as parseVersion } from "./semver.mjs";
+import { compare, parse as parseVersion } from "./semver.mjs";
+import { rpc } from "./mcp.mjs";
 
 /**
  * @typedef {{ cliVersion: string, pkgRoot: string, cwd?: string,
@@ -110,7 +111,11 @@ export async function upgradeCommand(argv, rt) {
     "allow-dirty": { type: "boolean" },
     env: { type: "string" },
     config: { type: "string" },
+    url: { type: "string" },
   });
+  if (values.url && !/^https?:\/\//.test(values.url)) {
+    throw new UsageError(`--url must be an http(s) origin, not "${values.url}"`);
+  }
   const to = values.to?.replace(/^v/, "");
   if (to !== undefined && !parseVersion(to)) {
     throw new UsageError(`--to takes a release such as v1.4.0, not "${values.to}"`);
@@ -130,6 +135,8 @@ export async function upgradeCommand(argv, rt) {
       return existsSync(file) && readFileSync(file, "utf8").includes("<!-- folio:begin -->");
     }) ?? null;
 
+  const base = await basePathOf(project);
+  const deployed = values.url ? await deployedVersion(values.url, base, rt.fetch) : null;
   let plan;
   try {
     plan = planUpgrade({
@@ -143,7 +150,8 @@ export async function upgradeCommand(argv, rt) {
       root: project.root,
       typecheck: Boolean(project.pkg.scripts?.typecheck),
       agentsFile,
-      base: await basePathOf(project),
+      base,
+      deployed,
       ...(await databasesByEnvironment(project)),
       env: values.env ?? null,
       config: values.config ?? null,
@@ -181,6 +189,9 @@ export async function upgradeCommand(argv, rt) {
       return refuse(err, { cli: rt.cliVersion, from, to: plan.to, mode: "apply" });
     }
   }
+  // A plan the gate stopped before it reached anything cannot make progress, which
+  // is not the same answer as "nothing to do".
+  if (plan.stop && !plan.hops.length) ok = false;
   plan.ok = ok;
   if (values.json) writeJson(plan, out);
   else out.write(renderPlan(plan));
@@ -202,6 +213,21 @@ export async function upgradeCommand(argv, rt) {
   }
 }
 
+/**
+ * The Folio version a deployment reports in MCP `server/discover`'s serverInfo, or
+ * `null` when it reports none worth trusting. Servers before the version was wired
+ * through answer `0.0.0`, which proves nothing, so anything below 1.0.0 is `null`.
+ */
+async function deployedVersion(url, base, fetchFn) {
+  const answer = await rpc({
+    endpoint: `${url.replace(/\/+$/, "")}${base}/mcp`,
+    method: "server/discover",
+    fetch: fetchFn,
+  });
+  const v = answer.json?.result?._meta?.["io.modelcontextprotocol/serverInfo"]?.version;
+  return typeof v === "string" && parseVersion(v) && compare(v, "1.0.0") >= 0 ? v : null;
+}
+
 /** The base path the host's Vite plugin reports, for printed reindex steps. */
 async function basePathOf(project) {
   const v = await readVite(project);
@@ -211,7 +237,11 @@ async function basePathOf(project) {
 function renderPlan(plan) {
   const lines = [`folio upgrade ${plan.cli}: v${plan.from} → v${plan.to} (${plan.mode})`, ""];
   if (!plan.hops.length) {
-    lines.push("Already at the target. Nothing to do.");
+    lines.push(
+      plan.stop
+        ? `Stopped before v${plan.stop.before}: ${plan.stop.text}`
+        : "Already at the target. Nothing to do.",
+    );
     return `${lines.join("\n")}\n`;
   }
   plan.hops.forEach((hop, i) => {
@@ -259,7 +289,8 @@ function renderPlan(plan) {
     for (const c of plan.claimed) lines.push(`  ${c.file}: ${c.rule}`);
     lines.push("");
   }
-  if (plan.next) lines.push(plan.next, "");
+  if (plan.stop) lines.push(`Stopped before v${plan.stop.before}: ${plan.stop.text}`, "");
+  else if (plan.next) lines.push(plan.next, "");
   if (plan.mode === "plan")
     lines.push("Dry run: nothing was changed. Pass --apply to run the local steps.");
   return `${lines.join("\n")}\n`;

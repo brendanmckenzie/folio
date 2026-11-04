@@ -31,6 +31,7 @@ type Plan = {
   pin: { before: string | null; after: string };
   hops: Hop[];
   claimed: { file: string; rule: string }[];
+  stop?: { before: string; requiresDeployed: string; deployed: string | null; text: string };
 };
 type Ledger = {
   releases: { version: string; requiresDeployed?: string; [k: string]: unknown }[];
@@ -230,7 +231,7 @@ describe("upgrade plans, other ranges", () => {
     expect(hop.migrations.map((m) => m.file)).toEqual(["0015_draft_data.sql"]);
   });
 
-  it("splits at a declared requiresDeployed, and says to deploy before the next hop", () => {
+  it("stops at a requiresDeployed release unless a deployment proves the version (review M1)", () => {
     const fixture = {
       ...ledger,
       releases: [
@@ -245,13 +246,24 @@ describe("upgrade plans, other ranges", () => {
       ],
     };
     const p = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.3.1" });
-    expect(p.hops.map((h) => h.to)).toEqual(["1.4.0", "1.5.0"]);
+    expect(p.hops.map((h) => h.to)).toEqual(["1.4.0"]);
+    expect(p.stop).toMatchObject({ before: "1.5.0", requiresDeployed: "1.4.0", deployed: null });
     expect(p.hops[0]?.steps.at(-1)).toMatchObject({ id: "next-hop", phase: "post-deploy" });
     expect(p.hops[0]?.steps.find((s) => s.id === "pin")).toMatchObject({
       after: "github:brendanmckenzie/folio#v1.4.0",
     });
-    // Already past it: one hop.
-    expect(plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.4.0" }).hops).toHaveLength(1);
+    // Installed at or past the gate proves nothing about what is deployed.
+    const installed = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.4.0" });
+    expect(installed.hops).toEqual([]);
+    expect(installed.stop?.before).toBe("1.5.0");
+    // A deployment that reports 1.4.0 or later is the proof.
+    const proven = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.4.0", deployed: "1.4.0" });
+    expect(proven.stop).toBeUndefined();
+    expect(proven.hops.map((h) => h.to)).toEqual(["1.5.0"]);
+    // An older deployment does not count.
+    expect(
+      plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.3.1", deployed: "1.3.9" }).stop,
+    ).toBeDefined();
   });
 
   it("pairs a with-deploy migration's apply with an immediate deploy, per environment", () => {

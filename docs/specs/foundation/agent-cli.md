@@ -1265,6 +1265,16 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
   ordered named first, top level, then `prod*`, matching "staging, then production";
   the local apply runs under the environment its database came from; and a hop with
   migrations is refused when an environment has no Folio database.
+- **`requiresDeployed` is a fact about deployments, so the installed version never
+  satisfies it** (review M1). Decision 9 compared the gate against the installed
+  version, which made 0012's `requiresDeployed: "1.0.0"` vacuous: every plan already
+  starts at 1.0.0 or later. A plan that reaches a gated release now stops before it,
+  with a `stop` object and a step saying to deploy, verify and rerun. `upgrade --url
+  <a deployment>` clears the gate only when that server's MCP `server/discover`
+  serverInfo reports a version at or above the one required. Today the server
+  reports a constant `0.0.0`, which proves nothing, so until a release wires the
+  package version into serverInfo the gate always stops; no new route was added. A
+  plan stopped before reaching any release answers `ok: false`, exit 1.
 - **Remote step ids are `d1-remote:<env>`, with the top level as `top-level`**, each
   `before: "deploy"`, followed by one `deploy` step naming every environment. The
   example's `before: "deploy:staging"` named a step that did not exist. A hop with a

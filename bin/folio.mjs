@@ -101,6 +101,7 @@ Options for upgrade:
   --apply                 Run the local steps (pin, reinstall, local D1, typecheck)
   --allow-dirty           Apply over uncommitted package.json or lockfile changes
   --env <name>            Restrict the printed remote steps to one environment
+  --url <origin>          A deployment whose version can prove a requiresDeployed gate
   --config <path>         The wrangler config, if not wrangler.jsonc/json/toml
 
 Options for add block:

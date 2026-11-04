@@ -39,6 +39,7 @@ export class PlanRefusal extends Error {
  *   databases: { env: string | null, envs?: (string | null)[], database_name: string,
  *     database_id?: string | null, binding: string }[],
  *   missing?: (string | null)[], env?: string | null, config?: string | null,
+ *   deployed?: string | null,
  * }} input
  */
 export function planUpgrade(input) {
@@ -101,41 +102,34 @@ export function planUpgrade(input) {
   };
   if (compare(to, from) === 0) return base;
 
-  const hops = splitHops(releasesBetween(ledger, from, to), from);
-  base.hops = hops.map((releases, i) =>
-    hopPlan(input, releases, { last: i === hops.length - 1, final: to }),
+  const releases = releasesBetween(ledger, from, to);
+  const gate = releases.findIndex(
+    (r) => r.requiresDeployed && !provenDeployed(input.deployed, r.requiresDeployed),
   );
+  const reach = gate === -1 ? releases : releases.slice(0, gate);
+  if (gate !== -1) {
+    const r = releases[gate];
+    base.stop = {
+      before: r.version,
+      requiresDeployed: r.requiresDeployed,
+      deployed: input.deployed ?? null,
+      text: `v${r.version} must not be crossed into until v${r.requiresDeployed} or later is deployed and verified on every deployment. ${reach.length ? `This plan stops at v${reach.at(-1).version}. ` : ""}Deploy, verify, then run \`npx ${SPEC}#v${to} upgrade --url <a deployment>\` again: the server's own answer is the only proof this command accepts.`,
+    };
+  }
+  if (reach.length) base.hops = [hopPlan(input, reach, { stop: base.stop ?? null })];
   return base;
 }
 
 /**
- * Releases grouped into hops. A release declaring `requiresDeployed: X` cannot be
- * crossed into from below X in one step, so the current hop ends at the release
- * before it (decision 9). No current release declares one.
+ * Whether a deployment is known to run `version` or later. Only a version the
+ * deployed server reported counts (review M1): the installed copy says what this
+ * machine has, not what any deployment runs, so it is never used here.
  */
-export function splitHops(releases, from) {
-  const hops = [];
-  let current = [];
-  let start = from;
-  for (const r of releases) {
-    if (r.requiresDeployed && compare(start, r.requiresDeployed) < 0) {
-      const end = current.at(-1)?.version;
-      if (!end || compare(end, r.requiresDeployed) < 0) {
-        throw new Error(
-          `ledger: v${r.version} requires v${r.requiresDeployed} deployed, and no release before it reaches that`,
-        );
-      }
-      hops.push(current);
-      current = [];
-      start = end;
-    }
-    current.push(r);
-  }
-  if (current.length) hops.push(current);
-  return hops;
+function provenDeployed(deployed, version) {
+  return Boolean(deployed && parseVersion(deployed) && compare(deployed, version) >= 0);
 }
 
-function hopPlan(input, releases, { last, final }) {
+function hopPlan(input, releases, { stop }) {
   const { ledger } = input;
   const to = releases.at(-1).version;
   const versions = new Set(releases.map((r) => r.version));
@@ -318,13 +312,8 @@ function hopPlan(input, releases, { last, final }) {
       });
     }
   }
-  if (!last) {
-    steps.push({
-      id: "next-hop",
-      phase: "post-deploy",
-      kind: "manual",
-      text: `Deploy v${to} everywhere first: the next release requires it. Then run \`npx ${SPEC}#v${final} upgrade\` again.`,
-    });
+  if (stop) {
+    steps.push({ id: "next-hop", phase: "post-deploy", kind: "manual", text: stop.text });
   }
 
   return {
