@@ -203,6 +203,15 @@
       ]
     },
     {
+      "version": "1.3.2",
+      "date": "2026-11-04",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": [
+        "Menu items grow (v1.3.2)"
+      ]
+    },
+    {
       "version": "1.4.0",
       "rollback": "safe",
       "migrations": [],
