@@ -2,11 +2,16 @@
  * A field over its `length` limit says so to assistive technology, not only in red
  * (`docs/specs/content-model/authoring-guidance.md` decision 14; the v1.4.0 browser
  * check). The sentence under the control is part of the control's description, after
- * the counter, and the control is `aria-invalid`. */
+ * the counter, and the control is `aria-invalid`. The counter's own states are pinned
+ * here too, because the class is the only thing that tells near from over.
+ */
 import { render, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Blok } from "../../../../src/core/doc";
 import type { Field as FieldDef } from "../../../../src/core/fields";
+import fieldCss from "../../../../src/admin/ui/Field.module.css";
 import type { FieldEnv } from "../../../../src/admin/ui/screens/fields/Control";
 import { FieldRow } from "../../../../src/admin/ui/screens/fields/FieldRow";
 
@@ -54,6 +59,10 @@ function description(control: HTMLElement): string[] {
   const ids = (control.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
   return ids.map((id) => document.getElementById(id)?.textContent ?? `<missing ${id}>`);
 }
+
+/** A stylesheet, by its path from the repo root: happy-dom's `import.meta.url` is not a
+ * `file:` URL, and the vitest root is the repo. */
+const sheet = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
 const heading: FieldDef = { kind: "text", label: "Heading", length: { max: 60 } };
 const body: FieldDef = { kind: "textarea", label: "Body", length: { max: 10 } };
@@ -124,5 +133,36 @@ describe("a field over its length limit", () => {
     const input = view.getByRole("textbox", { name: "Heading" });
     expect(description(input)).toEqual(["0 / 60", "Required — this is still empty."]);
     expect(input.hasAttribute("aria-invalid")).toBe(false);
+  });
+});
+
+describe("the length counter's states", () => {
+  const counter = (value: string) => {
+    const view = row(heading, value);
+    const id = view.getByRole("textbox").getAttribute("aria-describedby")?.split(" ")[0] ?? "";
+    const classes = [...(document.getElementById(id)?.classList ?? [])];
+    view.unmount();
+    return classes;
+  };
+
+  it("is plain at rest, near from 90% of the max, and over past it", () => {
+    expect(counter("x".repeat(42)).includes(fieldCss.near as string)).toBe(false);
+    expect(counter("x".repeat(42)).includes(fieldCss.over as string)).toBe(false);
+    expect(counter("x".repeat(56)).includes(fieldCss.near as string)).toBe(true);
+    const over = counter("x".repeat(82));
+    expect(over.includes(fieldCss.over as string)).toBe(true);
+    expect(over.includes(fieldCss.near as string)).toBe(false);
+  });
+
+  it("is over in the over-limit sentence's colour, and near in the warning colour", () => {
+    const fieldSheet = sheet("src/admin/ui/Field.module.css");
+    const rowSheet = sheet("src/admin/ui/screens/fields/fields.module.css");
+    const colour = (css: string, selector: string) =>
+      css
+        .match(new RegExp(`(?:^|\\n)${selector.replace(".", "\\.")} \\{([^}]*)\\}`))?.[1]
+        ?.match(/color:\s*([^;]+);/)?.[1];
+    expect(colour(fieldSheet, ".over")).toBe(colour(rowSheet, ".warn"));
+    expect(colour(fieldSheet, ".over")).toBe("var(--state-danger-fg)");
+    expect(colour(fieldSheet, ".near")).toBe("var(--state-warn-fg)");
   });
 });

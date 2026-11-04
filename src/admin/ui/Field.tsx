@@ -17,10 +17,12 @@ interface FieldProps {
   /** Right of the label. A locale note, a peer's name, "shared". */
   note?: ReactNode;
   /**
-   * A length counter at the label's end: `42 / 60`. `over` draws it in the warning
-   * colour. Advisory, so nothing is refused (`authoring-guidance.md` decision 14).
+   * A length counter at the label's end: `42 / 60`. `near` draws it in the warning
+   * colour, `over` in the danger colour of the sentence a field shows once it is past
+   * the limit, so the two cues in one field agree. Advisory, so nothing is refused
+   * (`authoring-guidance.md` decision 14).
    */
-  count?: { text: string; over: boolean };
+  count?: { text: string; over: boolean; near?: boolean };
   /** Under the help line: a field's "Writing guide" disclosure. */
   detail?: ReactNode;
   /**
@@ -82,7 +84,7 @@ export function Field({
       {count ? (
         <div className={css.labelRow}>
           {labelEl}
-          <span id={countId} className={count.over ? `${css.count} ${css.over}` : css.count}>
+          <span id={countId} className={countClass(count)}>
             {count.text}
           </span>
         </div>
@@ -98,6 +100,12 @@ export function Field({
       {detail ?? null}
     </div>
   );
+}
+
+function countClass(count: { over: boolean; near?: boolean }): string | undefined {
+  if (count.over) return `${css.count} ${css.over}`;
+  if (count.near) return `${css.count} ${css.near}`;
+  return css.count;
 }
 
 export function Input(props: Omit<InputHTMLAttributes<HTMLInputElement>, "className">) {
