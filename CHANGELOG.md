@@ -8,6 +8,24 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.3.2
+
+A patch release: nothing to run or edit on an existing host. No migration.
+
+### Fixed
+
+- **The form builder's "Add a question..." menu no longer overlaps its own items.**
+  The shared admin `Menu` gave every item a fixed one-row height, so the two-line
+  items (label and hint) spilled into their neighbours. Items now grow to fit their
+  content, with the highlight covering both lines, and one-line menus are unchanged.
+  The list also caps to the space below its trigger and scrolls, keeping the
+  keyboard-active item in view, so a long menu stays usable on a short viewport.
+  See [Menu items grow (v1.3.2)](UPGRADING.md#menu-items-grow-v132).
+
+### Breaking changes
+
+None.
+
 ## 1.3.1
 
 A patch release: nothing to run or edit on an existing host. No migration, no code

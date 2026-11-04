@@ -38,6 +38,11 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-menu);
+  /* `--menu-max-h` is the measured space below the trigger (Menu.tsx); `70dvh` is the
+     fallback for the frame before it is measured. Never a percentage: the list is
+     absolutely positioned and sized by its own content. */
+  max-height: var(--menu-max-h, 70dvh);
+  overflow-y: auto;
 }
 
 .start {
@@ -51,7 +56,11 @@
 .item {
   display: flex;
   align-items: center;
-  height: var(--row-h);
+  /* A floor, not a height: a two-line label grows the item and the highlight with
+     it. Padding stays horizontal so a one-line item is exactly row-h as before;
+     a caller with taller content pads its own content (FormBuilder's `.menuItem`). */
+  min-height: var(--row-h);
+  flex: none;
   padding: 0 var(--space-2);
   font: inherit;
   color: var(--fg);
