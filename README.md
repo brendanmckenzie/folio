@@ -1,39 +1,16 @@
 # Folio
 
-**A block CMS with a real visual editor, schema you write in TypeScript, and
-multiplayer editing — running on nothing but Cloudflare.**
+**The CMS you and your agent both love.**
 
-Every CMS is excellent at three or four things and asks you to live with the
-rest. The one with the beautiful click-a-block-in-the-page editor keeps your
-content model in a web form, so it drifts from your components. The one with
-schema-as-code has no visual editor at all. The one with genuine real-time
-collaboration has no publishing workflow, and the one with the workflow renders
-your pages on somebody else's boxes, in somebody else's region, behind somebody
-else's cache.
+Folio is a sleek, live visual block editor for the people who write your site, and the best surface for the agent you already use to build and run it: an MCP server, a typed schema, an integration guide written for coding agents, and writes that go through the same mutation log as a human edit, so they sync, undo and show up in the activity trail. It is a library, not an application, and it runs on nothing but Cloudflare: Workers, D1, Durable Objects and R2.
 
-Folio is what came of refusing to pick:
-
-- **Nested blocks, edited in the page** — click a block in the rendered page and
-  change it there, with a real draft/published split behind it.
-- **Schema as code**, colocated with the component, so the admin form, the prop
-  types and the HTML cannot drift apart.
-- **A local-first mutation log** — optimistic apply, delta sync, per-user undo
-  and multiplayer, the way a modern issue tracker works rather than the way a
-  CMS usually does.
-- **One platform, fully committed to** — Workers, D1, Durable Objects and R2.
-  No adapter layer, no lowest common denominator.
-
-It is a **library, not an application**. Your project owns its Worker, its
-routing and its public pages. Folio owns the editor, the sync engine and the
-block render, and returns `null` for every path it does not own — so it can
-never swallow one of yours.
+<!-- hero-demo: recorded GIF/video, hosted as a GitHub release asset -->
 
 ---
 
 ## A block, end to end
 
-This is the whole of what a content type is. The admin form, the prop types and
-the HTML all come from this one file, so they cannot drift apart:
+A content type is one file. The admin form, the prop types and the HTML all come from it, so they cannot drift apart:
 
 ```tsx
 // src/blocks/hero.tsx
@@ -50,7 +27,7 @@ export const hero = defineBlock({
         { label: 'Left', value: 'left' },
         { label: 'Centre', value: 'center' },
       ],
-      default: 'center',     // a new hero starts centred, not on option one by accident
+      default: 'center',
     }),
     actions: blocks({ allow: ['button'], max: 2 }),
   },
@@ -64,326 +41,61 @@ export const hero = defineBlock({
 })
 ```
 
-An editor sees a Hero with a heading box, a two-option dropdown and a slot that
-accepts up to two buttons. They click the heading *on the page* and type into
-it. Another editor, in another window, watches it change.
+An editor sees a Hero with a heading box, a two-option dropdown and a slot that takes up to two buttons. They click the heading on the page and type into it, and another editor in another window watches it change. An agent reads the same definition through `get_schema`.
 
 ---
 
 ## Quick start
 
 ```bash
-npx github:brendanmckenzie/folio#v1.0.0 init my-site
-cd my-site
-npm install
+npx github:brendanmckenzie/folio#v1.3.1 init my-site
+cd my-site && npm install
 npm run db:local && npm run db:seed
 npm run dev
 ```
 
-Open <http://localhost:5173/folio/login> and enter the address the scaffolder
-seeded — it prints it, and asks for it. There is no mail binding on a fresh
-project, so the sign-in link is **logged to your terminal**. Follow it, and you
-land in the editor on the home page.
+Open <http://localhost:5173/folio/login> and enter the address the scaffolder seeded. A fresh project has no mail binding, so the sign-in link is logged to your terminal. Follow it, add a Hero, type into it and hit **Publish**: it is live at `/`.
 
-Add a Hero, type into it, hit **Publish**. It is live at `/`.
+`init` writes [`examples/starter`](examples/starter), a complete Cloudflare project that is typechecked on every commit, along with an `AGENTS.md` for your coding agent. Adding Folio to an existing project is the same checklist: see [`AGENTS.md`](AGENTS.md). Requires Node 20.19+ or 22.12+, a Cloudflare account, React 19 and Vite 7 or 8. More on the first run in the [handbook](docs/handbook.md#getting-started-in-detail).
 
-Open the editor in a second window to watch multiplayer.
+---
 
-`init` scaffolds a complete, working Cloudflare project: a Worker that mounts
-Folio and renders published pages, three example blocks, a `wrangler.jsonc` with
-every binding wired up, and the D1 migrations pointed at the package's copy. It
-pins the release tag the scaffolder itself came from (`#v1.0.0` above) — see
-[Versioning](#versioning).
+## For editors
 
-> Two things about that first command. It is `npx github:…` rather than
-> `npm create folio`, because `npm create` needs a package on the npm registry
-> and Folio is not on one. And it takes a minute the first time: npm builds the
-> library on your machine before it can run anything from it. Nothing has hung.
+- **Edit the real page.** Your site renders in an iframe; click any block to select it and change it in place. Edits apply optimistically and stream to the preview without a reload.
+- **Work together.** Cursors, selections and presence across the site, with per-user undo.
+- **Draft and published are separate.** Browse the real site from its drafts, send a reviewer a share link that needs no account, and schedule a publish or unpublish.
+- **Nothing is lost.** Every document has a history with versions, restore, minimal diffs and an activity trail.
 
-What it writes is [`examples/starter`](examples/starter), which is a real
-package in this workspace and typechecked on every commit — so it compiles
-before it reaches you.
+## For agents
 
-Prefer to do it by hand, or adding Folio to a project that already exists?
-[`AGENTS.md`](AGENTS.md) is the integration guide — it is written for a coding
-agent and reads perfectly well as a checklist for a person.
+Point the agent you already use at `{base}/mcp` with a scoped token and it can read and write content the way an editor does. Folio builds no chat panel and picks no model; the agent is yours.
 
-**Keeping a project healthy.** `npx folio doctor` checks a project (the pin, the
-installed package, the wrangler bindings, the local D1 migrations) and attaches the
-command that fixes each finding. `npx github:brendanmckenzie/folio#<tag> upgrade`
-plans an upgrade to that release, and `--apply` runs the local half of it.
-`npx folio add block <name> --into page.body` scaffolds a block and makes it
-insertable. Every command answers JSON with `--json`, for the agent you already
-use; see [the command line](docs/handbook.md#the-command-line).
+- **An MCP server** with seventeen tools: `get_schema`, search and query, `get_document`, `check_document`, `create_document`, `write_content`, `patch_fields`, `move_document`, `duplicate_document`, `list_versions`, `restore_version`, `publish_document`, `unpublish_document`, `delete_document`, `upload_asset` and `preview_document`, which returns a screenshot so the agent can see the page. The tool list is filtered by the token's scopes.
+- **A typed schema** the agent can read (`get_schema`) and that refuses a payload that does not fit, with the path and the reason.
+- **Writing guidance and content checks.** `help`, `guidance` and advisory `length` on blocks and fields, a per-brand `writing` guide, and `check_document`, which tells an agent what to fix and where before anything is published.
+- **Writes are ordinary edits.** They go through the mutation log, appear live in an open editor, are attributed as `token:<name>` in the activity trail, and undo with Cmd+Z.
+- **[`AGENTS.md`](AGENTS.md)** is the integration guide, written for a coding agent. `folio init` drops it into your project and `folio agents` refreshes the block.
+- **A versioned Content API** at `{base}/api/v1` for scripts and headless front ends.
+- **A command line that keeps a project healthy.** `npx folio doctor` checks the pin, the installed package, the wrangler bindings and the local D1 migrations, and attaches the command that fixes each finding. `npx github:brendanmckenzie/folio#<tag> upgrade` plans an upgrade to that release and `--apply` runs the local half. `npx folio add block <name> --into page.body` scaffolds a block and makes it insertable. Every command answers JSON with `--json`; see [the command line](docs/handbook.md#the-command-line).
 
-**Requirements:** Node 20.19+ or 22.12+ (Vite's floor), a Cloudflare account,
-React 19, and Vite 7 or 8.
+Setup is a token and one command: [`docs/mcp.md`](docs/mcp.md).
 
 ---
 
 ## What it does
 
-Grouped roughly the way you meet them.
+- **Nested blocks** with per-slot `allow` lists, drag to reorder, duplicate, and copy and paste between documents and sites. Richtext on TipTap, constrainable per field.
+- **Three kinds of document:** pages that own a URL, records for unrouted data, and singletons such as site settings. Globals load into every page.
+- **References, collections, full-text search and localisation**, with one document holding every language.
+- **Forms** built in the admin, with conditional questions, steps, option sources and actions, stored and exportable.
+- **A media library** on R2 with on-the-fly resizing, focal points and optional machine-written alt text (you supply the model call).
+- **Caching that invalidates:** cache tags come from what a render loaded, and a publish purges by tag. D1 read replication runs through a per-request session.
+- **Auth with no default:** magic links, OIDC, Cloudflare Access, passkeys, or `auth: 'open'` said out loud. Members-only pages against your own membership system.
+- **Content migrations**, redirects, publish hooks and a drift audit.
+- **Many sites, and many brands, in one deployment.** Opt-in; the handbook has the design.
 
-### Authoring
-
-- **Visual editing.** Your real page in an iframe; click any block to select it.
-  Edits apply optimistically and stream to the preview without a reload.
-- **Multiplayer.** Cursors, selections and presence across the whole site, over
-  a Durable Object. Undo is per-user, not per-document.
-- **Nested blocks** with per-slot `allow` lists and maximums, drag to reorder,
-  duplicate, and copy/paste between documents and between sites.
-- **Richtext** built on TipTap, constrainable per field down to "bold, italic
-  and links, one paragraph". Internal links store a document *id*, so renaming
-  a page fixes every link pointing at it.
-- **Conditional fields**, field **defaults and presets**, and a **history** tab
-  with versions, restore, minimal diffs and an activity trail.
-
-### The content model
-
-- **Three kinds of document.** `page` lives in the tree and owns a URL;
-  `record` is unrouted data (people, offices, products); `singleton` is exactly
-  one of a thing (site settings, a header).
-- **Globals** — singletons loaded into every page's resolution, so your layout
-  can place a header and footer that editors control.
-- **References and collections.** Point at another document, hand-pick an
-  ordered list of them, or query published content by an indexed field with
-  filtering, sorting and pagination.
-- **Full-text search** over published content, with snippets, gate-aware.
-- **Localisation.** One document holds every language; translations live
-  alongside the source value per field. You own the URL shape.
-- **Forms.** Built in the admin, embedded by id, submitted to a route Folio
-  owns. Responses are stored, exportable as CSV that Excel will not execute,
-  and forwarded by a hook.
-
-### Assets
-
-- A **media library** on R2 with folders, tags, bulk edits and usage counts.
-- On-the-fly **resizing** and format conversion through the Images binding,
-  with focal points and per-usage alt text.
-- Optional **machine-written alt text**, descriptions and tags — you supply the
-  model call; Folio holds no API key and picks no vendor.
-
-### Publishing and the platform
-
-- **Draft / published split**, with **draft mode**: browse the real site from
-  its drafts at real URLs, and **share links** that give a reviewer one page
-  and no account.
-- **Scheduled publish and unpublish**, off one cron trigger.
-- **Redirects**, and a 404 branch that can tell "taken down on purpose" (410)
-  from "never existed" (404).
-- **Caching** that actually invalidates: cache tags are computed from what a
-  render *loaded*, and a publish purges by tag, globally.
-- **D1 read replication**, wired through a per-request session so a reader in
-  Sydney is not waiting on a primary in Virginia.
-- **Publish hooks** — typed after-commit callbacks in your own Worker, not
-  webhooks to yourself.
-
-### Access and integration
-
-- **Auth with no default**: magic links, OIDC, Cloudflare Access, passkeys, or
-  `auth: 'open'` said out loud. Roles, per-domain provider enforcement, and an
-  auth event log with a retention sweep.
-- **Visitor access** — members-only pages, where *your* membership system
-  answers who the visitor is and Folio does the cheap part.
-- **A versioned Content API** (`{base}/api/v1`) with token scopes, plus an
-  in-process `folio.write()` for your own Worker.
-- **An MCP server** at `{base}/mcp`, so an assistant can read and write content
-  with a scoped credential.
-- **Writing guidance and content checks**: `help`, `guidance` and advisory `length`
-  on blocks and fields, a per-brand `writing` guide, and `check_document`, which tells
-  an agent what to fix and where before anything is published.
-- **Content migrations** — pure functions from a document to a list of
-  mutations, applied through the same log the editor writes to, plus a drift
-  audit that tells you which schema changes have stranded data.
-- **Many sites in one deployment** — opt-in, with `sites` in `createFolio`. A
-  registry of sites and groups, a shared scope every site inherits from, forks to
-  override an inherited page, globals that layer field by field, roles as grants
-  per site, and drafts previewed on each site's own origin. See below.
-
-Not built, deliberately or not yet: host-defined custom field types,
-collaborative richtext (a CRDT), and an admin surface for outbound webhooks. The handbook's "Not built yet" section is the honest list.
-
----
-
-## The integration, in three pieces
-
-**1. Define your blocks** — the file above. Export them as one array.
-
-**2. Mount Folio in your Worker.** It goes first, and misses through:
-
-```tsx
-import { createFolio, magicLink } from 'folio/server'
-import { blocks } from './blocks'
-
-export { SpaceDO, StoryDO } from 'folio/server'
-
-const folio = createFolio<Env>({
-  blocks,
-  types: [{ name: 'page', label: 'Page', kind: 'page', root: 'page' }],
-  bindings: (env) => ({ db: env.DB, story: env.STORY, space: env.SPACE, media: env.MEDIA }),
-  auth: { providers: [magicLink({ send: (env, { email, url }) => sendMail(env, email, url) })] },
-  route: (path) => `/${path}`,
-})
-
-export default {
-  async fetch(req, env, ctx) {
-    // Your own routes win. Folio returns null for anything it does not own.
-    const handled = await folio.handle(req, env, ctx)
-    if (handled) return handled
-
-    return renderPage(req, env)      // …your router, unchanged
-  },
-}
-```
-
-**3. Render published pages from your own route.** One call gives you the
-document, the story, the resolution, whether this request may see a draft, and
-the exact cache headers the response must carry:
-
-```tsx
-const reader = folio.reader(env, req)          // one D1 session for the whole render
-const page = await reader.page(path)
-if (!page) {
-  const miss = await reader.miss(path)         // redirect + state, one round trip
-  // `miss.to` is rooted (`/guides/new`); `new URL(…, origin)` makes it absolute,
-  // which is what `Response.redirect` requires.
-  if (miss.kind === 'redirect') return Response.redirect(new URL(miss.to, url.origin), miss.status)
-  return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
-}
-
-return html(
-  <YourLayout>{folio.render(page.doc, { resolution: page.resolution })}</YourLayout>,
-  page.headers,
-)
-```
-
-Because `Resolution` is plain JSON, that survives a loader boundary — so this
-works inside React Router, TanStack Start, or whatever else owns your routes.
-Your layout, your `<head>`, your error boundaries.
-
-**Plus the Vite plugin**, which supplies the prebuilt admin, the preview bundle
-and the asset constants:
-
-```ts
-import { folio } from 'folio/vite'
-
-plugins: [react(), folio({ blocks: './src/blocks/index.ts' }), cloudflare()]
-```
-
----
-
-## Many sites in one deployment
-
-One Worker, one D1, one R2 and one admin can hold many sites. Add `sites` and a
-platform admin creates sites and groups from the admin, each with its own hostnames:
-
-```tsx
-const folio = createFolio<Env>({
-  …,
-  sites: { admin: 'https://cms.example', settings: 'siteSettings' },
-  route: (path, _locale, site) =>
-    site?.hosts[0] ? `https://${site.hosts[0]}/${path}` : `/${path}`,
-})
-```
-
-- **A shared scope** above every site holds default pages, a catalogue of shared
-  records and the base layer of every global. A site reads its **chain**: itself, its
-  group if any, then `shared`. Writes never flow up.
-- **Overriding is a fork.** A site serves an inherited page until it forks it;
-  unpublishing the fork hides the page, deleting it falls back.
-- **Globals and site settings layer field by field**, with *Inherited*,
-  *Overridden* and *Removed* labels in the editor.
-- **Roles are grants per scope**, so a marketing manager edits one site and a
-  regional editor looks after a group. SSO groups map to grants.
-- **Drafts are served only on a site's preview origin**, reached through a one-time
-  handoff from the admin; a headless front end reads pages, resolves hostnames and is
-  told what to purge over `{base}/api/v1`.
-- **Cache entries are keyed by site and surface**, and tags are scoped, so a publish
-  in one place purges exactly the pages that rendered it.
-
-Without `sites` nothing about a deployment changes. **Turning it on is one-way**,
-and the host has a few changes to make (`route`, readers built from a request, the
-cached loopback's props, a redirect for the admin path on live hosts, and DNS); read
-[`AGENTS.md`](AGENTS.md#a-multi-site-host) for those, the handbook's
-[chapter](docs/handbook.md#many-sites-in-one-deployment) for the design, and
-[`UPGRADING.md`](UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29-v100) before you flip it.
-
-### Many brands in one deployment
-
-Sites share one design by default. When they must not (two brands whose block names
-collide with different fields, or whose global stylesheets would restyle each other's
-editor) add `brands`, and a site belongs to a **brand**: a named registry of blocks,
-types, globals, preview shell, forms policy, describer and content migrations. One
-Worker, one D1, one R2 bucket, one admin origin and one sign-in serve them all.
-
-```tsx
-const folio = createFolio<Env>({
-  …,
-  brands: {
-    allaboutafrica: { label: 'All About Africa', blocks: aaaBlocks, types: aaaTypes },
-    takeoffgo: { label: 'Take Off Go', blocks: tgoBlocks, types: tgoTypes },
-  },
-  sites: { admin: 'https://cms.example' },
-})
-```
-
-- **Every read goes through the scope's brand.** The New menu, sidebar, pickers, MCP's
-  tool descriptions and the v1 schema list that brand's types and blocks and no other's,
-  and both brands keep their own `pageRoot` and `page`.
-- **A chain never crosses a brand, and there is no `shared` scope.** A site with no brand
-  serves nothing.
-- **One preview bundle per brand.** The Vite plugin's `blocks` is a record, and each
-  brand's stylesheet stays out of the others' previews.
-- **A hook payload and a sign-in mail say which brand they are for.**
-
-Without `brands` nothing about a deployment changes beyond a few additive fields
-(`brand: null` on hook payloads and `/me` scopes). The host has its own changes to make,
-and a route tree that serves several brands has rules of its own; read
-[`AGENTS.md`](AGENTS.md#a-multi-brand-host) for those, the handbook's
-[chapter](docs/handbook.md#many-brands-in-one-deployment) for the design, and
-[`UPGRADING.md`](UPGRADING.md#0013-and-turning-brands-on-2026-09-30-v100) before you flip it.
-
----
-
-## Configuring it
-
-`createFolio()` takes one object. Two keys are required and the rest are
-opt-in — and every optional key's absence is a complete, defined behaviour
-rather than a gap:
-
-| Key | | What it turns on |
-| --- | --- | --- |
-| `blocks` | **required** | Your block definitions (per brand, under `brands`) |
-| `auth` | **required** | Sign-in providers, or `'open'` said deliberately |
-| `bindings` | **required** | `env` → D1, Durable Objects, R2, Images |
-| `types` | | Document types: pages, records, singletons |
-| `basePath` | | Where the admin mounts. Default `/folio` |
-| `route` | | Story path → public URL. You own the URL shape (absolute per site, with `sites`) |
-| `locales` | | Languages. Absent is a single-locale site |
-| `globals` | | Singletons loaded into every page's resolution |
-| `hooks` | | After-commit callbacks: publish, delete, form submitted |
-| `gate` | | Members-only pages, against your membership system |
-| `forms` | | Human verification and the submission rate limit |
-| `describe` | | Machine-written alt text — your model call |
-| `migrations` | | Content migrations, in run order |
-| `draftMode` | | A promise that your route calls `reader.page()` |
-| `mcp` | | `false` removes `{base}/mcp`. Default on |
-| `sites` | | Many sites in one deployment. Absent is one implicit site. Turning it on is one-way |
-| `brands` | | Many brands in one deployment: a registry per brand. Needs `sites`, and moves `blocks`, `types` and the keys that follow them into each brand |
-| `assets`, `previewWrap`, `adminCss`, `previewCss` | | Preview and admin wiring |
-
-**[`docs/configuration.md`](docs/configuration.md) is the full reference** —
-every key with its default, its failure mode, and what happens when you leave
-it out. It also covers the `wrangler.jsonc` bindings, the Vite plugin options,
-and the two things (a seeded admin user, a cron trigger) that nothing will
-remind you about.
-
-Most misconfiguration is refused at construction rather than at request time. A
-gate on a translatable field, a locale fallback cycle, a typo in `hooks`, a
-migration list whose declared order and sort order disagree: all of them throw
-when `createFolio` runs, because a configuration mistake in a CMS should not
-become a 500 on whichever code path reaches it first.
+The host owns its Worker, routing and public pages. Folio owns the editor, the sync engine and the block render, and returns `null` for every path it does not own.
 
 ---
 
@@ -391,73 +103,25 @@ become a 500 on whichever code path reaches it first.
 
 | | |
 | --- | --- |
-| [`docs/handbook.md`](docs/handbook.md) | **Every feature**, what it is for and why it is shaped that way. The long one. |
-| [`docs/configuration.md`](docs/configuration.md) | Every `createFolio()` key, binding, and Vite option. |
-| [`AGENTS.md`](AGENTS.md) | Adding Folio to a project: order of operations, and the traps that read as library bugs. Written for a coding agent. |
-| [`UPGRADING.md`](UPGRADING.md) | Bumping the tag, applying schema migrations, and what each one needs. |
-| [`CHANGELOG.md`](CHANGELOG.md) | What changed in each release, with the breaking changes listed separately. |
-| [`docs/api.md`](docs/api.md) | The `{base}/api/v1` contract. |
+| [`docs/handbook.md`](docs/handbook.md) | Every feature, what it is for and why it is shaped that way. Includes the integration in three pieces, multi-site, multi-brand and versioning. |
+| [`docs/configuration.md`](docs/configuration.md) | Every `createFolio()` key, binding and Vite option. |
+| [`AGENTS.md`](AGENTS.md) | Adding Folio to a project, written for a coding agent. |
 | [`docs/mcp.md`](docs/mcp.md) | Pointing an assistant at a running site. |
-| [`examples/starter`](examples/starter) | The project `folio init` scaffolds. Small and real. |
-| [`examples/demo`](https://github.com/brendanmckenzie/folio/tree/v1.0.0/examples/demo) | Everything at once: locales, records, gating, forms, search. |
-| [`docs/specs/`](https://github.com/brendanmckenzie/folio/tree/v1.0.0/docs/specs) | One spec per feature, each recording the alternative its design beat. |
-| [`ROADMAP.md`](https://github.com/brendanmckenzie/folio/blob/v1.0.0/ROADMAP.md) | What is deferred, and why. |
+| [`docs/api.md`](docs/api.md) | The `{base}/api/v1` contract. |
+| [`UPGRADING.md`](UPGRADING.md) | Bumping the tag, applying migrations, and what each needs. |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed in each release. |
+| [`examples/starter`](examples/starter) | The project `folio init` scaffolds. |
 
-Working **on** Folio rather than with it? [`CLAUDE.md`](https://github.com/brendanmckenzie/folio/blob/v1.0.0/CLAUDE.md) is the
-contributor's guide: the gates, the end-to-end scripts, and the invariants that
-are easy to break by accident.
+Working on Folio itself? [`CLAUDE.md`](https://github.com/brendanmckenzie/folio/blob/main/CLAUDE.md) is the contributor's guide.
 
----
+## Install and versioning
 
-## Versioning
-
-Folio follows [semver](https://semver.org/) from `1.0.0`. A release is an annotated
-git tag, `vX.Y.Z`, on a commit that has merged to `main`:
+Folio installs from git, not npm. Pin an exact release tag:
 
 ```
-npm install github:brendanmckenzie/folio#v1.0.0
+npm install github:brendanmckenzie/folio#v1.3.1
 ```
 
-There is no npm package: `folio` is taken on the registry by an unrelated project,
-and Folio installs from git. `package.json` is `private`, which stops
-`npm publish` and does nothing to a git install.
+It follows [semver](https://semver.org/) from 1.0.0: a major version removes or narrows the `exports` surface or a `createFolio()` key, a minor adds to them (D1 migrations arrive in minors), a patch fixes. Never pin a range or a branch. [`UPGRADING.md`](UPGRADING.md) is the procedure, and the [handbook](docs/handbook.md#versioning-and-installing) has the reasoning.
 
-What the version number promises:
-
-- **Major**: removes or narrows the `exports` surface or a `createFolio()` config
-  key: anything a host's own code can import or configure.
-- **Minor**: adds to either. D1 migrations arrive in minors and are listed in
-  [`UPGRADING.md`](UPGRADING.md).
-- **Patch**: fixes only.
-
-Stored documents and the mutation log are not part of the contract, and a release
-tag is never moved or deleted once pushed.
-
-**Pin an exact tag, never a range.** `github:brendanmckenzie/folio#semver:^1.0.0`
-is valid npm syntax and is deliberately unsupported: it resolves against whatever
-tags exist at install time, which turns an upgrade into something that happens to
-you on the next fresh install, and here every upgrade is a decision. Pin
-`#v1.0.0`, and move it by editing the tag. Never pin a branch or a short SHA
-either; both resolve differently later.
-
-**Your lockfile still pins a commit.** npm resolves the tag to a SHA and records
-it in `package-lock.json`, so `npm ci` installs byte-identical code whatever
-happens to the tag later. The tag is what you read and bump; the lockfile is what
-guarantees it.
-
-[`UPGRADING.md`](UPGRADING.md) is the procedure, including the one step that
-bites everybody: `rm -rf node_modules/folio` before reinstalling, or npm skips
-the package's build and leaves you with no `dist/`.
-
-## Status
-
-Two sites run on Folio in production, each with a staging deployment, pinned to
-a release tag, with real editors and real content. Both are the author's own
-client work, so read "production" as that rather than "battle-tested by
-strangers". The release history is in [`CHANGELOG.md`](CHANGELOG.md).
-
-Breaking changes are made when a design turns out to be wrong, and from 1.0.0 they
-are a major version bump rather than a deprecation cycle: no `1.x` branch is
-maintained and no shim keeps a removed name alive.
-
-MIT licensed.
+Two sites run on Folio in production. MIT licensed.

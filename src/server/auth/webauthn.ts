@@ -26,7 +26,7 @@
  * **User verification is `required` at both ceremonies** (checkpoint 2), and the
  * UV flag is *checked*, not merely requested: a passkey is the only factor in
  * this sign-in, so the local PIN or biometric is what makes it two factors by
- * construction. The cost, stated in the README, is that a bare security key with
+ * construction. The cost, stated in the handbook, is that a bare security key with
  * no PIN cannot enrol at all.
  */
 import { algorithmFor, base64url, fromBase64url } from "./jwt";

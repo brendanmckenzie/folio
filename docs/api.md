@@ -1,7 +1,7 @@
 # Folio Content API — `v1`
 
 The reference for `/folio/api/v1`. If you are looking for *why* it is shaped this
-way, `README.md`'s "Content API" section has the reasoning and
+way, `docs/handbook.md`'s "Content API" section has the reasoning and
 `docs/specs/platform/content-api.md` has the decisions; this file is the contract.
 
 Everything below assumes the library is mounted at `/folio` (`basePath`). Adjust
