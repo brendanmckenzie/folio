@@ -16,7 +16,9 @@ const css = readFileSync(
 ).replace(/\/\*[\s\S]*?\*\//g, "");
 
 const rule = (selector: string) => {
-  const at = css.search(new RegExp(`(^|\\n)${selector.replace(/\./g, "\\.")} \\{`));
+  const at = css.search(
+    new RegExp(`(^|\\n)${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{`),
+  );
   expect(at, `${selector} is gone`).toBeGreaterThan(-1);
   return css.slice(at, css.indexOf("}", at));
 };
