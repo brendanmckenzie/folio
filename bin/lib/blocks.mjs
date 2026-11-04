@@ -72,6 +72,13 @@ export function kebabOf(name) {
  */
 export function planAddBlock({ module, name, label, into, read = (f) => readFileSync(f, "utf8") }) {
   validateName(name);
+  // A label is one line of text inside a string literal: a line break or other
+  // control character would write a block that does not parse (review L2).
+  if (label !== undefined && /[\p{Cc}\u2028\u2029]/u.test(label)) {
+    throw new UsageError(
+      "--label must be one line of text, with no line breaks or control characters",
+    );
+  }
   const dir = path.dirname(module);
   for (const ext of [".tsx", ".ts", ".jsx", ".js"]) {
     const existing = path.join(dir, `${name}${ext}`);

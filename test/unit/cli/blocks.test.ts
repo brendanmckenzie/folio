@@ -216,6 +216,19 @@ describe("add block refusals", () => {
     ).toThrow(AddBlockRefusal);
   });
 
+  it("refuses a label that would break the string literal, and escapes quotes", () => {
+    const dir = blocksDir(path.join(STARTER, "src/blocks"));
+    const file = path.join(dir, "index.ts");
+    for (const label of ["Line1\nLine2", "a\rb", "tab\there", "x\u2028y"]) {
+      expect(
+        () => planAddBlock({ module: file, name: "quote", label }),
+        JSON.stringify(label),
+      ).toThrow(UsageError);
+    }
+    const { files } = planAddBlock({ module: file, name: "quote", label: 'Say "hi" \\ ${x} `y`' });
+    expect((files[0] as File).after).toContain('label: "Say \\"hi\\" \\\\ ${x} `y`",');
+  });
+
   it("refuses bad names and collisions as usage errors", () => {
     const dir = blocksDir(path.join(STARTER, "src/blocks"));
     const file = path.join(dir, "index.ts");
