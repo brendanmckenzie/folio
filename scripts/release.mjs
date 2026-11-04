@@ -34,6 +34,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { newestRelease, readLedger } from "../bin/lib/ledger.mjs";
 
 const REMOTE = "origin";
 const REMOTE_BRANCH = "main";
@@ -201,6 +202,21 @@ if (ci) {
   });
 }
 
+/**
+ * A tag must carry its own ledger entry. `folio upgrade` plans from the running
+ * CLI's `upgrade-ledger.json`, so a release whose ledger stops at the previous
+ * version would plan every upgrade to it as a no-op. The unit test already allows
+ * at most one entry above `package.json`'s version; this is the other half, run
+ * only where a tag is being blessed.
+ */
+if (tag || ci) {
+  const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+  const newest = newestRelease(readLedger("."));
+  if (newest?.version !== version) {
+    die(`the ledger has no entry for v${version}: add it in the version-bump PR.`);
+  }
+}
+
 // ── gates ────────────────────────────────────────────────────────────────────
 
 if (gate) {
@@ -346,6 +362,8 @@ function smokeTest(sha) {
       "docs/api.md",
       "docs/mcp.md",
       "bin/folio.mjs",
+      "bin/lib/doctor.mjs",
+      "upgrade-ledger.json",
       "examples/starter/package.json",
       "examples/starter/src/index.tsx",
     ];
@@ -412,7 +430,7 @@ function sleep(ms) {
  * already does.
  */
 function consumerBoots(dir, spec) {
-  process.stdout.write("· consumer boots (init, install, vite dev, build) … ");
+  process.stdout.write("· consumer boots (init, install, doctor, add block, vite dev, build) … ");
   const fail = (what, detail = "") => {
     console.log("FAILED");
     if (detail) process.stderr.write(`${detail}\n`);
@@ -431,7 +449,59 @@ function consumerBoots(dir, spec) {
   pkg.dependencies.folio = spec;
   writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   sh("the starter's npm install", "npm", ["install", "--no-audit", "--no-fund"], app);
+
+  /**
+   * The agent CLI, from the installed package, against a project installed the way
+   * a consumer installs it: the only place `doctor`, `add block` and `upgrade` run
+   * over a real `node_modules/folio`, a real wrangler and a real Vite config
+   * (`agent-cli.md` phase 6). Gated on exit codes and parsed JSON, never on the
+   * human output. Before the local database exists, `doctor` must fail on exactly
+   * that and offer the local apply; after it, pass.
+   */
+  const folioCli = (args) => {
+    const r = spawnSync("node", ["node_modules/folio/bin/folio.mjs", ...args], {
+      cwd: app,
+      stdio: "pipe",
+      encoding: "utf8",
+    });
+    let json = null;
+    try {
+      json = JSON.parse(r.stdout);
+    } catch {}
+    return { status: r.status, json, output: `${r.stdout}${r.stderr}` };
+  };
+  const fresh = folioCli(["doctor", "--json"]);
+  const freshD1 = fresh.json?.checks?.find((c) => c.id === "d1.local");
+  const freshOthers = (fresh.json?.checks ?? []).filter(
+    (c) => c.status === "fail" && c.id !== "d1.local",
+  );
+  if (
+    fresh.status !== 1 ||
+    freshD1?.status !== "fail" ||
+    !freshD1.fix?.[0]?.argv?.join(" ").endsWith("d1 migrations apply folio --local") ||
+    freshOthers.length
+  ) {
+    fail(
+      "folio doctor on the fresh install did not fail on exactly the local database",
+      fresh.output,
+    );
+  }
+
   sh("db:local", "npm", ["run", "db:local"], app);
+
+  const ready = folioCli(["doctor", "--json"]);
+  if (ready.status !== 0 || ready.json?.ok !== true) {
+    fail("folio doctor did not pass after db:local", ready.output);
+  }
+  const added = folioCli(["add", "block", "quote", "--into", "page.body", "--json"]);
+  if (added.status !== 0 || added.json?.written !== true) {
+    fail("folio add block quote --into page.body failed", added.output);
+  }
+  sh("the starter's typecheck, with the added block", "npm", ["run", "typecheck"], app);
+  const planned = folioCli(["upgrade", "--json"]);
+  if (planned.status !== 0 || !Array.isArray(planned.json?.hops) || planned.json.hops.length) {
+    fail("folio upgrade did not answer an empty plan for an up-to-date install", planned.output);
+  }
 
   const port = spawnSync(
     "node",
@@ -489,6 +559,17 @@ function consumerBoots(dir, spec) {
     }
     if (commonJsError.test(readFileSync(logPath, "utf8"))) {
       fail("the Worker hit a CommonJS error", readFileSync(logPath, "utf8"));
+    }
+    const mounted = folioCli([
+      "doctor",
+      "--url",
+      `http://localhost:${port}`,
+      "--check",
+      "server.mounted",
+      "--json",
+    ]);
+    if (mounted.status !== 0) {
+      fail("folio doctor --check server.mounted failed against vite dev", mounted.output);
     }
   } finally {
     try {

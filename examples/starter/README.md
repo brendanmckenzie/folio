@@ -47,6 +47,17 @@ Three steps, none of which touch the admin:
 3. Name it in some other block's `blocks({ allow: [...] })` slot — usually
    `page`'s `body` — so an editor can insert it.
 
+Or let the CLI do all three:
+
+```bash
+npx folio add block quote --into page.body
+```
+
+It writes `src/blocks/quote.tsx`, lists it in `src/blocks/index.ts`, and adds it to
+`page`'s `body`. With the dev server running, `npx folio preview block quote --url
+http://localhost:5173` renders it and saves the HTML (it needs a `FOLIO_TOKEN` with
+`content:read`, `content:read:draft` and `content:write`, minted in the admin).
+
 The admin is schema-driven and ships prebuilt, so it learns about your block
 over HTTP. There is nothing to rebuild.
 
@@ -56,6 +67,7 @@ over HTTP. There is nothing to rebuild.
 wrangler d1 create folio                  # put the id in wrangler.jsonc
 wrangler r2 bucket create folio-media
 npm run db:remote                         # apply migrations to the real database
+npx folio doctor --remote                 # check the bindings and both databases
 ```
 
 Then three things this scaffold left as local-dev stand-ins:

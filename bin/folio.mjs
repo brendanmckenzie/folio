@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 /**
- * Folio's CLI. Two commands, no dependencies.
+ * Folio's CLI. Five commands, no dependencies.
  *
- *   folio init [dir]     scaffold a new host project
- *   folio agents [file]  write (or refresh) the agent instruction block
+ *   folio init [dir]            scaffold a new host project
+ *   folio agents [file]         write (or refresh) the agent instruction block
+ *   folio doctor [dir]          check a host project, writing nothing
+ *   folio upgrade [dir]         plan (or --apply the local half of) an upgrade
+ *   folio add block <name>      scaffold a block and register it
+ *     (and `folio preview block <name>`, which renders one through a running server)
  *
  * Reachable without an npm registry, because Folio has no npm package:
  *
@@ -14,6 +18,12 @@
  * the thing it writes compiles — and rewrites four things: the project name,
  * the `folio` dependency (a workspace link becomes this release's tag), the seeded
  * admin's address, and the migrations path.
+ *
+ * The other commands live in `bin/lib/`, plain ESM a unit test can import. Their
+ * argument is in `docs/specs/foundation/agent-cli.md`: they inspect the host's
+ * installed Folio and read its config through its own wrangler and vite, and
+ * `upgrade` plans from this copy's `upgrade-ledger.json`, which is why
+ * `npx github:…#vX.Y.Z upgrade` is how you upgrade to vX.Y.Z.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -21,6 +31,13 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { parse, UsageError } from "./lib/args.mjs";
+import {
+  addBlockCommand,
+  doctorCommand,
+  previewBlockCommand,
+  upgradeCommand,
+} from "./lib/commands.mjs";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = "https://github.com/brendanmckenzie/folio";
@@ -48,21 +65,117 @@ folio — a Cloudflare-native block CMS
                           directory, which must be empty)
   folio agents [file]     Write the Folio instruction block into your AGENTS.md
                           or CLAUDE.md, replacing an existing one in place
+  folio doctor [dir]      Check a project: Node, the pin, the installed package,
+                          the wrangler bindings, local (and --remote) D1
+                          migrations, and a running server (--url). Writes nothing
+  folio upgrade [dir]     Plan the upgrade from the installed Folio to this CLI's
+                          release. A dry run unless --apply, which runs only the
+                          local steps; remote migrations and deploys are printed,
+                          never run
+  folio add block <name>  Scaffold <name>.tsx beside your blocks module and list
+                          it there; --into <block>.<field> also makes it
+                          insertable
+  folio preview block <name>
+                          Render one block through a running server (--url) and
+                          save the PNG or HTML; needs FOLIO_TOKEN
 
 Options for init:
   --email <address>       Address seeded as the first admin (default ${DEFAULT_EMAIL})
   --force                 Write into a directory that is not empty
 
+Options for doctor:
+  --json                  One JSON value (schema folio.doctor/1) on stdout
+  --env <name>            Read this wrangler environment
+  --config <path>         The wrangler config, if not wrangler.jsonc/json/toml
+  --persist-to <dir>      Where local D1 state lives, if not .wrangler/state
+  --remote                Also read the deployed database (needs Cloudflare credentials)
+  --url <origin>          Also check a running server at this origin
+  --base <path>           Folio's base path, if the Vite plugin cannot say
+  --site <id>             The site to read the schema of, on a multi-site deployment
+  --check <id>            Run only this check (repeatable)
+  FOLIO_TOKEN             A token with content:read, for the schema check
+
+Options for upgrade:
+  --json                  One JSON value (schema folio.upgrade/1) on stdout
+  --to <vX.Y.Z>           Stop at an earlier release in this CLI's ledger
+  --apply                 Run the local steps (pin, reinstall, local D1, typecheck)
+  --allow-dirty           Apply over uncommitted package.json or lockfile changes
+  --env <name>            Restrict the printed remote steps to one environment
+  --url <origin>          A deployment whose version can prove a requiresDeployed gate
+  --config <path>         The wrangler config, if not wrangler.jsonc/json/toml
+
+Options for add block:
+  --json                  One JSON value (schema folio.add-block/1) on stdout
+  --into <block>.<field>  Add it to that root's blocks({ allow: [...] })
+  --label <text>          The editor's label (default: from the name)
+  --brand <id>            The brand's blocks module, when there are several
+  --blocks <path>         The blocks module, if the Vite plugin cannot say
+  --dry-run               Print the diffs and write nothing
+  --preview               Then preview it (takes the preview flags below)
+
+Options for preview block:
+  --json                  One JSON value (schema folio.preview-block/1) on stdout
+  --url <origin>          The running server (required)
+  --site <id>             The site, on a multi-site deployment
+  --base <path>           Folio's base path, if the Vite plugin cannot say
+  --into <block>.<field>  The root field to place it in
+  --fields <json>         The block's field values (default: each text field's label)
+  --viewport <w>x<h>      The browser size, where a screenshot is taken
+  --keep                  Keep the scratch draft afterwards
+  FOLIO_TOKEN             A token with content:read, content:read:draft, content:write
+
+Exit codes: 0 success, 1 a failure found or hit, 2 a usage error.
+
   ${REPO}
 `;
 
-main().catch((err) => {
-  console.error(`\nfolio: ${err.message}\n`);
-  process.exit(1);
-});
+/** The schema each `--json` command answers in, including when it fails. */
+const JSON_SCHEMAS = {
+  doctor: "folio.doctor/1",
+  upgrade: "folio.upgrade/1",
+  add: "folio.add-block/1",
+  preview: "folio.preview-block/1",
+};
+
+/**
+ * Under `--json`, stdout is the one JSON document and nothing else (spec 41
+ * decision 14). The host's Vite config runs in this process when the CLI loads it,
+ * and a `console.log` there (dotenv's banner is the common one) would otherwise land
+ * in front of the JSON. So for the whole run, writes to stdout go to stderr, and only
+ * the final answer is written to the real stdout (review M3).
+ */
+const argv = process.argv.slice(2);
+const jsonSchema = argv.includes("--json") ? JSON_SCHEMAS[argv[0]] : undefined;
+const realStdout = { write: process.stdout.write.bind(process.stdout) };
+if (jsonSchema) process.stdout.write = process.stderr.write.bind(process.stderr);
+
+main().then(
+  (code) => {
+    if (typeof code === "number") process.exitCode = code;
+  },
+  (err) => {
+    const usage = err instanceof UsageError;
+    console.error(`\nfolio: ${err.message}\n`);
+    // A usage error or an unexpected one still answers JSON, so an agent that parses
+    // stdout before it reads the exit code gets a refusal rather than nothing (L5).
+    if (jsonSchema) {
+      realStdout.write(
+        `${JSON.stringify(
+          {
+            schema: jsonSchema,
+            ok: false,
+            error: { kind: usage ? "usage" : "internal", message: err.message, fix: [] },
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    }
+    process.exit(usage ? 2 : 1);
+  },
+);
 
 async function main() {
-  const argv = process.argv.slice(2);
   const command = argv[0];
 
   if (!command || command === "-h" || command === "--help" || command === "help") {
@@ -75,14 +188,26 @@ async function main() {
   }
   if (command === "init") return init(argv.slice(1));
   if (command === "agents") return agents(argv.slice(1));
+  if (command === "doctor") return doctorCommand(argv.slice(1), runtime());
+  if (command === "upgrade") return upgradeCommand(argv.slice(1), runtime());
+  if (command === "add") return addBlockCommand(argv.slice(1), runtime());
+  if (command === "preview") return previewBlockCommand(argv.slice(1), runtime());
 
-  throw new Error(`unknown command "${command}". Try \`folio --help\`.`);
+  throw new UsageError(`unknown command "${command}". Try \`folio --help\`.`);
+}
+
+/** What the library commands need from this copy of the CLI. */
+function runtime() {
+  return { cliVersion: VERSION, pkgRoot: PKG_ROOT, stdout: realStdout };
 }
 
 // --- init -----------------------------------------------------------------
 
 async function init(argv) {
-  const { flags, positional } = parseArgs(argv);
+  const { values: flags, positionals: positional } = parse(argv, {
+    email: { type: "string" },
+    force: { type: "boolean" },
+  });
   const target = path.resolve(process.cwd(), positional[0] ?? ".");
   const name = sanitiseName(path.basename(target));
 
@@ -150,6 +275,8 @@ async function init(argv) {
 
   Then open http://localhost:5173/folio/login and sign in as ${email}.
   There is no mail binding, so the link is logged to your terminal.
+
+  npx folio doctor checks the project and names the fix for anything wrong.
 `);
 }
 
@@ -171,7 +298,7 @@ const BEGIN = "<!-- folio:begin -->";
 const END = "<!-- folio:end -->";
 
 async function agents(argv) {
-  const { positional } = parseArgs(argv);
+  const { positionals: positional } = parse(argv, {});
   const explicit = positional[0];
   const target = explicit
     ? path.resolve(process.cwd(), explicit)
@@ -225,20 +352,6 @@ ${await pasteBlock()}
 }
 
 // --- helpers --------------------------------------------------------------
-
-function parseArgs(argv) {
-  const flags = {};
-  const positional = [];
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--force") flags.force = true;
-    else if (arg === "--email") flags.email = argv[++i];
-    else if (arg.startsWith("--")) throw new Error(`unknown option "${arg}"`);
-    else positional.push(arg);
-  }
-  if (flags.email !== undefined && !flags.email) throw new Error("--email needs an address");
-  return { flags, positional };
-}
 
 /** npm package names: lowercase, no spaces, no leading dot or underscore. */
 function sanitiseName(raw) {

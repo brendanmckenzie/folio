@@ -1003,6 +1003,13 @@ stylesheet would carry every brand's CSS into every brand's preview, so the buil
 fails. That is the reverse of the single-brand rule above, which needs the flag. A
 string `blocks` is unchanged, byte for byte.
 
+**The plugin exposes its resolved options on its `api` property**, as read-only
+data for tools: `api.folio` is `{ version: 1, blocks, basePath }`, with `blocks` as
+you passed it (a string or a brand record) and `basePath` defaulted to `/folio`.
+`folio doctor`, `folio add block` and `folio preview block` load your Vite config
+with your own `vite` and read it there, so they find the blocks module the build
+uses. Nothing in the plugin reads it back; writing to it changes nothing.
+
 ---
 
 ## Deploy-time obligations

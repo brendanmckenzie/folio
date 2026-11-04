@@ -19,6 +19,7 @@ import {
 } from "../../src/server/mcp/rpc";
 import { ensureSingleton } from "../../src/server/stories";
 import { STORY_STATE } from "../../src/server/validate";
+import pkg from "../../package.json";
 
 /**
  * `{base}/mcp` over real workerd, real D1 and real Durable Objects
@@ -284,6 +285,10 @@ describe("server/discover", () => {
    * **Succeeds with no credential, and that is deliberate.** An MCP client probes
    * before it is configured, and a 401 at discovery presents as "the server is
    * broken" rather than "the token is missing".
+   *
+   * The identity carries the real package version, read here from `package.json`
+   * itself: `folio upgrade --url` clears a `requiresDeployed` gate from it, and the
+   * constant it used to be (`0.0.0`) cleared nothing.
    */
   it("answers an unauthenticated probe with versions, capabilities and identity", async () => {
     const answer = await rpc<{
@@ -300,7 +305,7 @@ describe("server/discover", () => {
     expect(answer.result?.capabilities).toEqual({ tools: {} });
     expect(answer.result?._meta["io.modelcontextprotocol/serverInfo"]).toEqual({
       name: "folio",
-      version: "0.0.0",
+      version: pkg.version,
     });
   });
 

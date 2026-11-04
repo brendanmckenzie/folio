@@ -2045,7 +2045,9 @@ src/preview/     renderer + the client that hydrates a previewed page
 src/admin/       the editor SPA (prebuilt, schema-driven)
 src/vite/        the plugin
 migrations/      the D1 schema, as ordered migrations
-bin/folio.mjs    the CLI: `folio init`, `folio agents`
+bin/folio.mjs    the CLI: `folio init`, `agents`, `doctor`, `upgrade`, `add block`
+bin/lib/         the CLI's modules, plain ESM with no dependencies
+upgrade-ledger.json  UPGRADING.md's ledger as data, for `folio upgrade`  (ships)
 examples/starter a minimal consuming project — what `folio init` copies  (ships)
 examples/demo/   a consuming project with everything switched on  (not shipped)
 docs/            reference and specs  (the consumer-facing ones ship; specs do not)
@@ -2054,8 +2056,8 @@ scripts/         gates, end-to-end scripts, release  (not shipped)
 
 The package is the repository root: `package.json` sits beside `src/`, which is
 what makes `github:brendanmckenzie/folio#vX.Y.Z` installable. `files` ships
-`dist`, `src`, `migrations`, `bin`, `examples/starter`, and the consumer-facing
-documents — `README.md`, `AGENTS.md`, `UPGRADING.md`, and `docs/`'s
+`dist`, `src`, `migrations`, `bin`, `examples/starter`, `upgrade-ledger.json`, and
+the consumer-facing documents — `README.md`, `AGENTS.md`, `UPGRADING.md`, and `docs/`'s
 `configuration.md`, `handbook.md`, `api.md` and `mcp.md`.
 
 ## Running it
@@ -2124,6 +2126,257 @@ class gets its own migration tag:
   { "tag": "v2", "new_sqlite_classes": ["SpaceDO"] }
 ]
 ```
+
+## The command line
+
+`bin/folio.mjs` is plain ESM with no dependencies, and ships in the package, so a
+host has it as `npx folio` once Folio is installed. Two commands scaffold
+(`init`, `agents`); three keep a project healthy, and every one of those answers
+one JSON value with `--json`, for the agent you already use.
+
+**`npx folio` runs the installed copy.** In a directory without Folio installed,
+npx would fetch the npm registry's `folio`, which is an unrelated package. Before
+the install, or to run a specific release's CLI, spell it
+`npx github:brendanmckenzie/folio#vX.Y.Z <command>`.
+
+| Command | What it does | Writes |
+| --- | --- | --- |
+| `folio init [dir]` | Scaffolds `examples/starter`, pinned to this CLI's tag | the new project |
+| `folio agents [file]` | Writes or refreshes the `<!-- folio:begin -->` block in `AGENTS.md` or `CLAUDE.md` | that file |
+| `folio doctor [dir]` | Checks the project and names a fix for every finding | nothing in the project (see below) |
+| `folio upgrade [dir]` | Plans the upgrade to this CLI's release; `--apply` runs its local half | only with `--apply` |
+| `folio add block <name>` | Scaffolds a block beside the blocks module, lists it, and with `--into` makes it insertable | the block file and up to two edits |
+| `folio preview block <name>` | Renders one block through a running server and saves the PNG or HTML | a scratch draft, deleted afterwards |
+
+**Exit codes are the whole verdict:** `0` success (for `doctor`, no `fail`;
+warnings allowed), `1` the command ran and found or hit a failure, `2` a usage
+error (an unknown flag, a bad name, an unreadable project root). Gate on them, not
+on the output.
+
+**Under `--json`, stdout is one JSON value and nothing else**; progress notes go to
+stderr. Every answer starts with a `schema` string: `folio.doctor/1`,
+`folio.upgrade/1`, `folio.add-block/1`, `folio.preview-block/1`. Adding a check id,
+a fix kind or an optional field keeps the number; removing or renaming a field, or
+changing what one means, bumps it, and the bump is listed under Breaking changes in
+`CHANGELOG.md` even in a minor release. Check `schema` before you read the rest.
+A refusal has the same `schema`, with `ok: false` and `error: { message, fix }`, and
+so do a usage error (exit 2, `error.kind: "usage"`) and an unexpected failure (exit 1,
+`error.kind: "internal"`). Anything else that would reach stdout during the run (the
+host's Vite config logging as it loads, a child process) goes to stderr instead.
+
+### Fixes, and the `local` rule
+
+A finding that is not a pass carries `fix`, an ordered list of steps, each one of:
+
+- `{ "kind": "run", "argv": [...], "cwd": "...", "local": true | false }`: run
+  `argv` as written, with no shell, in `cwd`.
+- `{ "kind": "edit", "file": "...", "snippet": "...", "text": "..." }`: make that
+  literal change by hand; `text` says where.
+- `{ "kind": "manual", "text": "...", "docs": "..." }`: prose, with an anchor into
+  the shipped docs where there is one.
+
+**`local: true` touches only this machine** and is undone by a reset
+(`rm -rf .wrangler/state`, `git checkout`): applying migrations to the local
+database, reinstalling. **`local: false` reaches Cloudflare**: a remote migration,
+which ahead of the wrong deploy can make a roll-forward-only release irreversible.
+An agent runs a `local: true` step on its own judgement and a `local: false` step
+only when it is asked to.
+
+### `folio doctor`
+
+Read-only and offline by default. It reads the host's `package.json`, the Folio
+in `node_modules` (not the copy the CLI runs from; in an npm or yarn workspace, the
+copy hoisted to the workspace root, found the way Node finds it), and the wrangler and Vite
+configs through the host's own `wrangler` and `vite`. It reads local D1 with
+`wrangler d1 execute --local --json` and a `select`, and only when the local state
+directory already exists, because wrangler creates an empty database on first
+touch. It never starts a server. Two writes are outside its control and change
+nothing you would commit: wrangler keeps its own debug log under your home
+directory, and a `select` can touch the local database's `-wal` and `-shm` files.
+The Vite config is loaded with Vite's module-runner loader, which writes no temp
+file (a config it cannot load falls back to the bundling loader, which writes one
+under `node_modules/.vite-temp` and removes it). The state-directory guard is per
+directory, not per database: with `--env`, an environment whose local database has
+never been created gets an empty one from the `select` when the directory already
+exists for another.
+
+| Flag | |
+| --- | --- |
+| `[dir]` | The project root (default the current directory) |
+| `--json` | One `folio.doctor/1` value on stdout |
+| `--env <name>` | Read that wrangler environment's bindings and database |
+| `--config <path>` | The wrangler config, if not `wrangler.jsonc`, `.json` or `.toml` in the root |
+| `--persist-to <dir>` | Where local D1 state lives, if not `.wrangler/state` |
+| `--remote` | Also read the deployed database; needs `wrangler login` or `CLOUDFLARE_API_TOKEN` |
+| `--url <origin>` | Also check a server you started (`http://localhost:5173`, or a staging origin) |
+| `--base <path>` | Folio's base path, when the Vite plugin cannot say |
+| `--site <id>` | The site whose schema to read, on a multi-site deployment |
+| `--check <id>` | Run only this check (repeatable); its prerequisites run unreported |
+| `FOLIO_TOKEN` | A token with `content:read`, for `server.schema`. Read from the environment, never a flag, so it stays out of shell history |
+
+The checks, in run order. A check whose prerequisite did not pass answers `skip`
+and names it.
+
+| id | Fails when | Warns when | Skips when |
+| --- | --- | --- | --- |
+| `node.version` | Node does not satisfy the installed package's `engines.node` | the range uses syntax outside `>= > <= < =`, bare versions and `\|\|` | Folio is not installed |
+| `package.pin` | no `folio` dependency, or it names a branch, a short SHA, `#semver:`, no ref, a path or a registry range | a full SHA, `git+file:` or `workspace:` | never |
+| `package.installed` | `node_modules/folio` is absent, has no `dist/server.js` (the `prepare` trap), or differs from a tag pin | it predates 1.0.0 | never |
+| `wrangler.config` | the host's wrangler cannot be resolved, there is no config, or wrangler cannot read it | | never |
+| `wrangler.d1` | no D1 entry's `migrations_dir` is the installed package's `migrations/` (including a copy of it) | more than one is | `wrangler.config` did not pass |
+| `wrangler.story` | no Durable Object binding has `class_name: "StoryDO"` | | `wrangler.config` did not pass |
+| `wrangler.space` | | no `SpaceDO` binding (Folio degrades) | `wrangler.config` did not pass |
+| `wrangler.do-backend` | `StoryDO` is created by no migrations tag or is KV-backed; `SpaceDO` is bound and created by none | | `wrangler.config` did not pass |
+| `wrangler.crons` | | no `triggers.crons` in the resolved environment | `wrangler.config` did not pass |
+| `vite.plugin` | the Vite config does not load, or has no plugin named `folio` | the installed plugin predates its `api` property | no `vite.config.*` |
+| `blocks.module` | a blocks module the plugin names does not exist | it is an alias the CLI cannot follow | `vite.plugin` gave no options |
+| `d1.local` | no local state yet; migrations pending; or the database records migrations the package does not ship (a newer Folio migrated it), or wrangler cannot read it | | `wrangler.d1` did not pass |
+| `d1.remote` | as `d1.local`, against the deployed database; or wrangler cannot authenticate | | without `--remote` |
+| `server.mounted` | `{base}/mcp` `server/discover` and `GET {base}/login` both fail; the first `folio: …` line of the answer is quoted | exactly one of them fails (with `mcp: false`, discover does) | without `--url` |
+| `server.schema` | `GET {base}[/~<site>]/api/v1/schema` is not 200 (`site_required` names `--site`) | | without `--url` or `FOLIO_TOKEN` |
+
+Folio's bindings are found by what they are, never by name: the D1 entry whose
+`migrations_dir` resolves to the same real path as `node_modules/folio/migrations`,
+and the Durable Object bindings whose `class_name` is `StoryDO` or `SpaceDO`. A
+host can call them anything. With `--env`, every check reads that environment,
+including which database the `d1.*` checks query.
+
+`d1.local` with pending files names the release each came from and links its
+`UPGRADING.md` headings. A database that records a migration the installed package
+does not ship was migrated by a newer release; the check names it from the ledger,
+says so when that release is roll-forward only, and offers that release's
+`upgrade`.
+
+### `folio upgrade`
+
+The plan for vX.Y.Z comes from vX.Y.Z's own `upgrade-ledger.json`, so the command
+to upgrade to it is that release's CLI:
+
+```bash
+npx github:brendanmckenzie/folio#vX.Y.Z upgrade          # the plan; changes nothing
+npx github:brendanmckenzie/folio#vX.Y.Z upgrade --apply  # the local half
+```
+
+| Flag | |
+| --- | --- |
+| `[dir]` | The project root |
+| `--to vX.Y.Z` | Stop at an earlier release in this CLI's ledger. A newer one is refused with the `npx` command that would plan it |
+| `--apply` | Run the first hop's local steps |
+| `--allow-dirty` | Apply over uncommitted changes to `package.json` or the lockfile |
+| `--env <name>` | The local database and the printed remote steps for one environment only |
+| `--url <origin>` | A deployment whose reported version can clear a `requiresDeployed` gate |
+| `--config <path>` | The wrangler config |
+| `--json` | One `folio.upgrade/1` value on stdout |
+
+A plan is one or more hops. Each lists its releases, whether any is roll-forward
+only (`rollForwardOnly`), the migrations it brings and whether each is applied
+before the deploy or with it, the `UPGRADING.md` headings to read (with links at
+that release's tag), and its steps in three phases:
+
+- **`local`**: set the pin to `github:brendanmckenzie/folio#vX.Y.Z` (only that
+  string changes, so the file's formatting survives), `rm -rf node_modules/folio`,
+  the package manager's install, `wrangler d1 migrations apply <db> --local`,
+  `folio agents` when `AGENTS.md` or `CLAUDE.md` carries the markers, the
+  `typecheck` script if there is one, and a closing `doctor` over the package and
+  local-D1 checks. This is all `--apply` runs.
+- **`deploy`**: one `wrangler d1 migrations apply <db> --remote [--env <e>]` per
+  Folio database across the top level and every named environment, then the
+  deploy. A database is identified by its `database_id` (its name only when there is
+  no id), so two environments that reuse a name for different databases get a step
+  each, and two that bind one database share a step. The order is named
+  environments first, then the top level, then environments named like
+  `production`: staging proves a release before production takes it. A migration
+  applied with the deploy (`0011`) pairs each remote apply with an immediate deploy
+  of that environment instead. A hop that brings migrations is refused when an
+  environment (or the `--env` named) has no Folio database, because the plan could
+  not say where they go.
+- **`post-deploy`**: a reindex where a migration needs one (`?drafts=1` for
+  `0015`), and any manual step a migration records.
+
+**Steps in the `deploy` and `post-deploy` phases are printed and never run, under
+any flag.** The deploy is not the CLI's: one host deploys from CI on a branch push,
+another from a laptop, and a remote migration applied ahead of a roll-forward-only
+release is the step that cannot be undone.
+
+`--apply` refuses to start when `package.json` or the lockfile has uncommitted
+changes, or the project is not in git, because `git checkout` of those two files
+and a reinstall is the rollback, and the rollback has to exist first. It stops at
+the first failed step; each step's `status` becomes `done` or `failed` (with
+`exitCode` and the last 40 lines of output). Every step is idempotent, and a rerun
+after an interruption picks up what is left: when `node_modules/folio` is missing,
+unbuilt or not the version the pin names, the plan starts from the pin committed
+at `HEAD` rather than from the already-rewritten one, and `--apply` accepts its own
+uncommitted pin edit (and nothing else) without `--allow-dirty`. When the committed
+pin already names the target, the plan is a `repair` hop: the local half again, and
+a deploy step that says to run `doctor --remote` first, because the release the
+upgrade started from is no longer known.
+
+A release can declare that another must be **deployed** first
+(`requiresDeployed`). What a deployment runs is not something this machine knows:
+the installed copy says what is installed here, never what any deployment runs, so
+it is never used as the proof. The plan stops before such a release and carries a
+`stop` saying to deploy and verify the earlier release, then rerun. Rerun with
+`--url <a deployment>` and the plan continues past the gate only when that server
+reports a version at or above the one required (MCP `server/discover`'s serverInfo,
+which carries the package version from v1.4.0; an earlier server reports `0.0.0` and
+never clears a gate). A plan stopped before it reaches
+any release answers `ok: false` and exits 1, so it never reads as "nothing to do".
+
+It refuses a target below the installed version (a downgrade is
+[Rolling back](../UPGRADING.md#rolling-back)), an installed version below 1.0.0, and
+a release the ledger does not list. Installed equal to the target answers
+`hops: []` and exits 0.
+
+### `folio add block` and `folio preview block`
+
+```bash
+npx folio add block quote --into page.body
+```
+
+writes `quote.tsx` beside the blocks module the Vite plugin names (a `defineBlock`
+with one required `text` field and a render), imports it after the module's last
+top-level import, appends it to `export const blocks = [ … ]`, and, with `--into
+<block>.<field>`, appends `"quote"` to that field's `blocks({ allow: [...] })` in the
+file that declares `name: "<block>"`. Listing it in `blocks` is also its preview
+registration: the preview bundle is generated from the same module. Quote style,
+semicolons and indentation follow the file being edited.
+
+| Flag | |
+| --- | --- |
+| `--into <block>.<field>` | Make it insertable in that root field |
+| `--label <text>` | The editor's label (default: the name split at capitals, `travelCard` is "Travel card") |
+| `--brand <id>` | Which brand's blocks module, when the plugin's `blocks` is a record of several |
+| `--blocks <path>` | The blocks module, when the plugin cannot say |
+| `--dry-run` | The diffs, with nothing written (`written: false`) |
+| `--preview` | Then preview it, taking the flags below |
+| `--json` | One `folio.add-block/1` value on stdout, with a diff per edited file |
+
+A name must match `^[a-z][A-Za-z0-9]*$` and not be a reserved word; a name already
+taken (a file, an import, another block's `name`) is a usage error. **Every edit is
+computed before anything is written.** If any of them does not match exactly once
+(a `blocks` built with a spread, a `blocks` that is not an array literal, an
+`--into` field that is not `blocks()`), nothing is written, the command exits 1, and
+`error.fix` carries the edits to make by hand.
+
+`folio preview block <name>` needs `--url` (never defaulted) and `FOLIO_TOKEN`, a
+token with `content:read`, `content:read:draft` and `content:write`. It waits up to
+60 seconds for the block to appear in the served schema (the dev server reloads the
+Worker after the file changes), finds a page type whose root has a `blocks` field
+allowing it, and writes one instance into an unpublished top-level page with slug
+`folio-scratch-<name>` (replacing the content of one a previous run kept, which it
+recognises as a never-published top-level page titled `Scratch: …`; anything else at
+that path is refused, never overwritten or deleted). It calls
+MCP `preview_document` on it, saves the PNG (with a `browser` binding) or the
+rendered HTML (without one, which is always the case locally) under the OS temp
+directory, and deletes the draft with `?redirect=false` unless `--keep`, also on
+a failure and on Ctrl-C or SIGTERM mid-render. When the delete fails, the answer
+says `kept: true` with `cleanup: { deleted: false, status }`, because `kept` reports
+what is true rather than what was asked for. Its flags
+are `--url`, `--site`, `--base`, `--into`, `--fields <json>` (the block's values;
+the default fills each `text` and `textarea` field with its label), `--viewport
+<w>x<h>`, `--keep` and `--json`. The scratch draft appears briefly in an open
+editor's tree and in the activity trail under the token's name; it is never
+published, so it never reaches a live page, a cache or the search index.
 
 ## History
 

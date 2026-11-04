@@ -475,3 +475,25 @@ describe("the Vite plugin, the Worker's pre-bundled dependencies", () => {
     );
   });
 });
+
+describe("the Vite plugin, its api for tools (agent-cli.md decision 13)", () => {
+  const api = (options: Parameters<typeof folio>[0]) =>
+    ((folio(options)[0] as Plugin).api as { folio: unknown }).folio;
+
+  it("exposes a string blocks module and the default base path", () => {
+    expect(api({ blocks: "./src/blocks/index.ts" })).toEqual({
+      version: 1,
+      blocks: "./src/blocks/index.ts",
+      basePath: "/folio",
+    });
+  });
+
+  it("exposes a brand record as given", () => {
+    const blocks = { alpha: "./a/blocks.ts", beta: "./b/blocks.ts" };
+    expect(api({ blocks })).toEqual({ version: 1, blocks, basePath: "/folio" });
+  });
+
+  it("exposes a custom base path", () => {
+    expect(api({ blocks: "./b.ts", basePath: "/cms" })).toMatchObject({ basePath: "/cms" });
+  });
+});

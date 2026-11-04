@@ -10,26 +10,10 @@
  */
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { upgradingEntries } from "../bin/lib/upgrading.mjs";
 
-/** The `###` sections of `markdown` whose heading contains `tag`, joined by a blank line. */
-export function upgradingEntries(markdown, tag) {
-  const lines = markdown.split("\n");
-  const entries = [];
-  let current = null;
-  let inFence = false;
-  for (const line of lines) {
-    if (/^```/.test(line)) inFence = !inFence;
-    const heading = !inFence && /^(#{1,6}) /.exec(line);
-    if (heading) {
-      if (current) entries.push(current);
-      current = heading[1] === "###" && line.includes(tag) ? [line] : null;
-      continue;
-    }
-    if (current) current.push(line);
-  }
-  if (current) entries.push(current);
-  return entries.map((e) => e.join("\n").trim()).join("\n\n");
-}
+/** Lives beside the CLI, which selects release headings by the same rule. */
+export { upgradingEntries };
 
 /** The notes body for `tag`. */
 export function releaseNotes(markdown, tag, repo = "brendanmckenzie/folio") {

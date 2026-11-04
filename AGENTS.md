@@ -39,6 +39,19 @@ An upgrade is more than the pin when Folio has landed a D1 migration since
 yours. `UPGRADING.md` is the procedure and the per-migration ledger — two of
 them need a reindex, and one needs a cron you may not have.
 
+Three commands do the checking for you, and each answers JSON with `--json`
+(`docs/handbook.md`, "The command line"):
+
+```
+npx folio doctor                 # is this project set up right; every finding carries its fix
+npx github:brendanmckenzie/folio#<tag> upgrade          # the plan to <tag>, changing nothing
+npx github:brendanmckenzie/folio#<tag> upgrade --apply  # …then its local half
+npx folio add block quote --into page.body              # scaffold a block and make it insertable
+```
+
+A fix step marked `"local": false` reaches Cloudflare (a remote migration, a
+deploy). `upgrade` prints those and never runs them; neither should you, unasked.
+
 ## Point your own agent at this file
 
 An agent working in *your* repository reads *your* root instructions, not this
@@ -70,6 +83,10 @@ After bumping the pinned tag, `rm -rf node_modules/folio` before installing.
 
 When writing content through Folio's MCP tools, call `check_document` after writing
 and before publishing, and fix what it reports.
+
+Run `npx folio doctor --json` after bumping the pin or editing the wrangler config,
+and fix what it reports. Upgrade with `npx github:brendanmckenzie/folio#<tag> upgrade`
+(a dry run; then `--apply`), and never run a `"local": false` step without being asked.
 
 If `createFolio` has `brands`, check the brand map in this file and in each
 `app/brands/<brand>/CLAUDE.md` before you edit a block, type or route, and never import
@@ -466,6 +483,10 @@ that site's brand.
   admin and changes shape freely.
 
 ## When something breaks
+
+Run `npx folio doctor` first (`--url http://localhost:<port>` with the dev server
+up, to check the Worker constructed). It reads the pin, the installed package, the
+bindings and the D1 migrations, and names the fix for each finding.
 
 | What you see | What it is |
 | --- | --- |

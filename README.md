@@ -77,6 +77,7 @@ Point the agent you already use at `{base}/mcp` with a scoped token and it can r
 - **Writes are ordinary edits.** They go through the mutation log, appear live in an open editor, are attributed as `token:<name>` in the activity trail, and undo with Cmd+Z.
 - **[`AGENTS.md`](AGENTS.md)** is the integration guide, written for a coding agent. `folio init` drops it into your project and `folio agents` refreshes the block.
 - **A versioned Content API** at `{base}/api/v1` for scripts and headless front ends.
+- **A command line that keeps a project healthy.** `npx folio doctor` checks the pin, the installed package, the wrangler bindings and the local D1 migrations, and attaches the command that fixes each finding. `npx github:brendanmckenzie/folio#<tag> upgrade` plans an upgrade to that release and `--apply` runs the local half. `npx folio add block <name> --into page.body` scaffolds a block and makes it insertable. Every command answers JSON with `--json`; see [the command line](docs/handbook.md#the-command-line).
 
 Setup is a token and one command: [`docs/mcp.md`](docs/mcp.md).
 
