@@ -22,7 +22,9 @@ for the two sanctioned behaviour changes.
   every field, an advisory `length` on `text`, `textarea` and `richtext`, and
   `decorative` on `asset` and `multiasset`. The inspector draws a length counter, a
   "Writing guide" disclosure and block help, and the block picker leads with a block's
-  help.
+  help. The counter turns to the warning colour at 90% of a `max` and to the danger
+  colour past it, where the over-limit sentence joins the control's description and the
+  control is `aria-invalid`.
 - **A writing guide per brand.** `writing: { voice, avoid }` on `createFolio` (or
   `brands.<id>.writing`), served only on the gated `GET {base}/api/v1/schema`, and so on
   `get_schema`.
