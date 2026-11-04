@@ -6,7 +6,7 @@ import type { ResolvedCollection } from "./query";
 import type { ResolvedAsset, ResolvedLink, ResolvedReference } from "./resolve";
 import {
   asRichtext,
-  isRichtextEmpty,
+  isRichtextBlank,
   type RichtextMarkName,
   type RichtextNodeName,
 } from "./richtext";
@@ -450,7 +450,7 @@ export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf
  */
 export function isBlankValue(field: Field, value: Json | undefined): boolean {
   if (value === null || value === undefined) return true;
-  if (field.kind === "richtext") return isRichtextEmpty(asRichtext(value));
+  if (field.kind === "richtext") return isRichtextBlank(asRichtext(value));
   if (field.kind === "boolean" || field.kind === "number") return false;
   if (typeof value === "string") return value.trim() === "";
   if (Array.isArray(value)) return value.length === 0;

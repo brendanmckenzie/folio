@@ -1352,6 +1352,16 @@ documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships
     argument; `text`, `textarea` and the richtext surface carry it as
     `aria-describedby`. Pinned by `test/unit/admin/render/field-count.test.tsx`.
 
+20. **A richtext holding only an image or an embed is not blank** (review finding 4).
+    `isBlankValue` reads a new `isRichtextBlank` (in `core/richtext.ts`, not exported
+    from `folio/core`): no text **and** no node outside plain text structure. Folio's
+    editor cannot make such a document; an importer can (a Storyblok `image` or `blok`
+    node), and the old `isRichtextEmpty` rule would have reported it as an empty
+    `required-setting`. `isRichtextEmpty` keeps its public answer. The same rule now
+    reaches the inspector's "Required" and the translation walk, which count such a
+    source as content too. Pinned by `test/workers/settings-audit.test.ts` (calling
+    `auditSettings` over D1) and `guidance.test.ts`.
+
 **Verified by breaking it.** Each boundary was disabled and a test went red, then
 restored: putting `writing` on the manifest (`schema.test.ts`, `multi-brand-entry.test.ts`);
 dropping `writing` from `BRAND_KEYS` (`multi-brand.test.ts`); appending the voice to the

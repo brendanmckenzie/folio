@@ -202,6 +202,23 @@ describe("isBlankValue (decision 15)", () => {
     expect(isBlankValue(text(), "x")).toBe(false);
   });
 
+  it("treats an image-only or embed-only richtext as content, and a rule as content", () => {
+    const doc = (...content: unknown[]) => ({ type: "doc", content }) as unknown as Json;
+    expect(isBlankValue(richtext(), doc({ type: "image", attrs: { src: "x.png" } }))).toBe(false);
+    expect(isBlankValue(richtext(), doc({ type: "blok", attrs: {} }))).toBe(false);
+    expect(isBlankValue(richtext(), doc({ type: "horizontalRule" }))).toBe(false);
+    expect(isBlankValue(richtext(), doc({ type: "paragraph" }, { type: "heading" }))).toBe(true);
+    expect(
+      isBlankValue(
+        richtext(),
+        doc({
+          type: "bulletList",
+          content: [{ type: "listItem", content: [{ type: "paragraph" }] }],
+        }),
+      ),
+    ).toBe(true);
+  });
+
   it("is the one rule: the translation walk and the inspector read the same function", () => {
     expect(isEmptySource).toBe(isBlankValue);
     expect(isBlank).toBe(isBlankValue);

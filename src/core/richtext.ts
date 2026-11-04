@@ -301,6 +301,34 @@ export function isRichtextEmpty(doc: RichtextDoc): boolean {
   return richtextToText(doc) === "" && !hasNode(doc, ["horizontalRule"]);
 }
 
+/**
+ * The nodes that hold nothing but text structure: an empty one of these is nothing.
+ * `horizontalRule` is not here (a rule is content, as `isRichtextEmpty` says), and
+ * neither is any node Folio's editor does not make. An importer can store a
+ * Storyblok `image` or `blok` node with no text in it, and that is content too.
+ */
+const TEXT_STRUCTURE: ReadonlySet<string> = new Set([
+  ...RICHTEXT_NODES.filter((n) => n !== "horizontalRule"),
+  "text",
+]);
+
+/**
+ * Whether a richtext value holds nothing, for the one blank rule (`isBlankValue`,
+ * `authoring-guidance.md` decision 15). Stricter than `isRichtextEmpty` about what
+ * counts as content: no text **and** no node outside plain text structure, so an
+ * imported image-only or embed-only document is not blank. `isRichtextEmpty` keeps
+ * its own answer, because it is public in `folio/core` and a renderer reads it.
+ */
+export function isRichtextBlank(doc: RichtextDoc): boolean {
+  if (richtextToText(doc) !== "") return false;
+  if (!doc?.content) return true;
+  const walk = (nodes: unknown): boolean =>
+    entries<RichtextNode>(nodes).every(
+      (n) => TEXT_STRUCTURE.has(n.type) && (n.content ? walk(n.content) : true),
+    );
+  return walk(doc.content);
+}
+
 function hasNode(doc: RichtextDoc, types: readonly string[]): boolean {
   if (!doc?.content) return false;
   const wanted = new Set(types);
