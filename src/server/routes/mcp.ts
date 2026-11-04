@@ -94,8 +94,9 @@ const INSTRUCTIONS = [
   "Writes go through the same log a human editor’s keystrokes do: an edit appears live in any open editor, is attributed to this token in the activity trail, and is undoable. Publishing is a separate, explicit step.",
   // Static, and nothing of the brand's guide: `server/discover` answers without a
   // credential (`authoring-guidance.md` decision 6), so the guide itself rides only
-  // on get_schema.
-  "Blocks and fields may carry `help`, `guidance` and `length`, and get_schema’s `writing` is the brand’s voice; follow them, then call check_document and fix what it reports before publishing.",
+  // on get_schema. "The site's voice", not the spec's "the brand's": on a deployment
+  // with no `brands` the instructions name no brand at all (`multi-brand.test.ts`).
+  "Blocks and fields may carry `help`, `guidance` and `length`, and get_schema’s `writing`, when present, is the site’s voice; follow them, then call check_document and fix what it reports before publishing.",
 ];
 
 export function mcpRoutes<Env>(
