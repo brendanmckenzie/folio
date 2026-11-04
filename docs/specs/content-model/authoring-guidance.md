@@ -1144,8 +1144,13 @@ unknown top-level `writing`, so a JS host is not broken by a downgrade.
   `truncated: true` (decision 17).
 - **`?locale=` naming the source locale** → only source-locale findings. There is no
   translation to be missing.
-- **A single-locale site** → `translation-missing`, `translated-not-translatable` and
-  `unknown-locale` never fire. Every finding omits `locale`.
+- **A single-locale site** → `translation-missing` and `translated-not-translatable`
+  never fire. An `i18n` map there is drift: one `unknown-locale` per blok and code
+  (`fix: "schema"`, the code in `locale`), and no other finding carries a `locale`
+  (Implementation notes, 17).
+- **An override under a locale the site does not configure** → only `unknown-locale`.
+  No per-value finding (`field-shape`, `length-*`, `alt-missing`) is reported for it,
+  because `patch_fields` refuses that locale.
 - **A host whose existing `help` is very long** → not refused. Only the new keys are
   capped (Ground truth, `fields.ts:21`).
 - **Guidance holding something private** → it is public, like `help`. The handbook says
@@ -1339,9 +1344,9 @@ documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships
     (a check, patch, refuse loop). The drift is `unknown-locale` (`warning`,
     `fix: "schema"`), one per blok and code. With locales configured that is the audit's
     own finding; on a single-locale site, where the audit's check is silent, the check
-    emits the same finding itself. This reverses the Edge cases line "a single-locale
-    site: `unknown-locale` never fires": an `i18n` map on a site with no locales is drift
-    too, and saying nothing left the agent nothing true to act on.
+    emits the same finding itself. This reverses what the Edge cases said about a
+    single-locale site (now corrected there): an `i18n` map on a site with no locales is
+    drift too, and saying nothing left the agent nothing true to act on.
 
 18. **A required field with no stored key is one finding** (review finding 2):
     `required-empty`, the warning. The audit's `missing-field` for the same field is
