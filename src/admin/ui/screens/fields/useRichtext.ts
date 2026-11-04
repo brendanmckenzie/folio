@@ -207,6 +207,12 @@ export function useRichtext(
    * undefined.
    */
   surfaceClass: string | undefined,
+  /**
+   * The id of the field's length counter, set as the surface's `aria-describedby`
+   * (`authoring-guidance.md` decision 14). Stable for the life of the field (a
+   * `useId`), so it is read once with the rest of `attributes`.
+   */
+  describedBy?: string,
 ): Richtext {
   /** Whether the prose surface itself has focus. See `externalUpdate`. */
   const [focused, setFocused] = useState(false);
@@ -263,6 +269,7 @@ export function useRichtext(
          */
         tabindex: "0",
         "data-folio-prose": "",
+        ...(describedBy ? { "aria-describedby": describedBy } : {}),
       },
     },
     // The admin renders on the client only; TipTap warns without this.

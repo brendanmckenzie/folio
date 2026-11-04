@@ -30,8 +30,11 @@ interface FieldProps {
    * gone missing. `Field.module.css`'s `.inline` argues the layout.
    */
   inline?: boolean;
-  /** Receives the generated id, so the label points at the real control. */
-  children: (id: string) => ReactNode;
+  /**
+   * Receives the generated id, so the label points at the real control, and the
+   * counter's id when there is a `count`, for the control's `aria-describedby`.
+   */
+  children: (id: string, describedBy?: string) => ReactNode;
 }
 
 /**
@@ -56,21 +59,37 @@ export function Field({
   children,
 }: FieldProps) {
   const id = useId();
+  const countId = `${id}-count`;
+  const labelEl = (
+    <label className={css.label} htmlFor={id}>
+      {label}
+      {required ? (
+        <span className={css.required} aria-hidden="true">
+          *
+        </span>
+      ) : null}
+      {note ? <span className={css.note}>{note}</span> : null}
+    </label>
+  );
   return (
     <div className={inline ? `${css.field} ${css.inline}` : css.field}>
-      <label className={css.label} htmlFor={id}>
-        {label}
-        {required ? (
-          <span className={css.required} aria-hidden="true">
-            *
+      {/*
+        The counter sits beside the label and **outside** it: inside a `<label>` its text
+        would be part of the input's accessible name, re-announced on every keystroke
+        ("Heading 42 / 60"). It describes the control instead, through the id handed to
+        `children` for `aria-describedby`.
+      */}
+      {count ? (
+        <div className={css.labelRow}>
+          {labelEl}
+          <span id={countId} className={count.over ? `${css.count} ${css.over}` : css.count}>
+            {count.text}
           </span>
-        ) : null}
-        {note ? <span className={css.note}>{note}</span> : null}
-        {count ? (
-          <span className={count.over ? `${css.count} ${css.over}` : css.count}>{count.text}</span>
-        ) : null}
-      </label>
-      {children(id)}
+        </div>
+      ) : (
+        labelEl
+      )}
+      {children(id, count ? countId : undefined)}
       {error ? (
         <p className={css.error}>{error}</p>
       ) : help ? (

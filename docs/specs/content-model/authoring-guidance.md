@@ -1346,6 +1346,12 @@ documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships
     `required-empty`, the warning. The audit's `missing-field` for the same field is
     dropped, so `counts` do not count one absent required field as two problems.
 
+19. **The counter is outside the `<label>`** (review finding 3). Inside it, its text
+    joined the input's accessible name and changed on every keystroke. `Field` now draws
+    it beside the label in a `.labelRow` and hands its id to `children` as a second
+    argument; `text`, `textarea` and the richtext surface carry it as
+    `aria-describedby`. Pinned by `test/unit/admin/render/field-count.test.tsx`.
+
 **Verified by breaking it.** Each boundary was disabled and a test went red, then
 restored: putting `writing` on the manifest (`schema.test.ts`, `multi-brand-entry.test.ts`);
 dropping `writing` from `BRAND_KEYS` (`multi-brand.test.ts`); appending the voice to the

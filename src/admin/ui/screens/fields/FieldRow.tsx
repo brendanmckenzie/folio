@@ -182,7 +182,7 @@ export function FieldRow(props: Props) {
         // and its label stranded above it is not a field anybody reads as on or off.
         {...(isInlineControl(field.kind) ? { inline: true } : {})}
       >
-        {(id) => (
+        {(id, describedBy) => (
           // Down the row for every kind but one. See `isInlineControl`: a 16px
           // checkbox leaves the rest of its row empty, so its warning goes beside it.
           <div className={isInlineControl(field.kind) ? css.row : css.stack}>
@@ -196,6 +196,7 @@ export function FieldRow(props: Props) {
             <fieldset className={css.control} disabled={!editable}>
               <Control
                 id={id}
+                {...(describedBy ? { describedBy } : {})}
                 name={name}
                 field={field}
                 value={value}

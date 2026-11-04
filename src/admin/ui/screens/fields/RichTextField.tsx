@@ -31,6 +31,8 @@ export interface FieldChrome {
 
 interface Props {
   value: Json;
+  /** The length counter's id, as the prose surface's `aria-describedby`. */
+  describedBy?: string;
   limits: RichtextLimits;
   editable: boolean;
   onChange: (value: Json) => void;
@@ -123,9 +125,17 @@ export function RichTextField({
   mount,
   expanded,
   onExpand,
+  describedBy,
 }: Props) {
   const [linking, setLinking] = useState(false);
-  const { editor, behind } = useRichtext(value, limits, editable, onChange, css.surface);
+  const { editor, behind } = useRichtext(
+    value,
+    limits,
+    editable,
+    onChange,
+    css.surface,
+    describedBy,
+  );
 
   /**
    * Put the caret back where the person was.
