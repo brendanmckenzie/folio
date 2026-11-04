@@ -259,6 +259,7 @@ export type {
   FolioBrandedConfig,
   FolioSingleConfig,
   SitesConfig,
+  WritingGuide,
 } from "./types";
 export type { PurgeIssued } from "./cache-purge";
 export { FolioError } from "./errors";

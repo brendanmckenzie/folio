@@ -188,6 +188,35 @@ beforeAll(async () => {
 /* ------------------------------------------------------------ construction --- */
 
 describe("construction", () => {
+  it("refuses a top-level writing guide, and prefixes a brand's own refusals (spec 40)", () => {
+    expect(() =>
+      createFolio({ ...config, writing: { voice: "x" } } as unknown as FolioConfig<Cloudflare.Env>),
+    ).toThrow("folio: 'writing' belongs to a brand beside 'brands'");
+    const withBrand = (over: Partial<FolioBrand<Cloudflare.Env>>) =>
+      createFolio({
+        ...config,
+        brands: { ...brands, takeoffgo: { ...brands.takeoffgo!, ...over } },
+      });
+    expect(() => withBrand({ writing: { voice: "x".repeat(16_001) } })).toThrow(
+      "folio: brand 'takeoffgo': 'writing.voice' must be",
+    );
+    expect(() =>
+      withBrand({ writing: { voice: "Warm.", avoid: [{ term: "Cheap" }, { term: "cheap" }] } }),
+    ).toThrow("folio: brand 'takeoffgo': 'writing.avoid[1].term' repeats 'cheap'");
+    const tooLong = defineBlock({
+      name: "pageRoot",
+      label: "Page",
+      fields: { heading: text({ length: { min: 10, max: 5 } }) },
+      render: () => null,
+    });
+    expect(() => withBrand({ blocks: [tooLong, tgoProse] })).toThrow(
+      "folio: brand 'takeoffgo': block 'pageRoot' field 'heading': 'length.max' (5) is below",
+    );
+    expect(() =>
+      withBrand({ writing: { voice: "Warm.", avoid: [{ term: "cheap" }] } }),
+    ).not.toThrow();
+  });
+
   it("refuses through createFolio exactly as through the runtime", () => {
     const { sites: _sites, ...noSites } = config;
     expect(() => createFolio(noSites as FolioConfig<Cloudflare.Env>)).toThrow(

@@ -111,6 +111,13 @@ const TGO_MIGRATION = defineMigration({
   up: (_doc, ctx) => ctx.each("prose", (b) => field.default(b, "tone", "warm")),
 });
 
+/** Text that must never leave the gated v1 `/schema`. */
+const TGO_VOICE = "TGO-VOICE-7f3a: warm, second person. Never mention the Smith account.";
+const TGO_WRITING = {
+  voice: TGO_VOICE,
+  avoid: [{ term: "Smith account", use: "a client", reason: "Confidential." }],
+};
+
 const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
   allaboutafrica: {
     label: "All About Africa",
@@ -130,6 +137,8 @@ const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
     previewCss: ["/tgo-global.css"],
     migrations: [TGO_MIGRATION],
     describe: { fn: async () => ({ alt: "TGO ALT" }) },
+    // `authoring-guidance.md` decision 6: one brand with a guide, one without.
+    writing: TGO_WRITING,
   },
 };
 
@@ -783,5 +792,44 @@ describe("a site-bound token at an unscoped URL", () => {
 
   it("still refuses an unbound token with no scope", async () => {
     expect((await get("/api/v1/schema", await bearer(null))).status).toBe(400);
+  });
+
+  it("serves each brand its own writing guide, and only on the gated v1 schema", async () => {
+    const tgo = await get("/api/v1/schema", await bearer("takeoffgo"));
+    expect(((await tgo.json()) as { writing?: unknown }).writing).toEqual(TGO_WRITING);
+    const aaa = await get("/api/v1/schema", await bearer("kenya"));
+    expect(aaa.status).toBe(200);
+    expect(await aaa.json()).not.toHaveProperty("writing");
+
+    // The open manifest, which the admin fetches before anyone signs in, carries
+    // neither the key nor a word of the guide, under either brand's scope.
+    for (const scope of ["takeoffgo", "kenya"]) {
+      const open = await get(`/~${scope}/api/schema`, {});
+      expect(open.status).toBe(200);
+      const text = await open.text();
+      expect(text).not.toContain('"writing"');
+      expect(text).not.toContain("TGO-VOICE-7f3a");
+      expect(text).not.toContain("Smith account");
+    }
+
+    // Nor does MCP's `server/discover`, which also answers without a credential.
+    const discover = await get(
+      "/~takeoffgo/mcp",
+      {},
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+          "mcp-method": "server/discover",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: {} }),
+      },
+    );
+    const instructions = ((await discover.json()) as { result: { instructions: string } }).result
+      .instructions;
+    expect(instructions).toContain("Take Off Go");
+    expect(instructions).not.toContain("TGO-VOICE-7f3a");
+    expect(instructions).not.toContain("Smith account");
   });
 });
