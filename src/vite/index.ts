@@ -94,6 +94,15 @@ export function folio(options: FolioPluginOptions): Plugin[] {
   const main: Plugin = {
     name: "folio",
 
+    /**
+     * Read-only data for tools, on the channel Vite documents for it. `folio
+     * doctor`, `add block` and `preview block` load the host's own Vite config and
+     * read the blocks modules and base path here, so their answer is the one the
+     * build uses rather than a guess at `vite.config.ts` (`agent-cli.md` decision
+     * 13). `version` bumps if this shape ever changes; nothing in the plugin reads it.
+     */
+    api: { folio: { version: 1, blocks: options.blocks, basePath: base } },
+
     config(userConfig, { command }) {
       const isDev = command === "serve";
       // In dev these are served by Vite's module graph, not as built files.
