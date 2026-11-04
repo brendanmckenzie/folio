@@ -43,6 +43,25 @@ const shipped = readdirSync(path.join(REPO_ROOT, "migrations"))
   .sort();
 const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"));
 const allHeadings = new Set(headings(upgrading).map((h) => h.text));
+const changelog = readFileSync(path.join(REPO_ROOT, "CHANGELOG.md"), "utf8");
+
+/** The text of one `## ` section of a document, by its exact heading. */
+function section(markdown: string, heading: string): string {
+  const start = markdown.indexOf(`\n## ${heading}\n`);
+  if (start === -1) return "";
+  const end = markdown.indexOf("\n## ", start + 1);
+  return markdown.slice(start, end === -1 ? undefined : end);
+}
+
+/** UPGRADING.md's schema ledger table: file name to its "anything else to do" cell. */
+const ledgerSection = section(upgrading, "The schema ledger");
+const rows = new Map(
+  [...ledgerSection.matchAll(/^\| `(\d{4}_[\w]+\.sql)` \|[^|]*\|(.*)\|\s*$/gm)].map((m) => [
+    m[1] as string,
+    m[2] as string,
+  ]),
+);
+const releaseOf = (file: string) => ledger.migrations[file]?.release;
 
 describe("upgrade-ledger.json against migrations/", () => {
   it("names every shipped migration exactly once, and nothing that is not shipped", () => {
@@ -95,7 +114,117 @@ describe("upgrade-ledger.json against UPGRADING.md", () => {
   });
 });
 
+/**
+ * The fields a plan is computed from, each checked against the prose it is derived
+ * from. Names and headings alone are not enough: a ledger with the right file names
+ * and the wrong `apply`, `release`, `rollback`, `after` or `claimed` plans a wrong
+ * upgrade and passes every check above (the spec 41 review, H2).
+ */
+describe("upgrade-ledger.json's plan fields against the prose", () => {
+  it("has a schema-ledger row for every shipped migration", () => {
+    expect([...rows.keys()].sort()).toEqual(shipped);
+  });
+
+  it("marks with-deploy exactly the migrations whose row says apply, then deploy", () => {
+    for (const [file, m] of Object.entries(ledger.migrations)) {
+      const row = rows.get(file) ?? "";
+      const withDeploy = /apply it, then deploy/i.test(row);
+      expect(m.apply, file).toBe(withDeploy ? "with-deploy" : "before-deploy");
+    }
+  });
+
+  it("reindexes after exactly the migrations whose row asks for it, drafts where it says so", () => {
+    for (const [file, m] of Object.entries(ledger.migrations)) {
+      const row = rows.get(file) ?? "";
+      const reindex = (m.after ?? []).find((a) => a.kind === "reindex");
+      expect(Boolean(reindex), file).toBe(/reindex/i.test(row));
+      if (reindex) expect(Boolean(reindex.drafts), file).toBe(row.includes("drafts=1"));
+    }
+  });
+
+  it("attributes each migration to the release whose CHANGELOG section names it", () => {
+    const first = ledger.releases[0]?.version as string;
+    for (const r of ledger.releases) {
+      const text = section(changelog, r.version);
+      const named = new Set(
+        [...text.matchAll(/\b(\d{4}_[a-z_]+\.sql)\b/g)]
+          .map((m) => m[1] as string)
+          .filter((f) => shipped.includes(f)),
+      );
+      if (!text) {
+        // Only the release in progress may lack a CHANGELOG section.
+        expect(
+          compare(r.version, pkg.version),
+          `v${r.version} has no CHANGELOG section`,
+        ).toBeGreaterThan(0);
+        continue;
+      }
+      if (r.version === first) {
+        // The first release shipped the base; every file its section names is in it.
+        for (const f of named) expect(r.migrations, `v${r.version} ${f}`).toContain(f);
+      } else {
+        expect([...r.migrations].sort(), `v${r.version}`).toEqual([...named].sort());
+      }
+    }
+  });
+
+  it("calls a release roll-forward only when a heading says so, conditional when it carries a with-deploy migration", () => {
+    for (const r of ledger.releases) {
+      const none = r.headings.some((h) => /roll-forward only/i.test(h));
+      const withDeploy = r.migrations.some((f) => ledger.migrations[f]?.apply === "with-deploy");
+      expect(r.rollback, `v${r.version}`).toBe(none ? "none" : withDeploy ? "conditional" : "safe");
+    }
+  });
+
+  it("claims exactly the unshipped migrations the schema ledger names", () => {
+    const unshipped = [
+      ...new Set(
+        [...ledgerSection.matchAll(/`(\d{4}_[\w]+\.sql)`/g)]
+          .map((m) => m[1] as string)
+          .filter((f) => !shipped.includes(f)),
+      ),
+    ].sort();
+    expect(ledger.claimed.map((c) => c.file).sort()).toEqual(unshipped);
+  });
+
+  it("holds back a migration the prose says must never share a step with another", () => {
+    const rules = ledgerSection.split(/\.\s+/).flatMap((sentence) => {
+      const guard = /never be applied in the same step as `(\d{4})`/.exec(sentence)?.[1];
+      const dependent = /`(\d{4}_[\w]+\.sql)`/.exec(sentence)?.[1];
+      return guard && dependent ? [{ guard, dependent }] : [];
+    });
+    expect(rules.length, "the 0012 rule is stated").toBeGreaterThan(0);
+    for (const { guard, dependent } of rules) {
+      const guardFile = shipped.find((f) => f.startsWith(`${guard}_`)) as string;
+      if (!shipped.includes(dependent)) {
+        expect(
+          ledger.claimed.map((c) => c.file),
+          dependent,
+        ).toContain(dependent);
+        continue;
+      }
+      // Landed: its release must refuse to be crossed until the guard's release is deployed.
+      const r = ledger.releases.find((x) => x.version === releaseOf(dependent));
+      expect(r?.requiresDeployed, `${dependent}'s release declares requiresDeployed`).toBeDefined();
+      expect(
+        compare(r?.requiresDeployed as string, releaseOf(guardFile) as string),
+      ).toBeGreaterThanOrEqual(0);
+      expect(r?.version).not.toBe(releaseOf(guardFile));
+    }
+  });
+});
+
 describe("upgrade-ledger.json, its own rules", () => {
+  it("lists every release a ### heading names", () => {
+    const versions = new Set(ledger.releases.map((r) => r.version));
+    for (const h of headings(upgrading)) {
+      if (h.level !== 3) continue;
+      for (const m of h.text.matchAll(/\bv(\d+\.\d+\.\d+)\b/g)) {
+        expect(versions, `${h.text} names v${m[1]}`).toContain(m[1]);
+      }
+    }
+  });
+
   it("is folio.ledger/1", () => {
     expect(ledger.schema).toBe("folio.ledger/1");
   });

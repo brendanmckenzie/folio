@@ -160,8 +160,16 @@ numbers that have not shipped. `folio upgrade` computes its plan from it, and
 
 **This document wins.** The ledger is derived from it, never the other way round,
 and a unit test (`test/unit/cli/ledger.test.ts`) fails whenever the two disagree,
-or when the ledger disagrees with `migrations/`. So a pull request that adds a
-migration or a heading naming a release updates both, or fails `pnpm test`.
+or when the ledger disagrees with `migrations/` or `CHANGELOG.md`. It checks the
+fields a plan is computed from, not only the names: a migration is `with-deploy`
+exactly when its row above says "apply it, then deploy"; it is followed by a reindex
+exactly when its row says so (with drafts when the row says `drafts=1`); it belongs to
+the release whose CHANGELOG section names it; a release is roll-forward only exactly
+when one of its headings says so; the claimed files are exactly the unshipped ones
+this section names; and a migration this section says must never share a step with
+another ships in a later release that declares `requiresDeployed`. So a pull request
+that adds a migration or a heading naming a release updates both, or fails
+`pnpm test`.
 
 ---
 
