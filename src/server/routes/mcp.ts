@@ -54,6 +54,7 @@ import { ensureAccess, inFence } from "../middleware";
 import type { BrandRuntime, FolioRuntime } from "../runtime";
 import { SCOPE_HEADER } from "../sites";
 import type { FolioEnv } from "../types";
+import { FOLIO_VERSION } from "../version";
 import { brandOf, draftOf } from "./stories";
 import { API_VERSION } from "./api";
 
@@ -69,8 +70,11 @@ function hasRoute(tool: McpTool): tool is RoutedTool {
   return tool.path !== undefined;
 }
 
-/** `version` tracks the package's, which is pre-release and says so. */
-const SERVER_INFO = { name: "folio", version: "0.0.0" } as const;
+/**
+ * `version` is the package's, which `folio upgrade --url` reads to clear a
+ * `requiresDeployed` gate (`../version.ts`). Servers before v1.4.0 said `0.0.0`.
+ */
+const SERVER_INFO = { name: "folio", version: FOLIO_VERSION } as const;
 
 /**
  * `DiscoverResult._meta`'s key for the server's own identity. Self-reported and

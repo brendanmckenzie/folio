@@ -2152,7 +2152,9 @@ the installed copy says what is installed here, never what any deployment runs, 
 it is never used as the proof. The plan stops before such a release and carries a
 `stop` saying to deploy and verify the earlier release, then rerun. Rerun with
 `--url <a deployment>` and the plan continues past the gate only when that server
-reports a version at or above the one required. A plan stopped before it reaches
+reports a version at or above the one required (MCP `server/discover`'s serverInfo,
+which carries the package version from v1.4.0; an earlier server reports `0.0.0` and
+never clears a gate). A plan stopped before it reaches
 any release answers `ok: false` and exits 1, so it never reads as "nothing to do".
 
 It refuses a target below the installed version (a downgrade is

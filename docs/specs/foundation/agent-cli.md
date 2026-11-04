@@ -1294,10 +1294,12 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
   starts at 1.0.0 or later. A plan that reaches a gated release now stops before it,
   with a `stop` object and a step saying to deploy, verify and rerun. `upgrade --url
   <a deployment>` clears the gate only when that server's MCP `server/discover`
-  serverInfo reports a version at or above the one required. Today the server
-  reports a constant `0.0.0`, which proves nothing, so until a release wires the
-  package version into serverInfo the gate always stops; no new route was added. A
-  plan stopped before reaching any release answers `ok: false`, exit 1.
+  serverInfo reports a version at or above the one required. The server used to
+  report a constant `0.0.0`, which proves nothing; from v1.4.0 it reports the package
+  version (`src/server/version.ts`, a literal that `test/unit/server/version.test.ts`
+  holds to `package.json`), so a v1.4.0 or later deployment can clear a gate and an
+  earlier one never does. No new route was added. A plan stopped before reaching any
+  release answers `ok: false`, exit 1.
 - **Remote step ids are `d1-remote:<env>`, with the top level as `top-level`**, each
   `before: "deploy"`, followed by one `deploy` step naming every environment. The
   example's `before: "deploy:staging"` named a step that did not exist. A hop with a
