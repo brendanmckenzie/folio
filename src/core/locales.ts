@@ -18,8 +18,7 @@
  * a cycle.
  */
 import type { Blok, Doc, Json } from "./doc";
-import type { Field } from "./fields";
-import { asRichtext, isRichtextEmpty } from "./richtext";
+import { type Field, isBlankValue } from "./fields";
 import type { BlockSchema, SchemaIndex } from "./schema";
 
 /** One language a site is available in. */
@@ -316,12 +315,7 @@ export function translationGaps(
 /**
  * Whether a source value is worth translating at all. A whitespace-only string
  * and an empty richtext document both read as nothing to do; anything else
- * (including `false` and `0`) is real content.
+ * (including `false` and `0`) is real content. The one blank rule
+ * (`authoring-guidance.md` decision 15), under the name this file always used.
  */
-function isEmptySource(field: Field, value: Json | undefined): boolean {
-  if (value === undefined || value === null) return true;
-  if (field.kind === "richtext") return isRichtextEmpty(asRichtext(value));
-  if (typeof value === "string") return value.trim() === "";
-  if (Array.isArray(value)) return value.length === 0;
-  return false;
-}
+export const isEmptySource: (field: Field, value: Json | undefined) => boolean = isBlankValue;

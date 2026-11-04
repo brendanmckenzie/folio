@@ -25,12 +25,12 @@
  */
 import { matches } from "../../../core/conditions";
 import type { Blok, Doc, Json } from "../../../core/doc";
-import type { Field } from "../../../core/fields";
+import { type Field, isBlankValue } from "../../../core/fields";
 import { type LayerState, layerStates, mergeLayers } from "../../../core/layers";
 import { isTranslatable } from "../../../core/locales";
 import type { Mutation } from "../../../core/mutations";
 import type { Presence } from "../../../core/protocol";
-import { asRichtext, isRichtextEmpty, richtextToText } from "../../../core/richtext";
+import { asRichtext, richtextToText } from "../../../core/richtext";
 import type { SchemaIndex } from "../../../core/schema";
 import { asAsset, asAssets, asStoryIds } from "../../../core/values";
 import { singletonTypeOf } from "../../../core/sites";
@@ -91,7 +91,7 @@ export function groupRuns(entries: [string, Field][], data: Record<string, Json>
   }
   for (const run of runs) {
     run.empty =
-      run.group !== null && run.entries.every(([name, f]) => isBlank(f, data[name] ?? null));
+      run.group !== null && run.entries.every(([name, f]) => isBlankValue(f, data[name] ?? null));
   }
   return runs;
 }
@@ -354,25 +354,17 @@ export function fieldWarning(field: Field, value: Json): string | null {
     if (field.min !== undefined && value < field.min) return `Must be at least ${field.min}.`;
     if (field.max !== undefined && value > field.max) return `Must be at most ${field.max}.`;
   }
-  if (field.required && isBlank(field, value)) return "Required — this is still empty.";
+  if (field.required && isBlankValue(field, value)) return "Required — this is still empty.";
   return null;
 }
 
 /**
- * Whether a value counts as nothing, per kind. `false` and `0` are values, an
- * empty richtext document and a whitespace-only string are not — the same rule
- * `core/locales.ts`'s `isEmptySource` applies when it decides whether a field is
- * work a translator owes, and stated the same way for the same reason.
+ * Whether a value counts as nothing, per kind. Moved to `core/fields.ts` as
+ * `isBlankValue` (`authoring-guidance.md` decision 15), so the inspector, the
+ * translation walk, `check_document` and the settings audit share one rule; the
+ * old name stays so the inspector's callers are untouched.
  */
-export function isBlank(field: Field, value: Json): boolean {
-  if (value === null || value === undefined) return true;
-  if (field.kind === "richtext") return isRichtextEmpty(asRichtext(value));
-  if (field.kind === "boolean" || field.kind === "number") return false;
-  if (typeof value === "string") return value.trim() === "";
-  if (Array.isArray(value)) return value.length === 0;
-  if (field.kind === "asset") return asAsset(value) === null;
-  return false;
-}
+export { isBlankValue as isBlank };
 
 /* --------------------------------------------------------------- focus mode --- */
 

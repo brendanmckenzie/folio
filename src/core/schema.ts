@@ -1,5 +1,5 @@
 import { type Blok, type Doc, type Json, keyAtIndex, newUid } from "./doc";
-import { defaultValue, type Field } from "./fields";
+import { defaultValue, type Field, type Guidance } from "./fields";
 import { type LocaleConfig, type LocaleContext, fieldValue } from "./locales";
 import { asRichtext, richtextToText } from "./richtext";
 import { asAsset } from "./values";
@@ -44,6 +44,16 @@ export interface BlockSchema {
    * key wins. Only the preview sees them; a live page gets the host's own.
    */
   previewParams?: Record<string, Json>;
+  /**
+   * What this block is for and when to choose it, at most 500 characters
+   * (`../../docs/specs/content-model/authoring-guidance.md` decision 5). The same
+   * word as a field's `help`, for the same thing: one line a person and a model both
+   * read. Drawn under the block's heading in the inspector and as the first line of
+   * its block picker entry, above the description derived from its fields.
+   */
+  help?: string;
+  /** Tone, and examples of good use (`Guidance`). Advisory, and public like `help`. */
+  guidance?: Guidance;
 }
 
 export type SchemaIndex = Record<string, BlockSchema>;

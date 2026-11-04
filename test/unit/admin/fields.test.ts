@@ -81,9 +81,10 @@ describe("controlFor", () => {
     ];
     expect(new Set(built.map((f) => f.kind))).toEqual(new Set(EVERY_KIND));
 
-    // `defaultValue` is the one exported function that is not a builder.
+    // `defaultValue` and `isBlankValue` are the exported functions that are not builders.
     const builders = Object.entries(fields).filter(
-      ([name, value]) => typeof value === "function" && name !== "defaultValue",
+      ([name, value]) =>
+        typeof value === "function" && name !== "defaultValue" && name !== "isBlankValue",
     );
     expect(builders).toHaveLength(EVERY_KIND.length);
   });

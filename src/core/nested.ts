@@ -259,6 +259,39 @@ const childPath = (parent: string, slot: string, index: number): string =>
 const fieldPath = (parent: string, name: string): string =>
   parent ? `${parent}.fields.${name}` : `fields.${name}`;
 
+/**
+ * Every reachable blok's place in the nested shape, uid to path, in document
+ * order: the root first (`''`), then depth first in the order `toNested` emits
+ * (`../../docs/specs/content-model/authoring-guidance.md` decision 10).
+ *
+ * Built from the same `childIndex` and `childPath` `toNested` and `fromNested`
+ * use, so a `check_document` finding's `path` and a `NestedError`'s path for the
+ * same blok cannot disagree. The walk mirrors `nestOne`'s: declared slots first,
+ * then any slot only the document has, and a blok already placed is skipped, so a
+ * cycle left by an old log cannot loop. Independent of whether a blok's type is
+ * declared, because `childIndex` is built from `parent` and `slot`.
+ */
+export function nestedPaths(doc: Doc, schema: SchemaIndex): Map<string, string> {
+  const out = new Map<string, string>();
+  const root = doc.bloks[doc.root];
+  if (!root) return out;
+  const children = childIndex(doc);
+  const visit = (blok: Blok, path: string, depth: number): void => {
+    if (depth > MAX_NESTED_DEPTH) return;
+    out.set(blok.uid, path);
+    const bySlot = children.get(blok.uid);
+    const slots = slotsOf(schema[blok.type]).map(([name]) => name);
+    for (const name of new Set([...slots, ...(bySlot?.keys() ?? [])])) {
+      const list = (bySlot?.get(name) ?? []).filter((child) => !out.has(child.uid));
+      for (const [i, child] of list.entries()) {
+        if (!out.has(child.uid)) visit(child, childPath(path, name, i), depth + 1);
+      }
+    }
+  };
+  visit(root, "", 0);
+  return out;
+}
+
 /* ---------------------------------------------------------- from nested --- */
 
 export interface FromNestedOptions {
