@@ -24,6 +24,13 @@ change, no change to the `exports` surface or to any `createFolio()` key.
   kills other vite processes. The demo's `vite.config.ts` reads `FOLIO_E2E_PORT` and
   `FOLIO_E2E_STATE`, which are unset in a normal `pnpm dev`.
 
+### Fixed
+
+- **The `cli` end-to-end script no longer fails intermittently in the parallel sweep.** It
+  ran the CLI with `spawnSync`, which froze its event loop long enough for the dev server
+  to drop the pooled keep-alive connection, so the next request failed with
+  `ECONNRESET`. It now spawns the CLI asynchronously.
+
 ### Breaking changes
 
 None.
