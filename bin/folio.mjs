@@ -21,6 +21,7 @@ import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { parse, UsageError } from "./lib/args.mjs";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = "https://github.com/brendanmckenzie/folio";
@@ -56,10 +57,15 @@ Options for init:
   ${REPO}
 `;
 
-main().catch((err) => {
-  console.error(`\nfolio: ${err.message}\n`);
-  process.exit(1);
-});
+main().then(
+  (code) => {
+    if (typeof code === "number") process.exitCode = code;
+  },
+  (err) => {
+    console.error(`\nfolio: ${err.message}\n`);
+    process.exit(err instanceof UsageError ? 2 : 1);
+  },
+);
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -76,13 +82,16 @@ async function main() {
   if (command === "init") return init(argv.slice(1));
   if (command === "agents") return agents(argv.slice(1));
 
-  throw new Error(`unknown command "${command}". Try \`folio --help\`.`);
+  throw new UsageError(`unknown command "${command}". Try \`folio --help\`.`);
 }
 
 // --- init -----------------------------------------------------------------
 
 async function init(argv) {
-  const { flags, positional } = parseArgs(argv);
+  const { values: flags, positionals: positional } = parse(argv, {
+    email: { type: "string" },
+    force: { type: "boolean" },
+  });
   const target = path.resolve(process.cwd(), positional[0] ?? ".");
   const name = sanitiseName(path.basename(target));
 
@@ -171,7 +180,7 @@ const BEGIN = "<!-- folio:begin -->";
 const END = "<!-- folio:end -->";
 
 async function agents(argv) {
-  const { positional } = parseArgs(argv);
+  const { positionals: positional } = parse(argv, {});
   const explicit = positional[0];
   const target = explicit
     ? path.resolve(process.cwd(), explicit)
@@ -225,20 +234,6 @@ ${await pasteBlock()}
 }
 
 // --- helpers --------------------------------------------------------------
-
-function parseArgs(argv) {
-  const flags = {};
-  const positional = [];
-  for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i];
-    if (arg === "--force") flags.force = true;
-    else if (arg === "--email") flags.email = argv[++i];
-    else if (arg.startsWith("--")) throw new Error(`unknown option "${arg}"`);
-    else positional.push(arg);
-  }
-  if (flags.email !== undefined && !flags.email) throw new Error("--email needs an address");
-  return { flags, positional };
-}
 
 /** npm package names: lowercase, no spaces, no leading dot or underscore. */
 function sanitiseName(raw) {
