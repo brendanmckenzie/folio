@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 40
 > **Size:** L
-> **Status:** built (2026-11-04, `feat/authoring-guidance`), ships in `v1.4.0`
+> **Status:** done (built 2026-11-04, ships in `v1.4.0`)
 > **Wire version:** none. Nothing here crosses the socket or the admin↔preview frame. Guidance rides inside the block schemas the manifest already serves over HTTP, and a check is an HTTP read. `PROTOCOL_VERSION` stays at 5
 > **Migration:** none. Guidance is code (`defineBlock`, `createFolio`), and a check is computed on read from the document and one `stories` lookup. Nothing is stored
 > **Release:** `v1.4.0`, a minor. Every change to the exports surface is additive: new optional keys on `defineBlock` and on the field builders, one new optional `createFolio` key, one new `{base}/api/v1` route, one new key on the v1 `/schema` answer, one new MCP tool. Ships beside spec 41 (agent CLI), which touches `AGENTS.md` and `bin/folio.mjs agents` too (Dependencies)

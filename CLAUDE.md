@@ -77,13 +77,13 @@ Biome and gitleaks on commit, commitlint on the message, and a refusal to push
 
 ```
 ./scripts/e2e.sh scripts/sync-test.mjs     # one script
-./scripts/e2e-all.sh                       # all 25, one fresh database each
+./scripts/e2e-all.sh                       # all 26, one fresh database each
 ```
 
 **Both propagate the script's exit code**, so either can gate something. `e2e.sh` used
 to discard it — `node "$SCRIPT" ... || true` with a trailing `pkill ... || true` as the
 last statement — which meant the whole tier was decorative for as long as it existed.
-`e2e-all.sh` is a loop of reset-then-run rather than one server for all 25, because they
+`e2e-all.sh` is a loop of reset-then-run rather than one server for all 26, because they
 share a database otherwise; that makes it minutes rather than seconds, which is why
 `release.mjs --tag` runs it and an ordinary push does not.
 
@@ -227,7 +227,14 @@ release, so it must be applied before that Worker is deployed. v1.3.0 is roll-fo
 (`UPGRADING.md`, "v1.3.0 is roll-forward only"). Next free is `0018`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
-table — `stories` included — is fair game when the shape is wrong. **Editing a
+table — `stories` included — is fair game when the shape is wrong. **A new migration
+touches three artefacts, not two:** the file, its row in `UPGRADING.md`'s ledger, and
+its entry in `upgrade-ledger.json` (spec 41), which `folio upgrade` plans from.
+`test/unit/cli/ledger.test.ts` fails when the JSON disagrees with `migrations/`, with
+`CHANGELOG.md`, or with the prose it is derived from (the `###` headings naming each
+release, the ledger rows' apply class and reindex, the claimed numbers). When `0012`
+is written, its release must declare `requiresDeployed` at or above the release that
+shipped `0011`, and the same test refuses it otherwise. **Editing a
 landed one is not**, now that four live databases have them applied: a fresh database
 would get the edit and those four would not. A rebuild has to
 carry every column and recreate every index, which is a correctness chore, not a
@@ -504,7 +511,12 @@ What survives from it, because it was never about the split:
 Changes reach `main` only through a squash-merged pull request that passed `gate`.
 A release is a tag on a commit that has merged:
 
-1. Bump `package.json` `version` to `X.Y.Z` in a PR and merge it.
+1. Bump `package.json` `version` to `X.Y.Z` in a PR and merge it. The same PR bumps
+   `FOLIO_VERSION` in `src/server/version.ts` (MCP serverInfo reports it, and
+   `folio upgrade --url` trusts it), and gives `upgrade-ledger.json`'s entry for
+   `X.Y.Z` its `date`, its migrations and the exact `###` headings naming `vX.Y.Z`;
+   the version and ledger tests enforce all three, and `release.mjs --tag`/`--ci`
+   refuses a tag whose version is not the ledger's newest release.
 2. `git tag -a vX.Y.Z <sha-on-main> -m vX.Y.Z && git push origin vX.Y.Z` (annotated, so
    it is a permanent ref).
 3. `release.yml` runs `node scripts/release.mjs --tag --ci` (tag matches
@@ -530,8 +542,11 @@ against itself, so it runs before the push — and checks that every `exports`
 subpath resolves, that the built entries still export the names a host cannot do
 without (`anchors` in `smokeTest`: add to it when a name joins the contract), and that the consumer-facing documents are in the installed
 package. It then runs a **consumer boots** stage: `folio init`, the starter's own
-`npm install` against the commit under test, `vite dev` (which must answer `/` and
-`/folio/login` with no CommonJS error and no 5xx), and `npm run build`. A consumer's
+`npm install` against the commit under test, `folio doctor --json` before and after
+`db:local` (failing only on `d1.local`, then passing), `folio add block` and the
+host's typecheck, `folio upgrade --json` (which must answer `hops: []`), `vite dev`
+(which must answer `/` and `/folio/login` with no CommonJS error and no 5xx, and pass
+`doctor --url … --check server.mounted`), and `npm run build`. A consumer's
 dev server takes `dist/` for `folio/server`, not the `development`-condition
 source Folio's own demo resolves, so React's CommonJS entries reach workerd raw
 there and nothing else in the gates sees it. That is the only check that exercises
@@ -558,6 +573,19 @@ Exports are deliberate: `folio/core` is the whole contract for defining blocks a
 rendering resolved pages; `folio/engine` is document tooling for bulk imports and
 migrations (`apply()` outside a transaction bypasses sync, undo and multiplayer).
 
+The MCP tools are one table, `server/mcp/tools.ts`: seventeen, sixteen of them a v1
+route dispatched internally and `preview_document` the one that is not.
+`check_document` is the route-backed `GET {base}/api/v1/documents/:id/check`, computed
+by `server/checks.ts`, and `test/unit/mcp/tools.test.ts` pins the count.
+
+The CLI is `bin/folio.mjs` with its modules in `bin/lib/`: `init`, `agents`, `doctor`,
+`upgrade`, `add block` and `preview block`, every one but `init` and `agents` with a
+`--json` answer. `bin/` is plain ESM with **zero dependencies** (every import is
+`node:*` or relative) and no build step, so the CLI that diagnoses a broken install
+never depends on `prepare` having succeeded (spec 41 decision 1). `doctor`
+writes nothing to the project, and `upgrade` never runs a remote step under any flag;
+both are tested, and both are what an agent is told it may rely on.
+
 ## Specs
 
 `docs/specs/` is one spec per feature, in `_TEMPLATE.md`'s format. The load-bearing
@@ -570,9 +598,11 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
+Specs 40 (authoring guidance and content checks, `content-model/authoring-guidance.md`) and 41 (the agent CLI, `foundation/agent-cli.md`) were built 2026-11-04 and ship together as v1.4.0 (ledger date 2026-11-05); neither adds a migration or touches the wire. 40 added `GET {base}/api/v1/documents/:id/check` and the seventeenth MCP tool, `check_document`; 41 added `folio doctor`, `folio upgrade`, `folio add block` and `folio preview block`, and `upgrade-ledger.json`.
+
 Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on group-web staging; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
 
-**Specs 1–22 and 24–38 are done** (36–38 in v1.3.0) — 34 (`foundation/multi-brand.md`) since the owner's
+**Specs 1–22, 24–38, 40 and 41 are done** (36–38 in v1.3.0, 40 and 41 in v1.4.0; 39 and 42 are `draft`) — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and
 merged to `main` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33

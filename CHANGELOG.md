@@ -8,6 +8,75 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.4.0
+
+A minor release for agents working on a Folio site: guidance and content checks in the
+schema (spec 40), and a command line that checks, upgrades and extends a project (spec
+41). No migration, no wire change, nothing to run or edit on an existing host. Read
+[Authoring guidance and content checks](UPGRADING.md#authoring-guidance-and-content-checks-v140)
+for the two sanctioned behaviour changes.
+
+### Added
+
+- **Authoring guidance in the schema.** `help` and `guidance` on blocks, `guidance` on
+  every field, an advisory `length` on `text`, `textarea` and `richtext`, and
+  `decorative` on `asset` and `multiasset`. The inspector draws a length counter, a
+  "Writing guide" disclosure and block help, and the block picker leads with a block's
+  help.
+- **A writing guide per brand.** `writing: { voice, avoid }` on `createFolio` (or
+  `brands.<id>.writing`), served only on the gated `GET {base}/api/v1/schema`, and so on
+  `get_schema`.
+- **Content checks.** `GET {base}/api/v1/documents/:id/check` and the `check_document`
+  MCP tool report findings addressed by `{ uid, field, locale }` for `patch_fields`, each
+  with a `fix` naming the tool. Advisory: nothing blocks a publish.
+- **`folio doctor`** checks a host project (Node, the pin, the installed package, the
+  wrangler bindings and Durable Object backends found by class rather than by name, the
+  crons, the Vite plugin and blocks module, and local and `--remote` D1 migrations
+  against the shipped ones). With `--url` it also checks that a running server
+  constructed `createFolio` and serves the schema. It writes nothing to the project, and
+  every finding carries a fix marked `local: true` or `false`. `--json` answers
+  `folio.doctor/1`.
+- **`folio upgrade`**, run as `npx github:brendanmckenzie/folio#vX.Y.Z upgrade`, plans an
+  upgrade to vX.Y.Z from that release's `upgrade-ledger.json`. A dry run by default;
+  `--apply` runs only the local steps (the pin, the reinstall, the local D1 apply,
+  `folio agents`, the typecheck and a closing doctor). Remote migrations and deploys are
+  printed in order and never run. `--url <deployment>` lets a deployment's reported
+  version clear a release that requires another to be deployed first; without it a plan
+  stops before any such release, and a stopped plan that reaches nothing exits 1.
+  `--json` answers `folio.upgrade/1`.
+- **`folio add block <name> [--into <block>.<field>]`** scaffolds a block beside the
+  blocks module, lists it and makes it insertable, writing everything or nothing.
+  `--json` answers `folio.add-block/1`.
+- **`folio preview block <name> --url <origin>`** (also `add block --preview`) renders one
+  block through a running server with MCP `preview_document` and saves the PNG or HTML.
+  It needs `FOLIO_TOKEN`. `--json` answers `folio.preview-block/1`.
+- **`upgrade-ledger.json`**, shipped at the package root: `UPGRADING.md`'s ledger as data,
+  cross-checked against it, `CHANGELOG.md` and `migrations/` by a unit test.
+- **The Vite plugin exposes `api.folio = { version: 1, blocks, basePath }`**, read-only
+  data for tools.
+- **Type exports**: `Guidance` and `TextLength` from `folio/core`; `WritingGuide`,
+  `ContentCheck`, `ContentCheckReport` and `ContentCheckSeverity` from `folio/server`.
+
+### Changed
+
+- **`/folio/audit`'s `required-setting` treats a whitespace-only value, an empty richtext
+  document or an empty list as empty**, matching the inspector. A richtext holding only an
+  image or an embed still counts as filled.
+- **`check_document` reports translations under an unconfigured locale once, as
+  `unknown-locale` drift**, including on a single-locale site, where `/folio/audit` says
+  nothing.
+- **MCP has seventeen tools.** `get_schema`'s description and the server instructions
+  mention guidance and `check_document`.
+- **MCP `server/discover` reports the package version** in its serverInfo, where it said
+  `0.0.0`.
+- **A usage error from `folio init` or `folio agents` exits 2** rather than 1.
+
+### Breaking changes
+
+None to the `exports` surface or to `createFolio()` keys. Every change to either is
+additive, and the behaviour changes above are described under the v1.4.0 entries in
+[`UPGRADING.md`](UPGRADING.md).
+
 ## 1.3.2
 
 A patch release: nothing to run or edit on an existing host. No migration.

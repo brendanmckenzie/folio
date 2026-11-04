@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 41
 > **Size:** M. Seven new modules under `bin/lib/`, one JSON ledger, one additive property on the Vite plugin, and the smoke-test and docs changes that keep them honest. No `src/server` change, no admin change.
-> **Status:** review (built 2026-11-04 on `feat/agent-cli`; the consumer smoke test and `scripts/cli-test.mjs` are not yet run)
+> **Status:** done (built 2026-11-04, ships in `v1.4.0`; the consumer smoke test and `scripts/cli-test.mjs` pass)
 > **Wire version:** none. Nothing here crosses the socket or the admin↔preview frame; `PROTOCOL_VERSION` stays at 5
 > **Migration:** none. The CLI reads `d1_migrations` and writes nothing to D1 except through `wrangler d1 migrations apply --local`, which is the command a host already runs
 > **Build sequence:** v1.4.0, beside spec 40 (authoring guidance and content checks). The two share no source file; both edit `AGENTS.md` and `README.md`, so whichever merges second rebases its prose. Nothing here waits on spec 39.
