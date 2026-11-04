@@ -34,6 +34,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { newestRelease, readLedger } from "../bin/lib/ledger.mjs";
 
 const REMOTE = "origin";
 const REMOTE_BRANCH = "main";
@@ -201,6 +202,21 @@ if (ci) {
   });
 }
 
+/**
+ * A tag must carry its own ledger entry. `folio upgrade` plans from the running
+ * CLI's `upgrade-ledger.json`, so a release whose ledger stops at the previous
+ * version would plan every upgrade to it as a no-op. The unit test already allows
+ * at most one entry above `package.json`'s version; this is the other half, run
+ * only where a tag is being blessed.
+ */
+if (tag || ci) {
+  const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+  const newest = newestRelease(readLedger("."));
+  if (newest?.version !== version) {
+    die(`the ledger has no entry for v${version}: add it in the version-bump PR.`);
+  }
+}
+
 // ── gates ────────────────────────────────────────────────────────────────────
 
 if (gate) {
@@ -346,6 +362,7 @@ function smokeTest(sha) {
       "docs/api.md",
       "docs/mcp.md",
       "bin/folio.mjs",
+      "upgrade-ledger.json",
       "examples/starter/package.json",
       "examples/starter/src/index.tsx",
     ];

@@ -1,0 +1,212 @@
+{
+  "schema": "folio.ledger/1",
+  "migrations": {
+    "0001_init.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0002_asset_refs.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy",
+      "after": [
+        {
+          "kind": "reindex"
+        }
+      ]
+    },
+    "0003_schedules.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0004_shares.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0005_content_fts.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy",
+      "after": [
+        {
+          "kind": "reindex"
+        }
+      ]
+    },
+    "0006_auth.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0007_passkeys.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0008_asset_organisation.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0010_forms.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0011_sites.sql": {
+      "release": "1.0.0",
+      "apply": "with-deploy",
+      "after": [
+        {
+          "kind": "manual",
+          "text": "Run the post-deploy grant statement.",
+          "heading": "0011: roles move to `site_roles` (2026-09-29) (v1.0.0)"
+        }
+      ]
+    },
+    "0013_site_brands.sql": {
+      "release": "1.0.0",
+      "apply": "before-deploy"
+    },
+    "0014_form_logic.sql": {
+      "release": "1.1.0",
+      "apply": "before-deploy"
+    },
+    "0015_draft_data.sql": {
+      "release": "1.2.0",
+      "apply": "before-deploy",
+      "after": [
+        {
+          "kind": "reindex",
+          "drafts": true
+        }
+      ]
+    },
+    "0016_option_sources.sql": {
+      "release": "1.3.0",
+      "apply": "before-deploy"
+    },
+    "0017_form_actions.sql": {
+      "release": "1.3.0",
+      "apply": "before-deploy"
+    }
+  },
+  "claimed": [
+    {
+      "file": "0012_users_role_contract.sql",
+      "rule": "Drops users.role and users.role_from. Ships in a release after every deployment runs the release carrying 0011, and is never applied in the same step as 0011.",
+      "heading": "0011: roles move to `site_roles` (2026-09-29) (v1.0.0)"
+    }
+  ],
+  "releases": [
+    {
+      "version": "1.0.0",
+      "date": "2026-10-19",
+      "rollback": "conditional",
+      "migrations": [
+        "0001_init.sql",
+        "0002_asset_refs.sql",
+        "0003_schedules.sql",
+        "0004_shares.sql",
+        "0005_content_fts.sql",
+        "0006_auth.sql",
+        "0007_passkeys.sql",
+        "0008_asset_organisation.sql",
+        "0010_forms.sql",
+        "0011_sites.sql",
+        "0013_site_brands.sql"
+      ],
+      "headings": [
+        "0011: roles move to `site_roles` (2026-09-29) (v1.0.0)",
+        "Turning `sites` on: what the host changes (2026-09-29) (v1.0.0)",
+        "0013 and turning `brands` on (2026-09-30) (v1.0.0)",
+        "A title-only patch no longer moves the page (2026-09-06) (v1.0.0)",
+        "Collection items no longer carry each document (2026-09-06) (v1.0.0)"
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "date": "2026-10-20",
+      "rollback": "safe",
+      "migrations": [
+        "0014_form_logic.sql"
+      ],
+      "headings": [
+        "A story with no Durable Object opens with its content (2026-10-19) (v1.1.0)",
+        "Conditional questions, sections and prefill (2026-10-19) (v1.1.0)",
+        "`anthropicDescriber` reports usage (2026-10-20) (v1.1.0)"
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "date": "2026-10-22",
+      "rollback": "safe",
+      "migrations": [
+        "0015_draft_data.sql"
+      ],
+      "headings": [
+        "Draft values in the Data table (v1.2.0)",
+        "Render parameters (v1.2.0)",
+        "`reader.recordBy` and `unique` fields (v1.2.0)",
+        "Previewing a record through a host page (v1.2.0)",
+        "Referenced documents resolve two hops deep (v1.2.0)",
+        "Explicit slugs are no longer truncated (v1.2.0)",
+        "`date` fields and field groups (v1.2.0)",
+        "`folio/vite` pre-bundles React's CommonJS entries (v1.2.0)",
+        "Search boxes bound their term (v1.2.0)"
+      ]
+    },
+    {
+      "version": "1.2.1",
+      "date": "2026-10-22",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
+    },
+    {
+      "version": "1.2.2",
+      "date": "2026-10-23",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
+    },
+    {
+      "version": "1.2.3",
+      "date": "2026-10-26",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
+    },
+    {
+      "version": "1.2.4",
+      "date": "2026-10-29",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
+    },
+    {
+      "version": "1.3.0",
+      "date": "2026-11-04",
+      "rollback": "none",
+      "migrations": [
+        "0016_option_sources.sql",
+        "0017_form_actions.sql"
+      ],
+      "headings": [
+        "Form option sources (v1.3.0)",
+        "Form actions (v1.3.0)",
+        "Form steps and the `folio/form` hook (v1.3.0)",
+        "v1.3.0 is roll-forward only"
+      ]
+    },
+    {
+      "version": "1.3.1",
+      "date": "2026-11-04",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": [
+        "SpaceDO migration (v1.3.1)"
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
+    }
+  ]
+}

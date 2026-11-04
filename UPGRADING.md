@@ -105,7 +105,7 @@ and whether it needs anything from you beyond applying it.
 | `0010_forms.sql` | Forms and responses | Nothing required. Add a `form()` field to a block to embed one, and a `submitted` hook to forward responses. |
 | `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29-v100) first: it changes what a rollback can do. |
 | `0013_site_brands.sql` | One nullable `sites.brand` column | **Apply it before you deploy, on every deployment with `sites`**: this release's registry read selects the column, so a Worker deployed first fails every registry read with `no such column`. It is additive and safe ahead of the deploy. It changes nothing until you configure `brands`; read [the brands section](#0013-and-turning-brands-on-2026-09-30-v100) before you do. |
-| `0014_form_logic.sql` | `forms.layout` (a form's sections) and `form_responses.unasked` (the questions a response was never asked) | **Apply it before you deploy**: this release's form reads select `forms.layout` and its response reads select `unasked`, so a Worker deployed first fails every form read with `no such column`. Both columns are additive with defaults (`'{}'` and `'[]'`), safe ahead of the deploy, and change nothing for a form until an editor gives it a condition or a section. Read [conditional questions](#conditional-questions-sections-and-prefill-2026-10-19) before you do. |
+| `0014_form_logic.sql` | `forms.layout` (a form's sections) and `form_responses.unasked` (the questions a response was never asked) | **Apply it before you deploy**: this release's form reads select `forms.layout` and its response reads select `unasked`, so a Worker deployed first fails every form read with `no such column`. Both columns are additive with defaults (`'{}'` and `'[]'`), safe ahead of the deploy, and change nothing for a form until an editor gives it a condition or a section. Read [conditional questions](#conditional-questions-sections-and-prefill-2026-10-19-v110) before you do. |
 | `0015_draft_data.sql` | One nullable column, `stories.draft_data` (a JSON mirror of the draft's root scalars, for the Data table) | **Apply it before you deploy**: the Data list selects it for anyone who may read drafts, so a Worker deployed first answers `500` to every editor. Additive and nullable, so safe ahead of the deploy. Then run `POST {base}/api/reindex?drafts=1` once. Read [draft values](#draft-values-in-the-data-table-v120) first. |
 | `0016_option_sources.sql` | `option_lists` (the last good list per host option source) and `form_responses.option_labels` | **Apply it before you deploy**: v1.3.0 reads `option_lists` when it renders a form and selects `option_labels` in every response read, so a Worker deployed first fails both with `no such table` / `no such column`. Additive and safe ahead of the deploy. v1.3.0 is **roll-forward only**: read [that section](#v130-is-roll-forward-only) first. |
 | `0017_form_actions.sql` | `forms.actions` (a form's attached actions), the `form_deliveries` log, and `form_refusals` (refused attempts, for the rate limit) | **Apply it before you deploy**: this release's form reads select `forms.actions` and every submission's rate check reads `form_refusals`, so a Worker deployed first fails both with `no such column` / `no such table`. Additive, safe ahead of the deploy, and independent of `0016`. v1.3.0 is **roll-forward only**: read [that section](#v130-is-roll-forward-only) first. |
@@ -132,6 +132,24 @@ curl -X POST https://your-site/folio/api/reindex \
 Or `folio.reindex(env)` from a deploy step. It is batched and resumable — re-call
 with the previous answer's `continueFrom` until it is null — and idempotent, so
 racing a publish is harmless.
+
+---
+
+## The machine-readable ledger
+
+`upgrade-ledger.json`, at the package root, is this document's schema ledger and
+release headings as data: per migration, the release that first shipped it,
+whether it is applied ahead of the deploy or with it, and what it needs afterwards;
+per release, its migrations, the headings in this document that name its tag,
+whether an older pin can be redeployed over it (`rollback`: `safe`, `conditional`
+or `none`), and any release that must be deployed before it; and the claimed
+numbers that have not shipped. `folio upgrade` computes its plan from it, and
+`folio doctor` reads it to say which release a database's migrations came from.
+
+**This document wins.** The ledger is derived from it, never the other way round,
+and a unit test (`test/unit/cli/ledger.test.ts`) fails whenever the two disagree,
+or when the ledger disagrees with `migrations/`. So a pull request that adds a
+migration or a heading naming a release updates both, or fails `pnpm test`.
 
 ---
 
@@ -208,7 +226,7 @@ Or `folio.audit(env)`. It is also the Model screen in the admin.
 
 ## Things that need an eye on upgrade
 
-### A story with no Durable Object opens with its content (2026-10-19)
+### A story with no Durable Object opens with its content (2026-10-19) (v1.1.0)
 
 **No action for a deployment that has never copied a database between
 environments.** A Durable Object that already holds a draft is untouched, so every
