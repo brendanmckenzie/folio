@@ -191,7 +191,8 @@ export function folioDatabases(config, configDir, project) {
   );
 }
 
-async function readVite(project) {
+/** The host's Vite config, loaded by its own vite, and the folio plugin in it. */
+export async function readVite(project) {
   if (!project.viteConfig) return { ok: false, reason: "none" };
   let tool;
   try {
@@ -1090,4 +1091,45 @@ function newestReleaseOf(ledger, files) {
 
 export function headingUrl(version, heading) {
   return `${REPO_URL}/blob/v${version}/UPGRADING.md#${slug(heading)}`;
+}
+
+/**
+ * Folio's database in every environment the wrangler config declares: the top
+ * level first, then each named `env` in the order the file gives them, de-duplicated
+ * by `database_name`. For `upgrade`'s remote steps. `[]` when the config cannot be
+ * read, which `doctor` reports on its own.
+ */
+export async function databasesByEnvironment(project) {
+  let tool;
+  try {
+    tool = await project.loadWrangler();
+  } catch {
+    return [];
+  }
+  if (!project.wranglerConfig || !existsSync(project.wranglerConfig)) return [];
+  const configDir = path.dirname(project.wranglerConfig);
+  let names = [];
+  try {
+    const raw = tool.module.experimental_readRawConfig({ config: project.wranglerConfig });
+    names = Object.keys(raw.rawConfig?.env ?? {});
+  } catch {}
+  const out = [];
+  const seen = new Set();
+  for (const env of [null, ...names]) {
+    let config;
+    try {
+      config = tool.module.unstable_readConfig(
+        { config: project.wranglerConfig, env: env ?? undefined },
+        {},
+      );
+    } catch {
+      continue;
+    }
+    for (const d of folioDatabases(config, configDir, project)) {
+      if (seen.has(d.database_name)) continue;
+      seen.add(d.database_name);
+      out.push({ env, database_name: d.database_name, binding: d.binding });
+    }
+  }
+  return out;
 }

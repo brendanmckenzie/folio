@@ -22,7 +22,7 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parse, UsageError } from "./lib/args.mjs";
-import { doctorCommand } from "./lib/commands.mjs";
+import { doctorCommand, upgradeCommand } from "./lib/commands.mjs";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = "https://github.com/brendanmckenzie/folio";
@@ -55,6 +55,11 @@ folio — a Cloudflare-native block CMS
                           the wrangler bindings, local (and --remote) D1
                           migrations, and a running server (--url). Writes nothing
 
+  folio upgrade [dir]     Plan the upgrade from the installed Folio to this CLI's
+                          release. A dry run unless --apply, which runs only the
+                          local steps; remote migrations and deploys are printed,
+                          never run
+
 Options for init:
   --email <address>       Address seeded as the first admin (default ${DEFAULT_EMAIL})
   --force                 Write into a directory that is not empty
@@ -70,6 +75,14 @@ Options for doctor:
   --site <id>             The site to read the schema of, on a multi-site deployment
   --check <id>            Run only this check (repeatable)
   FOLIO_TOKEN             A token with content:read, for the schema check
+
+Options for upgrade:
+  --json                  One JSON value (schema folio.upgrade/1) on stdout
+  --to <vX.Y.Z>           Stop at an earlier release in this CLI's ledger
+  --apply                 Run the local steps (pin, reinstall, local D1, typecheck)
+  --allow-dirty           Apply over uncommitted package.json or lockfile changes
+  --env <name>            Restrict the printed remote steps to one environment
+  --config <path>         The wrangler config, if not wrangler.jsonc/json/toml
 
 Exit codes: 0 success, 1 a failure found or hit, 2 a usage error.
 
@@ -101,6 +114,7 @@ async function main() {
   if (command === "init") return init(argv.slice(1));
   if (command === "agents") return agents(argv.slice(1));
   if (command === "doctor") return doctorCommand(argv.slice(1), runtime());
+  if (command === "upgrade") return upgradeCommand(argv.slice(1), runtime());
 
   throw new UsageError(`unknown command "${command}". Try \`folio --help\`.`);
 }
