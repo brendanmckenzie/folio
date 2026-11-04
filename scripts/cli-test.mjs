@@ -16,7 +16,7 @@
 // The CLI is run as a process, the way an agent runs it, and gated on its exit code
 // and its JSON, never on human output.
 
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { signInGlobally } from "./lib/auth.mjs";
@@ -46,17 +46,30 @@ const made = await fetch(`${ADMIN}/tokens`, {
 if (!made.token) throw new Error(`could not mint a token: ${JSON.stringify(made)}`);
 const token = made.token;
 
+// Asynchronous on purpose. `spawnSync` blocks this process's event loop for as long as the
+// CLI runs, and undici's idle timer for the pooled keep-alive socket to the dev server
+// cannot fire while it is blocked. The server drops an idle connection after about five
+// seconds regardless, so a CLI call that outlasts that (a `preview block` on a loaded
+// machine, which is what a parallel sweep is) leaves a dead socket in the pool and the
+// next fetch fails with ECONNRESET.
 function folio(args) {
-  const r = spawnSync("node", [CLI, ...args], {
-    cwd: DEMO,
-    encoding: "utf8",
-    env: { ...process.env, FOLIO_TOKEN: token },
+  return new Promise((resolve) => {
+    const child = spawn("node", [CLI, ...args], {
+      cwd: DEMO,
+      env: { ...process.env, FOLIO_TOKEN: token },
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+    child.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+    child.on("close", (status) => {
+      let json = null;
+      try {
+        json = JSON.parse(stdout);
+      } catch {}
+      resolve({ status, json, output: `${stdout}${stderr}` });
+    });
   });
-  let json = null;
-  try {
-    json = JSON.parse(r.stdout);
-  } catch {}
-  return { status: r.status, json, output: `${r.stdout}${r.stderr}` };
 }
 
 /** The scratch draft, searched for over v1 with the CLI's own token. */
@@ -71,7 +84,7 @@ async function scratch(name) {
 
 /* --- doctor against the running server ----------------------------------- */
 
-const doctor = folio([
+const doctor = await folio([
   "doctor",
   "--url",
   HTTP,
@@ -100,7 +113,7 @@ check(
 
 /* --- preview block -------------------------------------------------------- */
 
-const preview = folio(["preview", "block", "hero", "--url", HTTP, "--json"]);
+const preview = await folio(["preview", "block", "hero", "--url", HTTP, "--json"]);
 const html = preview.json?.preview?.html;
 check(
   "preview block hero exits 0 with an HTML file",
@@ -118,7 +131,7 @@ check(
   (await scratch("hero")).length === 0 && preview.json?.preview?.kept === false,
 );
 
-const kept = folio(["preview", "block", "hero", "--url", HTTP, "--keep", "--json"]);
+const kept = await folio(["preview", "block", "hero", "--url", HTTP, "--keep", "--json"]);
 const rows = await scratch("hero");
 check("--keep exits 0", kept.status === 0, kept.output.slice(0, 400));
 check(
