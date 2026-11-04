@@ -42,6 +42,7 @@ import {
   duplicateDocument,
   moveDocument,
 } from "../../documents";
+import { checkDocument } from "../../checks";
 import { answerMiss, FolioError, rethrow } from "../../errors";
 import {
   chainResolver,
@@ -65,12 +66,14 @@ import {
   ensureSingleton,
   pathMiss,
   publishedDocsByIds,
+  storiesFor,
   storyByPath,
   storyById,
 } from "../../stories";
 import type { ReadBindings, FolioEnv } from "../../types";
 import {
   CheckpointBody,
+  checkStatusQuery,
   ContentPutBody,
   DocumentCreateBody,
   FieldsPatchBody,
@@ -445,6 +448,49 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ).rows,
       }),
   );
+
+  /**
+   * The content checks for one document (`authoring-guidance.md` decisions 8 to
+   * 12): what is wrong and exactly where, each finding addressed the way
+   * `PATCH /documents/:id/fields` addresses a write. Advisory: nothing here
+   * gates a publish.
+   *
+   * **The draft by default**, unlike `GET /documents/:id`: a check exists to run
+   * before a publish, and checking the published copy of what was just written
+   * would report the old page clean. The draft needs `content:read:draft`, which
+   * every token that can write already holds.
+   *
+   * Reads the story through the fence (`load`), the document through the same
+   * paths `GET /documents/:id` uses, and every link and reference target in one
+   * `storiesFor` over the request's chain, on the request's session. A target
+   * outside the chain reads exactly like a deleted one, and no target's Durable
+   * Object is ever asked for anything.
+   */
+  app.get("/documents/:id/check", requireAccess<Env>(rt, READ), async (c) => {
+    const status = checkStatusQuery(c.req.query("status"));
+    const story = await load(c, idParam("id", c.req.param("id")), "read");
+    const locale = askedLocale(c);
+    const brand = brandOf(c);
+    let doc: Doc;
+    if (status === "draft") {
+      ensureAccess(rt, c.var.actor, READ_DRAFT);
+      doc = await draftOf(c, rt)(story);
+    } else {
+      doc = await publishedFor(c, story);
+    }
+    const db = c.var.bindings().db;
+    const chain = await requestChain(c, rt);
+    return c.json(
+      await checkDocument(doc, brand, {
+        id: story.id,
+        source: status,
+        ...(rt.locales ? { locales: rt.locales } : {}),
+        ...(locale !== undefined ? { locale } : {}),
+        bare: (await layerOption(c, rt, story)).layer === "bare",
+        targets: (ids) => storiesFor(db, ids, [], chain),
+      }),
+    );
+  });
 
   /* ------------------------------------------------------------- writing --- */
 

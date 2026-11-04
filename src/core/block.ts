@@ -113,6 +113,10 @@ export function toSchemaIndex(registry: Registry): SchemaIndex {
         presets: def.presets,
         presetsOnly: def.presetsOnly,
         previewParams: def.previewParams,
+        // Spread only when declared (`authoring-guidance.md` decision 5), so a
+        // registry with no guidance builds the same object it always did.
+        ...(def.help !== undefined ? { help: def.help } : {}),
+        ...(def.guidance !== undefined ? { guidance: def.guidance } : {}),
       } satisfies BlockSchema,
     ]),
   );

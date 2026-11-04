@@ -223,6 +223,9 @@ export function Inspector(props: InspectorProps) {
           </div>
         ) : null}
       </div>
+      {/* What the block is for (`authoring-guidance.md` decision 5): the same line an
+          agent reads in get_schema, under the block's heading. Absent, nothing. */}
+      {def.help ? <p className={css.blockHelp}>{def.help}</p> : null}
 
       {/* Routing lives in D1 rather than in the document, so it is a `PATCH` and not a
           mutation. Only on the root block of a routed page: a nested block has no

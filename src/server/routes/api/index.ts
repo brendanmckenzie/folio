@@ -66,16 +66,22 @@ export function apiRoutes<Env>(
     // (`multi-brand.md` decision 12).
     const brand = brandOf(c);
     const scope = c.var.scope;
-    if (!rt.sites || scope === null) return c.json(brand.manifest);
+    // The brand's writing guide rides here and nowhere open (`authoring-guidance.md`
+    // decision 6): this route is gated, and `brand.manifest`, which the open
+    // `{base}/api/schema` serves, never holds it. Absent without one, so a host with
+    // no `writing` gets the bytes it always did.
+    const writing = brand.writing ? { writing: brand.writing } : {};
+    if (!rt.sites || scope === null) return c.json({ ...brand.manifest, ...writing });
     // On a deployment with `sites`, the answer says which scope it is for, and so which
     // brand's registry it describes (decision 19, signal 4).
     const registry = await rt.sites.registry(c.env);
     const site = registry.sites.find((s) => s.id === scope);
     const group = site ? undefined : registry.groups.find((g) => g.id === scope);
     const row = site ?? group;
-    if (!row && scope !== SHARED_SCOPE) return c.json(brand.manifest);
+    if (!row && scope !== SHARED_SCOPE) return c.json({ ...brand.manifest, ...writing });
     return c.json({
       ...brand.manifest,
+      ...writing,
       scope: {
         id: scope,
         name: row?.name ?? "Shared",

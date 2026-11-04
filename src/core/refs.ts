@@ -33,7 +33,7 @@
  */
 import type { Blok, Doc, Json } from "./doc";
 import type { Field } from "./fields";
-import type { SchemaIndex } from "./schema";
+import type { BlockSchema, SchemaIndex } from "./schema";
 import { asRichtext, type RichtextNode } from "./richtext";
 import { asAsset, asAssets, asLink, asStoryIds, type LinkValue } from "./values";
 
@@ -54,23 +54,34 @@ export interface OutboundRef {
 }
 
 /**
+ * Every stored value of one field on one blok, each with the locale it came from:
+ * the source value (`locale: null`), then each locale's override, absent and null
+ * values skipped. The walk `blokTargets` needs to say *which* stored value holds
+ * an edge (`../../docs/specs/content-model/authoring-guidance.md` decision 13).
+ */
+function storedValuesByLocale(blok: Blok, name: string): { locale: string | null; value: Json }[] {
+  const out: { locale: string | null; value: Json }[] = [];
+  const source = blok.data[name];
+  if (source !== undefined && source !== null) out.push({ locale: null, value: source });
+  for (const [locale, map] of Object.entries(blok.i18n ?? {})) {
+    const value = map[name];
+    if (value !== undefined && value !== null) out.push({ locale, value });
+  }
+  return out;
+}
+
+/**
  * Every stored value of one field on one blok: the source value, then each
  * locale's override.
  *
  * The union rather than the *active* locale's value, because these walks feed a
  * resolution built once per render and reused across every field read. A locale
  * whose translation links elsewhere must not have its target missing from the
- * story map.
+ * story map. `storedValuesByLocale`, flattened, so the two cannot disagree about
+ * which values exist.
  */
 function storedValues(blok: Blok, name: string): Json[] {
-  const out: Json[] = [];
-  const source = blok.data[name];
-  if (source !== undefined && source !== null) out.push(source);
-  for (const map of Object.values(blok.i18n ?? {})) {
-    const value = map[name];
-    if (value !== undefined && value !== null) out.push(value);
-  }
-  return out;
+  return storedValuesByLocale(blok, name).map((v) => v.value);
 }
 
 /**
@@ -130,6 +141,59 @@ export function linkedIds(doc: Doc, schema: SchemaIndex): string[] {
     }
   }
   return [...out];
+}
+
+/** One story edge of one blok, located the way `patch_fields` addresses a write. */
+export interface BlokTarget {
+  field: string;
+  /** The locale whose override holds the edge; null for the source value. */
+  locale: string | null;
+  id: string;
+  kind: "link" | "reference";
+  /** `richtext` for a link mark inside prose, `field` for the field's own value. */
+  via: "field" | "richtext";
+}
+
+/**
+ * Every story id one blok links to or references, per field and per locale
+ * (`../../docs/specs/content-model/authoring-guidance.md` decision 13): what
+ * `check_document` needs to say *where* a broken link is, which the per-document
+ * walks above cannot.
+ *
+ * Built on the same `storedValuesByLocale` and `richtextLinks` as `linkedIds` and
+ * `referencedIdsAllLocales`, rather than a second richtext walker (this file's
+ * header names that mistake), and deliberately *not* the base those two are
+ * rewritten onto: they are on `resolve()`'s path and `read-session.test.ts` counts
+ * its queries. `refs.test.ts` pins that the union of this over every blok is
+ * exactly theirs. In field declaration order, source before overrides; a repeated
+ * id in one stored value is one target.
+ */
+export function blokTargets(blok: Blok, def: BlockSchema | undefined): BlokTarget[] {
+  if (!def) return [];
+  const out: BlokTarget[] = [];
+  for (const [field, f] of Object.entries(def.fields)) {
+    for (const { locale, value } of storedValuesByLocale(blok, field)) {
+      const ids = new Set<string>();
+      const add = (id: string, kind: BlokTarget["kind"], via: BlokTarget["via"]): void => {
+        if (ids.has(id)) return;
+        ids.add(id);
+        out.push({ field, locale, id, kind, via });
+      };
+      if (f.kind === "multilink") {
+        const link = asLink(value);
+        if (link?.kind === "story") add(link.id, "link", "field");
+      } else if (f.kind === "richtext") {
+        richtextLinks(value, (link) => {
+          if (link.kind === "story") add(link.id, "link", "richtext");
+        });
+      } else if (f.kind === "reference") {
+        if (typeof value === "string" && value) add(value, "reference", "field");
+      } else if (f.kind === "references") {
+        for (const id of asStoryIds(value)) add(id, "reference", "field");
+      }
+    }
+  }
+  return out;
 }
 
 /**

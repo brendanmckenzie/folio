@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { Blok, Doc, Json } from "../../../src/core/doc";
-import { asset, multiasset, multilink, reference, richtext, text } from "../../../src/core/fields";
+import {
+  asset,
+  multiasset,
+  multilink,
+  reference,
+  references,
+  richtext,
+  text,
+} from "../../../src/core/fields";
 import {
   assetKeys,
+  blokTargets,
   formIds,
   linkedIds,
   outboundRefs,
@@ -364,5 +373,56 @@ describe("outboundRefs", () => {
       { to: "sty_ada", kind: "reference" },
       { to: key, kind: "asset" },
     ]);
+  });
+});
+
+describe("blokTargets (authoring-guidance.md decision 13)", () => {
+  const targetSchema: SchemaIndex = {
+    ...schema,
+    team: { name: "team", label: "Team", fields: { people: references({ types: ["person"] }) } },
+  };
+  const fixture = docOf(
+    blok(
+      "p",
+      "prose",
+      { body: proseLinkingTo("sty_src"), heading: "Hi" },
+      {
+        fr: { body: proseLinkingTo("sty_fr_only") },
+      },
+    ),
+    blok("c", "cta", { link: { kind: "story", id: "sty_cta" } as Json, label: "Go" }),
+    blok("k", "card", { who: "sty_person" }),
+    blok("t", "team", { people: ["sty_a", "sty_b"] }),
+  );
+
+  it("locates each edge by field, locale, kind and via", () => {
+    const all = Object.values(fixture.bloks).flatMap((b) => [
+      ...blokTargets(b, targetSchema[b.type]).map((t) => ({ uid: b.uid, ...t })),
+    ]);
+    expect(all).toEqual([
+      { uid: "p", field: "body", locale: null, id: "sty_src", kind: "link", via: "richtext" },
+      { uid: "p", field: "body", locale: "fr", id: "sty_fr_only", kind: "link", via: "richtext" },
+      { uid: "c", field: "link", locale: null, id: "sty_cta", kind: "link", via: "field" },
+      { uid: "k", field: "who", locale: null, id: "sty_person", kind: "reference", via: "field" },
+      { uid: "t", field: "people", locale: null, id: "sty_a", kind: "reference", via: "field" },
+      { uid: "t", field: "people", locale: null, id: "sty_b", kind: "reference", via: "field" },
+    ]);
+  });
+
+  it("unions to exactly linkedIds and referencedIdsAllLocales, so the walks cannot drift", () => {
+    const fromTargets = new Set(
+      Object.values(fixture.bloks).flatMap((b) =>
+        blokTargets(b, targetSchema[b.type]).map((t) => t.id),
+      ),
+    );
+    const fromDocument = new Set([
+      ...linkedIds(fixture, targetSchema),
+      ...referencedIdsAllLocales(fixture, targetSchema),
+    ]);
+    expect([...fromTargets].sort()).toEqual([...fromDocument].sort());
+  });
+
+  it("answers nothing for a blok whose type nothing declares", () => {
+    expect(blokTargets(fixture.bloks.c!, undefined)).toEqual([]);
   });
 });

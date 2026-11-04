@@ -24,6 +24,7 @@ import {
   type NestedBlok,
   NestedError,
   type NestedInput,
+  nestedPaths,
   toNested,
 } from "../../../src/core/nested";
 import type { SchemaIndex } from "../../../src/core/schema";
@@ -918,5 +919,60 @@ describe("fromNested/toNested round trip (seeded property)", () => {
         }
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nestedPaths (authoring-guidance.md decision 10)
+// ---------------------------------------------------------------------------
+
+describe("nestedPaths", () => {
+  /** Follows the `NestedError` path grammar into `toNested`'s output: each
+   * `slot[i]` segment is `fields[slot][i]`. */
+  const follow = (nested: NestedBlok, path: string): NestedBlok => {
+    let node = nested;
+    if (!path) return node;
+    for (const segment of path.split(".")) {
+      const m = /^(.+)\[(\d+)\]$/.exec(segment);
+      if (!m) throw new Error(`not a slot segment: ${segment}`);
+      node = (node.fields[m[1]!] as NestedBlok[])[Number(m[2])]!;
+    }
+    return node;
+  };
+
+  it("places every blok of a three-level document where toNested puts it", () => {
+    const doc = sample();
+    const paths = nestedPaths(doc, schema);
+    const nested = toNested(doc, schema);
+    expect([...paths.keys()].sort()).toEqual(Object.keys(doc.bloks).sort());
+    for (const [uid, path] of paths) expect(follow(nested, path).uid).toBe(uid);
+    expect(paths.get(ROOT)).toBe("");
+    expect(paths.get("b2")).toBe("body[0].actions[1]");
+  });
+
+  it("answers in document order: root first, then depth first", () => {
+    expect([...nestedPaths(sample(), schema).keys()]).toEqual([ROOT, "h", "b1", "b2", "p"]);
+  });
+
+  it("places a child under a parent whose type nothing declares", () => {
+    const doc = sample();
+    doc.bloks.h = { ...doc.bloks.h!, type: "gone" };
+    expect(nestedPaths(doc, schema).get("b1")).toBe("body[0].actions[0]");
+  });
+
+  it("is the prefix of a NestedError's path for a bad field on the same blok", () => {
+    const doc = sample();
+    const nested = toNested(doc, schema) as unknown as NestedInput;
+    const body = (nested as unknown as NestedBlok).fields.body as NestedBlok[];
+    const actions = body[0]!.fields.actions as NestedBlok[];
+    actions[1]!.fields.label = 5 as unknown as Json;
+    let error: NestedError | null = null;
+    try {
+      fromNested(nested, schema, doc);
+    } catch (e) {
+      if (e instanceof NestedError) error = e;
+      else throw e;
+    }
+    expect(error?.path).toBe(`${nestedPaths(doc, schema).get("b2")}.fields.label`);
   });
 });

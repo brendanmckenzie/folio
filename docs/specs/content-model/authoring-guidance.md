@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 40
 > **Size:** L
-> **Status:** draft
+> **Status:** built (2026-11-04, `feat/authoring-guidance`), ships in `v1.4.0`
 > **Wire version:** none. Nothing here crosses the socket or the admin↔preview frame. Guidance rides inside the block schemas the manifest already serves over HTTP, and a check is an HTTP read. `PROTOCOL_VERSION` stays at 5
 > **Migration:** none. Guidance is code (`defineBlock`, `createFolio`), and a check is computed on read from the document and one `stories` lookup. Nothing is stored
 > **Release:** `v1.4.0`, a minor. Every change to the exports surface is additive: new optional keys on `defineBlock` and on the field builders, one new optional `createFolio` key, one new `{base}/api/v1` route, one new key on the v1 `/schema` answer, one new MCP tool. Ships beside spec 41 (agent CLI), which touches `AGENTS.md` and `bin/folio.mjs agents` too (Dependencies)
@@ -731,7 +731,7 @@ inherited.
   `content:read:draft` (`ensureAccess(READ_DRAFT)`).
 - Query: `status` (`draft` | `published`, default `draft`; anything else is
   `400 bad_request`), `locale` (optional, screened by `localeQuery` and checked
-  against the declared set like `GET /documents/:id`'s: unknown is `422 unsupported`).
+  against the declared set like `GET /documents/:id`'s: unknown is `501 unsupported`).
   With `locale`, `translation-missing` and every per-locale finding are limited to that
   locale. Source-locale findings are always reported.
 - Fence: `load(c, id, 'read')`. Outside the fence is `404 not_found`, never `403`.
@@ -1144,8 +1144,13 @@ unknown top-level `writing`, so a JS host is not broken by a downgrade.
   `truncated: true` (decision 17).
 - **`?locale=` naming the source locale** → only source-locale findings. There is no
   translation to be missing.
-- **A single-locale site** → `translation-missing`, `translated-not-translatable` and
-  `unknown-locale` never fire. Every finding omits `locale`.
+- **A single-locale site** → `translation-missing` and `translated-not-translatable`
+  never fire. An `i18n` map there is drift: one `unknown-locale` per blok and code
+  (`fix: "schema"`, the code in `locale`), and no other finding carries a `locale`
+  (Implementation notes, 17).
+- **An override under a locale the site does not configure** → only `unknown-locale`.
+  No per-value finding (`field-shape`, `length-*`, `alt-missing`) is reported for it,
+  because `patch_fields` refuses that locale.
 - **A host whose existing `help` is very long** → not refused. Only the new keys are
   capped (Ground truth, `fields.ts:21`).
 - **Guidance holding something private** → it is public, like `help`. The handbook says
@@ -1255,3 +1260,150 @@ unknown top-level `writing`, so a JS host is not broken by a downgrade.
   reason.
 - **Exporting `checkDocument` from `folio/engine`.** The v1 route is the contract. A
   second contract surface for the same shape can be added later as a minor.
+
+## Implementation notes
+
+Built 2026-11-04 on `feat/authoring-guidance` in the plan's order, phases 1 to 5 each
+committed separately and phase 6 (the demo, the starter, the end-to-end loop and the
+documents) last. No migration, no wire change, `PROTOCOL_VERSION` still 5. Ships in
+`v1.4.0` beside spec 41.
+
+**Where the spec was wrong or ambiguous, and what was done.**
+
+1. **An undeclared `?locale=` is `unsupported`, which is `501`, not `422`** (the Wire
+   section above is corrected to match; `FolioErrorStatus` has no 422). The route
+   reuses `askedLocale`, so it answers exactly what `GET /documents/:id` answers for
+   the same locale; the workers test pins the two together rather than a number.
+2. **The `path` grammar elides `fields.` for a slot.** `NestedError`'s paths come from
+   `childPath`, which writes `body[0].actions[0]`, not `fields.body[0].actions[0]`; a
+   field inside a blok is `body[0].fields.heading`. `nestedPaths` uses the same helper,
+   and `nested.test.ts` pins both that a path followed into `toNested`'s output lands on
+   its blok and that it prefixes a refused write's `NestedError.path`. The docs' example
+   uses the real grammar.
+3. **`translation-missing` reads `translationStatus` once per locale, not per blok.**
+   `translationStatus` walks a whole document; calling it from a per-blok check would
+   walk it once per blok. `checkDocument` computes the gaps per non-source locale (only
+   `?locale=`'s when one is given) and the `AUTHORING_CHECKS` entry reads them by uid, so
+   the rule is still the publish dialog's.
+4. **`isEmptySource` gains the asset arm.** It now *is* `isBlankValue`, whose asset case
+   (an `asset` value with neither a key nor a usable url is blank) the old private copy
+   lacked. A translatable `asset` whose source is unreadable no longer counts as work a
+   translator owes. Nothing else about the translation walk changed.
+5. **`fieldWarning` takes the field's name.** `check_document` labels a finding
+   `label ?? name`; the inspector's `fieldWarning(field, value)` had no name to fall back
+   on, so it gained an optional third argument and `FieldRow` passes it. The length case
+   is answered before `required`'s, which cannot fire for the same value (an empty value
+   is never measured).
+6. **`Field` gained two props, not one.** `count` is the counter at the label's end, as
+   planned; `detail` draws the "Writing guide" disclosure *under* the help line, which
+   the plan's "rendered by `FieldRow`" could not do without it, since `Field` draws the
+   help after the control.
+7. **`validateWriting` refuses more than the caps the spec lists**: an unknown key on
+   the guide or on a term, a blank `voice`, a `term` over 100 characters, and a `use` or
+   `reason` over 500. Each is the same kind of refusal as the listed ones and is in
+   `docs/configuration.md`'s table.
+8. **`alt-missing` reads an override only on a `translatable` field.** An override on an
+   untranslatable field is `translated-not-translatable`'s finding; reporting its alt text
+   as well would say one problem twice.
+9. **`term-avoided` is one finding per term per field**, however often the term occurs,
+   because the fix is one rewrite of that value.
+10. **Only reachable bloks are checked.** The walk is `nestedPaths`, so a blok no path
+    from the root reaches (an orphan left by an old log) has no `path` and is skipped; it
+    renders nowhere and `patch_fields` on it would change nothing anyone sees.
+11. **A link target of an undeclared type is not `unrouted`.** "Not a `page` kind" is read
+    off the brand's declared types; a row whose type the brand no longer declares is
+    judged only on presence, state and the field's `types`.
+12. **The status parser is a picklist.** `?status=` is screened by a new `CHECK_STATUS`
+    in `validate.ts` (a misspelt value is `400`, never a silent draft check), and
+    `tools.test.ts` pins `check_document`'s enum against it, as `search_documents`' is
+    against `STORY_STATE`.
+13. **Where the tests landed.** The per-brand guide test is in
+    `multi-brand-entry.test.ts`, because `multi-brand.test.ts` mounts no API routes; its
+    construction refusals are in `multi-brand.test.ts`. The sanctioned settings-audit
+    change is pinned in `multi-site.test.ts`'s settings test, because `requiredEmpty` is
+    private and `auditSettings` needs D1, so `server/audit.test.ts` could not reach it.
+    The "no Durable Object for a deleted target" assertion watches the story
+    namespace's `idFromName`, which `FolioRuntime.stub` is the one caller of, rather than
+    spying on `stub` itself, so it runs through `createFolio` unchanged. The mcp
+    tools/scopes unit tests count `check_document` among the reads.
+14. **`scope-partition.test.ts`'s page block gained a `link` field**, so the cross-site
+    link case has an edge to follow.
+15. **The instructions say "the site's voice", not "the brand's voice".** The sentence
+    the spec gives would put the word "brand" into every deployment's instructions, and
+    `multi-brand.test.ts` pins that a deployment with no `brands` names no brand there.
+    The sentence is "Blocks and fields may carry `help`, `guidance` and `length`, and
+    get_schema's `writing`, when present, is the site's voice; follow them, then call
+    check_document and fix what it reports before publishing."
+16. **Phase 3's commit lists the route in `NOT_TOOLS`** so the tree stays green between
+    the route and the tool; phase 4 removes it.
+
+17. **An override under an undeclared locale is reported once, as drift, and never
+    per value** (review finding 1). Every per-value step (`field-shape`, `length-*`,
+    `alt-missing`) reads only the source and the *configured* locales' overrides, so no
+    finding sends an agent to `patch_fields` with a locale it refuses as `unsupported`
+    (a check, patch, refuse loop). The drift is `unknown-locale` (`warning`,
+    `fix: "schema"`), one per blok and code. With locales configured that is the audit's
+    own finding; on a single-locale site, where the audit's check is silent, the check
+    emits the same finding itself. This reverses what the Edge cases said about a
+    single-locale site (now corrected there): an `i18n` map on a site with no locales is
+    drift too, and saying nothing left the agent nothing true to act on.
+
+18. **A required field with no stored key is one finding** (review finding 2):
+    `required-empty`, the warning. The audit's `missing-field` for the same field is
+    dropped, so `counts` do not count one absent required field as two problems.
+
+19. **The counter is outside the `<label>`** (review finding 3). Inside it, its text
+    joined the input's accessible name and changed on every keystroke. `Field` now draws
+    it beside the label in a `.labelRow` and hands its id to `children` as a second
+    argument; `text`, `textarea` and the richtext surface carry it as
+    `aria-describedby`. Pinned by `test/unit/admin/render/field-count.test.tsx`.
+
+20. **A richtext holding only an image or an embed is not blank** (review finding 4).
+    `isBlankValue` reads a new `isRichtextBlank` (in `core/richtext.ts`, not exported
+    from `folio/core`): no text **and** no node outside plain text structure. Folio's
+    editor cannot make such a document; an importer can (a Storyblok `image` or `blok`
+    node), and the old `isRichtextEmpty` rule would have reported it as an empty
+    `required-setting`. `isRichtextEmpty` keeps its public answer. The same rule now
+    reaches the inspector's "Required" and the translation walk, which count such a
+    source as content too. Pinned by `test/workers/settings-audit.test.ts` (calling
+    `auditSettings` over D1) and `guidance.test.ts`.
+
+21. **A field's warning is part of its control's description, and over a limit the
+    control is `aria-invalid`** (browser check on the v1.4.0 branch). The over-limit
+    sentence was a bare `<p>` that no control pointed at, so a screen reader heard
+    "82 / 60" and never the sentence saying it was over. `FieldRow` gives the warning an
+    id and appends it after the counter's in `aria-describedby` (the "Required" warning
+    takes the same path), and the text and textarea inputs and the prose surface carry
+    `aria-invalid="true"` while the counter is `over`. Only the length case is invalid:
+    an empty required field on a fresh block is not an error worth announcing on every
+    focus. The prose surface follows the value because `useEditor` re-applies
+    `editorProps` through `setOptions` on each render. Pinned by
+    `test/unit/admin/render/field-row-limits.test.tsx`.
+22. **The counter has a near-limit state, at 90% of `max`** (`NEAR_LIMIT` in
+    `inspector-model.ts`). The spec named no threshold and the counter was binary, grey
+    until the flip past the limit. `lengthCounter` answers `near` while within the limit
+    and at 90% or more of a `max` (a 60-character heading turns at 54); never with
+    `over`, and never against a minimum alone. Near draws in `--state-warn-fg`; over now
+    draws in `--state-danger-fg`, the colour of the over-limit sentence, where it was
+    amber and disagreed with the red sentence under it.
+23. **The "Writing guide" summary is a 24 x 24 CSS px target**, WCAG 2.2's minimum; at
+    the help line's 11px it measured 81 x 16. A 24px line height and 24px minimums on
+    both axes, keeping the `list-item` display so the marker stays.
+
+**Verified by breaking it.** Each boundary was disabled and a test went red, then
+restored: putting `writing` on the manifest (`schema.test.ts`, `multi-brand-entry.test.ts`);
+dropping `writing` from `BRAND_KEYS` (`multi-brand.test.ts`); appending the voice to the
+MCP instructions (`multi-brand-entry.test.ts`); passing `null` for the chain
+(`scope-partition.test.ts`'s cross-site link); bypassing `load` (the fence table's walk);
+reading targets once per edge (`checks.test.ts`, unit and workers); addressing a target's
+object (`checks.test.ts`); reading targets off the raw binding rather than the session
+(`checks.test.ts`); dropping the draft access check (`checks.test.ts`); the old blank
+rule in the settings audit (`multi-site.test.ts`); `toSchemaIndex` always carrying `help`
+(`block-registry.test.ts`); `blokTargets` skipping overrides (`refs.test.ts`); and a
+UTF-16 `.length` count in the counter (`inspector.test.ts`).
+
+**Not verified here.** `scripts/mcp-test.mjs` gains the write, check, patch, check loop
+but was not run on this branch (the end-to-end tier shares one port and one database,
+and runs on the merged branch). The inspector's counter, disclosure and block help, and
+the picker's help line, are pinned by Node tests of the model functions; nobody has
+looked at them in a browser yet.

@@ -85,6 +85,13 @@
   font-weight: 600;
 }
 
+/* A block's own `help` (`authoring-guidance.md` decision 5), under the head. */
+.blockHelp {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
 /* Paths, slugs, uids and scopes are content here (the brief's commitment 3), so a
    uid is monospaced rather than decorated. */
 .uid {

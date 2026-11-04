@@ -27,6 +27,18 @@ describe("computeBlocksDigest", () => {
     expect(computeBlocksDigest(toSchemaIndex(toRegistry([relabelled])))).toBe(digestOf(block("a")));
   });
 
+  it("ignores authoring guidance, so declaring it cannot trip the wrong-bundle banner", () => {
+    const guided = defineBlock({
+      name: "a",
+      label: "a",
+      help: "What a is for.",
+      guidance: { tone: "Plain.", examples: ["An a"] },
+      fields: { t: text({ length: { max: 60 }, guidance: { tone: "Short." } }) },
+      render: () => null,
+    });
+    expect(computeBlocksDigest(toSchemaIndex(toRegistry([guided])))).toBe(digestOf(block("a")));
+  });
+
   it("changes with a block", () => {
     expect(digestOf(block("a"))).not.toBe(digestOf(block("a"), block("b")));
   });

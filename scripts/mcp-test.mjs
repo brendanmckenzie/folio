@@ -22,6 +22,9 @@
 //     the draft URL and the rendered HTML, and it still has to not fail.
 //  5. The published page renders what the tool calls wrote, and the activity
 //     trail names the token — `token:<name>`, not the person who minted it.
+//  6. check_document finds an over-long heading and a link to a deleted page,
+//     patch_fields repairs both at the addresses it gave, and a second check
+//     is clean of them (spec 40's write, check, patch, check loop).
 //
 // **This script does not import the tool table from source, unlike every
 // other e2e script's `core/diff.ts`/`core/doc.ts` import.** `mcp/tools.ts`
@@ -297,6 +300,79 @@ check(
   "the published page renders exactly what the tool calls wrote",
   live.includes("Written by MCP"),
   live.slice(0, 160),
+);
+
+/* --- check, patch by the findings' addresses, check again (spec 40) ------ */
+
+// `docs/specs/content-model/authoring-guidance.md` phase 6: the loop an agent is
+// told to run before publishing. A page whose hero heading is over the demo's
+// 60-character `length` and whose button links to a page that has been deleted.
+const doomed = await callTool(
+  "create_document",
+  { title: "MCP check doomed", type: "page", content: { fields: { body: [] } } },
+  token,
+);
+const deadId = doomed.value?.id;
+const removed = await fetch(`${ADMIN}/stories/${deadId}`, { method: "DELETE" });
+check("a page to link to is created and then deleted", removed.ok, `${removed.status}`);
+
+const checked = await callTool(
+  "create_document",
+  {
+    title: "MCP check e2e",
+    type: "page",
+    content: {
+      fields: {
+        body: [
+          {
+            type: "hero",
+            fields: {
+              heading: "A heading written far past the sixty characters this field allows",
+              actions: [
+                { type: "button", fields: { label: "Go", href: { kind: "story", id: deadId } } },
+              ],
+            },
+          },
+        ],
+      },
+    },
+  },
+  token,
+);
+const checkedId = checked.value?.id;
+const report = await callTool("check_document", { id: checkedId }, token);
+const findings = report.value?.findings ?? [];
+const over = findings.filter((f) => f.check === "length-over" && f.field === "heading");
+const broken = findings.filter((f) => f.check === "link-broken" && f.field === "href");
+check(
+  "check_document reports the over-long heading and the link to the deleted page",
+  report.value?.source === "draft" && over.length === 1 && broken.length === 1,
+  JSON.stringify(findings.map((f) => `${f.check} ${f.uid}.${f.field}`)),
+);
+check(
+  "the broken link is an error ahead of every warning, with its reason",
+  findings[0]?.check === "link-broken" && broken[0]?.detail?.reason === "missing",
+  JSON.stringify(findings[0]),
+);
+
+const patched = await callTool(
+  "patch_fields",
+  {
+    id: checkedId,
+    bloks: [
+      { uid: over[0]?.uid, fields: { heading: "Find your next safari" } },
+      { uid: broken[0]?.uid, fields: { href: { kind: "story", id } } },
+    ],
+  },
+  token,
+);
+check("patch_fields takes the findings' uid and field as they are", patched.value?.changed === 2);
+
+const again = (await callTool("check_document", { id: checkedId }, token)).value?.findings ?? [];
+check(
+  "and the check that follows no longer reports either",
+  !again.some((f) => f.check === "length-over" || f.check === "link-broken"),
+  JSON.stringify(again.map((f) => `${f.check} ${f.uid}.${f.field}`)),
 );
 
 /* --- the activity trail names the token, not the person who minted it ---- */

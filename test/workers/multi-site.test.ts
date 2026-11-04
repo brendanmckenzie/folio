@@ -1464,6 +1464,20 @@ describe("Site settings", () => {
     expect(
       after.missingFields.filter((f) => f.type === "lsSettingsRoot" && f.field === "siteName"),
     ).toEqual([]);
+
+    // Whitespace is empty, by the one blank rule the inspector already reads
+    // (`authoring-guidance.md` decision 15, the sanctioned change).
+    const bravo = await tokenFor("bravo");
+    await api("/api/v1/documents/sng_lsSettings:bravo/content", bravo, {
+      method: "PUT",
+      body: JSON.stringify({ content: { fields: { siteName: "   " } } }),
+    });
+    await api("/api/v1/documents/sng_lsSettings:bravo/publish", bravo, { method: "POST" });
+    expect(
+      ((await layered.audit(env)).settings ?? [])
+        .filter((f) => f.field === "siteName")
+        .map((f) => f.site),
+    ).toContain("bravo");
   });
 
   it("reports nothing about settings on a deployment with no sites", async () => {

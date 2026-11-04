@@ -25,12 +25,13 @@
  */
 import { matches } from "../../../core/conditions";
 import type { Blok, Doc, Json } from "../../../core/doc";
-import type { Field } from "../../../core/fields";
+import { type Field, isBlankValue } from "../../../core/fields";
+import { lengthMessage, lengthProblem, measureText } from "../../../core/guidance";
 import { type LayerState, layerStates, mergeLayers } from "../../../core/layers";
 import { isTranslatable } from "../../../core/locales";
 import type { Mutation } from "../../../core/mutations";
 import type { Presence } from "../../../core/protocol";
-import { asRichtext, isRichtextEmpty, richtextToText } from "../../../core/richtext";
+import { asRichtext, richtextToText } from "../../../core/richtext";
 import type { SchemaIndex } from "../../../core/schema";
 import { asAsset, asAssets, asStoryIds } from "../../../core/values";
 import { singletonTypeOf } from "../../../core/sites";
@@ -91,7 +92,7 @@ export function groupRuns(entries: [string, Field][], data: Record<string, Json>
   }
   for (const run of runs) {
     run.empty =
-      run.group !== null && run.entries.every(([name, f]) => isBlank(f, data[name] ?? null));
+      run.group !== null && run.entries.every(([name, f]) => isBlankValue(f, data[name] ?? null));
   }
   return runs;
 }
@@ -339,7 +340,7 @@ export function isInlineControl(kind: Field["kind"]): boolean {
  * red asterisk with no message at all, so "is this field satisfied" had no single
  * answer anywhere.
  */
-export function fieldWarning(field: Field, value: Json): string | null {
+export function fieldWarning(field: Field, value: Json, name?: string): string | null {
   if (field.kind === "references") {
     const n = asStoryIds(value).length;
     if (field.min !== undefined && n < field.min) {
@@ -354,25 +355,74 @@ export function fieldWarning(field: Field, value: Json): string | null {
     if (field.min !== undefined && value < field.min) return `Must be at least ${field.min}.`;
     if (field.max !== undefined && value > field.max) return `Must be at most ${field.max}.`;
   }
-  if (field.required && isBlank(field, value)) return "Required — this is still empty.";
+  // Advisory, like everything here: the same sentence `check_document`'s
+  // `length-over` / `length-under` carries, from the same `lengthMessage`
+  // (`authoring-guidance.md` decision 14), so a person and an agent are told the
+  // same thing about the same value.
+  const length = lengthProblem(field, value);
+  // Labelled as `check_document` labels it, `label ?? name`, so the two sentences match.
+  if (length) return lengthMessage(field.label ?? name ?? "This field", length);
+  if (field.required && isBlankValue(field, value)) return "Required — this is still empty.";
   return null;
 }
 
 /**
- * Whether a value counts as nothing, per kind. `false` and `0` are values, an
- * empty richtext document and a whitespace-only string are not — the same rule
- * `core/locales.ts`'s `isEmptySource` applies when it decides whether a field is
- * work a translator owes, and stated the same way for the same reason.
+ * The counter beside a field's label when it declares a `length`
+ * (`authoring-guidance.md` decision 14): `42 / 60`, `12 / 40 words`, or against a
+ * minimum alone `12 (min 20)`. Measured by `core/guidance.ts`'s `measureText`, the
+ * function `check_document` measures with, so the two cannot disagree by one.
+ * `over` is outside either bound with something typed; an empty field counts 0 and
+ * is never `over`, because emptiness is `required`'s to report. `near` is the early
+ * cue: within the limit but at `NEAR_LIMIT` of a `max` or more, so the counter
+ * changes before the sentence below it appears rather than at the same keystroke.
+ * Never both, and never against a minimum alone, which has nothing to approach.
+ *
+ * Null for a field with no `length`, which is what keeps the inspector of a host
+ * that declares none exactly as it was.
  */
-export function isBlank(field: Field, value: Json): boolean {
-  if (value === null || value === undefined) return true;
-  if (field.kind === "richtext") return isRichtextEmpty(asRichtext(value));
-  if (field.kind === "boolean" || field.kind === "number") return false;
-  if (typeof value === "string") return value.trim() === "";
-  if (Array.isArray(value)) return value.length === 0;
-  if (field.kind === "asset") return asAsset(value) === null;
-  return false;
+export function lengthCounter(
+  field: Field,
+  value: Json,
+): { text: string; over: boolean; near: boolean } | null {
+  if (field.kind !== "text" && field.kind !== "textarea" && field.kind !== "richtext") return null;
+  const length = field.length;
+  if (!length || (length.max === undefined && length.min === undefined)) return null;
+  const n = measureText(field, value) ?? 0;
+  const words = length.unit === "words" ? " words" : "";
+  const text =
+    length.max !== undefined ? `${n} / ${length.max}${words}` : `${n}${words} (min ${length.min})`;
+  const over = lengthProblem(field, value) !== null;
+  const near = !over && length.max !== undefined && n >= length.max * NEAR_LIMIT;
+  return { text, over, near };
 }
+
+/**
+ * The share of a `length.max` at which the counter turns to its near-limit state. 90%,
+ * because the spec names no threshold: a heading of 60 turns at 54, which leaves about
+ * a word of room, and a 160-character description at 144.
+ */
+export const NEAR_LIMIT = 0.9;
+
+/**
+ * What a field's "Writing guide" disclosure shows (`authoring-guidance.md`
+ * decision 14): its tone and its examples, or null when it declares neither, so no
+ * empty disclosure is ever drawn.
+ */
+export function guidanceOf(
+  field: Pick<Field, "guidance">,
+): { tone: string | null; examples: readonly string[] } | null {
+  const tone = field.guidance?.tone?.trim() || null;
+  const examples = (field.guidance?.examples ?? []).filter((e) => e.trim() !== "");
+  return tone || examples.length ? { tone, examples } : null;
+}
+
+/**
+ * Whether a value counts as nothing, per kind. Moved to `core/fields.ts` as
+ * `isBlankValue` (`authoring-guidance.md` decision 15), so the inspector, the
+ * translation walk, `check_document` and the settings audit share one rule; the
+ * old name stays so the inspector's callers are untouched.
+ */
+export { isBlankValue as isBlank };
 
 /* --------------------------------------------------------------- focus mode --- */
 

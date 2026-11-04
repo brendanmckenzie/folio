@@ -251,6 +251,7 @@ const READS = [
   "search_documents",
   "query_documents",
   "get_document",
+  "check_document",
   "list_versions",
 ];
 /**
@@ -312,6 +313,9 @@ describe("server/discover", () => {
     const answer = await rpc<{ instructions: string }>("server/discover");
     expect(answer.result?.instructions).toContain("filtered");
     expect(answer.result?.instructions).toContain("undoable");
+    // Spec 40: a pointer at the guidance and the check, and nothing of any guide.
+    expect(answer.result?.instructions).toContain("call check_document");
+    expect(answer.result?.instructions).toContain("get_schema’s `writing`");
   });
 
   /**
@@ -322,9 +326,11 @@ describe("server/discover", () => {
   it("adds no scope sentence on a deployment with no sites", async () => {
     const answer = await rpc<{ instructions: string }>("server/discover");
     expect(answer.result?.instructions).not.toContain("scoped to");
-    expect(answer.result?.instructions.endsWith("Publishing is a separate, explicit step.")).toBe(
-      true,
-    );
+    expect(
+      answer.result?.instructions.endsWith(
+        "then call check_document and fix what it reports before publishing.",
+      ),
+    ).toBe(true);
   });
 
   /**
@@ -566,7 +572,7 @@ describe("tools/list", () => {
   it("admin — every tool, including delete_document", async () => {
     const offered = await listed(await tokenFor("admin"));
     expect(offered).toContain("delete_document");
-    expect(offered).toHaveLength(16);
+    expect(offered).toHaveLength(17);
   });
 
   /**
@@ -590,7 +596,7 @@ describe("tools/list", () => {
    * has no access control by choice, and MCP is not the place to invent some.
    */
   it("offers every tool on an open deployment, with no credential at all", async () => {
-    expect(await listed(undefined, open)).toHaveLength(16);
+    expect(await listed(undefined, open)).toHaveLength(17);
   });
 
   /** Names the site's own declared types, which is a bounded list of strings
@@ -683,6 +689,33 @@ describe("tools/call", () => {
     );
     expect(answer.error?.code).toBe(-32603);
     expect(answer.error?.message).toBe("This token is missing the 'content:write' scope.");
+  });
+
+  /**
+   * `check_document` (`authoring-guidance.md` decision 12): the draft by default,
+   * refused by the route itself for a token that cannot read drafts, which is
+   * offered the tool all the same and gets the published snapshot on request.
+   */
+  it("checks a draft through check_document, and lets the route refuse a draft to content:read", async () => {
+    const { id, headers } = await created();
+    const report = await callTool<{
+      source: string;
+      findings: { check: string; uid: string; field: string | null }[];
+    }>("check_document", { id }, headers);
+    expect(report.value?.source).toBe("draft");
+    expect(report.value?.findings).toEqual([]);
+
+    const reader = await tokenFor("content:read");
+    expect(await listed(reader)).toContain("check_document");
+    const refused = await callTool("check_document", { id }, reader);
+    expect(refused.error?.message).toBe("This token is missing the 'content:read:draft' scope.");
+    await callTool("publish_document", { id }, await tokenFor("publish"));
+    const published = await callTool<{ source: string }>(
+      "check_document",
+      { id, status: "published" },
+      reader,
+    );
+    expect(published.value?.source).toBe("published");
   });
 
   /**

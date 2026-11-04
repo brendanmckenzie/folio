@@ -1,8 +1,9 @@
 import { createExecutionContext, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { asset, blocks, defineBlock, select, text } from "../../src/core";
-import { createFolio } from "../../src/server";
+import { createFolio, magicLink } from "../../src/server";
 import type { FolioBindings } from "../../src/server";
+import { createToken } from "../../src/server/auth/tokens";
 
 // conditional-fields.md's testing requirements: `showIf` and `hidden` are
 // plain JSON, so the guard against someone "simplifying" them into a function
@@ -180,5 +181,87 @@ describe("GET /folio/api/schema: field defaults and block presets survive the tr
         ],
       },
     ]);
+  });
+});
+
+// authoring-guidance.md decision 6: the brand's writing guide is served on the
+// gated v1 schema and nowhere open.
+
+describe("the writing guide on GET /folio/api/v1/schema", () => {
+  const WRITING = {
+    voice: "SINGLE-VOICE-91c2: plain words, short sentences.",
+    avoid: [{ term: "synergy", use: "working together" }],
+  };
+  const guided = defineBlock({
+    name: "hero",
+    label: "Hero",
+    help: "The first thing on a landing page.",
+    fields: {
+      heading: text({
+        help: "The promise.",
+        length: { max: 60 },
+        guidance: { tone: "Second person.", examples: ["Find your next safari"] },
+      }),
+    },
+    render: () => null,
+  });
+  const build = (writing?: typeof WRITING) =>
+    createFolio<Cloudflare.Env>({
+      blocks: [guided],
+      root: "hero",
+      bindings,
+      basePath: "/folio",
+      auth: { providers: [magicLink<Cloudflare.Env>({ send: () => {} })] },
+      ...(writing ? { writing } : {}),
+    });
+  const get = async (folio: ReturnType<typeof build>, path: string, token?: string) =>
+    (await folio.handle(
+      new Request(
+        `${ORIGIN}${path}`,
+        token ? { headers: { authorization: `Bearer ${token}` } } : {},
+      ),
+      env,
+      createExecutionContext(),
+    )) as Response;
+
+  it("carries the guide beside the manifest, and the open schema never does", async () => {
+    const folio = build(WRITING);
+    const { token } = await createToken(env.DB, { name: "reader", scopes: ["content:read"] });
+    const gated = await get(folio, "/folio/api/v1/schema", token);
+    expect(gated.status).toBe(200);
+    const body = await gated.json<{
+      writing?: unknown;
+      blocks: { name: string; help?: string }[];
+    }>();
+    expect(body.writing).toEqual(WRITING);
+    expect(body.blocks.find((b) => b.name === "hero")?.help).toBe(
+      "The first thing on a landing page.",
+    );
+
+    const open = await get(folio, "/folio/api/schema");
+    expect(open.status).toBe(200);
+    const text = await open.text();
+    expect(text).not.toContain('"writing"');
+    expect(text).not.toContain("SINGLE-VOICE-91c2");
+    // Block and field guidance are public, like `help` (decision 6, the documented exposure).
+    const manifest = JSON.parse(text) as { blocks: { name: string; fields: object }[] };
+    expect(manifest.blocks.find((b) => b.name === "hero")?.fields).toEqual({
+      heading: {
+        kind: "text",
+        help: "The promise.",
+        length: { max: 60 },
+        guidance: { tone: "Second person.", examples: ["Find your next safari"] },
+      },
+    });
+
+    // Unauthenticated v1 is refused outright, so the guide is never sent without a credential.
+    expect((await get(folio, "/folio/api/v1/schema")).status).toBe(401);
+  });
+
+  it("answers no writing key for a host that declares none", async () => {
+    const folio = build();
+    const { token } = await createToken(env.DB, { name: "reader2", scopes: ["content:read"] });
+    const body = await (await get(folio, "/folio/api/v1/schema", token)).json<object>();
+    expect(body).not.toHaveProperty("writing");
   });
 });

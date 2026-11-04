@@ -4,15 +4,29 @@ export const hero = defineBlock({
   name: "hero",
   label: "Hero",
   summary: "heading",
+  // What the block is for, for the editor's picker and an agent's get_schema alike
+  // (`docs/specs/content-model/authoring-guidance.md` decision 5).
+  help: "The first thing on a landing page: one promise, one image, at most two actions.",
   fields: {
     eyebrow: text({
       label: "Eyebrow",
       placeholder: "Small label above the heading",
       translatable: true,
     }),
-    heading: text({ label: "Heading", required: true, translatable: true }),
+    heading: text({
+      label: "Heading",
+      required: true,
+      translatable: true,
+      // Advisory: counted in the inspector and reported by check_document, never refused.
+      length: { max: 60 },
+      guidance: {
+        tone: "Second person, present tense. Lead with what the reader gets.",
+        examples: ["Find your next safari", "Plan a week on the coast"],
+      },
+    }),
     body: textarea({ label: "Body", rows: 3, translatable: true }),
-    image: asset({ label: "Background image", accept: "image/*" }),
+    // Under a gradient and carrying no information, so it wants no alt text.
+    image: asset({ label: "Background image", accept: "image/*", decorative: true }),
     align: select({
       label: "Alignment",
       options: [

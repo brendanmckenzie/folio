@@ -1151,6 +1151,21 @@ export const STORY_STATE = v.picklist(
 );
 
 /**
+ * `?status=` on `GET /api/v1/documents/:id/check`
+ * (`../../docs/specs/content-model/authoring-guidance.md` decision 12). Screened
+ * rather than read as `=== 'draft'` the way `GET /documents/:id` reads it, because
+ * this route's default is the draft: a misspelt `publishd` silently checking the
+ * draft would be the wrong copy with no sign of it. Exported for `tools.test.ts`,
+ * which pins `check_document`'s advertised enum against it, as for `STORY_STATE`.
+ */
+export const CHECK_STATUS = v.picklist(["draft", "published"], "must be draft or published");
+
+/** `?status=`, absent meaning `draft`; anything else is `bad_request`. */
+export function checkStatusQuery(raw: string | undefined): "draft" | "published" {
+  return raw === undefined ? "draft" : parseOrThrow(CHECK_STATUS, raw, "status");
+}
+
+/**
  * A free-text search term. Bounded, and that is the whole screen: it reaches SQL
  * as a bound `like` parameter, so `%` and `_` in it are the user's wildcards
  * rather than an injection — a substring search where `_` matched any character

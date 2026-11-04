@@ -50,6 +50,7 @@ import {
   validatePresets,
   validateTypes,
 } from "../core/schema";
+import { validateGuidance } from "../core/guidance";
 import {
   layerId,
   layerSeed,
@@ -68,6 +69,7 @@ import { cachePurgeHooks, type PurgeCapability } from "./cache-purge";
 import type { AuditContext } from "./audit";
 import { type ContentProjection, contentProjection } from "./content-index";
 import { type ResolvedDescribe, validateDescribe } from "./describe";
+import { validateWriting } from "./writing";
 import { logActionWarnings } from "./form-actions";
 import { type ResolvedForms, validateForms } from "./form-responses";
 import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
@@ -117,6 +119,7 @@ import type {
   ReadBindings,
   SpaceStub,
   StoryStub,
+  WritingGuide,
 } from "./types";
 import type { FolioDb } from "./db";
 
@@ -292,6 +295,12 @@ export interface BrandRuntime {
   gate: ResolvedGate | null;
   forms: ResolvedForms | null;
   describe: ResolvedDescribe | null;
+  /**
+   * This brand's writing guide (`authoring-guidance.md` decision 6), or null. Read
+   * by `GET {base}/api/v1/schema` and `check_document` only, and never part of
+   * `manifest`, which `{base}/api/schema` serves unauthenticated.
+   */
+  writing: WritingGuide | null;
   previewWrap: PreviewWrap | undefined;
   /** This brand's preview entry and stylesheets (decision 9). */
   page: (which: "preview") => PageAssets;
@@ -685,6 +694,7 @@ const BRAND_KEYS = [
   "gate",
   "forms",
   "describe",
+  "writing",
   "migrations",
 ] as const;
 
@@ -773,6 +783,7 @@ interface PreparedBrand {
   migrations: readonly Migration[];
   gate: ResolvedGate | null;
   describe: ResolvedDescribe | null;
+  writing: WritingGuide | null;
   forms: ResolvedForms | null;
   previewCss: readonly string[];
   previewWrap: PreviewWrap | undefined;
@@ -795,6 +806,10 @@ function prepareBrand<Env>(
     // unknown type or slot, a disallowed child, a cycle) is a config mistake,
     // not a runtime surprise a caller discovers three requests later.
     validatePresets(schema);
+    // Same timing, same reason: a `length` on a number field, a `min` above its
+    // `max`, or guidance over its caps is a limit the host believes in and nothing
+    // would ever report (`../../docs/specs/content-model/authoring-guidance.md`).
+    validateGuidance(schema);
     // Same timing, same reason, and the same for `types`: an unknown root block,
     // two defaults, a duplicate name or an `under` chain that never reaches the
     // top level all throw here (`../../docs/specs/foundation/document-types.md`).
@@ -811,6 +826,9 @@ function prepareBrand<Env>(
     // upload — where nobody is looking and the only symptom is alt text that
     // never appears (`../../docs/specs/content-model/media-library.md` decision 8).
     const describe = validateDescribe(brand.describe);
+    // Same timing, same reason: a guide served to every agent session should not
+    // discover its own malformed `avoid` list on the first check (decision 6).
+    const writing = validateWriting(brand.writing);
     // Same timing, same reason, one rung more insistent than `describe`: the
     // request that would otherwise discover a `verify` that is not a function is an
     // anonymous POST from the public internet, and `verify` fails closed — so the
@@ -858,6 +876,7 @@ function prepareBrand<Env>(
       migrations,
       gate,
       describe,
+      writing,
       forms,
       previewCss: brand.previewCss ?? [],
       previewWrap: brand.previewWrap,
@@ -1114,7 +1133,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * it is the runtime it always was.
    */
   const buildBrand = (b: PreparedBrand): BrandRuntime => {
-    const { registry, schema, types, globals, migrations, gate, describe, forms } = b;
+    const { registry, schema, types, globals, migrations, gate, describe, writing, forms } = b;
     /** The brand's forms config, which the descriptor loop's own `forms` shadows. */
     const registeredForms = forms;
     const schemaId = latestMigrationId(migrations);
@@ -2104,6 +2123,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       gate,
       forms,
       describe,
+      writing,
       previewWrap: b.previewWrap,
       page: () => previewPage(),
       seed,

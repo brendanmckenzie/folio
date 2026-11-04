@@ -207,6 +207,16 @@ export function useRichtext(
    * undefined.
    */
   surfaceClass: string | undefined,
+  /**
+   * The ids of the field's length counter and its warning, set as the surface's
+   * `aria-describedby` (`authoring-guidance.md` decision 14). The warning's comes and
+   * goes as the value crosses a limit, and so does `invalid`: both reach the mounted
+   * surface because `useEditor` re-applies `editorProps` (a fresh object each render)
+   * through `setOptions`, which keeps TipTap's `role="textbox"`.
+   */
+  describedBy?: string,
+  /** Past a `length` limit: the surface's `aria-invalid`. */
+  invalid?: boolean,
 ): Richtext {
   /** Whether the prose surface itself has focus. See `externalUpdate`. */
   const [focused, setFocused] = useState(false);
@@ -263,6 +273,8 @@ export function useRichtext(
          */
         tabindex: "0",
         "data-folio-prose": "",
+        ...(describedBy ? { "aria-describedby": describedBy } : {}),
+        ...(invalid ? { "aria-invalid": "true" } : {}),
       },
     },
     // The admin renders on the client only; TipTap warns without this.

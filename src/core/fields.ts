@@ -4,8 +4,49 @@ import type { Json } from "./doc";
 import type { ResolvedForm } from "./forms";
 import type { ResolvedCollection } from "./query";
 import type { ResolvedAsset, ResolvedLink, ResolvedReference } from "./resolve";
-import type { RichtextMarkName, RichtextNodeName } from "./richtext";
-import type { LinkKind } from "./values";
+import {
+  asRichtext,
+  isRichtextBlank,
+  type RichtextMarkName,
+  type RichtextNodeName,
+} from "./richtext";
+import { asAsset, type LinkKind } from "./values";
+
+/**
+ * How to write a value, for the people and the agents who fill it in
+ * (`../../docs/specs/content-model/authoring-guidance.md` decision 1).
+ *
+ * **Advisory, and nothing enforces it.** A field's *purpose* stays in `help`, the
+ * one line already written for whoever fills the field in; this adds what a line
+ * cannot hold. Served in the manifest beside `help`, which is unauthenticated at
+ * `{base}/api/schema`, so it is public: nothing private belongs here. The brand's
+ * own voice is `writing` on the config, which is not.
+ *
+ * Capped at construction (`validateGuidance`): `tone` at 500 characters,
+ * `examples` at 10 entries of 1-500 characters each.
+ */
+export interface Guidance {
+  /** How to write it: voice, register, what to lead with. At most 500 characters. */
+  tone?: string;
+  /** Good values, as plain text. At most 10, each 1-500 characters. */
+  examples?: readonly string[];
+}
+
+/**
+ * An advisory length for one stored prose value (`authoring-guidance.md`
+ * decisions 2 to 4): reported by `check_document` and drawn as the inspector's
+ * counter, **never refused** on a write or a publish. `characters` counts code
+ * points after trimming; `words` counts runs of non-whitespace, which undercounts
+ * languages that do not separate words with spaces.
+ */
+export interface TextLength {
+  /** A whole number, 0 or more. */
+  min?: number;
+  /** A whole number, 1 or more, and not below `min`. */
+  max?: number;
+  /** Default `characters`. */
+  unit?: "characters" | "words";
+}
 
 interface Common {
   label?: string;
@@ -56,6 +97,36 @@ interface Common {
    * per-locale structure is exactly what decision 1 trades away.
    */
   translatable?: boolean;
+  /**
+   * Writing guidance for people and agents (`authoring-guidance.md` decision 1).
+   * Advisory; nothing enforces it. On every kind, `blocks` included: a slot's tone
+   * and examples ("two to four feature cards, each a benefit") are guidance too.
+   */
+  guidance?: Guidance;
+}
+
+/**
+ * An advisory `length` (`authoring-guidance.md` decision 2).
+ *
+ * **Deliberately not on `Common`**, the `Indexable` precedent: only `text`,
+ * `textarea` and `richtext` carry it, so `number({ length })` does not compile. A
+ * length means nothing on a number, an asset or a slot, and `multiasset.max` and
+ * `references.min`/`max` already count items. A JS host the types cannot stop is
+ * refused at construction (`validateGuidance`).
+ */
+interface Measured {
+  /** Advisory: reported by check_document and the inspector, never refused. */
+  length?: TextLength;
+}
+
+/**
+ * Opts an image field out of `check_document`'s `alt-missing`
+ * (`authoring-guidance.md` decision 16). An empty `alt` cannot say "decorative" by
+ * itself, because `''` is also what every asset holds before anybody types one.
+ * Everything else about the field, its alt input included, is unchanged.
+ */
+interface Decorative {
+  decorative?: boolean;
 }
 
 /**
@@ -124,8 +195,14 @@ export type Field =
    * racing can both pass, which is what `/folio/audit`'s `unique-duplicate` reports.
    * Refused at construction without `indexed` or off a root block (`validateTypes`).
    */
-  | ({ kind: "text"; placeholder?: string; unique?: boolean } & Common & Indexable & Searchable)
-  | ({ kind: "textarea"; rows?: number; placeholder?: string } & Common & Indexable & Searchable)
+  | ({ kind: "text"; placeholder?: string; unique?: boolean } & Common &
+      Indexable &
+      Searchable &
+      Measured)
+  | ({ kind: "textarea"; rows?: number; placeholder?: string } & Common &
+      Indexable &
+      Searchable &
+      Measured)
   | ({ kind: "number"; min?: number; max?: number } & Common & Indexable)
   | ({ kind: "boolean" } & Common & Indexable)
   /**
@@ -139,8 +216,8 @@ export type Field =
   | ({ kind: "date"; time?: boolean } & Common & Indexable)
   | ({ kind: "select"; options: readonly SelectOption[] } & Common & Indexable)
   /** `accept` is passed to the file picker, e.g. `'image/*'` or `'.pdf'`. */
-  | ({ kind: "asset"; accept?: string } & Common)
-  | ({ kind: "multiasset"; accept?: string; max?: number } & Common)
+  | ({ kind: "asset"; accept?: string } & Common & Decorative)
+  | ({ kind: "multiasset"; accept?: string; max?: number } & Common & Decorative)
   /**
    * `allow` narrows which kinds of target the editor offers, so a "Read more"
    * button can be restricted to internal pages while a footer link is not.
@@ -160,7 +237,8 @@ export type Field =
       nodes?: readonly RichtextNodeName[];
       headingLevels?: readonly number[];
     } & Common &
-      Searchable)
+      Searchable &
+      Measured)
   /**
    * Points at another document and resolves its content at render time.
    * `types` narrows the candidates to particular document types, so a
@@ -356,6 +434,29 @@ export type ValueOf<F extends Field> = F extends { kind: "blocks" | "richtext" }
                       : string;
 
 export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf<F[K]> };
+
+/**
+ * Whether a value counts as nothing, per kind: the **one** blank rule
+ * (`authoring-guidance.md` decision 15). The inspector's "Required",
+ * `check_document`'s `required-empty`, the translation walk's "nothing to
+ * translate" and the audit's `required-setting` all read this, because three rules
+ * that disagreed about a whitespace heading told a person and an agent different
+ * things about the same field.
+ *
+ * `false` and `0` are values; an empty richtext document, a whitespace-only string,
+ * an empty array and an asset with nowhere to load it from are not. A `blocks`
+ * field holds no value (children are separate bloks), so its emptiness is a
+ * question about children and is the caller's.
+ */
+export function isBlankValue(field: Field, value: Json | undefined): boolean {
+  if (value === null || value === undefined) return true;
+  if (field.kind === "richtext") return isRichtextBlank(asRichtext(value));
+  if (field.kind === "boolean" || field.kind === "number") return false;
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  if (field.kind === "asset") return asAsset(value) === null;
+  return false;
+}
 
 export function defaultValue(f: Field): Json {
   switch (f.kind) {

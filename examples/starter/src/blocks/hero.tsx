@@ -8,8 +8,11 @@ export const hero = defineBlock({
   name: "hero",
   label: "Hero",
   summary: "heading",
+  // What the block is for: the first line of its entry in the block picker, and
+  // what an agent reads in get_schema before choosing it.
+  help: "The opening of a page: a heading, a line of copy, and up to two buttons.",
   fields: {
-    heading: text({ label: "Heading", required: true }),
+    heading: text({ label: "Heading", required: true, length: { max: 80 } }),
     body: textarea({ label: "Body", rows: 3 }),
     image: asset({ label: "Background image", accept: "image/*" }),
     align: select({

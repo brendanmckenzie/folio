@@ -639,6 +639,19 @@ export interface FolioLogger {
  */
 export type FolioConfig<Env> = FolioSingleConfig<Env> | FolioBrandedConfig<Env>;
 
+/**
+ * One brand's writing guide (`../../docs/specs/content-model/authoring-guidance.md`
+ * decisions 6 and 7). The prose is never judged by Folio: the agent reading it is
+ * the model, and it is already in the loop. `avoid` is the one machine-checked
+ * part, matched case-insensitively on word boundaries in source-locale prose.
+ */
+export interface WritingGuide {
+  /** Voice, audience, tone, house style. Markdown, served to agents verbatim. 1-16,000 characters. */
+  voice: string;
+  /** Terms this brand does not use, each with what to say instead. At most 200, distinct ignoring case. */
+  avoid?: readonly { term: string; use?: string; reason?: string }[];
+}
+
 /** A brand as people and models see it: the switcher, the tab title, the sign-in mail. */
 export interface BrandRef {
   id: string;
@@ -666,6 +679,8 @@ export interface FolioBrand<Env> {
   gate?: FolioGate<Env>;
   forms?: FolioForms<Env>;
   describe?: FolioDescribe<Env>;
+  /** This brand's voice and avoided terms, served to agents on the gated v1 `/schema` only. */
+  writing?: WritingGuide;
   /** Ids carry the brand: `takeoffgo/0001-fifty-fifty-to-feature`. */
   migrations?: readonly Migration[];
 }
@@ -688,6 +703,7 @@ export interface FolioBrandedConfig<Env>
     | "gate"
     | "forms"
     | "describe"
+    | "writing"
     | "migrations"
     | "sites"
     | "assets"
@@ -715,6 +731,7 @@ export interface FolioBrandedConfig<Env>
   gate?: never;
   forms?: never;
   describe?: never;
+  writing?: never;
   migrations?: never;
 }
 
@@ -880,6 +897,18 @@ export interface FolioSingleConfig<Env> {
    * request reaches it first.
    */
   describe?: FolioDescribe<Env>;
+  /**
+   * The brand's writing guide (`../../docs/specs/content-model/authoring-guidance.md`
+   * decision 6): voice prose, served to agents verbatim, and terms to avoid, which
+   * `check_document` reports.
+   *
+   * **Served on `GET {base}/api/v1/schema` only**, as `writing` beside the manifest,
+   * so `get_schema` hands it to an agent in the call it already makes first. Never
+   * on the unauthenticated `{base}/api/schema` and never in the MCP instructions,
+   * both of which answer without a credential: a guide can name things a brand
+   * would rather not publish. Validated at construction (`validateWriting`).
+   */
+  writing?: WritingGuide;
   /**
    * What a host decides about form submissions
    * (`../../docs/specs/content-model/forms.md` decision 9): a `verify` function

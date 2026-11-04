@@ -495,6 +495,142 @@ constants, and `folio.reader(env, req)` is the one call a page route makes. Beca
 works inside React Router, TanStack Start, or whatever else owns your routes.
 Your layout, your `<head>`, your error boundaries.
 
+## Writing guidance and content checks
+
+A field's `help` says what it is for. Folio has four more places to say how to
+write it, and one way to ask whether a document is sound. People see them in the
+inspector; an agent reads them in `get_schema` and asks with `check_document`.
+All of it is advisory: nothing here refuses a write or a publish.
+
+```tsx
+export const hero = defineBlock({
+  name: 'hero',
+  label: 'Hero',
+  help: 'The first thing on a landing page: one promise, one image.',
+  fields: {
+    heading: text({
+      help: 'The promise.',
+      length: { max: 60 },
+      guidance: { tone: 'Second person.', examples: ['Find your next safari'] },
+    }),
+    image: asset({ decorative: true }),
+  },
+  render: …,
+})
+```
+
+- **A block's `help`** (at most 500 characters) is what the block is for and when
+  to choose it. It is the first line of the block's entry in the block picker,
+  above the description Folio derives from its fields, and it sits under the
+  block's head in the inspector.
+- **`guidance`**, on a block or on any field (`blocks` slots included), is
+  `{ tone?, examples? }`: how to write it, and up to ten good values of at most 500
+  characters each. A field's purpose stays in `help`; `guidance` does not have a
+  second word for it. The inspector shows a field's guidance in a closed "Writing
+  guide" disclosure under its help line.
+- **`length`**, on `text`, `textarea` and `richtext` only, is
+  `{ min?, max?, unit? }`. `unit` is `characters` (the default) or `words`.
+  Characters are Unicode code points after trimming, so an emoji counts as however
+  many code points it is; words are runs of non-whitespace, which undercounts
+  Chinese, Japanese and Thai, so use `characters` for those languages. Richtext is
+  measured over its plain text, so marks and links add nothing. Each stored value
+  is measured on its own: the source, and each locale's override. The inspector
+  draws a counter beside the label (`42 / 60`) that turns the warning colour
+  outside the bounds, and the field's warning line says the same sentence the
+  check reports. An empty value is never measured, because emptiness is
+  `required`'s business. Declare a limit here rather than writing it into `help`.
+- **`decorative: true`**, on `asset` and `multiasset`, opts an image field out of
+  the alt-text check. An empty `alt` cannot say "decorative" by itself, because it
+  is also what every asset holds before anybody types one.
+
+`length` on any other kind does not compile, and a JS host is refused at
+construction, as it is for a `min` above its `max`, a `max` of 0, an unknown
+`unit`, or guidance over its caps. An existing `help` is not capped.
+
+**Block and field guidance is public.** It travels in the manifest beside `help`,
+labels and presets, and the manifest is served unauthenticated at
+`{base}/api/schema`, because the admin needs it before it can draw a sign-in
+prompt. Write nothing into `help` or `guidance` that you would not show in an
+unauthenticated `curl`.
+
+### The brand's writing guide
+
+`writing` is the private half: a brand's voice, and the terms it does not use.
+
+```ts
+createFolio({
+  // …
+  writing: {
+    voice: 'Plain words, second person, short sentences. Say what it does before why.',
+    avoid: [
+      { term: 'cheap', use: 'good value', reason: 'We sell on quality.' },
+      { term: 'synergy', use: 'working together' },
+    ],
+  },
+})
+```
+
+`voice` is Markdown, 1 to 16,000 characters, served to agents verbatim. `avoid` is
+at most 200 terms, distinct ignoring case. On a deployment with `brands`, `writing`
+is a brand key (`brands.<id>.writing`) and is refused at the top level, so every
+site of a brand reads that brand's guide and never another's.
+
+It is served **only on the gated `GET {base}/api/v1/schema`**, as a `writing` key
+beside the manifest, which is the call `get_schema` makes. It is never on the open
+`{base}/api/schema`, and the MCP instructions (also served without a credential)
+point at it without quoting it. The admin does not show it: editors keep reading
+their style guide wherever the brand keeps it.
+
+Folio never judges the voice prose; the agent reading it is the model. The `avoid`
+terms are the one machine-checked part: each is matched case-insensitively, as a
+literal, on Unicode word boundaries, in source-locale `text`, `textarea` and
+`richtext` values. "cheap" does not match "cheapest", so list both if both are out.
+A term inside a link's target is not matched, because a link mark holds its target
+in attributes rather than in the text.
+
+### Checking a document
+
+`GET {base}/api/v1/documents/:id/check` (the `check_document` MCP tool) answers
+what is wrong with one document and exactly where. It checks the **draft** by
+default, which needs `content:read:draft`; `?status=published` checks the
+published snapshot at `content:read`. `?locale=` limits the per-locale findings to
+one locale; source-locale findings are always reported. It reads the document
+through the same scope fence as `GET /documents/:id`, and every link and reference
+target in one indexed read within the request's chain, so a target on another
+site reads exactly like a deleted one.
+
+Each finding names its block `uid`, `field` and, for one locale's value, `locale`:
+exactly what `PATCH /documents/:id/fields` (`patch_fields`) takes, the root
+included. `path` is the block's place in the nested shape, and `fix` says which
+tool repairs it: `patch_fields` for a value, `write_content` for structure, and
+`schema` for drift only a code change or a content migration can clear.
+
+| `check` | Severity | `fix` | What it means |
+| --- | --- | --- | --- |
+| `unknown-type` | error | `write_content` | A block whose type nothing declares; it renders nothing. |
+| `field-shape` | error | `patch_fields` | A stored value that does not fit its field (`detail.reason`). |
+| `link-broken` | error | `patch_fields` | A link to a document that is missing, has no URL, or is a type the field does not allow (`detail.reason`). |
+| `reference-broken` | error | `patch_fields` | A reference to a missing document or a disallowed type. |
+| `required-empty` | warning | `patch_fields`, or `write_content` for a slot | A `required` field holding nothing, by the inspector's own blank rule. |
+| `alt-missing` | warning | `patch_fields` | An image with no alt text; `detail.index` for a `multiasset` entry. |
+| `length-over`, `length-under` | warning | `patch_fields` | A value outside its `length`. |
+| `term-avoided` | warning | `patch_fields` | A brand `avoid` term, with `detail.use` when the guide gives one. |
+| `link-unpublished`, `reference-unpublished` | warning | `patch_fields` | A target that is a draft or taken down. |
+| `orphan-key` | warning | `schema` | A stored key the schema no longer declares. |
+| `translated-not-translatable` | warning | `schema` | Translations in a field not marked `translatable`. |
+| `unknown-locale` | warning | `schema` | Translations under an undeclared locale (`locale` is the code). |
+| `missing-field` | info | `patch_fields` | A declared field with no stored key. |
+| `translation-missing` | info | `patch_fields` | A translatable field with source content and nothing in `locale`. |
+
+The `check` names are a v1 contract: a name may be added and is never renamed or
+removed within v1. The `message` text is not. `counts` cover every finding;
+`findings` are errors first, then warnings, then info, each in document order, and
+are capped at 500 with `truncated: true`. On a layer with something below it,
+`missing-field` and `required-empty` are skipped, because absent means inherited.
+
+**Nothing blocks a publish.** `required` is not enforced anywhere, and a check is a
+tool an agent uses before asking a person to look, not a gate on what goes live.
+
 ## Document types
 
 A document is not necessarily a page. `types` declares each shape one, with its
@@ -4776,8 +4912,8 @@ Two surfaces over one set of services.
 
 ## An MCP server, for assistants
 
-`{base}/mcp` is the same content again, for Claude or any other MCP client: sixteen
-tools, each one of the v1 routes above dispatched internally, so there is no second
+`{base}/mcp` is the same content again, for Claude or any other MCP client: seventeen
+tools, sixteen of them a v1 route above dispatched internally, so there is no second
 implementation of the access gate, the validation or the document shape. **Connecting one
 is documented in [`mcp.md`](mcp.md)** — mint a token on the admin's Access
 screen, then one `claude mcp add` command.

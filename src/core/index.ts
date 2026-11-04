@@ -63,7 +63,7 @@ export {
   textarea,
   defaultValue,
 } from "./fields";
-export type { Field, PropsOf, SelectOption, ValueOf } from "./fields";
+export type { Field, Guidance, PropsOf, SelectOption, TextLength, ValueOf } from "./fields";
 
 // Collections (`../../docs/specs/content-model/collections.md`). A block author
 // needs `ResolvedCollection` to type what `collection()` hands `render`; a host

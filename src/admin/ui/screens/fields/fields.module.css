@@ -59,6 +59,33 @@
   font-size: var(--text-xs);
 }
 
+/* A field's "Writing guide" disclosure (`authoring-guidance.md` decision 14): quiet,
+   closed by default, the help line's size. */
+.guide {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+/* At least 24 x 24 CSS px, WCAG 2.2's target size minimum: at the help line's 11px the
+   bare summary was 16px tall. The line height makes the row, so the label stays
+   centred in it and the disclosure marker keeps its `list-item` display. */
+.guide > summary {
+  cursor: pointer;
+  width: fit-content;
+  min-inline-size: 24px;
+  min-block-size: 24px;
+  line-height: 24px;
+}
+
+.guide > p,
+.guide > ul {
+  margin: var(--space-1) 0 0;
+}
+
+.guide > ul {
+  padding-left: var(--space-4);
+}
+
 /* The wrapper that carries `disabled` for a shared field. `display: contents` so
    it is invisible when it is not doing anything — a bare fieldset arrives with a
    border and a margin. */

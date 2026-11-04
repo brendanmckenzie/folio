@@ -1,7 +1,7 @@
 import { createExecutionContext, env } from "cloudflare:test";
 import { Hono } from "hono";
 import { beforeAll, describe, expect, it } from "vitest";
-import { defineBlock, text } from "../../src/core";
+import { defineBlock, multilink, text } from "../../src/core";
 import type { Doc, Json } from "../../src/core/doc";
 import { EMPTY_REGISTRY, type Registry } from "../../src/core/sites";
 import type { FolioBindings, FolioConfig } from "../../src/server";
@@ -59,7 +59,8 @@ const page = defineBlock({
   name: "spPage",
   label: "Page",
   summary: "title",
-  fields: { title: text({ label: "Title" }) },
+  // `link`, so a content check has an edge to follow across the fence (spec 40).
+  fields: { title: text({ label: "Title" }), link: multilink({ label: "Link" }) },
   render: () => null,
 });
 
@@ -780,6 +781,7 @@ describe("every id loader is a fence", () => {
     ["GET", "/api/documents/:id/usage", "read", "story"],
     ["GET", "/api/v1/documents/:id", "read", "story"],
     ["GET", "/api/v1/documents/:id/versions", "read", "story"],
+    ["GET", "/api/v1/documents/:id/check", "read", "story"],
     ["GET", "/api/versions/:versionId", "read", "version"],
     ["PATCH", "/api/stories/:id", "write", "story"],
     ["DELETE", "/api/stories/:id", "write", "story"],
@@ -941,6 +943,32 @@ describe("every id loader is a fence", () => {
     // That is what makes the deferred list exact: an entry fenced into `LOADERS`
     // fails the line above until it leaves the list, and an unfenced route missing
     // from it fails `unaccounted`.
+  });
+
+  it("checks a document within the chain: a link to another site reads as deleted", async () => {
+    await story("sty_sp_alpha_chk", "alpha", "sp-alpha-chk");
+    const linkTo = async (id: string) => {
+      const res = await call("/~alpha/api/v1/documents/sty_sp_alpha_chk/fields", U, {
+        method: "PATCH",
+        body: JSON.stringify({ fields: { link: { kind: "story", id } } }),
+      });
+      expect(res.status).toBe(200);
+      const report = await call("/~alpha/api/v1/documents/sty_sp_alpha_chk/check", U);
+      expect(report.status).toBe(200);
+      const { findings } = (await report.json()) as {
+        findings: { check: string; detail?: Record<string, unknown> }[];
+      };
+      return findings.filter((f) => f.check.startsWith("link-"));
+    };
+    // A live page on bravo, from alpha: outside the chain, exactly like a deleted one.
+    expect(await linkTo("sty_sp_bravo")).toEqual([
+      expect.objectContaining({
+        check: "link-broken",
+        detail: { target: "sty_sp_bravo", reason: "missing" },
+      }),
+    ]);
+    // A live page up the chain is fine.
+    expect(await linkTo("sty_sp_shared")).toEqual([]);
   });
 
   it("answers a batch by id within the chain only", async () => {

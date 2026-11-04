@@ -12,7 +12,7 @@ import {
 } from "../../../src/server/mcp/tools";
 import { apiRoutes } from "../../../src/server/routes/api";
 import { createRuntime } from "../../../src/server/runtime";
-import { STORY_STATE } from "../../../src/server/validate";
+import { CHECK_STATUS, STORY_STATE } from "../../../src/server/validate";
 
 /**
  * **The tool table must not drift from the API** — the point of this file, and
@@ -110,13 +110,13 @@ const NOT_TOOLS: readonly string[] = [
 ];
 
 describe("the tool table", () => {
-  it("names sixteen tools, each once — fifteen route-backed and preview_document with none", () => {
-    // Fifteen are a `{method, path}` over the v1 app; `preview_document` is
+  it("names seventeen tools, each once — sixteen route-backed and preview_document with none", () => {
+    // Sixteen are a `{method, path}` over the v1 app; `preview_document` is
     // `?_folio=draft` plus a `browser` binding (decisions 5, 5a) and has
     // neither — `routes/mcp.ts`'s `tools/call` branches to it before the
-    // internal dispatch the other fifteen share.
-    expect(MCP_TOOLS).toHaveLength(16);
-    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(16);
+    // internal dispatch the other sixteen share.
+    expect(MCP_TOOLS).toHaveLength(17);
+    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(17);
     const preview = toolByName("preview_document");
     expect(preview?.method).toBeUndefined();
     expect(preview?.path).toBeUndefined();
@@ -255,6 +255,13 @@ describe("the tool table", () => {
     expect(state?.enum).toEqual(["draft", "unpublished", "live", "changed"]);
   });
 
+  it("advertises check_document's status as exactly what the route's CHECK_STATUS screens", () => {
+    const status = toolByName("check_document")?.inputSchema.properties?.status;
+    expect(status?.enum).toEqual(CHECK_STATUS.options);
+    expect(status?.enum).toEqual(["draft", "published"]);
+    expect(toolByName("check_document")?.narrowed).toBeUndefined();
+  });
+
   /**
    * A body field the route reads through `v.nullish(ID)` takes `null` as a real
    * value — the top of the tree — so the schema has to say so. Advertising a
@@ -358,6 +365,7 @@ describe("the tool table", () => {
       search_documents: "content:read",
       query_documents: "content:read",
       get_document: "content:read",
+      check_document: "content:read",
       list_versions: "content:read",
       preview_document: "content:read:draft",
       create_document: "content:write",
