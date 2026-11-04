@@ -1978,7 +1978,7 @@ the install, or to run a specific release's CLI, spell it
 | --- | --- | --- |
 | `folio init [dir]` | Scaffolds `examples/starter`, pinned to this CLI's tag | the new project |
 | `folio agents [file]` | Writes or refreshes the `<!-- folio:begin -->` block in `AGENTS.md` or `CLAUDE.md` | that file |
-| `folio doctor [dir]` | Checks the project and names a fix for every finding | nothing |
+| `folio doctor [dir]` | Checks the project and names a fix for every finding | nothing in the project (see below) |
 | `folio upgrade [dir]` | Plans the upgrade to this CLI's release; `--apply` runs its local half | only with `--apply` |
 | `folio add block <name>` | Scaffolds a block beside the blocks module, lists it, and with `--into` makes it insertable | the block file and up to two edits |
 | `folio preview block <name>` | Renders one block through a running server and saves the PNG or HTML | a scratch draft, deleted afterwards |
@@ -2025,7 +2025,15 @@ copy hoisted to the workspace root, found the way Node finds it), and the wrangl
 configs through the host's own `wrangler` and `vite`. It reads local D1 with
 `wrangler d1 execute --local --json` and a `select`, and only when the local state
 directory already exists, because wrangler creates an empty database on first
-touch. It never starts a server.
+touch. It never starts a server. Two writes are outside its control and change
+nothing you would commit: wrangler keeps its own debug log under your home
+directory, and a `select` can touch the local database's `-wal` and `-shm` files.
+The Vite config is loaded with Vite's module-runner loader, which writes no temp
+file (a config it cannot load falls back to the bundling loader, which writes one
+under `node_modules/.vite-temp` and removes it). The state-directory guard is per
+directory, not per database: with `--env`, an environment whose local database has
+never been created gets an empty one from the `select` when the directory already
+exists for another.
 
 | Flag | |
 | --- | --- |

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
@@ -113,6 +113,8 @@ describe("doctor on a fresh scaffold", () => {
     // No local state: wrangler would create a database on first touch.
     expect(calls).toEqual([]);
     expect(snapshot(root)).toEqual(before);
+    // Loading the Vite config leaves no bundled temp file either (review L3).
+    expect(existsSync(path.join(root, "node_modules/.vite-temp"))).toBe(false);
     everyFailHasAFix(result);
   });
 

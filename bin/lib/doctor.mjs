@@ -205,12 +205,19 @@ export async function readVite(project) {
     return { ok: false, reason: "unresolvable", message: String(err?.message ?? err) };
   }
   try {
-    const loaded = await tool.module.loadConfigFromFile(
-      { command: "serve", mode: "development" },
-      project.viteConfig,
-      path.dirname(project.viteConfig),
-      "silent",
-    );
+    // Vite's module-runner loader evaluates the config without writing the bundled
+    // temp file its default loader leaves in node_modules/.vite-temp (review L3).
+    // A config the runner cannot load falls back to the loader the build uses.
+    const load = (loader) =>
+      tool.module.loadConfigFromFile(
+        { command: "serve", mode: "development" },
+        project.viteConfig,
+        path.dirname(project.viteConfig),
+        "silent",
+        undefined,
+        loader,
+      );
+    const loaded = await load("runner").catch(() => load("bundle"));
     const plugins = await flatten(loaded?.config?.plugins ?? []);
     const plugin = plugins.find((p) => p?.name === "folio");
     const root = path.resolve(path.dirname(project.viteConfig), loaded?.config?.root ?? ".");

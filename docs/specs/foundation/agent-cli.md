@@ -1263,6 +1263,10 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
   cannot supply one.
 - **`server.mounted` warns when exactly one of discover and login fails**, either
   way round. The table specified only the discover-fails case.
+- **"Writes nothing" is scoped to the project** (review L3). Vite's default config
+  loader leaves `node_modules/.vite-temp`, so `doctor` loads with the module-runner
+  loader and falls back to bundling only when that fails; wrangler's own log and the
+  local database's `-wal`/`-shm` files are outside its control and documented.
 - **The local-state guard is per directory, not per database.** `d1.local` runs the
   `select` only when `.wrangler/state/v3/d1` (or `--persist-to`'s) exists; if it
   exists but this database has never been touched, wrangler creates its file. A
