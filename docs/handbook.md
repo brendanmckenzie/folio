@@ -2188,10 +2188,15 @@ token with `content:read`, `content:read:draft` and `content:write`. It waits up
 60 seconds for the block to appear in the served schema (the dev server reloads the
 Worker after the file changes), finds a page type whose root has a `blocks` field
 allowing it, and writes one instance into an unpublished top-level page with slug
-`folio-scratch-<name>` (replacing the content of one a previous run kept). It calls
+`folio-scratch-<name>` (replacing the content of one a previous run kept, which it
+recognises as a never-published top-level page titled `Scratch: …`; anything else at
+that path is refused, never overwritten or deleted). It calls
 MCP `preview_document` on it, saves the PNG (with a `browser` binding) or the
 rendered HTML (without one, which is always the case locally) under the OS temp
-directory, and deletes the draft with `?redirect=false` unless `--keep`. Its flags
+directory, and deletes the draft with `?redirect=false` unless `--keep`, also on
+a failure and on Ctrl-C or SIGTERM mid-render. When the delete fails, the answer
+says `kept: true` with `cleanup: { deleted: false, status }`, because `kept` reports
+what is true rather than what was asked for. Its flags
 are `--url`, `--site`, `--base`, `--into`, `--fields <json>` (the block's values;
 the default fills each `text` and `textarea` field with its label), `--viewport
 <w>x<h>`, `--keep` and `--json`. The scratch draft appears briefly in an open

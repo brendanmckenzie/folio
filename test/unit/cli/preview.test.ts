@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -53,7 +54,14 @@ const manifest = (withHero = true) => ({
 
 /** A fake Folio: records each request, answers like the v1 routes and MCP do. */
 function server(
-  opts: { schemaAfter?: number; existing?: boolean; image?: boolean; schemaStatus?: number } = {},
+  opts: {
+    schemaAfter?: number;
+    existing?: boolean | { state: string; title: string };
+    image?: boolean;
+    schemaStatus?: number;
+    deleteStatus?: number;
+    mcp?: () => Promise<void>;
+  } = {},
 ) {
   const calls: { method: string; url: string; body: unknown; auth: string | null }[] = [];
   let schemaReads = 0;
@@ -77,7 +85,17 @@ function server(
     }
     if (p.includes("/api/v1/search")) {
       return json({
-        rows: opts.existing ? [{ id: "sty_old", path: "folio-scratch-hero" }] : [],
+        rows: opts.existing
+          ? [
+              {
+                id: "sty_old",
+                path: "folio-scratch-hero",
+                ...(opts.existing === true
+                  ? { state: "draft", title: "Scratch: Hero" }
+                  : opts.existing),
+              },
+            ]
+          : [],
         cursor: null,
       });
     }
@@ -86,8 +104,12 @@ function server(
     }
     if (method === "PUT") return json({ changed: 1, transactions: 1, syncId: 2 });
     if (method === "POST" && p.endsWith("/api/v1/documents")) return json({ id: "sty_new" }, 201);
-    if (method === "DELETE") return json({ deleted: [p.split("/").at(-1)?.split("?")[0]] });
+    if (method === "DELETE") {
+      if (opts.deleteStatus) return json({ error: { code: "internal" } }, opts.deleteStatus);
+      return json({ deleted: [p.split("/").at(-1)?.split("?")[0]] });
+    }
     if (p.endsWith("/mcp")) {
+      await opts.mcp?.();
       const content = opts.image
         ? [{ type: "image", data: Buffer.from("png!").toString("base64"), mimeType: "image/png" }]
         : [
@@ -193,6 +215,60 @@ describe("preview block", () => {
   it("refuses --into a root field that does not allow the block", async () => {
     const err = await run(server(), { into: "page.title" }).catch((e) => e);
     expect(err).toBeInstanceOf(PreviewError);
+  });
+});
+
+describe("preview block cleanup (review L1)", () => {
+  it("refuses to reuse, overwrite or delete a document it did not make", async () => {
+    for (const existing of [
+      { state: "live", title: "Scratch: Hero" },
+      { state: "draft", title: "Somebody's page" },
+    ]) {
+      const fake = server({ existing });
+      const err = await run(fake).catch((e) => e);
+      expect(err).toBeInstanceOf(PreviewError);
+      expect(err.message).toMatch(/preview did not make/);
+      expect(
+        fake.calls.some((c) => c.method === "PUT" || c.method === "DELETE" || c.method === "POST"),
+      ).toBe(false);
+    }
+  });
+
+  it("reports the draft as kept when the delete fails, and keeps the result", async () => {
+    const fake = server({ deleteStatus: 500 });
+    const got = (await run(fake)) as Preview & { cleanup?: { deleted: boolean; status: number } };
+    expect(got.html).toBeTruthy();
+    expect(got.kept).toBe(true);
+    expect(got.cleanup).toEqual({ deleted: false, status: 500 });
+  });
+
+  it("deletes the draft and exits on Ctrl-C while the render is in flight", async () => {
+    const signals = new EventEmitter();
+    let release = () => {};
+    const exited: number[] = [];
+    let deleted: Promise<void> | null = null;
+    const fake = server({
+      mcp: () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+          deleted = new Promise<void>((done) => {
+            setTimeout(() => {
+              signals.emit("SIGINT", "SIGINT");
+              setTimeout(done, 20);
+            }, 5);
+          });
+        }),
+    });
+    const pending = run(fake, { signals, exit: (code: number) => exited.push(code) });
+    await new Promise((r) => setTimeout(r, 50));
+    await deleted;
+    expect(fake.calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
+    expect(exited).toEqual([130]);
+    release();
+    await pending;
+    // The handler is removed and the delete is not repeated.
+    expect(signals.listenerCount("SIGINT")).toBe(0);
+    expect(fake.calls.filter((c) => c.method === "DELETE")).toHaveLength(1);
   });
 });
 

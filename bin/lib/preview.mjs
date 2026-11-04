@@ -46,6 +46,8 @@ export async function previewBlock(opts) {
     pollMs = 1000,
     dir = tmpdir(),
     note = () => {},
+    signals = process,
+    exit = (code) => process.exit(code),
   } = opts;
   if (!opts.token) {
     throw new PreviewError("preview needs FOLIO_TOKEN in the environment.", [
@@ -159,9 +161,17 @@ export async function previewBlock(opts) {
   const slug = `folio-scratch-${name}`;
   const found = await api("GET", `/search?q=${encodeURIComponent(slug)}`);
   if (found.status !== 200) throw refused("Searching for an earlier scratch draft", found);
-  const existing = (found.json?.rows ?? []).find(
-    (r) => r.path === slug || r.path?.endsWith(`/${slug}`),
-  );
+  // Only a top-level, never-published page titled as this command titles it is a
+  // scratch draft to reuse. Anything else at that path is somebody's document, and
+  // the DELETE below would take it and its descendants with it (review L1).
+  const atPath = (found.json?.rows ?? []).filter((r) => r.path === slug);
+  const existing = atPath.find((r) => r.state === "draft" && r.title?.startsWith("Scratch: "));
+  if (atPath.length && !existing) {
+    throw new PreviewError(
+      `A document already lives at /${slug} that preview did not make (${atPath.map((r) => `${r.id}, ${r.state}`).join("; ")}), so it will not overwrite or delete it.`,
+      [{ kind: "manual", text: `Move or delete /${slug} in the admin, then run preview again.` }],
+    );
+  }
   let id;
   if (existing) {
     id = existing.id;
@@ -182,27 +192,62 @@ export async function previewBlock(opts) {
     id = made.json.id;
   }
 
-  // 4. Render it, and always tidy up unless asked not to.
+  // 4. Render it, and always tidy up unless asked not to: on success, on a failure,
+  // and on Ctrl-C or SIGTERM while the render is in flight (review L1).
+  let cleaned = null;
+  const cleanup = async () => {
+    if (keep) return { deleted: false, kept: true };
+    cleaned ??= (async () => {
+      try {
+        const gone = await api("DELETE", `/documents/${id}?redirect=false`);
+        if (gone.status === 200) return { deleted: true };
+        note(`! could not delete the scratch draft ${id} (${gone.status})`);
+        return { deleted: false, status: gone.status };
+      } catch (err) {
+        note(`! could not delete the scratch draft ${id}: ${err.message}`);
+        return { deleted: false, status: 0 };
+      }
+    })();
+    return cleaned;
+  };
+  const onSignal = (signal) => {
+    note(`· ${signal}: deleting the scratch draft ${id}`);
+    cleanup().finally(() => exit(signal === "SIGINT" ? 130 : 143));
+  };
+  for (const sig of ["SIGINT", "SIGTERM"]) signals.once(sig, onSignal);
+  let result;
   try {
-    note(`· preview_document ${id}`);
+    result = await render(id);
+  } finally {
+    for (const sig of ["SIGINT", "SIGTERM"]) signals.off(sig, onSignal);
+    const done = await cleanup();
+    if (result) {
+      // `kept` is the truth about the draft, whatever was asked for.
+      result.kept = keep || !done.deleted;
+      if (!keep && !done.deleted) result.cleanup = { deleted: false, status: done.status };
+    }
+  }
+  return result;
+
+  async function render(docId) {
+    note(`· preview_document ${docId}`);
     const answer = await rpc({
       endpoint: `${prefix}/mcp`,
       method: "tools/call",
       params: {
         name: "preview_document",
-        arguments: { id, ...(opts.viewport ? { viewport: opts.viewport } : {}) },
+        arguments: { id: docId, ...(opts.viewport ? { viewport: opts.viewport } : {}) },
       },
       token: opts.token,
       fetch,
       timeoutMs: 120_000,
     });
-    const result = answer.json?.result;
-    if (!result || answer.json?.error) {
+    const content = answer.json?.result?.content;
+    if (!content || answer.json?.error) {
       throw new PreviewError(
         `preview_document failed: ${answer.json?.error?.message ?? `HTTP ${answer.status}`}`,
       );
     }
-    const content = result.content ?? [];
     const texts = content.filter((c) => c.type === "text").map((c) => c.text);
     const image = content.find((c) => c.type === "image");
     const stamp = `${name}-${Date.now()}`;
@@ -218,12 +263,7 @@ export async function previewBlock(opts) {
       throw new PreviewError(`preview_document rendered nothing: ${texts[0] ?? "no content"}`);
     }
     const url = /URL: (\S+)/.exec(texts.join("\n"))?.[1] ?? null;
-    return { documentId: id, url, image: imagePath, html: htmlPath, kept: keep };
-  } finally {
-    if (!keep) {
-      const gone = await api("DELETE", `/documents/${id}?redirect=false`);
-      if (gone.status !== 200) note(`! could not delete the scratch draft ${id} (${gone.status})`);
-    }
+    return { documentId: docId, url, image: imagePath, html: htmlPath, kept: keep };
   }
 }
 

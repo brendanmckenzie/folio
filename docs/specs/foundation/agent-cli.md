@@ -1303,7 +1303,11 @@ and `scripts/cli-test.mjs` were written and syntax-checked but not run on the br
 - **`upgrade` reads `from` from `node_modules/folio`, falling back to a tag pin's
   version** when nothing is installed, and refuses when neither exists.
 - **The preview's scratch draft is found by `path`**, because `ApiDocumentMeta`
-  carries no `slug`; a top-level page's path is its slug.
+  carries no `slug`; a top-level page's path is its slug. Only a page at exactly
+  that path, never published and titled `Scratch: …`, is reused: the review (L1)
+  found any nested `…/folio-scratch-<name>` would have been overwritten and then
+  deleted with its descendants. Cleanup now also runs on a failure and on SIGINT or
+  SIGTERM, and a failed delete reports `kept: true` with a `cleanup` object.
 - **The ledger's in-progress 1.4.0 has no `date` and no headings yet.** The ledger
   test requires a date on every release at or below `package.json`'s version and
   requires each release's `headings` to equal the `###` headings naming its tag, so
