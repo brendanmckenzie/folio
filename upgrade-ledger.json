@@ -213,9 +213,13 @@
     },
     {
       "version": "1.4.0",
+      "date": "2026-11-05",
       "rollback": "safe",
       "migrations": [],
-      "headings": []
+      "headings": [
+        "Authoring guidance and content checks (v1.4.0)",
+        "The `folio` command line (v1.4.0)"
+      ]
     }
   ]
 }

@@ -87,9 +87,10 @@ sequence because the dependency graph is the same one.
 | 41 | [An agent-friendly CLI](foundation/agent-cli.md) | foundation | M | — | none | owner, 2026-11-04 |
 | 42 | [The command palette](editing/command-palette.md) | editing | M | — | none | owner, 2026-11-04 |
 
-**39–42 are `draft`** (2026-11-04) and build in the order 40 and 41 (v1.4, sharing no
-source file), then 39 (v1.5: `PROTOCOL_VERSION` 6 and `0018`), then 42, after a UI review
-of the core flows and after 39, whose changes to `EditorShell.tsx` it rebases onto.
+**40 and 41 are done** (built 2026-11-04, shipping together in v1.4.0, sharing no source
+file). **39 and 42 are `draft`** (2026-11-04) and build in the order 39 (v1.5:
+`PROTOCOL_VERSION` 6 and `0018`), then 42, after a UI review of the core flows and after
+39, whose changes to `EditorShell.tsx` it rebases onto.
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were

@@ -1133,6 +1133,69 @@ drew each item over the next. Items now take `min-height` rather than `height`, 
 list caps to the space below its trigger and scrolls. Nothing to run or edit: it is
 admin UI only, and one-line menus render at the same height as before.
 
+### Authoring guidance and content checks (v1.4.0)
+
+Additive, with nothing to do. No migration, no wire change, no new required key. A
+host that declares none of the new keys gets byte-identical `{base}/api/schema` and
+`{base}/api/v1/schema` answers, an unchanged inspector and an unchanged preview digest.
+
+To adopt it, add `help` and `guidance` to blocks, `guidance` and `length` to fields
+(`decorative: true` on purely decorative image fields), and `writing` to `createFolio`
+(or `brands.<id>.writing`). Block and field guidance is served on the unauthenticated
+manifest, like `help`, so put anything private in `writing`, which only the gated
+`{base}/api/v1/schema` carries. A malformed key throws at construction, naming the
+block and field.
+
+Two sanctioned behaviour changes:
+
+- **`/folio/audit`'s `required-setting` reads blank more strictly.** A required site
+  setting holding only whitespace, an empty richtext document (empty paragraphs and
+  nothing else) or an empty list of references or assets is now reported as empty,
+  which is what the inspector already said about the same field. A richtext holding
+  only an image or an embed still counts as filled. Expect new `required-setting`
+  findings on a site whose required settings were cleared to whitespace; fill them in
+  or relax `required`.
+- **`check_document` reports undeclared-locale translations as drift, on a
+  single-locale site too.** Overrides stored under a locale code the deployment does
+  not configure are reported once per block and code as `unknown-locale` (`fix:
+  "schema"`), never as per-field findings that `patch_fields` would refuse. Where
+  `locales` is configured that is the audit's own finding; on a site with no `locales`
+  the audit stays silent and the check is the only place it appears. It usually means
+  a locale was dropped from config, or content was imported with `i18n` before locales
+  were declared. Clear the overrides or declare the locale.
+
+Rolling back to v1.3.x is safe once the new keys are removed. TypeScript rejects them
+on the v1.3.x builders; at runtime v1.3.x passes unknown field keys through to the
+manifest and ignores a top-level `writing`.
+
+### The `folio` command line (v1.4.0)
+
+Nothing to do: no migration, no wire bump, no config key. v1.4.0 adds four commands to
+the CLI the package already ships, and each answers JSON with `--json`.
+
+- `npx folio doctor` checks this project and names the fix for each finding. It
+  writes nothing to the project. Pass `--remote` to read the deployed database too,
+  and `--url http://localhost:<port>` to check a running dev server.
+- `npx github:brendanmckenzie/folio#<tag> upgrade` plans the upgrade to `<tag>` from
+  that release's own `upgrade-ledger.json` and changes nothing. `--apply` runs the
+  local half: the pin, the reinstall, the local migrations, the agent instructions and
+  the typecheck. It prints the remote migrations and the deploy, in order, and never
+  runs them.
+- `npx folio add block <name> --into page.body` scaffolds a block and makes it
+  insertable, writing everything or nothing.
+- `npx folio preview block <name> --url <origin>` renders one block through a running
+  server and saves the image or HTML. It needs `FOLIO_TOKEN`.
+
+`npx folio` runs the installed copy. In a project without Folio installed, use the
+`npx github:…#<tag>` form, because the npm registry's `folio` is another package. The
+handbook's "The command line" section has every flag and the JSON shapes.
+
+MCP `server/discover` now reports the package version in its serverInfo, where it
+said `0.0.0`. `folio upgrade --url <deployment>` reads it to clear a release that
+requires another to be deployed first, so a deployment on v1.4.0 or later can prove
+what it runs and an earlier one never does. A usage error from `folio init` or `folio
+agents` now exits 2 rather than 1.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable
