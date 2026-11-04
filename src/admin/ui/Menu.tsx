@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import css from "./Menu.module.css";
 import { nextIndex } from "./rank";
 
@@ -37,6 +37,33 @@ export function Menu({ trigger, label, align = "end", items }: Props) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const box = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<number | null>(null);
+
+  // The list is absolutely positioned under the trigger, so there is no ancestor
+  // whose height a percentage could resolve against (and a percentage of its own
+  // track is the circularity Dialog.module.css documents). Measure what is actually
+  // left below the trigger instead and hand it to the stylesheet as a variable; the
+  // CSS keeps a viewport-relative cap for the one frame before this runs.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const bottom = box.current?.getBoundingClientRect().bottom;
+      if (bottom === undefined) return;
+      // 4px gap under the trigger (`.list` top) plus 8px breathing room at the edge.
+      setRoom(Math.max(120, window.innerHeight - bottom - 12));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [open]);
+
+  // Keep the keyboard-active item visible when the list scrolls.
+  useEffect(() => {
+    if (!open || active < 0) return;
+    const el = list.current?.querySelectorAll<HTMLElement>('[role="menuitem"]')[active];
+    el?.scrollIntoView?.({ block: "nearest" });
+  }, [open, active]);
 
   // Close on an outside click, and on Escape, without a scrim element: a scrim
   // has to be excluded from the tab cycle, sized, z-indexed and given a name,
@@ -82,6 +109,8 @@ export function Menu({ trigger, label, align = "end", items }: Props) {
         <div
           className={`${css.list} ${align === "start" ? css.start : css.end}`}
           role="menu"
+          ref={list}
+          style={room === null ? undefined : ({ "--menu-max-h": `${room}px` } as CSSProperties)}
           // Roving focus is overkill for a five-item menu; a single keydown
           // handler on the container with an active index reads the same to a
           // user and is one place to get right.

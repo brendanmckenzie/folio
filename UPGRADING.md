@@ -1087,6 +1087,14 @@ backends and no Folio code changed. What to do depends on your `wrangler.jsonc`:
   is. A deployed class's backend cannot be changed by a migration, and editing the
   tag does not convert it. The class keeps working exactly as before. Nothing to do.
 
+### Menu items grow (v1.3.2)
+
+The admin's shared `Menu` gave every item a fixed one-row height, so a menu whose items
+carry two lines of text (the form builder's "Add a question..." menu: a label and a hint)
+drew each item over the next. Items now take `min-height` rather than `height`, and the
+list caps to the space below its trigger and scrolls. Nothing to run or edit: it is
+admin UI only, and one-line menus render at the same height as before.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable
