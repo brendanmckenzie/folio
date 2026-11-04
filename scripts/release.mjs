@@ -15,6 +15,7 @@
  *   node scripts/release.mjs --tag     # …and add the end-to-end sweep
  *   node scripts/release.mjs --tag --ci  # the release.yml run: verify a pushed tag, publish nothing
  *   node scripts/release.mjs --smoke-only  # just the consumer smoke test, on the working tree
+ *   node scripts/release.mjs --tag --ci --stage=e2e  # one stage of the --ci run (see `stage`)
  *
  * Tags are created by hand (CLAUDE.md "Releasing"), never by this script. What it
  * does about them is refuse to bless a tag that has moved: see `assertTagNotMoved`.
@@ -74,6 +75,28 @@ const ci = args.has("--ci");
  * install is of a commit, and the snapshot never moves a branch.
  */
 const smokeOnly = args.has("--smoke-only");
+/**
+ * One stage of a `--ci` run, so `release.yml` can run the independent ones on
+ * separate runners at once instead of one after another on one machine. Without
+ * `--stage` every stage runs in order, which is what a local pre-flight wants.
+ *
+ *   verify  the tag, `package.json`, ledger and remote-tag checks (no dependencies)
+ *   tests   `pnpm test`: the Node project and the workers project in real workerd
+ *   static  biome and typecheck
+ *   e2e     the end-to-end sweep (only with `--tag`)
+ *   smoke   the consumer smoke test
+ *
+ * They are separate *runners* and not parallel processes on one because the
+ * workers project starves under load (`Timeout starting cloudflare-pool runner`,
+ * which reads as a regression) and the sweep is exactly that load. The release is
+ * only created by a job that needs every stage, so one failing stage still means
+ * no Release. Only `--ci` takes a stage: a local run that skipped one would read
+ * as having passed the gate.
+ */
+const STAGES = ["verify", "tests", "static", "e2e", "smoke"];
+const stageArg = [...args].find((a) => a.startsWith("--stage="));
+const stage = stageArg ? stageArg.slice("--stage=".length) : null;
+const runs = (name) => stage === null || stage === name;
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim();
 
@@ -164,20 +187,29 @@ if (smokeOnly) {
   process.exit(0);
 }
 
+if (stageArg && !(ci && STAGES.includes(stage))) {
+  die(`--stage=<${STAGES.join("|")}> needs --ci (got ${stageArg}).`);
+}
+
+// A stage other than `verify` trusts the job that runs `verify`, and needs no history.
+const verify = runs("verify");
+
 if (ci) {
-  const refName = process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME ?? "";
-  const { version } = JSON.parse(readFileSync("package.json", "utf8"));
-  if (!/^v\d+\.\d+\.\d+$/.test(refName)) die(`"${refName}" is not a vX.Y.Z tag.`);
-  if (refName !== `v${version}`) {
-    die(
-      `tag ${refName} does not match package.json version ${version}. Bump it in a PR, then tag.`,
-    );
-  }
-  if (
-    spawnSync("git", ["merge-base", "--is-ancestor", "HEAD", `${REMOTE}/${REMOTE_BRANCH}`])
-      .status !== 0
-  ) {
-    die(`${refName} is not on ${REMOTE_BRANCH}. Tag a commit that has merged.`);
+  if (verify) {
+    const refName = process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME ?? "";
+    const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+    if (!/^v\d+\.\d+\.\d+$/.test(refName)) die(`"${refName}" is not a vX.Y.Z tag.`);
+    if (refName !== `v${version}`) {
+      die(
+        `tag ${refName} does not match package.json version ${version}. Bump it in a PR, then tag.`,
+      );
+    }
+    if (
+      spawnSync("git", ["merge-base", "--is-ancestor", "HEAD", `${REMOTE}/${REMOTE_BRANCH}`])
+        .status !== 0
+    ) {
+      die(`${refName} is not on ${REMOTE_BRANCH}. Tag a commit that has merged.`);
+    }
   }
 } else {
   const branch = git("rev-parse", "--abbrev-ref", "HEAD");
@@ -185,18 +217,18 @@ if (ci) {
     die(`on "${branch}", not ${REMOTE_BRANCH}. Release from there.`);
   }
 }
-if (git("status", "--porcelain")) {
+if (verify && git("status", "--porcelain")) {
   die("working tree is dirty. A push ships commits, so uncommitted work would ship as nothing.");
 }
 
 const head = git("rev-parse", "HEAD");
 
-if (ci) {
+if (ci && verify) {
   assertTagNotMoved(process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME, head, {
     // A workflow_dispatch rehearsal names a tag that is deliberately not pushed.
     required: process.env.GITHUB_REF_TYPE === "tag",
   });
-} else if (tag) {
+} else if (tag && !ci) {
   assertTagNotMoved(`v${JSON.parse(readFileSync("package.json", "utf8")).version}`, head, {
     required: false,
   });
@@ -209,7 +241,7 @@ if (ci) {
  * at most one entry above `package.json`'s version; this is the other half, run
  * only where a tag is being blessed.
  */
-if (tag || ci) {
+if ((tag || ci) && verify) {
   const { version } = JSON.parse(readFileSync("package.json", "utf8"));
   const newest = newestRelease(readLedger("."));
   if (newest?.version !== version) {
@@ -217,16 +249,29 @@ if (tag || ci) {
   }
 }
 
+if (stage === "verify") {
+  console.log(
+    `\n✓ ${process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME} is a valid release tag.`,
+  );
+  process.exit(0);
+}
+
 // ── gates ────────────────────────────────────────────────────────────────────
 
 if (gate) {
   console.log("Gates:");
-  runGate("tests", "pnpm", ["test"]);
-  runGate("biome", "./node_modules/.bin/biome", ["ci", "."]);
-  runGate("typecheck", "pnpm", ["typecheck"]);
-  // Streamed, not swallowed: it is 22 resets and 22 dev servers, and a gate with
-  // no output for ten minutes is indistinguishable from a hung one.
-  if (tag) runGate("end-to-end (22 scripts)", "./scripts/e2e-all.sh", [], { stream: true });
+  if (runs("tests")) runGate("tests", "pnpm", ["test"]);
+  if (runs("static")) {
+    runGate("biome", "./node_modules/.bin/biome", ["ci", "."]);
+    runGate("typecheck", "pnpm", ["typecheck"]);
+  }
+  // Streamed, not swallowed: the sweep is dozens of dev servers and a gate with
+  // no output for minutes is indistinguishable from a hung one. It runs the
+  // scripts several at a time (`scripts/e2e-all.sh`), so it must not share a
+  // machine with `tests`: see `stage`.
+  if (tag && runs("e2e")) {
+    runGate("end-to-end (26 scripts)", "./scripts/e2e-all.sh", [], { stream: true });
+  }
 } else {
   console.log(`Gates skipped (--no-gate).${tag ? " Including the end-to-end sweep." : ""}`);
 }
@@ -583,10 +628,14 @@ function consumerBoots(dir, spec) {
 
 if (ci) {
   if (!gate) die("--ci runs the gates; it cannot be combined with --no-gate.");
-  console.log("\nSmoke test (what a consumer actually runs):");
-  smokeTest(head);
+  if (runs("smoke")) {
+    console.log("\nSmoke test (what a consumer actually runs):");
+    smokeTest(head);
+  }
   console.log(
-    `\n✓ ${process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME} (${head.slice(0, 7)}) is releasable.`,
+    stage
+      ? `\n✓ stage ${stage} passed for ${head.slice(0, 7)}.`
+      : `\n✓ ${process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME} (${head.slice(0, 7)}) is releasable.`,
   );
   process.exit(0);
 }

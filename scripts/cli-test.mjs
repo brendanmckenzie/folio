@@ -1,5 +1,5 @@
 // Drives the agent CLI (docs/specs/foundation/agent-cli.md phase 6) against a live
-// dev server on port 5199: `folio doctor`'s server checks and `folio preview block`,
+// dev server (FOLIO_E2E_BASE, else port 5199): `folio doctor`'s server checks and `folio preview block`,
 // the two things no unit test can reach, because both need a real Worker answering
 // over HTTP with a real token resolving off a real D1 row.
 //
@@ -21,7 +21,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { signInGlobally } from "./lib/auth.mjs";
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const ADMIN = `${HTTP}/folio/api`;
 const ROOT = new URL("..", import.meta.url).pathname;
 const DEMO = join(ROOT, "examples/demo");
@@ -81,6 +81,8 @@ const doctor = folio([
   "server.schema",
   "--check",
   "d1.local",
+  // The local database the dev server is using, which e2e.sh puts in its own state directory.
+  ...(process.env.FOLIO_E2E_STATE ? ["--persist-to", process.env.FOLIO_E2E_STATE] : []),
   "--json",
 ]);
 check(

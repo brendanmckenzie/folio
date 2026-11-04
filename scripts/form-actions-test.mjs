@@ -25,7 +25,7 @@ import { signInGlobally } from "./lib/auth.mjs";
 
 const { realFetch } = await signInGlobally();
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 

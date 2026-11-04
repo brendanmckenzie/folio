@@ -37,7 +37,7 @@ import { signInGlobally } from "./lib/auth.mjs";
 
 const { PROTOCOL_VERSION } = await import(new URL("../src/core/protocol.ts", import.meta.url));
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 // The admin's **internal** JSON, which is what `asAdmin` below reaches for: the
 // activity trail and the token list are not part of the v1 contract. Unversioned on
 // purpose — a version segment is a promise, and this surface makes none
@@ -170,7 +170,7 @@ check(
 /* --- a write reaches an open editor ------------------------------------- */
 
 function client(name, storyId) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`);
+  const ws = new WebSocket(`${HTTP.replace(/^http/, "ws")}/folio/api/story/${storyId}/socket`);
   const inbox = [];
   const waiters = [];
   ws.addEventListener("message", (e) => {

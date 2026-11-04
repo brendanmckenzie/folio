@@ -23,7 +23,7 @@ await signInGlobally();
 
 const { PROTOCOL_VERSION } = await import(new URL("../src/core/protocol.ts", import.meta.url));
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 const STORY = "sty_home";
@@ -58,7 +58,7 @@ const sweep = (body) => postJson("/schedules/run", body).then((r) => r.json());
 const listSchedules = (query = "") => json(`${API}/schedules${query}`);
 
 function client(name, colour) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${STORY}/socket`);
+  const ws = new WebSocket(`${HTTP.replace(/^http/, "ws")}/folio/api/story/${STORY}/socket`);
   const inbox = [];
   const waiters = [];
   ws.addEventListener("message", (e) => {

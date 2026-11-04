@@ -20,7 +20,7 @@ await signInGlobally();
 const { diff } = await import(new URL("../src/core/diff.ts", import.meta.url));
 const { PROTOCOL_VERSION } = await import(new URL("../src/core/protocol.ts", import.meta.url));
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 const STORY = "sty_home";
@@ -51,7 +51,7 @@ const diffOf = (before, after) => diff(docWith(before), docWith(after));
  * rather than the hard-coded constant it used to be.
  */
 function client(name, storyId = STORY) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`);
+  const ws = new WebSocket(`${HTTP.replace(/^http/, "ws")}/folio/api/story/${storyId}/socket`);
   const inbox = [];
   const waiters = [];
   ws.addEventListener("message", (e) => {
@@ -715,7 +715,7 @@ check("the richtext tree restored intact", (await preview()).includes("<h2>A hea
 // Give the About page some content of its own to be pulled in.
 const about = client("about");
 const aboutDoc = await new Promise((resolve) => {
-  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/sty_about/socket`);
+  const ws = new WebSocket(`${HTTP.replace(/^http/, "ws")}/folio/api/story/sty_about/socket`);
   const inbox = [];
   ws.addEventListener("message", (e) => {
     const msg = JSON.parse(e.data);

@@ -26,7 +26,7 @@
 //     edit that leaks one fails loudly rather than passing for the wrong reason.
 import { signInGlobally } from "./lib/auth.mjs";
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 
@@ -329,7 +329,7 @@ check(
 // code* rather than a status anyway. `RealWebSocket` is the unwrapped constructor
 // `signInGlobally` saved; the wrapped one would attach the admin's session.
 const socketClose = await new Promise((resolve) => {
-  const ws = new RealWebSocket(`ws://localhost:5199/folio/api/story/${ABOUT}/socket`, {
+  const ws = new RealWebSocket(`${HTTP.replace(/^http/, "ws")}/folio/api/story/${ABOUT}/socket`, {
     headers: { cookie: jar },
   });
   const done = setTimeout(() => resolve("timed out"), 5000);

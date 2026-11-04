@@ -21,7 +21,7 @@ const { realFetch } = await signInGlobally();
 
 const { PROTOCOL_VERSION } = await import(new URL("../src/core/protocol.ts", import.meta.url));
 
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
 const BASE = `${HTTP}/folio`;
 const API = `${BASE}/api`;
 
@@ -58,7 +58,7 @@ const dev = (query) => json(`${HTTP}/dev/option-source?${query}`);
 
 /** A real WebSocket to a story's sync endpoint, as the other scripts use. */
 function client(storyId) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`);
+  const ws = new WebSocket(`${HTTP.replace(/^http/, "ws")}/folio/api/story/${storyId}/socket`);
   const inbox = [];
   const waiters = [];
   ws.addEventListener("message", (e) => {

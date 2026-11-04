@@ -21,8 +21,8 @@ const { PROTOCOL_VERSION } = await import(new URL("../src/core/protocol.ts", imp
 const { cloneSubtree } = await import(new URL("../src/core/clone.ts", import.meta.url));
 const { keyAtIndex } = await import(new URL("../src/core/doc.ts", import.meta.url));
 
-const BASE = "ws://localhost:5199/folio/api/story/sty_home/socket";
-const HTTP = "http://localhost:5199";
+const HTTP = process.env.FOLIO_E2E_BASE ?? "http://localhost:5199";
+const BASE = `${HTTP.replace(/^http/, "ws")}/folio/api/story/sty_home/socket`;
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 

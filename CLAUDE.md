@@ -72,26 +72,57 @@ Biome and gitleaks on commit, commitlint on the message, and a refusal to push
 
 ## End-to-end scripts
 
-`scripts/*-test.mjs` drive a live dev server on port **5199** over plain
-`fetch`/`WebSocket` — no browser. Run one with:
+`scripts/*-test.mjs` drive a live dev server over plain `fetch`/`WebSocket` — no
+browser. The server is on a **free port the run picks**, never a fixed 5199 (another
+dev server may hold it, and the sweep needs a port per script); the scripts read the
+origin from `FOLIO_E2E_BASE`, which `e2e.sh` sets, and fall back to
+`http://localhost:5199` when run by hand against `pnpm dev`. Run them with:
 
 ```
 ./scripts/e2e.sh scripts/sync-test.mjs     # one script
-./scripts/e2e-all.sh                       # all 26, one fresh database each
+./scripts/e2e-all.sh                       # all 26, one fresh database each, several at a time
+./scripts/e2e-all.sh scripts/sync-test.mjs scripts/space-test.mjs   # a subset
+FOLIO_E2E_JOBS=2 ./scripts/e2e-all.sh      # choose how many at once
 ```
 
 **Both propagate the script's exit code**, so either can gate something. `e2e.sh` used
 to discard it — `node "$SCRIPT" ... || true` with a trailing `pkill ... || true` as the
 last statement — which meant the whole tier was decorative for as long as it existed.
-`e2e-all.sh` is a loop of reset-then-run rather than one server for all 26, because they
-share a database otherwise; that makes it minutes rather than seconds, which is why
-`release.mjs --tag` runs it and an ordinary push does not.
 
-**Never run them without resetting first**, and never two in one database. They mutate
-content and are not idempotent, so a stale database produces failures that look like
-real bugs. The helper wipes `examples/demo/.wrangler/state/v3` — D1 **and** Durable
-Object state, because drafts live in the objects and wiping only D1 leaves objects that
-disagree with the tree — reapplies migrations, seeds, and runs one script.
+**The sweep is parallel, and what makes that safe is that nothing is shared.** Each
+script gets its own port, its own wrangler state directory (D1 **and** Durable Object
+state, through `persistState` in `examples/demo/vite.config.ts` and `--persist-to` for
+wrangler) and its own dev server, so "one fresh database each" is unchanged; only the
+waiting is gone. `scripts/lib/e2e-sweep.mjs` is the pool: it runs `build:js` once,
+migrates and seeds once into a template state directory that each script copies, hands
+out ports itself, buffers each script's output and prints it whole when the script ends,
+and on failure names the script's output file and dev-server log. Cold, 26 scripts take
+about 35 seconds on a 10-core laptop, against about nine minutes serially before.
+
+Knobs, all environment variables:
+
+- `FOLIO_E2E_JOBS` — scripts at a time. Default half the CPUs, between 2 and 6. More
+  is not faster: each is a vite process plus a workerd.
+- `e2e.sh` alone: `FOLIO_E2E_PORT` (default a free port), `FOLIO_E2E_STATE` (default a
+  fresh temp directory, removed on success and kept on failure — it never defaults to
+  `examples/demo/.wrangler/state`, so a run cannot wipe the database of a dev server
+  you are using), `FOLIO_E2E_TEMPLATE` (a migrated and seeded state to copy instead of
+  running migrate and seed), `FOLIO_E2E_SKIP_BUILD`, `FOLIO_E2E_OUT`, `FOLIO_E2E_DEV_LOG`.
+
+**`e2e.sh` only ever signals the server it started.** It used to `pkill -f
+vite/bin/vite.js`, which would end every other run's server and any unrelated vite on
+the machine; that line is why a parallel sweep was impossible. With a state directory set
+the demo also starts without a Node inspector (`inspectorPort: false`), because several
+servers race for 9229 and the loser dies on `EADDRINUSE`.
+
+**Do not run the sweep alongside `pnpm test` on one machine.** The workers project
+(real workerd) starves under that load and fails as `Timeout starting cloudflare-pool
+runner`, which reads as a regression. CI keeps them on separate runners for that reason.
+
+**Never run two scripts in one database.** They mutate content and are not idempotent,
+so a stale database produces failures that look like real bugs. A new script needs
+nothing for this: take the origin from `FOLIO_E2E_BASE` (and, for a CLI that reads the
+local database, `FOLIO_E2E_STATE`) and never assume a port or a state path.
 
 When writing a new one, follow two conventions that already exist:
 
@@ -492,9 +523,10 @@ paying for the subdirectory. The subdirectory is gone.
 
 What survives from it, because it was never about the split:
 
-- **The gates run twice.** `ci.yml` runs them on every pull request and `gate` is
-  required to merge; `release.mjs` runs them again, locally, before it publishes
-  and again in `release.yml` for a tag. It refuses to publish if any fails.
+- **The gates run twice.** `ci.yml` runs them on every pull request (`check` and `test`
+  on separate runners) and `gate` is required to merge, and it fails if any job it
+  needs failed or was cancelled; `release.mjs` runs them again, locally, before it
+  publishes and again in `release.yml` for a tag. It refuses to publish if any fails.
 - **A pinned tag or SHA keeps resolving** as long as it stays reachable from a
   pushed ref, so a release is additive for everyone who has not bumped. Consumers
   pin an exact `vX.Y.Z` tag from 1.0.0 (`#semver:` ranges are unsupported on purpose,
@@ -519,9 +551,13 @@ A release is a tag on a commit that has merged:
    refuses a tag whose version is not the ledger's newest release.
 2. `git tag -a vX.Y.Z <sha-on-main> -m vX.Y.Z && git push origin vX.Y.Z` (annotated, so
    it is a permanent ref).
-3. `release.yml` runs `node scripts/release.mjs --tag --ci` (tag matches
-   `package.json`, sits on `main` and is not a moved tag, the gates, the end-to-end sweep, the
-   consumer smoke test), then creates the GitHub Release. Its notes are the
+3. `release.yml` runs `node scripts/release.mjs --tag --ci` as five jobs at once, one
+   `--stage` each (`verify`: tag matches `package.json`, sits on `main`, is not a moved
+   tag; `tests`; `static`: biome and typecheck; `e2e`: the sweep; `smoke`: the consumer
+   smoke test), then a `release` job that `needs` all five creates the GitHub Release,
+   so any failed or cancelled stage means no Release. They are separate runners and not
+   parallel processes because the workers tests and the sweep must not share a machine.
+   Locally, with no `--stage`, the stages run in that order on one machine. Its notes are the
    `UPGRADING.md` `###` entries whose heading names the tag (for example
    `### Roles move (v1.0.0)`), then the generated commit list.
 
