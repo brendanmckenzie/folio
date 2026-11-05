@@ -5,7 +5,7 @@
  * `rootDir` is `src`, so a JSON import from the root fails declaration emit, and
  * esbuild would inline the whole manifest into every host's Worker to read one
  * field. A build-time `define` reaches `dist/` only, and the demo, vitest and a
- * host's `development` condition all run this file as source. A literal is the
+ * host that sets `folio-source` all run this file as source. A literal is the
  * same value under every one of them.
  *
  * `test/unit/server/version.test.ts` fails when it disagrees with

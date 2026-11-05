@@ -289,11 +289,9 @@ if (gate) {
  * about whether the package builds from a clean clone with only what `files`
  * ships.
  *
- * Both export shapes are checked because the package uses both: `./core` and
- * friends resolve into `dist/` and therefore prove `prepare` ran, while
- * `./render` and `./preview` are plain strings into `src/` that
- * the consumer's own bundler compiles (`./admin-entry` is the prebuilt admin in `dist/`) — those prove `files` still carries `src`.
- * A build that half-works fails one set and not the other.
+ * Every export resolves into `dist/` and therefore proves `prepare` ran. The
+ * private `folio-source` condition points into `src/`, which the package does not
+ * ship, so it is skipped here and the installed tree is asserted to have no `src/`.
  *
  * It also proves the docs ship. `files` is an allowlist, and a consumer reading
  * `node_modules/folio` is the only reader some of them will ever have.
@@ -329,7 +327,9 @@ function smokeTest(sha) {
         return;
       }
       if (node && typeof node === "object") {
-        for (const [, child] of Object.entries(node)) walk(subpath, child);
+        for (const [condition, child] of Object.entries(node)) {
+          if (condition !== "folio-source") walk(subpath, child);
+        }
       }
     };
     for (const [subpath, node] of Object.entries(map ?? {})) walk(subpath, node);
@@ -337,6 +337,14 @@ function smokeTest(sha) {
       console.log("FAILED");
       for (const m of missing) console.error(`    missing: ${m}`);
       die(`${missing.length} export target(s) absent from the built package.`);
+    }
+    // `src/` is not shipped: a host that resolved into it would be running source
+    // the package does not carry, and the build would be proving nothing.
+    for (const dirName of ["src", "evals"]) {
+      if (existsSync(join(root, dirName))) {
+        console.log("FAILED");
+        die(`the installed package carries ${dirName}/, which \`files\` should not ship.`);
+      }
     }
     console.log(`ok (${Object.keys(map ?? {}).length} subpaths)`);
 
@@ -364,6 +372,8 @@ function smokeTest(sha) {
       "dist/server.js": ["createFolio", "StoryDO", "SITE_TAG", "ANY_TYPE_TAG", "typeTag"],
       "dist/vite.js": ["folio"],
       "dist/form.js": ["useFolioForm"],
+      "dist/render.js": ["FolioDoc", "RenderBlok", "RenderRichtext"],
+      "dist/preview.js": ["mountPreview"],
     };
     const absent = [];
     for (const [file, names] of Object.entries(anchors)) {
@@ -467,7 +477,7 @@ function sleep(ms) {
  * inside `node_modules`, which Vite externalises, and workerd then loads React's
  * CommonJS entries raw and dies at startup with `module is not defined` before it
  * can answer a request. Folio's own demo resolves the library to TypeScript source
- * through the `development` export condition and never sees it, and `vite build`
+ * through the private `folio-source` export condition and never sees it, and `vite build`
  * bundles CommonJS through Rollup so it never sees it either. Only a dev server
  * started against the installed package does, which is what this does.
  *
@@ -610,6 +620,22 @@ function consumerBoots(dir, spec) {
     if (commonJsError.test(readFileSync(logPath, "utf8"))) {
       fail("the Worker hit a CommonJS error", readFileSync(logPath, "utf8"));
     }
+    // The client environment, which is where `folio/preview` runs. It must resolve to
+    // the built `dist/` (there is no `src/` in the install) and answer 200.
+    const previewEntry = spawnSync(
+      "curl",
+      ["-s", "--max-time", "30", `http://localhost:${port}/@id/__x00__virtual:folio/preview`],
+      { encoding: "utf8" },
+    ).stdout;
+    const previewImport = previewEntry.match(/from "([^"]*folio[^"]*preview[^"]*\.js[^"]*)"/)?.[1];
+    if (!previewImport) {
+      fail("the virtual preview entry does not import folio/preview", previewEntry.slice(0, 600));
+    }
+    if (/\/src\//.test(previewImport)) {
+      fail(`folio/preview resolved into src/: ${previewImport}`);
+    }
+    const previewCode = status(previewImport);
+    if (previewCode !== 200) fail(`vite dev answered ${previewCode} for ${previewImport}, not 200`);
     const mounted = folioCli([
       "doctor",
       "--url",

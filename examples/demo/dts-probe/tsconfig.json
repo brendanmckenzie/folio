@@ -1,6 +1,6 @@
 {
   // Deliberately does NOT extend the demo's `tsconfig.json`, and the one option
-  // it is avoiding is `customConditions: ["development"]`. Dropping that is the
+  // it is avoiding is `customConditions: ["folio-source"]`. Dropping that is the
   // whole point: resolution falls through to the `types` condition in the
   // library's `exports`, so this program compiles against
   // `dist/types` the way an installed consumer would. See
