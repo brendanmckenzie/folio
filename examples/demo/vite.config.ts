@@ -1,7 +1,7 @@
 import { cloudflare } from "@cloudflare/vite-plugin";
 import react from "@vitejs/plugin-react";
 import { folio } from "folio/vite";
-import { defaultClientConditions, defaultServerConditions, defineConfig } from "vite";
+import { defaultClientConditions, defineConfig } from "vite";
 
 // The scripts in `scripts/` drive a live server. `scripts/e2e.sh` and `e2e-all.sh` give
 // each run its own port and its own state directory so several can run at once; a plain
@@ -17,7 +17,7 @@ export default defineConfig({
   server: { port, strictPort: true },
   preview: { port, strictPort: true },
   environments: {
-    ssr: { resolve: { conditions: ["folio-source", ...defaultServerConditions] } },
+    ssr: { resolve: { conditions: ["folio-source"] } },
     client: {
       // Source-mode admin only (see `adminFromSource` below). The dep scanner crawls the
       // host's entries and the admin sits outside them, so without this `@tiptap/react`'s
