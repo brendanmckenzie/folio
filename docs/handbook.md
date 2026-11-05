@@ -5296,7 +5296,7 @@ The eight subpaths in `package.json`, and who each is for:
 | `folio/form` | `useFolioForm`, the optional headless hook that binds a form descriptor to a host's own inputs. React, client-side. |
 | `folio/render` | `FolioDoc`, the component that renders a resolved document, and `RenderRichtext`, which renders a richtext value you hold outside a block. Both live consumers import `FolioDoc`. |
 | `folio/preview` | The preview bundle's own entry. Folio's, not a host's. |
-| `folio/admin-entry` | The admin bundle's entry, resolved by the Vite plugin. Folio's, not a host's. |
+| `folio/admin-entry` | The prebuilt admin bundle (`dist/admin/folio-admin.js`), which the Vite plugin emits and serves. Folio's, not a host's. |
 
 **What is deliberately *not* exported**, because each has been asked for and
 refused: `ShareGrant` (what a live share link authorises — a second gate built out

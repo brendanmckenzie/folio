@@ -291,8 +291,8 @@ if (gate) {
  *
  * Both export shapes are checked because the package uses both: `./core` and
  * friends resolve into `dist/` and therefore prove `prepare` ran, while
- * `./render`, `./preview` and `./admin-entry` are plain strings into `src/` that
- * the consumer's own bundler compiles — those prove `files` still carries `src`.
+ * `./render` and `./preview` are plain strings into `src/` that
+ * the consumer's own bundler compiles (`./admin-entry` is the prebuilt admin in `dist/`) — those prove `files` still carries `src`.
  * A build that half-works fails one set and not the other.
  *
  * It also proves the docs ship. `files` is an allowlist, and a consumer reading
@@ -594,6 +594,11 @@ function consumerBoots(dir, spec) {
       fail("vite dev hit a CommonJS error on startup", readFileSync(logPath, "utf8"));
     }
     if (!answered) fail("vite dev never answered", readFileSync(logPath, "utf8"));
+    // The prebuilt admin is a real file in dev, not a module Vite compiles.
+    for (const path of ["/folio-admin.js", "/folio-admin.css"]) {
+      const code = status(path);
+      if (code !== 200) fail(`vite dev answered ${code} for ${path}, not 200`);
+    }
     // The Worker runs on the first request, so a startup failure can also arrive
     // as a 500 here rather than as an exit.
     for (const path of ["/", "/folio/login"]) {
@@ -623,6 +628,26 @@ function consumerBoots(dir, spec) {
     closeSync(logFd);
   }
   sh("the starter's build", "npm", ["run", "build"], app);
+  for (const file of ["folio-admin.js", "folio-admin.css"]) {
+    if (!existsSync(join(app, "dist", "client", file))) {
+      fail(`the starter's build did not emit ${file} into dist/client`);
+    }
+  }
+  // The editor is bundled into the admin; none of it may reach a consumer's tree.
+  const tree = spawnSync("npm", ["ls", "--all", "--parseable"], {
+    cwd: app,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  }).stdout;
+  const editorPackages = tree
+    .split("\n")
+    .filter((l) => /node_modules\/(@tiptap|@floating-ui|prosemirror-)[^/]*/.test(l));
+  if (editorPackages.length) {
+    fail(
+      "the consumer's tree carries the editor's packages, which the admin bundle should have inlined",
+      editorPackages.join("\n"),
+    );
+  }
   console.log("ok");
 }
 
