@@ -73,7 +73,7 @@ that event and stays recursive. Loading the file records a
 `pnpmfileChecksum` in `pnpm-lock.yaml`, which Renovate's `--ignore-pnpmfile` lockfile
 regeneration removes, so **every workflow's `pnpm install --frozen-lockfile` passes
 `--ignore-pnpmfile`** (a new one must too, or the next Renovate PR fails it with
-`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`) and a developer's plain `pnpm install` puts the line back. `release.mjs`'s pnpm smoke stage fails if the install covers
+`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`) and a developer's plain `pnpm install` puts the line back. The checksum is of the file's bytes, so editing `.pnpmfile.mjs`, even a comment, needs a `pnpm install` and the lockfile committed. `release.mjs`'s pnpm smoke stage fails if the install covers
 the workspace again, which is what a pnpm rename of the event would look like. **There is
 deliberately no `prepack` script:** pnpm runs it after `prepare`, so it built twice. The root keeps `esbuild`,
 `typescript`, `react`, `react-dom`, the tiptap packages, `@floating-ui/dom`, and the
