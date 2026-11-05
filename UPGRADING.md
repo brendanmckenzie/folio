@@ -1196,6 +1196,53 @@ requires another to be deployed first, so a deployment on v1.4.0 or later can pr
 what it runs and an earlier one never does. A usage error from `folio init` or `folio
 agents` now exits 2 rather than 1.
 
+### A smaller install and a prebuilt admin (v1.5.0)
+
+Nothing to run and no migration: bump the pin and redeploy. No wire change, no change
+to a `createFolio()` key, and every `exports` subpath still resolves to the same names.
+Rolling back is a pin change.
+
+What changed is what a git install fetches and builds. The package used to compile the
+admin in every consumer's tree and ship `src/` beside `dist/`. It now ships the admin
+prebuilt and ships only `dist/`, so a cold install fetches and builds far less. Measured
+against a fresh cache:
+
+| | before | after |
+| --- | --- | --- |
+| npm cold git install | 238 packages, 128 MB | 85 packages, 31 MB |
+| pnpm prepare | 262 packages, 234 MB | 89 packages, 70 MB |
+| admin initial JavaScript | about 348 KB gzipped | about 166 KB gzipped |
+| consumer dependency tree | 78 packages | 22 packages |
+
+The admin's rich-text editor is now a separate chunk that loads when a screen needs a
+rich-text field, which is most of the drop in initial JavaScript. pnpm's git prepare is scoped to the root package
+by a `.pnpmfile.mjs` that only applies during that prepare, so a pnpm consumer no longer
+installs Folio's own workspace.
+
+Three details a host may notice:
+
+- **`folio/admin-entry` names the built admin file.** The export points at
+  `dist/admin/folio-admin.js` rather than a source module. The Vite plugin serves it for
+  you; a host that imported the export directly gets the bundle.
+- **The Vite plugin has an `adminFromSource` option.** It serves the admin from `src/`
+  instead of the prebuilt file, and exists for Folio's own demo, which edits the admin
+  live. A host has no reason to set it, and the package no longer ships the source it
+  would read.
+- **`src/` is no longer in the package**, apart from the three files the describer eval
+  gate reads: `src/server/describe-anthropic.ts`, `src/server/llm-tasks.ts` and
+  `src/server/llm-tasks.json`. Sourcemaps embed their source, so stack traces still
+  resolve, and docs that named other `src/` paths now link the repository on GitHub.
+
+### The `development` export condition is now `folio-source` (v1.5.0)
+
+Every `exports` subpath carried a private `development` condition that resolved to
+Folio's TypeScript source, for Folio's own demo. It is renamed `folio-source`. Vite
+applies `development` in any dev server, so until now a host's `vite dev` could resolve
+some Folio subpaths to source while its production build used `dist/`. Both now use
+`dist/`, which is what a consumer wants, and a host needs no change. Only a host that deliberately builds
+against Folio's source needs to add `folio-source`, and the source is no longer in the
+package to resolve to, so in practice that means working from a clone of the repository.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

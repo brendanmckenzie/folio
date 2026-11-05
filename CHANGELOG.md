@@ -8,6 +8,38 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.5.0
+
+A minor release that makes a git install much smaller and the admin lighter to load. No
+migration, no wire change, nothing to run or edit on an existing host. Read
+[A smaller install and a prebuilt admin](UPGRADING.md#a-smaller-install-and-a-prebuilt-admin-v150)
+for the details.
+
+### Changed
+
+- **The admin ships prebuilt.** `folio/admin-entry` names `dist/admin/folio-admin.js`, and
+  the Vite plugin serves it instead of compiling the admin in the consumer's tree. The
+  plugin's new `adminFromSource` option serves it from `src/` for Folio's own demo.
+- **The rich-text editor loads on demand.** The admin's initial JavaScript falls from about
+  348 KB to about 166 KB gzipped.
+- **The package ships only `dist/`.** `src/` is gone apart from the describer prompt files
+  the eval gate reads (`describe-anthropic.ts`, `llm-tasks.ts`, `llm-tasks.json`), and
+  `folio/render` is built like the other entries.
+- **A git install builds only what it needs.** npm's cold install falls from 238 packages and
+  128 MB to 85 and 31 MB, pnpm's prepare from 262 packages and 234 MB to 89 and 70 MB, and the
+  consumer dependency tree from 78 packages to 22. pnpm's prepare is scoped to the root
+  package by `.pnpmfile.mjs`.
+- **The private `development` export condition is renamed `folio-source`.** A host that set
+  `development` expecting Folio's source now gets `dist/`.
+- **The shipped docs link repository files at the release tag.** Specs, scripts and tests
+  that the package does not carry are linked on GitHub instead of named as local paths.
+
+### Breaking changes
+
+None. The `exports` surface and every `createFolio()` key are unchanged; the only
+visible effect of the condition rename is for a host that set `development` expecting
+source, which now gets the built package.
+
 ## 1.4.1
 
 A patch release: nothing to run or edit on an existing host. No migration, no wire

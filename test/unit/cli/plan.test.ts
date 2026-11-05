@@ -253,7 +253,7 @@ describe("upgrade plans, other ranges", () => {
       releases: [
         ...ledger.releases,
         {
-          version: "1.5.0",
+          version: "1.6.0",
           rollback: "safe",
           migrations: [],
           headings: [],
@@ -261,24 +261,24 @@ describe("upgrade plans, other ranges", () => {
         },
       ],
     };
-    const p = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.3.1" });
+    const p = plan({ ledger: fixture, cliVersion: "1.6.0", from: "1.3.1" });
     expect(p.hops.map((h) => h.to)).toEqual([newest]);
-    expect(p.stop).toMatchObject({ before: "1.5.0", requiresDeployed: newest, deployed: null });
+    expect(p.stop).toMatchObject({ before: "1.6.0", requiresDeployed: newest, deployed: null });
     expect(p.hops[0]?.steps.at(-1)).toMatchObject({ id: "next-hop", phase: "post-deploy" });
     expect(p.hops[0]?.steps.find((s) => s.id === "pin")).toMatchObject({
       after: `github:brendanmckenzie/folio#v${newest}`,
     });
     // Installed at or past the gate proves nothing about what is deployed.
-    const installed = plan({ ledger: fixture, cliVersion: "1.5.0", from: newest });
+    const installed = plan({ ledger: fixture, cliVersion: "1.6.0", from: newest });
     expect(installed.hops).toEqual([]);
-    expect(installed.stop?.before).toBe("1.5.0");
+    expect(installed.stop?.before).toBe("1.6.0");
     // A deployment that reports the newest release or later is the proof.
-    const proven = plan({ ledger: fixture, cliVersion: "1.5.0", from: newest, deployed: newest });
+    const proven = plan({ ledger: fixture, cliVersion: "1.6.0", from: newest, deployed: newest });
     expect(proven.stop).toBeUndefined();
-    expect(proven.hops.map((h) => h.to)).toEqual(["1.5.0"]);
+    expect(proven.hops.map((h) => h.to)).toEqual(["1.6.0"]);
     // An older deployment does not count.
     expect(
-      plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.3.1", deployed: "1.3.9" }).stop,
+      plan({ ledger: fixture, cliVersion: "1.6.0", from: "1.3.1", deployed: "1.3.9" }).stop,
     ).toBeDefined();
   });
 
@@ -287,14 +287,14 @@ describe("upgrade plans, other ranges", () => {
       ...ledger,
       migrations: {
         ...(ledger.migrations as object),
-        "0018_x.sql": { release: "1.5.0", apply: "with-deploy" },
+        "0018_x.sql": { release: "1.6.0", apply: "with-deploy" },
       },
       releases: [
         ...ledger.releases,
-        { version: "1.5.0", rollback: "none", migrations: ["0018_x.sql"], headings: [] },
+        { version: "1.6.0", rollback: "none", migrations: ["0018_x.sql"], headings: [] },
       ],
     };
-    const hop = plan({ ledger: fixture, cliVersion: "1.5.0", from: "1.4.0" }).hops[0] as Hop;
+    const hop = plan({ ledger: fixture, cliVersion: "1.6.0", from: "1.4.0" }).hops[0] as Hop;
     expect(hop.steps.filter((s) => s.phase === "deploy").map((s) => s.id)).toEqual([
       "d1-remote:staging",
       "deploy:staging",
