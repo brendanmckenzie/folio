@@ -757,7 +757,7 @@ layout meanwhile.
 **Search.** `richtext` cannot be `indexed`, so the body is not filterable through
 `content_index` — `title` and `published` are, and that is what an archive page
 sorts and filters by. Full-text search over bodies is FTS5's job and spec 30's
-(`docs/specs/content-model/full-text-search.md`) — see "Search" below.
+([`docs/specs/content-model/full-text-search.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/content-model/full-text-search.md)) — see "Search" below.
 
 **Gating.** If this type carries a `gate` field, a denial nulls `body` itself —
 the root-level `richtext` — in `data` and every `i18n` locale, exactly as it
@@ -1505,7 +1505,7 @@ second-hop documents are loaded per resolve (ids past the cap resolve to
 nothing, though their story rows still load), and a second-hop document that is
 a gated page is dropped, because `resolve()` has no visitor to ask. A *first*-hop
 reference to a gated page is the documented gap in
-`docs/specs/platform/visitor-access.md`.
+[`docs/specs/platform/visitor-access.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/visitor-access.md).
 
 In the admin, the editor's preview is given the **server's** resolution
 (`GET {base}/api/story/:id/resolution`, which runs the same `resolve()` a preview
@@ -1925,7 +1925,7 @@ binds at most 100 parameters per statement, so a query whose filters, type list,
 scope chain, search and paging together would bind more than 100 values is a
 `400 bad_request` naming the count. Anything that fits is accepted. `contains` is a scan and is refused unless
 something else can narrow first; full-text search is FTS5's job and spec 30's
-(`docs/specs/content-model/full-text-search.md`) — see "Search" below.
+([`docs/specs/content-model/full-text-search.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/content-model/full-text-search.md)) — see "Search" below.
 
 **A `where` or `order` on a field nobody marked `indexed` is a 400 naming the
 field**, and listing the ones that work. Never a silent empty result: that is the
@@ -1975,7 +1975,7 @@ letting you delete something.
 because `richtext` cannot be `indexed`. Full-text search is the other half, over
 every `text`, `textarea` and `richtext` value in a document's whole blok graph — not
 just the root — written by FTS5 rows inside the **same publish batch** as
-`content_index` (`docs/specs/content-model/full-text-search.md`). One write path, one
+`content_index` ([`docs/specs/content-model/full-text-search.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/content-model/full-text-search.md)). One write path, one
 query compiler: `search` is a term of `ContentQuery`, so `folio.query`,
 `GET {base}/api/content`, `GET /api/v1/documents` and MCP's `query_documents` all
 rank and snippet the same way.
@@ -2089,7 +2089,7 @@ and `0002`–`0010` on top of it. (`0009` is a deliberate gap — it is a claim 
 spec still in draft.) The ten migrations that preceded `0001_init.sql` were
 collapsed into it back when nothing was deployed; what each of them added is
 still recorded, in its own spec's *Wire & schema changes* section and in the
-table in `docs/specs/README.md`.
+table in [`docs/specs/README.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/README.md).
 
 `0001_init.sql` is a plain `create table` file, so applying it over a database
 that already has those tables **fails loudly** rather than adopting it. That is
@@ -3607,7 +3607,7 @@ debounced watermark write that publishes nothing.
 
 **Verify it, do not assume it.** None of this is observable locally, none of it
 errors when wrong, and the failure — a purge into an empty namespace — looks
-exactly like a purge that worked. `scripts/cache-probe.mjs <url> --token …` is
+exactly like a purge that worked. [`scripts/cache-probe.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/cache-probe.mjs) `<url> --token …` is
 the only thing that will tell you, and it is worth running against a deployment
 after any change to how requests reach your entrypoints.
 On a deployment with `sites`, name the admin origin, the site and its preview
@@ -3738,7 +3738,7 @@ hooks: {
 Workers Cache is not simulated by miniflare, so no test in this repo — unit, workers,
 or `scripts/*-test.mjs` against `wrangler dev` — can observe a hit or a purge. Every
 computation is therefore a pure function with tests behind it, and
-[`scripts/cache-probe.mjs`](../scripts/cache-probe.mjs) covers the rest against a real
+[`scripts/cache-probe.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/cache-probe.mjs) covers the rest against a real
 deployment: it asserts MISS→HIT, triggers a purge for each tag prefix and reports
 time-to-fresh. It needs a deployed Worker, so it is a tool rather than a test and CI
 never runs it. Run it after changing the purge hook or the tag vocabulary. It cannot
@@ -4583,7 +4583,7 @@ migrate purge everything.
 A publish in the shared scope purges the `path:` tag on every site under it, which is
 how a shared page reaches fifty sites within a minute without a reverse index.
 
-Everything in this section is unobservable locally. `scripts/cache-probe.mjs` takes
+Everything in this section is unobservable locally. [`scripts/cache-probe.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/cache-probe.mjs) takes
 the new arguments for exactly this: `--admin <origin> --site <id> --preview <origin>`
 reports a MISS then a HIT on the live host, a MISS on the preview origin while the
 live entry is warm (the entries are separate), and both purged by one publish.
@@ -4991,7 +4991,7 @@ grown since it last went live.
 
 It is deliberately not part of the migrate path: an audit that runs as a side
 effect of a write is an audit nobody reads. Adding a check is one entry in
-`DOCUMENT_CHECKS`, `STORY_CHECKS` or `SCHEMA_CHECKS` ([`src/server/audit.ts`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/server/audit.ts)) —
+`DOCUMENT_CHECKS`, `STORY_CHECKS` or `SCHEMA_CHECKS` ([`src/server/audit.ts`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/src/server/audit.ts)) —
 every finding carries its own `check` name and travels in the report's `content`
 / `stories` / `schema` arrays, so no route, response shape or admin screen
 changes.
@@ -5144,7 +5144,7 @@ await folio.write(env, id, diff(doc, target), { actor: 'sync-job', txId: 'nightl
 ```
 
 Same `commit`, same chunking, same guarantees — see `POST /dev/sync` in
-[`examples/demo/src/index.tsx`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/examples/demo/src/index.tsx), which is that call and a JSON body.
+[`examples/demo/src/index.tsx`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/examples/demo/src/index.tsx), which is that call and a JSON body.
 
 ### Globals are ordinary documents
 
@@ -5196,18 +5196,18 @@ On by default; `createFolio({ mcp: false })` turns it off.
 
 ## Verified
 
-`scripts/sync-test.mjs` (17 checks) exercises the engine against both `vite dev`
+[`scripts/sync-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/sync-test.mjs) (17 checks) exercises the engine against both `vite dev`
 and the production build: bootstrap, cross-client delta, self-ack, presence,
 draft persistence, watermark catchup, that a client-side `cloneSubtree` duplicate
 arrives at another connected client as one transaction and both converge, publish,
 and that a published page contains no `<script>`.
 
-`scripts/history-test.mjs` (19 checks) covers versioning: checkpoints, publish
+[`scripts/history-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/history-test.mjs) (19 checks) covers versioning: checkpoints, publish
 writing a version, list ordering, that the list omits document payloads, that a
 restore diff is minimal, that restoring leaves the published page untouched until
 re-published, diff round-tripping, and the activity trail.
 
-`scripts/fields-test.mjs` (75 checks) covers the richer field types: link
+[`scripts/fields-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/fields-test.mjs) (75 checks) covers the richer field types: link
 resolution for every kind, upload and header dimension sniffing, serving and
 resizing, focal points, per-usage alt text, richtext rendering and per-field
 constraints, reference resolution in both draft and published modes, tolerance of
@@ -5218,8 +5218,8 @@ correctly. Two are load-bearing:
   richtext — while leaving the linking documents byte-for-byte unchanged, and
 - a story that references itself renders once rather than forever.
 
-`scripts/migrate-test.mjs` (38 checks) covers content migrations against the
-demo's own two ([`examples/demo/src/migrations.ts`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/examples/demo/src/migrations.ts)): the seeded rows, which
+[`scripts/migrate-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/migrate-test.mjs) (38 checks) covers content migrations against the
+demo's own two ([`examples/demo/src/migrations.ts`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/examples/demo/src/migrations.ts)): the seeded rows, which
 genuinely predate them, reaching all three copies of a document — a connected
 editor receiving the change as a delta with no reload, the published page
 rendering the new field, and an old version previewing correctly because it is
@@ -5227,7 +5227,7 @@ migrated on read while its stored bytes stay untouched. Plus the two properties
 everything else leans on: a dry run that writes nothing at all, and a second run
 that reports zero changes.
 
-`scripts/auth-test.mjs` (42 checks) covers identity and access against the demo's
+[`scripts/auth-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/auth-test.mjs) (42 checks) covers identity and access against the demo's
 own `magicLink` provider: the editor redirecting when signed out and the API
 answering 401, an unauthenticated socket upgrading and then closing 4003, an
 unknown address answered byte-identically to a known one with no link sent, a
@@ -5238,7 +5238,7 @@ back as a `reject`, a read-only token refused a write and refused a socket
 entirely, a cross-origin mutation refused, and — after signing out — the editor and
 the socket both refused while the published page carries on serving to anyone.
 
-`scripts/collections-test.mjs` (45 checks) covers collections against the demo's
+[`scripts/collections-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/collections-test.mjs) (45 checks) covers collections against the demo's
 `insight` type and its `insightList` block: twenty-five insights, one left
 unpublished, filtered and sorted and paged over HTTP; `total` counting every match
 rather than the page; a filter on an unindexed field answering 400 with the field
@@ -5254,7 +5254,7 @@ resolves to a real `href`**, because a link mark stores an id and no href, so a
 resolution narrowed to link *fields* would render every internal prose link as
 plain text with nothing failing.
 
-`scripts/space-test.mjs` (26 checks) covers the space channel with three clients —
+[`scripts/space-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/space-test.mjs) (26 checks) covers the space channel with three clients —
 two story sockets on two different documents plus a space socket, which is the
 minimum that can show what it is for. Cross-story presence, as the signed-in
 identity rather than what the client asserted, and with no session id or expiry
@@ -5271,10 +5271,10 @@ presence on a story socket still works and now names a field**, because the spac
 channel duplicates the selection and must not have replaced anything.
 
 Every script runs against a live dev server (and the engine tests
-against the production build via `vite preview`). `scripts/e2e.sh` starts it on a free
+against the production build via `vite preview`). [`scripts/e2e.sh`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/e2e.sh) starts it on a free
 port with its own state directory and passes the origin as `FOLIO_E2E_BASE`; run by hand
 against `pnpm dev`, the scripts fall back to port 5199. They sign in first, through
-`scripts/lib/auth.mjs`: the demo's `send` logs the link and stashes it at a
+[`scripts/lib/auth.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/lib/auth.mjs): the demo's `send` logs the link and stashes it at a
 localhost-only `/dev/last-signin`, which is the stand-in for a mailbox that lets
 these run with no mail credentials at all.
 
@@ -5497,16 +5497,16 @@ per-locale publishing. Both are deliberate and both are additive later — see t
 section above.
 
 Within auth, **spec 28 has landed**
-(`docs/specs/foundation/auth-providers.md`) — see "Auth" above: a
+([`docs/specs/foundation/auth-providers.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/foundation/auth-providers.md)) — see "Auth" above: a
 trusted-identity provider kind with a Cloudflare Access helper, SSO role
 mapping through `roleFromClaim`, per-domain enforced providers and an
 `auth_events` table with a `sweepAuth` retention sweep. **Passkeys have
-landed too**, as spec 29 (`docs/specs/foundation/passkeys.md`) — see
+landed too**, as spec 29 ([`docs/specs/foundation/passkeys.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/foundation/passkeys.md)) — see
 "Passkeys" above. One thing that spec's own gate does not yet cover: the
 hand-rolled WebAuthn verifier is proven against a synthetic authenticator,
 not against real devices — `test/fixtures/webauthn/` is still empty, and a
 `todo` in `pnpm test` names the gap rather than hiding it. **Site-visitor
-access control has landed**, as spec 31 (`docs/specs/platform/visitor-access.md`) —
+access control has landed**, as spec 31 ([`docs/specs/platform/visitor-access.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/visitor-access.md)) —
 see "Visitor access" above. Still deliberately out: per-story editor
 permissions, passwords and TOTP. **Multi-site is built**, as spec 23 — see
 "Many sites in one deployment" above — **and so are many brands**, as spec 34: see
@@ -5515,7 +5515,7 @@ rate limiting is per address only; the IP dimension wants a Cloudflare
 rate-limiting rule at the zone.
 
 Within collections: **full-text search has landed**, as spec 30
-(`docs/specs/content-model/full-text-search.md`) — see "Search" above. Still unbuilt: a
+([`docs/specs/content-model/full-text-search.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/content-model/full-text-search.md)) — see "Search" above. Still unbuilt: a
 `collection` on a nested block's field (only a root block is projected, so the index
 stays a fixed projection of a document), **faceted counts** ("Policy (12), AI (8)" —
 one `group by` over the same predicate, genuinely easy and deliberately unbuilt

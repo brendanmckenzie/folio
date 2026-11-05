@@ -163,7 +163,7 @@ jobs:
           cache: pnpm
 
       # No build needed to lint a string.
-      - run: pnpm install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile --ignore-scripts
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
 
       - name: lint the PR title
