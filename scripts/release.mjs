@@ -522,6 +522,11 @@ function pnpmConsumerInstall(repoRoot, sha) {
   const MAX_PACKAGES = 150; // 89 today; headroom for dependency churn, not for a workspace member
   const dir = mkdtempSync(join(tmpdir(), "folio-pnpm-consumer-"));
   const source = mkdtempSync(join(tmpdir(), "folio-pnpm-source-"));
+  // `die` exits the process, which skips the `finally`, so a failure cleans up first.
+  const cleanup = () => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(source, { recursive: true, force: true });
+  };
   try {
     const inSource = (...a) => execFileSync("git", a, { cwd: source, stdio: "ignore" });
     inSource("init", "-q");
@@ -545,6 +550,7 @@ function pnpmConsumerInstall(repoRoot, sha) {
     const fail = (what) => {
       console.log("FAILED");
       process.stderr.write(`${out}\n`);
+      cleanup();
       die(`${what}. Nothing has been pushed.`);
     };
     if (r.status !== 0) fail(`a pnpm consumer cannot install the package (exit ${r.status})`);
@@ -562,8 +568,7 @@ function pnpmConsumerInstall(repoRoot, sha) {
       fail("the pnpm-installed package has no dist/server.js");
     console.log(`ok (${count} packages)`);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(source, { recursive: true, force: true });
+    cleanup();
   }
 }
 
