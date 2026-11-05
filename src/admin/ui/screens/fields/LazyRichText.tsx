@@ -1,13 +1,4 @@
-import {
-  Component,
-  type ComponentProps,
-  type ComponentType,
-  lazy,
-  type ReactNode,
-  Suspense,
-  useMemo,
-  useState,
-} from "react";
+import { Component, type ComponentProps, lazy, type ReactNode, Suspense, useMemo } from "react";
 import { Button } from "../../Button";
 import css from "./fields.module.css";
 import type { RichTextField } from "./RichTextField";
@@ -20,21 +11,20 @@ import type { RichTextField } from "./RichTextField";
  * fields share, so it stays in the entry's one stylesheet.
  *
  * A chunk can fail to load: a tab left open across a deploy asks for a hashed file
- * that is gone, or the network drops. `React.lazy` caches the rejection and an
- * unhandled one unmounts the whole root, so the failure is contained to this field
- * by a boundary, and Retry builds a **new** lazy component, because the old one would
- * answer the same rejection without asking again.
+ * that is gone, or the network drops. An unhandled rejection unmounts the whole root,
+ * so a boundary contains it to this field. **There is no in-place retry**: a module
+ * whose dynamic `import()` failed is cached as failed in the browser's module map, so
+ * a second `import()` of the same URL rejects without a request, and recreating the
+ * `lazy` component cannot change that. A reload is the only recovery, and after a
+ * deploy it is the right one anyway.
  */
 
 type Props = ComponentProps<typeof RichTextField>;
-type Loader = () => Promise<{ RichTextField: ComponentType<Props> }>;
+type Loader = () => Promise<{ RichTextField: (props: Props) => ReactNode }>;
 
 const loadEditor: Loader = () => import("./RichTextField");
 
-class Boundary extends Component<
-  { onRetry: () => void; children: ReactNode },
-  { failed: boolean }
-> {
+class Boundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   override state = { failed: false };
 
   static getDerivedStateFromError() {
@@ -45,18 +35,9 @@ class Boundary extends Component<
     if (!this.state.failed) return this.props.children;
     return (
       <div className={css.rtPending} role="alert">
-        <p className={css.note}>
-          The editor could not be loaded. Retry, or reload the page if this keeps happening (the
-          admin may have been updated since this tab opened).
-        </p>
-        <Button
-          size="sm"
-          onClick={() => {
-            this.props.onRetry();
-            this.setState({ failed: false });
-          }}
-        >
-          Retry
+        <p className={css.note}>The editor could not be loaded. Reload the page to try again.</p>
+        <Button size="sm" onClick={() => window.location.reload()}>
+          Reload the page
         </Button>
       </div>
     );
@@ -64,14 +45,13 @@ class Boundary extends Component<
 }
 
 export function LazyRichText({ load = loadEditor, ...props }: Props & { load?: Loader }) {
-  const [attempt, setAttempt] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is the retry token
+  // Memoised: a `lazy` made per render is a new component type, which remounts.
   const Editor = useMemo(
     () => lazy(() => load().then((m) => ({ default: m.RichTextField }))),
-    [load, attempt],
+    [load],
   );
   return (
-    <Boundary onRetry={() => setAttempt((n) => n + 1)}>
+    <Boundary>
       <Suspense fallback={<div className={css.rtPending} aria-busy="true" />}>
         <Editor {...props} />
       </Suspense>
