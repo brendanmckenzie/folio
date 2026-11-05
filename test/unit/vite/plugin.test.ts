@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Plugin, UserConfig } from "vite";
 import { folio } from "../../../src/vite/index";
@@ -531,6 +532,27 @@ describe("the Vite plugin, the prebuilt admin (the default)", () => {
       expect(assets.adminCss).toEqual(["/folio-admin.css"]);
     }
   });
+
+  // Needs `dist/admin`, which `pnpm build` writes before CI runs the tests.
+  it.skipIf(!existsSync(new URL("../../../dist/admin/folio-admin.css", import.meta.url)))(
+    "emits the admin with an originalFileName, so a consumer can attribute its CSS to a source",
+    () => {
+      const plugin = folio({ blocks: "./src/blocks/index.ts" })[0] as Plugin;
+      const gen = plugin.generateBundle as unknown as {
+        handler: (this: unknown, o: unknown, b: unknown) => void;
+      };
+      const emitted: Array<{ fileName: string; originalFileName?: string }> = [];
+      gen.handler.call(
+        { environment: { name: "client" }, emitFile: (f: never) => emitted.push(f) },
+        {},
+        {},
+      );
+      const css = emitted.find((f) => f.fileName === "folio-admin.css");
+      expect(css?.originalFileName).toMatch(/dist[\\/]admin[\\/]folio-admin\.css$/);
+      expect(emitted.every((f) => f.originalFileName)).toBe(true);
+      expect(emitted.map((f) => f.fileName)).toContain("folio-admin.js");
+    },
+  );
 
   it("keeps the admin stylesheet out of the single bundle when code splitting is off", () => {
     const { define } = prebuilt("build", { build: { cssCodeSplit: false } });

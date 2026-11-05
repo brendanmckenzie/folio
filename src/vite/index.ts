@@ -280,8 +280,13 @@ export function folio(options: FolioPluginOptions): Plugin[] {
         ) {
           // At the root under the names `__FOLIO_ASSETS__` carries; split chunks
           // import each other relatively, so they sit beside the entry.
-          for (const [name, source] of adminFiles()) {
-            this.emitFile({ type: "asset", fileName: name, source });
+          //
+          // `originalFileName` is the real file under the package: a consumer's
+          // build tooling attributes a stylesheet to its source through the
+          // asset's `originalFileNames`, and an emitted asset with none reads as
+          // CSS from nowhere (group-web's `check-brand-css` refuses it).
+          for (const [name, { source, file }] of adminFiles()) {
+            this.emitFile({ type: "asset", fileName: name, source, originalFileName: file });
           }
         }
         if (noSplit) return;
@@ -300,9 +305,9 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       server.middlewares.use((req, res, next) => {
         const name = (req.url ?? "").split("?")[0]?.slice(1) ?? "";
         const file = /^folio-admin[\w.-]*\.(js|css)$/.test(name)
-          ? adminFiles().get(name)
+          ? adminFiles().get(name)?.source
           : undefined;
-        if (!file) return next();
+        if (file === undefined) return next();
         res.setHeader("Content-Type", name.endsWith(".css") ? "text/css" : "text/javascript");
         res.setHeader("Cache-Control", "no-cache");
         res.end(file);
@@ -578,19 +583,23 @@ function entryName(id: string): string {
  * `dist/vite.js` sits one directory below the package root and `src/vite/index.ts`
  * two, which is the same walk `adminEntry` makes.
  */
-function adminFiles(): Map<string, string> {
+function adminFiles(): Map<string, { source: string; file: string }> {
   const dir = import.meta.dirname;
   const dist = path.resolve(dir, path.basename(dir) === "vite" ? "../../dist" : ".", "admin");
   if (!existsSync(path.join(dist, "folio-admin.js"))) {
     throw new Error(
-      `folio: the prebuilt admin is missing (${dist}). Run \`pnpm build\` in the Folio checkout, ` +
-        "or pass `adminFromSource: true` to compile it from `src/admin`.",
+      `folio: the prebuilt admin is missing (${dist}). Folio's \`prepare\` step builds it when the ` +
+        "package is installed, so that step did not run or failed. Reinstall folio and check the " +
+        "install log for the build error (in a Folio checkout, run `pnpm build`).",
     );
   }
   return new Map(
     readdirSync(dist)
       .filter((n) => n.startsWith("folio-admin") && /\.(js|css)$/.test(n))
-      .map((n) => [n, readFileSync(path.join(dist, n), "utf8")]),
+      .map((n) => [
+        n,
+        { source: readFileSync(path.join(dist, n), "utf8"), file: path.join(dist, n) },
+      ]),
   );
 }
 
