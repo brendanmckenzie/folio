@@ -16,7 +16,8 @@ import css from "./fields.module.css";
 import { FormField } from "./FormField";
 import { LinkField } from "./LinkField";
 import { ReferenceField, ReferencesField } from "./ReferenceField";
-import { type FieldChrome, RichTextField } from "./RichTextField";
+import { LazyRichText } from "./LazyRichText";
+import type { FieldChrome } from "./RichTextField";
 
 /**
  * Everything a control needs that is the same for every field in the panel. The
@@ -235,7 +236,7 @@ export function Control(props: ControlProps) {
 
     case "richtext":
       return (
-        <RichTextField
+        <LazyRichText
           value={value}
           {...(props.describedBy ? { describedBy: props.describedBy } : {})}
           {...(props.invalid ? { invalid: true } : {})}

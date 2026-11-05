@@ -456,6 +456,16 @@
   min-width: 0;
 }
 
+/* What stands in for a richtext field while its chunk loads (`Control.tsx`): the
+   toolbar row (2rem) and the surface's own `min-height`, so the inspector does not
+   jump when the editor arrives. Same box model as `.surface`, no content. */
+.rtPending {
+  min-height: calc(2rem + var(--space-2) + 7rem);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+
 /* The prose surface. `.surface` is the class TipTap is told to put on its own
    `contenteditable`, which is why the peer ring above names it explicitly: it is
    not an `input` and would otherwise get no ring at all. */
