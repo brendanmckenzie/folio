@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The repo's dev toolchain (lint, test, hooks), kept out of the root so a git install of folio does not download it",
+  "description": "The repo's dev toolchain (lint, test, hooks), kept out of the root so an npm git install of folio does not download it",
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",
     "@cloudflare/vitest-plugin": "^1.4.11",

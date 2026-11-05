@@ -23,7 +23,7 @@ minimumReleaseAgeExclude:
   # Renovate security update: happy-dom@21.0.4
   - happy-dom@21.0.4
 
-# The dev toolchain lives in tooling/ (so a git install of folio does not fetch it), but
+# The dev toolchain lives in tooling/ (so an npm git install of folio does not fetch it), but
 # vitest.config.ts, test/ and the gates run from the repo root and resolve it from here.
 publicHoistPattern:
   - "@biomejs/biome"

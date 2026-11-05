@@ -61,8 +61,12 @@ pnpm build:demo         # demo vite build
 
 **The root `devDependencies` are exactly what `prepare` runs; the rest live in `tooling/`.**
 npm installs every devDependency of a git dependency before it runs `prepare`, so anything
-at the root is downloaded by every consumer build (a cold install was 238 tarballs, 128 MB,
-before this; most of it workerd, biome, sharp and lefthook). The root keeps `esbuild`,
+at the root is downloaded by every npm consumer build (a cold npm install was 238 tarballs,
+128 MB before this and 85, 31 MB after; most of the difference was workerd, biome, sharp and
+lefthook). **This does not reach pnpm consumers:** pnpm prepares a git dependency by running
+`pnpm install` in the clone, which reads `pnpm-workspace.yaml` and installs `tooling/` and
+`examples/*` as well, so their builds still download the whole workspace. That is tracked
+separately. The root keeps `esbuild`,
 `typescript`, `react`, `react-dom`, the tiptap packages, `@floating-ui/dom`, and the
 type packages `tsc -p tsconfig.build.json` reads through `tsconfig.json`'s `types`
 (`@types/node`, `@types/react`, `@types/react-dom`, `@cloudflare/workers-types`, `vite`).
