@@ -268,7 +268,7 @@ version.
 
 ### The wire version
 
-`PROTOCOL_VERSION` (`src/core/protocol.ts`, currently **5**) is carried by every
+`PROTOCOL_VERSION` ([`src/core/protocol.ts`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/core/protocol.ts), currently **5**) is carried by every
 socket frame and every admin↔preview message. A mismatch is refused rather than
 guessed at. **The release that carries `0011` bumps it from 4 to 5** (three wire
 changes ride the one bump: the mutation log's `unset`, the preview bridge's
@@ -990,7 +990,7 @@ called when no request was made, and a hook that throws or rejects is ignored, s
 ledger write cannot fail a describe. Folio records nothing itself: this is the seam for
 a host that keeps its own cost ledger.
 
-`DEFAULT_DESCRIBE_MODEL` now comes from `src/server/llm-tasks.json`, where the model
+`DEFAULT_DESCRIBE_MODEL` now comes from [`src/server/llm-tasks.json`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/server/llm-tasks.json), where the model
 watch and the eval suite read it. Its value is unchanged (`claude-opus-5`).
 
 ### A title-only patch no longer moves the page (2026-09-06) (v1.0.0)
