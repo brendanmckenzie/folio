@@ -249,7 +249,7 @@ brand would not publish belongs in `writing`.
 
 Skip this unless `createFolio` has a `sites` key. Without one, none of it applies
 and nothing above changes. With one, the deployment holds many sites (spec 23,
-`docs/specs/foundation/multi-site.md`; the feature is `docs/handbook.md` "Many sites
+[`docs/specs/foundation/multi-site.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/foundation/multi-site.md); the feature is `docs/handbook.md` "Many sites
 in one deployment"), and the host does six things differently. **Turning `sites` on
 is the point of no return** (`UPGRADING.md`); do not do it to a production
 deployment on the strength of this file.
@@ -356,7 +356,7 @@ scope itself.
 
 Skip this unless `createFolio` has a `brands` key. Without one, none of it applies. With
 one, the deployment holds sites of more than one **brand**, each its own registry of
-blocks, types, preview and policy (spec 34, `docs/specs/foundation/multi-brand.md`; the
+blocks, types, preview and policy (spec 34, [`docs/specs/foundation/multi-brand.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/foundation/multi-brand.md); the
 feature is `docs/handbook.md` "Many brands in one deployment", the keys are in
 `docs/configuration.md`). It builds on "A multi-site host" above, and everything there
 still applies. **Do not turn `brands` on for a deployment on the strength of this file**:
@@ -542,13 +542,13 @@ bindings and the D1 migrations, and names the fix for each finding.
 
 `src/server/llm-tasks.json` is the registry of every model call Folio ships, today
 `media.describe`. The model id lives there and nowhere else: code reads it through
-`taskModel()` in `src/server/llm-tasks.ts`, and `test/unit/llm-registry.test.ts` fails
-on a model id written anywhere else. [`src/server/llm-prices.json`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/server/llm-prices.json) prices the models for
+`taskModel()` in `src/server/llm-tasks.ts`, and [`test/unit/llm-registry.test.ts`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/test/unit/llm-registry.test.ts) fails
+on a model id written anywhere else. [`src/server/llm-prices.json`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/src/server/llm-prices.json) prices the models for
 evals only; Folio spends nothing itself, and a host records its own spend through the
 `onUsage` hook on `anthropicDescriber`. The task's eval suite is `evals/media.describe`
-(ten CC0 photographs, sources in its `SOURCES.md`); `node scripts/llm/eval.mjs` ([source](https://github.com/brendanmckenzie/folio/blob/v1.4.1/scripts/llm/eval.mjs)) runs it from a clone of the repository.
+(ten CC0 photographs, sources in its `SOURCES.md`); `node scripts/llm/eval.mjs` ([source](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/llm/eval.mjs)) runs it from a clone of the repository.
 The suite gates prompt changes in Folio; consumers own model choice and the model
-watch, so the registry has `watch: false`. Lifecycle: [`docs/operations/README.md`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/docs/operations/README.md).
+watch, so the registry has `watch: false`. Lifecycle: [`docs/operations/README.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/operations/README.md).
 
 **Secrets in CI.** `ci.yml` is secret-free except for one job: `evals`, which holds
 `ANTHROPIC_EVAL_KEY` as `ANTHROPIC_API_KEY`, runs only on a same-repo PR that changes an

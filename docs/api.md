@@ -2,7 +2,7 @@
 
 The reference for `/folio/api/v1`. If you are looking for *why* it is shaped this
 way, `docs/handbook.md`'s "Content API" section has the reasoning and
-`docs/specs/platform/content-api.md` has the decisions; this file is the contract.
+[`docs/specs/platform/content-api.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/content-api.md) has the decisions; this file is the contract.
 
 Everything below assumes the library is mounted at `/folio` (`basePath`). Adjust
 the prefix if your host mounted it elsewhere.
@@ -461,7 +461,7 @@ declares `indexed: true`; anything else is a `400` naming the field, never a sil
 empty result.
 
 **`search` full-text-matches a document's title and its `searchable` `text`,
-`textarea` and `richtext` fields** (`docs/specs/content-model/full-text-search.md`),
+`textarea` and `richtext` fields** ([`docs/specs/content-model/full-text-search.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/content-model/full-text-search.md)),
 ranked with the best match first. `order` defaults to `relevance` the moment
 `search` is present; naming any other order still returns a `score` on every item.
 **`order=relevance` with no `search` is the one `400` this parameter adds**, naming
@@ -497,7 +497,7 @@ which destroys the marks that made it a snippet. Render the matched parts yourse
 from the `match` flag.
 
 **On a deployment with a `gate` configured**
-(`docs/specs/platform/visitor-access.md`), a `search` query is scoped to the gate's
+([`docs/specs/platform/visitor-access.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/visitor-access.md)), a `search` query is scoped to the gate's
 public value unless the query's own `where` already names that field. A members'
 search over members' content is `where=access:in:public,members` plus the host's
 own check that the visitor is a member before it runs the query — the same opt-out
@@ -588,7 +588,7 @@ we turn it off" stays answerable.
 - **Bulk endpoints across documents.** Per-document idempotency makes a client-side
   loop correct and resumable, which is easier to reason about than a batch endpoint
   that is partially applied. The admin has them (`{base}/api/bulk/*`,
-  `docs/specs/platform/bulk-writes.md`) and they are deliberately **not** here: what
+  [`docs/specs/platform/bulk-writes.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/bulk-writes.md)) and they are deliberately **not** here: what
   they exist for is "act on every document matching this filter" without materialising
   the ids, which is a UI problem. A script has the ids.
 - **Draft *queries*, in the `content_index` sense.** `GET /documents` still reads published
@@ -597,7 +597,7 @@ we turn it off" stays answerable.
   drafts" is not a flag on that query, it is a different query against a different table.
 
   **Finding a draft is no longer missing, though** — `GET /search` (added by
-  `docs/specs/platform/mcp-server.md`) searches title, slug and path across the whole
+  [`docs/specs/platform/mcp-server.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/mcp-server.md)) searches title, slug and path across the whole
   `stories` table regardless of publication state. What it does not do is filter on an
   indexed *field*, which is what `?where=` is for and what a draft has nothing to answer
   with. Reading a draft's content is still one document at a time:

@@ -13,7 +13,7 @@ state on your behalf. The cost of implementing one revision is that a client whi
 a `400` naming what would work. Current clients negotiate this automatically.
 
 Seventeen tools, sixteen of them an existing v1 route dispatched internally (see
-`docs/specs/platform/mcp-server.md` decision 2). So an assistant can do what a person can
+[`docs/specs/platform/mcp-server.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/mcp-server.md) decision 2). So an assistant can do what a person can
 do, an agent's edit appears live in an open editor, and it lands in the activity trail
 attributed to the token rather than to whoever minted it.
 
@@ -53,7 +53,7 @@ Two of those are worth knowing rather than discovering:
   does not.
 
 **`query_documents` takes a full-text `search` argument**
-(`docs/specs/content-model/full-text-search.md`): the same query `GET
+([`docs/specs/content-model/full-text-search.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/content-model/full-text-search.md)): the same query `GET
 /api/v1/documents?search=` runs, ranked by relevance, with a `snippet` per item rather than
 a single indexed field it filters on — so an agent can find the document about a topic
 rather than guessing its title. A malformed value is never refused; see `docs/api.md`'s
@@ -215,7 +215,7 @@ browser can then go and look; one without can still check the content is there.
 
 **It cannot work against `pnpm dev` at all.** Cloudflare's browser is remote and cannot
 reach `localhost:5199`, so local development always takes the no-binding path. That is not
-a misconfiguration, and it is what `scripts/mcp-test.mjs` asserts.
+a misconfiguration, and it is what [`scripts/mcp-test.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/mcp-test.mjs) asserts.
 
 Two limits the tool reports rather than hides:
 
@@ -223,7 +223,7 @@ Two limits the tool reports rather than hides:
   own content is node-for-node what the published page renders — which is what a screenshot
   clipped to one block is about — but the chrome around it stacks globals above the document
   instead of placing them the way your host does. Every result says so. A draft rendered
-  inside a host's own layout is a real feature and a different one; see `ROADMAP.md`.
+  inside a host's own layout is a real feature and a different one; see [`ROADMAP.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/ROADMAP.md).
 - **`blok` clips to one block, and not every block can be clipped.** A block whose `render`
   returns a component rather than an element has no addressable node in the draft render (a
   deliberate trade: the wrapper that would carry one is an extra grid child, which is the
@@ -272,5 +272,5 @@ handbook's [Checking a document](handbook.md#checking-a-document).
 
 - `docs/api.md` — the v1 Content API every tool dispatches to, including the document
   shape `write_content` and `patch_fields` take.
-- `docs/specs/platform/mcp-server.md` — why it is built this way, every alternative
+- [`docs/specs/platform/mcp-server.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/mcp-server.md) — why it is built this way, every alternative
   rejected, and the implementation notes.

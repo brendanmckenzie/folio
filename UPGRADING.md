@@ -159,7 +159,7 @@ numbers that have not shipped. `folio upgrade` computes its plan from it, and
 `folio doctor` reads it to say which release a database's migrations came from.
 
 **This document wins.** The ledger is derived from it, never the other way round,
-and a unit test (`test/unit/cli/ledger.test.ts`) fails whenever the two disagree,
+and a unit test ([`test/unit/cli/ledger.test.ts`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/test/unit/cli/ledger.test.ts)) fails whenever the two disagree,
 or when the ledger disagrees with `migrations/` or `CHANGELOG.md`. It checks the
 fields a plan is computed from, not only the names: a migration is `with-deploy`
 exactly when its row above says "apply it, then deploy"; it is followed by a reindex
@@ -268,7 +268,7 @@ version.
 
 ### The wire version
 
-`PROTOCOL_VERSION` ([`src/core/protocol.ts`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/core/protocol.ts), currently **5**) is carried by every
+`PROTOCOL_VERSION` ([`src/core/protocol.ts`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/src/core/protocol.ts), currently **5**) is carried by every
 socket frame and every admin↔preview message. A mismatch is refused rather than
 guessed at. **The release that carries `0011` bumps it from 4 to 5** (three wire
 changes ride the one bump: the mutation log's `unset`, the preview bridge's
@@ -759,7 +759,7 @@ a nested record came out as nothing.
   rest resolve to nothing, though their story rows still load), the page itself is never
   one of its own references, and a gated page is dropped because `resolve()` has no
   visitor. A first-hop reference to a gated page is the documented gap in
-  `docs/specs/platform/visitor-access.md`, unchanged by this.
+  [`docs/specs/platform/visitor-access.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/visitor-access.md), unchanged by this.
 
 A published page with no second-hop references costs the same two reads as before. A
 page that reaches one costs four, in two concurrent pairs.
@@ -1249,5 +1249,5 @@ More of these, including the ones that are not upgrade-specific, are in
 - [`docs/handbook.md`](docs/handbook.md) — "Content migrations" has the full
   argument, including why the same function has to reach three copies of a
   document.
-- [`docs/specs/README.md`](docs/specs/README.md) — the record of what every
+- [`docs/specs/README.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/README.md) — the record of what every
   migration added, per feature.

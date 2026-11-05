@@ -19,7 +19,7 @@ change, no change to the `exports` surface or to any `createFolio()` key.
   at a time, each against its own dev server, port and state directory, and
   `release.yml` runs the tag check, tests, biome and typecheck, the sweep and the
   consumer smoke test as separate jobs that the release job needs. Nothing a check
-  asserts changed. For a contributor: `scripts/e2e.sh` picks a free port and a fresh
+  asserts changed. For a contributor: [`scripts/e2e.sh`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/e2e.sh) picks a free port and a fresh
   state directory instead of using 5199 and `examples/demo/.wrangler/state`, and no longer
   kills other vite processes. The demo's `vite.config.ts` reads `FOLIO_E2E_PORT` and
   `FOLIO_E2E_STATE`, which are unset in a normal `pnpm dev`.
@@ -440,7 +440,7 @@ a running site does, so read them before you bump.
   at it).
 - The links in the installed README to contributor material are absolute URLs on
   the `v1.0.0` tag.
-- `scripts/release.mjs` checks the names a host imports from each built entry, not
+- [`scripts/release.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/release.mjs) checks the names a host imports from each built entry, not
   only that the files exist, and refuses a tag whose remote copy points at a
   different commit.
 - The handbook's exported-surface section now covers `toRegistry`, `cacheControl`,
