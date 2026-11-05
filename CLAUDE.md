@@ -59,6 +59,21 @@ pnpm build:demo         # demo vite build
   (`suppressions/parse`), and the rule it was meant to suppress stays reported. The
   group matters: `noImportantStyles` is `lint/complexity/`, not `lint/style/`.
 
+**The root `devDependencies` are exactly what `prepare` runs; the rest live in `tooling/`.**
+npm installs every devDependency of a git dependency before it runs `prepare`, so anything
+at the root is downloaded by every consumer build (a cold install was 238 tarballs, 128 MB,
+before this; most of it workerd, biome, sharp and lefthook). The root keeps `esbuild`,
+`typescript`, `react`, `react-dom`, the tiptap packages, `@floating-ui/dom`, and the
+type packages `tsc -p tsconfig.build.json` reads through `tsconfig.json`'s `types`
+(`@types/node`, `@types/react`, `@types/react-dom`, `@cloudflare/workers-types`, `vite`).
+Biome, vitest, `@cloudflare/vitest-plugin`, happy-dom, testing-library, commitlint and
+lefthook are in the private `tooling/` workspace package. `publicHoistPattern` in
+`pnpm-workspace.yaml` links them (and their bins) into the root `node_modules`, which is
+why `./node_modules/.bin/biome`, `vitest.config.ts` and the tests work unchanged from the
+root. **A new dev tool goes in `tooling/package.json` and, if a root script or config
+imports it, in that hoist list. Adding to the root `devDependencies` re-bloats every
+consumer install; only add what `prepare` needs.**
+
 `scripts/release.mjs` runs the first three before it will publish, then smoke-tests
 the installed package (including a boot of the starter under `vite dev`). `.github/workflows/ci.yml` runs the same gates (`biome ci`, typecheck,
 build, test) on every pull request, and `gate` is the status the `main` ruleset
