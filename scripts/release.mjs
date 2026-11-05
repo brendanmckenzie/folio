@@ -464,7 +464,7 @@ function smokeTest(sha) {
     }
     console.log(`ok (${shipped.length} files)`);
 
-    pnpmConsumerInstall(`git+file://${repoRoot}#${sha}`);
+    pnpmConsumerInstall(repoRoot, sha);
 
     consumerBoots(dir, `git+file://${repoRoot}#${sha}`);
   } finally {
@@ -513,11 +513,21 @@ function sleep(ms) {
  *
  * `Packages: +N` counts packages linked, not downloaded, so a warm store reads the
  * same and this uses the default one.
+ *
+ * pnpm clones the repository and checks the commit out, so unlike npm it cannot see a
+ * commit that only a private ref (the `--smoke-only` snapshot) points at. The commit is
+ * fetched into a throwaway repository and put on a branch there.
  */
-function pnpmConsumerInstall(spec) {
+function pnpmConsumerInstall(repoRoot, sha) {
   const MAX_PACKAGES = 150; // 89 today; headroom for dependency churn, not for a workspace member
   const dir = mkdtempSync(join(tmpdir(), "folio-pnpm-consumer-"));
+  const source = mkdtempSync(join(tmpdir(), "folio-pnpm-source-"));
   try {
+    const inSource = (...a) => execFileSync("git", a, { cwd: source, stdio: "ignore" });
+    inSource("init", "-q");
+    inSource("fetch", "-q", repoRoot, sha);
+    inSource("update-ref", "refs/heads/smoke", sha);
+    const spec = `git+file://${source}#${sha}`;
     writeFileSync(join(dir, "package.json"), '{"name":"pnpm-consumer","private":true}\n');
     // A throwaway consumer, so allow every build rather than compute folio's allowBuilds key.
     writeFileSync(
@@ -553,6 +563,7 @@ function pnpmConsumerInstall(spec) {
     console.log(`ok (${count} packages)`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(source, { recursive: true, force: true });
   }
 }
 
