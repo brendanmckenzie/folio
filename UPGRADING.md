@@ -1230,16 +1230,16 @@ Three details a host may notice:
   would read.
 - **`src/` is no longer in the package**, apart from the three files the describer eval
   gate reads: `src/server/describe-anthropic.ts`, `src/server/llm-tasks.ts` and
-  `src/server/llm-tasks.json`. Declaration maps and docs that named other `src/` paths
-  now point at the repository on GitHub.
+  `src/server/llm-tasks.json`. Sourcemaps embed their source, so stack traces still
+  resolve, and docs that named other `src/` paths now link the repository on GitHub.
 
 ### The `development` export condition is now `folio-source` (v1.5.0)
 
 Every `exports` subpath carried a private `development` condition that resolved to
-Folio's TypeScript source, for Folio's own demo. It is renamed `folio-source`. A host
-that does not mention it changes nothing. A host that set `development` in its own
-`resolve.conditions` expecting Folio's source now gets `dist/`, which is what a consumer
-wants and what every other host already had. Only a host that deliberately builds
+Folio's TypeScript source, for Folio's own demo. It is renamed `folio-source`. Vite
+applies `development` in any dev server, so until now a host's `vite dev` could resolve
+some Folio subpaths to source while its production build used `dist/`. Both now use
+`dist/`, which is what a consumer wants, and a host needs no change. Only a host that deliberately builds
 against Folio's source needs to add `folio-source`, and the source is no longer in the
 package to resolve to, so in practice that means working from a clone of the repository.
 
