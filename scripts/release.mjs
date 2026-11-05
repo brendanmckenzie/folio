@@ -464,6 +464,8 @@ function smokeTest(sha) {
     }
     console.log(`ok (${shipped.length} files)`);
 
+    pnpmConsumerInstall(repoRoot, sha);
+
     consumerBoots(dir, `git+file://${repoRoot}#${sha}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -497,6 +499,77 @@ function snapshotWorkingTree() {
 // A declaration, not a const: `--smoke-only` calls `smokeTest` before this line runs.
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * A pnpm consumer's install of the commit must prepare it from the root project alone.
+ *
+ * pnpm prepares a git dependency by running `pnpm install` in the fetched tree, which
+ * reads `pnpm-workspace.yaml` and, left alone, installs every workspace member (262
+ * packages, about 230 MB, against the root's 89). `.pnpmfile.mjs` narrows that one
+ * install by the lifecycle event pnpm names it with. That event is pnpm's internal
+ * name, so if pnpm renames it the hook stops matching and nothing breaks: the install
+ * just goes back to being slow. This is the only thing that notices.
+ *
+ * `Packages: +N` counts packages linked, not downloaded, so a warm store reads the
+ * same and this uses the default one.
+ *
+ * pnpm clones the repository and checks the commit out, so unlike npm it cannot see a
+ * commit that only a private ref (the `--smoke-only` snapshot) points at. The commit is
+ * fetched into a throwaway repository and put on a branch there.
+ */
+function pnpmConsumerInstall(repoRoot, sha) {
+  const MAX_PACKAGES = 150; // 89 today; headroom for dependency churn, not for a workspace member
+  const dir = mkdtempSync(join(tmpdir(), "folio-pnpm-consumer-"));
+  const source = mkdtempSync(join(tmpdir(), "folio-pnpm-source-"));
+  // `die` exits the process, which skips the `finally`, so a failure cleans up first.
+  const cleanup = () => {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(source, { recursive: true, force: true });
+  };
+  try {
+    const inSource = (...a) => execFileSync("git", a, { cwd: source, stdio: "ignore" });
+    inSource("init", "-q");
+    inSource("fetch", "-q", repoRoot, sha);
+    inSource("update-ref", "refs/heads/smoke", sha);
+    const spec = `git+file://${source}#${sha}`;
+    writeFileSync(join(dir, "package.json"), '{"name":"pnpm-consumer","private":true}\n');
+    // A throwaway consumer, so allow every build rather than compute folio's allowBuilds key.
+    writeFileSync(
+      join(dir, "pnpm-workspace.yaml"),
+      "packages: []\ndangerouslyAllowAllBuilds: true\n",
+    );
+
+    process.stdout.write("· pnpm consumer install (prepare stays root-only) … ");
+    const r = spawnSync("pnpm", ["add", "--reporter=append-only", spec], {
+      cwd: dir,
+      stdio: "pipe",
+      encoding: "utf8",
+    });
+    const out = `${r.stdout}${r.stderr}`;
+    const fail = (what) => {
+      console.log("FAILED");
+      process.stderr.write(`${out}\n`);
+      cleanup();
+      die(`${what}. Nothing has been pushed.`);
+    };
+    if (r.status !== 0) fail(`a pnpm consumer cannot install the package (exit ${r.status})`);
+
+    if (/pnpm-install: Scope: all \d+ workspace projects/.test(out))
+      fail(
+        "pnpm's git-dependency prepare installed the whole workspace; .pnpmfile.mjs did not narrow it",
+      );
+    const packages = /pnpm-install: Packages: \+(\d+)/.exec(out);
+    if (!packages) fail("could not read the prepare install's package count from pnpm's output");
+    const count = Number(packages[1]);
+    if (count > MAX_PACKAGES)
+      fail(`pnpm's prepare installed ${count} packages (limit ${MAX_PACKAGES})`);
+    if (!existsSync(join(dir, "node_modules", "folio", "dist", "server.js")))
+      fail("the pnpm-installed package has no dist/server.js");
+    console.log(`ok (${count} packages)`);
+  } finally {
+    cleanup();
+  }
 }
 
 /**

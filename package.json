@@ -16,7 +16,6 @@
     "build:types": "tsc -p tsconfig.build.json && node scripts/strip-css-import.mjs",
     "build:demo": "pnpm --filter demo build",
     "clean": "rm -rf dist",
-    "prepack": "pnpm run clean && pnpm run build",
     "prepare": "npm run clean && npm run build:js && npm run build:types",
     "typecheck": "tsc --noEmit -p . && pnpm --filter demo typecheck && pnpm --filter folio-starter typecheck",
     "test": "vitest run",

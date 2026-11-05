@@ -39,7 +39,7 @@ jobs:
           cache: pnpm
 
       # The root `prepare` script builds the library here as a side effect.
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
       # Gate on exit codes, not output: `biome ci` prints "No issues found" even
       # when its format check failed (see CLAUDE.md), and Actions fails the step
@@ -74,7 +74,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
       # worker-configuration.d.ts is gitignored.
       - name: generate Worker types
@@ -163,7 +163,7 @@ jobs:
           cache: pnpm
 
       # No build needed to lint a string.
-      - run: pnpm install --frozen-lockfile --ignore-scripts --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile --ignore-scripts --ignore-scripts
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
 
       - name: lint the PR title
@@ -230,7 +230,7 @@ jobs:
           cache: pnpm
 
       # The harness bundles src/server/describe-anthropic.ts itself, so no library build.
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile --ignore-scripts
 
       - name: run the evals
         run: node scripts/llm/eval.mjs --gate --tasks "$LLM_TASKS" --max-usd 2.00

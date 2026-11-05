@@ -63,10 +63,19 @@ pnpm build:demo         # demo vite build
 npm installs every devDependency of a git dependency before it runs `prepare`, so anything
 at the root is downloaded by every npm consumer build (a cold npm install was 238 tarballs,
 128 MB before this and 85, 31 MB after; most of the difference was workerd, biome, sharp and
-lefthook). **This does not reach pnpm consumers:** pnpm prepares a git dependency by running
-`pnpm install` in the clone, which reads `pnpm-workspace.yaml` and installs `tooling/` and
-`examples/*` as well, so their builds still download the whole workspace. That is tracked
-separately. The root keeps `esbuild`,
+lefthook). **pnpm needed its own fix:** it prepares a git dependency by running `pnpm install`
+in the fetched tree, which reads `pnpm-workspace.yaml` and would install `tooling/` and
+`examples/*` as well. `.pnpmfile.mjs` narrows that one install to the root project, keyed on
+`npm_lifecycle_event === 'pnpm-install'` (pnpm's internal name for it), so a pnpm consumer
+downloads the same root devDependencies an npm one does (a cold install's prepare went from
+262 packages / 234 MB to 89 / 70 MB). A contributor's or CI's `pnpm install` never runs under
+that event and stays recursive. Loading the file records a
+`pnpmfileChecksum` in `pnpm-lock.yaml`, which Renovate's `--ignore-pnpmfile` lockfile
+regeneration removes, so **every workflow's `pnpm install --frozen-lockfile` passes
+`--ignore-pnpmfile`** (a new one must too, or the next Renovate PR fails it with
+`ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`) and a developer's plain `pnpm install` puts the line back. The checksum is of the file's bytes, so editing `.pnpmfile.mjs`, even a comment, needs a `pnpm install` and the lockfile committed. `release.mjs`'s pnpm smoke stage fails if the install covers
+the workspace again, which is what a pnpm rename of the event would look like. **There is
+deliberately no `prepack` script:** pnpm runs it after `prepare`, so it built twice. The root keeps `esbuild`,
 `typescript`, `react`, `react-dom`, the tiptap packages, `@floating-ui/dom`, and the
 type packages `tsc -p tsconfig.build.json` reads through `tsconfig.json`'s `types`
 (`@types/node`, `@types/react`, `@types/react-dom`, `@cloudflare/workers-types`, `vite`).

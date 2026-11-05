@@ -46,7 +46,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile --ignore-scripts
 
       - name: evaluate
         env:

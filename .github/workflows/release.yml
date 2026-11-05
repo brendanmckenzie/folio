@@ -72,7 +72,7 @@ jobs:
           # have written.
           package-manager-cache: false
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
       # gitignored, and examples/demo does not typecheck without it.
       - name: generate Worker types
@@ -97,7 +97,7 @@ jobs:
           node-version-file: .nvmrc
           package-manager-cache: false
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
       - name: generate Worker types
         run: pnpm --filter demo cf-typegen
@@ -128,12 +128,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zsh
 
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
       - run: node scripts/release.mjs --tag --ci --stage=e2e
 
   # The packed install in a temp directory, the way a consumer runs it. It installs
-  # the repository with npm, so it needs no workspace install.
+  # the repository with npm and again with pnpm, so it needs no workspace install.
   smoke:
     name: consumer smoke test
     runs-on: ubuntu-26.04
@@ -144,6 +144,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      # The pnpm consumer stage runs `pnpm add` against this checkout.
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
