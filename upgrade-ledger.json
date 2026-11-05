@@ -227,6 +227,16 @@
       "rollback": "safe",
       "migrations": [],
       "headings": []
+    },
+    {
+      "version": "1.5.0",
+      "date": "2026-11-05",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": [
+        "A smaller install and a prebuilt admin (v1.5.0)",
+        "The `development` export condition is now `folio-source` (v1.5.0)"
+      ]
     }
   ]
 }
