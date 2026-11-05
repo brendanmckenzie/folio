@@ -12,8 +12,8 @@
   "scripts": {
     "dev": "pnpm --filter demo dev",
     "build": "pnpm run build:js && pnpm run build:types",
-    "build:js": "node scripts/build-admin.mjs && esbuild core=src/core/index.ts engine=src/core/engine.ts server=src/server/index.tsx vite=src/vite/index.ts form=src/form/index.ts --bundle --splitting --format=esm --platform=neutral --packages=external --target=es2022 --sourcemap --sources-content=false --outdir=dist --tsconfig=tsconfig.json",
-    "build:types": "tsc -p tsconfig.build.json",
+    "build:js": "node scripts/build-admin.mjs && esbuild core=src/core/index.ts engine=src/core/engine.ts server=src/server/index.tsx vite=src/vite/index.ts form=src/form/index.ts render=src/preview/Render.tsx preview=src/preview/mount.tsx --bundle --splitting --format=esm --platform=neutral --packages=external --target=es2022 --sourcemap --sources-content=true --outdir=dist --loader:.css=copy --asset-names=[name] --tsconfig=tsconfig.json",
+    "build:types": "tsc -p tsconfig.build.json && node scripts/strip-css-import.mjs",
     "build:demo": "pnpm --filter demo build",
     "clean": "rm -rf dist",
     "prepack": "pnpm run clean && pnpm run build",
@@ -30,14 +30,16 @@
   },
   "files": [
     "dist",
-    "src",
-    "!src/admin",
     "migrations",
     "bin",
     "evals",
+    "src/server/describe-anthropic.ts",
+    "src/server/llm-tasks.ts",
+    "src/server/llm-tasks.json",
     "examples/starter",
     "!examples/starter/node_modules",
     "!examples/starter/.wrangler",
+    "!examples/starter/dist",
     "README.md",
     "AGENTS.md",
     "UPGRADING.md",
@@ -50,32 +52,40 @@
   ],
   "exports": {
     "./core": {
-      "development": "./src/core/index.ts",
+      "folio-source": "./src/core/index.ts",
       "types": "./dist/types/core/index.d.ts",
       "default": "./dist/core.js"
     },
     "./engine": {
-      "development": "./src/core/engine.ts",
+      "folio-source": "./src/core/engine.ts",
       "types": "./dist/types/core/engine.d.ts",
       "default": "./dist/engine.js"
     },
     "./server": {
-      "development": "./src/server/index.tsx",
+      "folio-source": "./src/server/index.tsx",
       "types": "./dist/types/server/index.d.ts",
       "default": "./dist/server.js"
     },
     "./vite": {
-      "development": "./src/vite/index.ts",
+      "folio-source": "./src/vite/index.ts",
       "types": "./dist/types/vite/index.d.ts",
       "default": "./dist/vite.js"
     },
     "./form": {
-      "development": "./src/form/index.ts",
+      "folio-source": "./src/form/index.ts",
       "types": "./dist/types/form/index.d.ts",
       "default": "./dist/form.js"
     },
-    "./render": "./src/preview/Render.tsx",
-    "./preview": "./src/preview/mount.tsx",
+    "./render": {
+      "folio-source": "./src/preview/Render.tsx",
+      "types": "./dist/types/preview/Render.d.ts",
+      "default": "./dist/render.js"
+    },
+    "./preview": {
+      "folio-source": "./src/preview/mount.tsx",
+      "types": "./dist/types/preview/mount.d.ts",
+      "default": "./dist/preview.js"
+    },
     "./admin-entry": "./dist/admin/folio-admin.js"
   },
   "peerDependencies": {

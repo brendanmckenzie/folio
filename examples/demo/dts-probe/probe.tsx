@@ -1,7 +1,7 @@
 /**
  * What an *installed* consumer sees — a tool, not a test.
  *
- * Everything else in this repo resolves `folio/*` through the `development`
+ * Everything else in this repo resolves `folio/*` through the `folio-source`
  * condition, which points at TypeScript source (see the demo's own
  * `tsconfig.json`). So `pnpm typecheck` cannot observe the `types` condition at
  * all, and the declarations in `dist/types` are unreached by any

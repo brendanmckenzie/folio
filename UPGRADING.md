@@ -268,7 +268,7 @@ version.
 
 ### The wire version
 
-`PROTOCOL_VERSION` (`src/core/protocol.ts`, currently **5**) is carried by every
+`PROTOCOL_VERSION` ([`src/core/protocol.ts`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/core/protocol.ts), currently **5**) is carried by every
 socket frame and every admin↔preview message. A mismatch is refused rather than
 guessed at. **The release that carries `0011` bumps it from 4 to 5** (three wire
 changes ride the one bump: the mutation log's `unset`, the preview bridge's

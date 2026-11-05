@@ -543,12 +543,12 @@ bindings and the D1 migrations, and names the fix for each finding.
 `src/server/llm-tasks.json` is the registry of every model call Folio ships, today
 `media.describe`. The model id lives there and nowhere else: code reads it through
 `taskModel()` in `src/server/llm-tasks.ts`, and `test/unit/llm-registry.test.ts` fails
-on a model id written anywhere else. `src/server/llm-prices.json` prices the models for
+on a model id written anywhere else. [`src/server/llm-prices.json`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/server/llm-prices.json) prices the models for
 evals only; Folio spends nothing itself, and a host records its own spend through the
 `onUsage` hook on `anthropicDescriber`. The task's eval suite is `evals/media.describe`
-(ten CC0 photographs, sources in its `SOURCES.md`); `node scripts/llm/eval.mjs` runs it.
+(ten CC0 photographs, sources in its `SOURCES.md`); `node scripts/llm/eval.mjs` ([source](https://github.com/brendanmckenzie/folio/blob/v1.4.1/scripts/llm/eval.mjs)) runs it from a clone of the repository.
 The suite gates prompt changes in Folio; consumers own model choice and the model
-watch, so the registry has `watch: false`. Lifecycle: `docs/operations/README.md`.
+watch, so the registry has `watch: false`. Lifecycle: [`docs/operations/README.md`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/docs/operations/README.md).
 
 **Secrets in CI.** `ci.yml` is secret-free except for one job: `evals`, which holds
 `ANTHROPIC_EVAL_KEY` as `ANTHROPIC_API_KEY`, runs only on a same-repo PR that changes an

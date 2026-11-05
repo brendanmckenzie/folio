@@ -186,7 +186,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
            * Declared by the plugin rather than left to each host because no
            * host could reasonably deduce it: the error mentions neither Folio
            * nor react-dom. Folio's own demo never sees it, since that project
-           * resolves the library to TypeScript source through the `development`
+           * resolves the library to TypeScript source through the `folio-source`
            * export condition — which is exactly why this went unnoticed until a
            * second project installed the built package.
            *

@@ -510,10 +510,19 @@ are free to go the next time that code is touched.
   an inset `box-shadow`.** An inset shadow is clipped by the border radius, so a 2px
   left edge on a rounded row draws a curved bracket `(`, not a bar. `List.module.css`
   uses a `::before`. Both of these are UI-review findings that no test could catch.
+- **Only `dist/` ships, and `folio-source` is the one way into `src/`.** `files` carries no `src/`,
+  `evals/` or `examples/starter/dist`; every `exports` subpath (render and preview included)
+  is built by `build:js` with `sourcesContent` embedded, so a stack trace resolves without the
+  source. The private `folio-source` condition in `exports` points at `src/` and is set only by
+  `examples/demo`'s Vite config and its tsconfig (`customConditions`); it was the public
+  `development` condition, which Vite applied in every host's dev server. Folio's own tests import
+  by relative path and do not use it. `release.mjs`'s smoke test fails if the installed package has
+  a `src/`, and fetches `folio/preview` from the starter's dev server to show the client
+  environment resolves `dist/`. `preview.css` ships beside `dist/preview.js` (esbuild `copy` loader).
 - **The admin ships prebuilt, and what it imports is a devDependency.** `scripts/build-admin.mjs`
   (run by `prepare` and `pnpm build`) bundles `src/admin/main.tsx` with esbuild, React and
   tiptap inlined, into `dist/admin/`; the Vite plugin emits it at the build root (and serves it
-  from `dist/` in dev), so a consumer compiles none of it and `src/admin` is not in `files`.
+  from `dist/` in dev), so a consumer compiles none of it.
   A package the admin imports belongs in `devDependencies`, never `dependencies`: a runtime
   dependency would put the editor back in every consumer's `node_modules`. The admin may
   code-split (`splitting`, ESM): chunks are `folio-admin-<hash>.js`, emitted beside the entry,
@@ -599,7 +608,7 @@ package. It then runs a **consumer boots** stage: `folio init`, the starter's ow
 host's typecheck, `folio upgrade --json` (which must answer `hops: []`), `vite dev`
 (which must answer `/` and `/folio/login` with no CommonJS error and no 5xx, and pass
 `doctor --url … --check server.mounted`), and `npm run build`. A consumer's
-dev server takes `dist/` for `folio/server`, not the `development`-condition
+dev server takes `dist/` for `folio/server`, not the private `folio-source`-condition
 source Folio's own demo resolves, so React's CommonJS entries reach workerd raw
 there and nothing else in the gates sees it. That is the only check that exercises
 the package's own `prepare` build and the package running: the three gates run

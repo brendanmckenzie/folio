@@ -2038,6 +2038,8 @@ value: 'public' }]`) to build a members' search over members' content instead.
 
 ## Layout
 
+The tree below is the repository's, which is what the contributor links in this document point at. The installed package carries `dist/` instead of `src/`; the lines marked `(ships)` are in `node_modules/folio`.
+
 ```
 src/core/        document model, mutations, field builders, schema  (isomorphic)
 src/server/      createFolio, StoryDO, SSR
@@ -2056,7 +2058,7 @@ scripts/         gates, end-to-end scripts, release  (not shipped)
 
 The package is the repository root: `package.json` sits beside `src/`, which is
 what makes `github:brendanmckenzie/folio#vX.Y.Z` installable. `files` ships
-`dist`, `src`, `migrations`, `bin`, `examples/starter`, `upgrade-ledger.json`, and
+`dist` (every export subpath is built there, with sourcemaps that embed their source), `migrations`, `bin`, `examples/starter`, `upgrade-ledger.json`, and
 the consumer-facing documents — `README.md`, `AGENTS.md`, `UPGRADING.md`, and `docs/`'s
 `configuration.md`, `handbook.md`, `api.md` and `mcp.md`.
 
@@ -4989,7 +4991,7 @@ grown since it last went live.
 
 It is deliberately not part of the migrate path: an audit that runs as a side
 effect of a write is an audit nobody reads. Adding a check is one entry in
-`DOCUMENT_CHECKS`, `STORY_CHECKS` or `SCHEMA_CHECKS` (`src/server/audit.ts`) —
+`DOCUMENT_CHECKS`, `STORY_CHECKS` or `SCHEMA_CHECKS` ([`src/server/audit.ts`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/src/server/audit.ts)) —
 every finding carries its own `check` name and travels in the report's `content`
 / `stories` / `schema` arrays, so no route, response shape or admin screen
 changes.
@@ -5142,7 +5144,7 @@ await folio.write(env, id, diff(doc, target), { actor: 'sync-job', txId: 'nightl
 ```
 
 Same `commit`, same chunking, same guarantees — see `POST /dev/sync` in
-`examples/demo/src/index.tsx`, which is that call and a JSON body.
+[`examples/demo/src/index.tsx`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/examples/demo/src/index.tsx), which is that call and a JSON body.
 
 ### Globals are ordinary documents
 
@@ -5217,7 +5219,7 @@ correctly. Two are load-bearing:
 - a story that references itself renders once rather than forever.
 
 `scripts/migrate-test.mjs` (38 checks) covers content migrations against the
-demo's own two (`examples/demo/src/migrations.ts`): the seeded rows, which
+demo's own two ([`examples/demo/src/migrations.ts`](https://github.com/brendanmckenzie/folio/blob/v1.4.1/examples/demo/src/migrations.ts)): the seeded rows, which
 genuinely predate them, reaching all three copies of a document — a connected
 editor receiving the change as a delta with no reload, the published page
 rendering the new field, and an old version previewing correctly because it is

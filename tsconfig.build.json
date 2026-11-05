@@ -48,28 +48,22 @@
   // That is the first call in every host's file, which is why `package.json`
   // moves core, engine and server in one commit or not at all.
   //
-  // ## Why `src/admin` and `src/preview` are not in `include`
+  // ## Why `src/admin` is not in `include`
   //
-  // A different and permanent reason: they are entry points to the *host's*
-  // client bundle, so they ship as source and are never imported as types. See
-  // `package.json`'s `exports` and `src/vite/index.ts`.
+  // It is built by `scripts/build-admin.mjs` into a self-contained bundle and
+  // nothing imports it as types. `src/preview/Render.tsx` and `mount.tsx` are
+  // listed, because `folio/render` and `folio/preview` are real subpaths with
+  // their own `types` condition.
   //
-  // Note that `dist/types/preview/Render.d.ts` and `RichText.d.ts` are emitted
-  // anyway, and correctly: `src/server/index.tsx` re-exports `FolioDoc` from
-  // `../preview/Render`, so the server's own declarations reference them. Being
-  // reachable from an included file is what pulls a declaration in, not being
-  // listed here — which is also why `preview/mount.tsx`, reachable from nothing
-  // on this side, stays out.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
     "emitDeclarationOnly": true,
     "declaration": true,
-    // Points at the `src/` this package ships, so jump-to-definition from a
-    // consumer's editor lands on real TypeScript rather than the declaration.
-    "declarationMap": true,
+    // No `declarationMap`: `src/` is not in the package, so a map would point at
+    // files a consumer does not have.
     "rootDir": "src",
     "outDir": "dist/types"
   },
-  "include": ["src/core", "src/server", "src/vite", "src/form"]
+  "include": ["src/core", "src/server", "src/vite", "src/form", "src/preview/Render.tsx", "src/preview/mount.tsx"]
 }
