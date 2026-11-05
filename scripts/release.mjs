@@ -27,6 +27,7 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
   existsSync,
+  readdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
@@ -291,7 +292,7 @@ if (gate) {
  *
  * Every export resolves into `dist/` and therefore proves `prepare` ran. The
  * private `folio-source` condition points into `src/`, which the package does not
- * ship, so it is skipped here and the installed tree is asserted to have no `src/`.
+ * ship (bar three files an eval gate bundles), so it is skipped here.
  *
  * It also proves the docs ship. `files` is an allowlist, and a consumer reading
  * `node_modules/folio` is the only reader some of them will ever have.
@@ -340,11 +341,40 @@ function smokeTest(sha) {
     }
     // `src/` is not shipped: a host that resolved into it would be running source
     // the package does not carry, and the build would be proving nothing.
-    for (const dirName of ["src", "evals"]) {
-      if (existsSync(join(root, dirName))) {
-        console.log("FAILED");
-        die(`the installed package carries ${dirName}/, which \`files\` should not ship.`);
+    // Three files under `src/server` ship on purpose: a host's LLM eval gate bundles
+    // `describe-anthropic.ts` (and its two imports) from `node_modules/folio`, and runs the
+    // suite in `evals/`. Anything else under `src/` is a leak.
+    const SHIPPED_SRC = [
+      "src/server/describe-anthropic.ts",
+      "src/server/llm-tasks.json",
+      "src/server/llm-tasks.ts",
+    ];
+    const srcFiles = [];
+    const listSrc = (rel) => {
+      for (const e of readdirSync(join(root, rel), { withFileTypes: true })) {
+        if (e.isDirectory()) listSrc(`${rel}/${e.name}`);
+        else srcFiles.push(`${rel}/${e.name}`);
       }
+    };
+    if (existsSync(join(root, "src"))) listSrc("src");
+    const strays = srcFiles.filter((f) => !SHIPPED_SRC.includes(f));
+    const lacking = [
+      ...SHIPPED_SRC,
+      "evals/media.describe/run.mjs",
+      "evals/media.describe/suite.json",
+    ].filter((f) => !existsSync(join(root, f)));
+    if (strays.length || lacking.length) {
+      console.log("FAILED");
+      for (const f of strays) console.error(`    unexpected in package: ${f}`);
+      for (const f of lacking) console.error(`    missing from package: ${f}`);
+      die("the installed package's src/ and evals/ are not what a host's eval gate needs.");
+    }
+    // The emitted declarations must not import CSS: a host without `vite/client` types and
+    // with `skipLibCheck: false` fails TS2882 on it.
+    const mountDts = readFileSync(join(root, "dist/types/preview/mount.d.ts"), "utf8");
+    if (/import\s+["'][^"']*\.css["']/.test(mountDts)) {
+      console.log("FAILED");
+      die("dist/types/preview/mount.d.ts imports a stylesheet.");
     }
     console.log(`ok (${Object.keys(map ?? {}).length} subpaths)`);
 
