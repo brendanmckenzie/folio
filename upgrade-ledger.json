@@ -237,6 +237,13 @@
         "A smaller install and a prebuilt admin (v1.5.0)",
         "The `development` export condition is now `folio-source` (v1.5.0)"
       ]
+    },
+    {
+      "version": "1.5.1",
+      "date": "2026-11-07",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
     }
   ]
 }

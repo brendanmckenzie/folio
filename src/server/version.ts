@@ -13,4 +13,4 @@
  * clears a `requiresDeployed` gate from this value, so a stale one is a wrong
  * answer about what a deployment runs, not a cosmetic one.
  */
-export const FOLIO_VERSION = "1.5.0";
+export const FOLIO_VERSION = "1.5.1";
