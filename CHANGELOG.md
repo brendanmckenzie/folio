@@ -8,6 +8,19 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.5.1
+
+A patch release: nothing to run or edit on an existing host. No migration, no wire
+change, no change to the `exports` surface or to any `createFolio()` key.
+
+### Fixed
+
+- **A handled session re-check failure logs at `warn`, not `error`.** When the space and
+  story sockets cannot re-check a session (a D1 blip, say), the socket stays open and the
+  next frame past the interval retries. The failure is now logged with `console.warn`
+  instead of `console.error`, so an error-level alert no longer pages on it. The cause is
+  still logged.
+
 ## 1.5.0
 
 A minor release that makes a git install much smaller and the admin lighter to load. No
