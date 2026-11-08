@@ -94,7 +94,7 @@
   },
   "dependencies": {
     "fractional-indexing": "^4.0.0",
-    "hono": "^4.13.13",
+    "hono": "^4.13.16",
     "valibot": "^1.5.0"
   },
   "devDependencies": {
