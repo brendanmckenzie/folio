@@ -98,14 +98,14 @@
     "valibot": "^1.5.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261030.1",
+    "@cloudflare/workers-types": "^5.20261106.1",
     "@floating-ui/dom": "^1.8.0",
-    "@tiptap/core": "^3.32.0",
-    "@tiptap/extension-subscript": "^3.32.0",
-    "@tiptap/extension-superscript": "^3.32.0",
-    "@tiptap/pm": "^3.32.0",
-    "@tiptap/react": "^3.32.0",
-    "@tiptap/starter-kit": "^3.32.0",
+    "@tiptap/core": "^3.33.0",
+    "@tiptap/extension-subscript": "^3.33.0",
+    "@tiptap/extension-superscript": "^3.33.0",
+    "@tiptap/pm": "^3.33.0",
+    "@tiptap/react": "^3.33.0",
+    "@tiptap/starter-kit": "^3.33.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -113,6 +113,6 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5"
+    "vite": "^8.3.6"
   }
 }
