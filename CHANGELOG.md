@@ -8,7 +8,10 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
-## Unreleased
+## 1.5.2
+
+A patch release: nothing to run or edit on an existing host. No migration, no wire
+change, no change to the `exports` surface or to any `createFolio()` key.
 
 ### Fixed
 
