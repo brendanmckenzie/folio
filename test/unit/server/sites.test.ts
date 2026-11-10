@@ -223,7 +223,7 @@ describe("registrySnapshot", () => {
   });
 
   describe("when a refresh fails", () => {
-    const boom = new Error("D1 unavailable");
+    const boom = new Error("D1_ERROR: internal error; reference = abc");
     const failing = (clock: { t: number }, opts: { maxStale?: number } = {}) => {
       let reads = 0;
       let fail = false;
@@ -260,6 +260,19 @@ describe("registrySnapshot", () => {
       f.failNow();
       await expect(f.snap.get(db)).rejects.toBe(boom);
       expect(f.reads()).toBe(2);
+    });
+
+    it("does not retry a deterministic D1 error", async () => {
+      let reads = 0;
+      const snap = registrySnapshot({
+        now: () => 0,
+        read: async () => {
+          reads++;
+          throw new Error("D1_ERROR: too many SQL variables");
+        },
+      });
+      await expect(snap.get(db)).rejects.toThrow("too many SQL variables");
+      expect(reads).toBe(1);
     });
 
     it("rejects once the held copy is past the staleness ceiling", async () => {
