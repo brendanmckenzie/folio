@@ -1,6 +1,6 @@
 {
   "name": "folio",
-  "version": "1.5.2",
+  "version": "1.5.3",
   "private": true,
   "type": "module",
   "description": "Cloudflare-native block CMS with a live visual editor",

@@ -8,7 +8,24 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.5.3
+
+A patch release: nothing to run or edit on an existing host. No migration, no wire
+change, no change to the `exports` surface or to any `createFolio()` key. It carries
+1.5.2's fix unchanged; **pin `v1.5.3`, not `v1.5.2`.**
+
+### Fixed
+
+- **A pnpm host can install the tag again.** 1.5.2's lockfile had lost its
+  `pnpmfileChecksum` line (a dependency update regenerated it with `--ignore-pnpmfile`), and
+  pnpm prepares a git dependency with a frozen install that reads `.pnpmfile.mjs`, so
+  installing `v1.5.2` failed with `ERR_PNPM_LOCKFILE_CONFIG_MISMATCH`. npm hosts were not
+  affected. CI now runs that frozen install on every pull request, so a lockfile without
+  the checksum fails the PR instead of the release.
+
 ## 1.5.2
+
+**Not installable with pnpm; use 1.5.3.** The tag is kept because tags never move.
 
 A patch release: nothing to run or edit on an existing host. No migration, no wire
 change, no change to the `exports` surface or to any `createFolio()` key.
