@@ -41,6 +41,14 @@ jobs:
       # The root `prepare` script builds the library here as a side effect.
       - run: pnpm install --frozen-lockfile --ignore-pnpmfile
 
+      # A consumer's pnpm prepares this package with a frozen install that *does*
+      # read `.pnpmfile.mjs`, so a lockfile without a matching `pnpmfileChecksum`
+      # (Renovate regenerates it with `--ignore-pnpmfile` and drops the line) makes
+      # the tag uninstallable for every pnpm host. v1.5.2 shipped exactly that.
+      # Fix a red step with `pnpm install --lockfile-only` and commit the lockfile.
+      - name: lockfile carries the pnpmfile checksum
+        run: pnpm install --frozen-lockfile --lockfile-only --ignore-scripts
+
       # Gate on exit codes, not output: `biome ci` prints "No issues found" even
       # when its format check failed (see CLAUDE.md), and Actions fails the step
       # on the exit code alone.
