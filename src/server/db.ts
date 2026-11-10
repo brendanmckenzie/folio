@@ -61,6 +61,46 @@ export const REPLICA_FIRST = "first-unconstrained";
  */
 export const PRIMARY_FIRST = "first-primary";
 
+/**
+ * The message D1 answers with for a transient server-side failure:
+ * `D1_ERROR: internal error; reference = ...`. Matched on the text because D1
+ * puts no code on the error. Deterministic failures (a constraint, `too many SQL
+ * variables`, a syntax error) have other messages and are not matched.
+ */
+const TRANSIENT_D1 = /D1_ERROR: internal error/i;
+
+/** How long `retryRead` waits before its one retry. Short, so a real outage fails fast. */
+export const D1_RETRY_DELAY_MS = 50;
+
+/**
+ * Runs a D1 **read**, and once more if it fails with D1's transient `internal
+ * error`. The one retry policy for reads (#169); `registrySnapshot` uses it too.
+ *
+ * **Reads only.** A write that failed with an internal error may have landed, and
+ * retrying it could apply it twice, so nothing that writes goes through here.
+ * Pass a thunk that issues the query on the same session each time, so the retry
+ * does not change which session (and so which replica) answers.
+ *
+ * Exactly one retry: a second failure is the caller's, so an outage is not
+ * stretched. The first failure is logged at `warn` so a retry that worked is
+ * still visible in observability.
+ */
+export async function retryRead<T>(
+  read: () => Promise<T>,
+  opts: { delayMs?: number } = {},
+): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : "";
+    if (!TRANSIENT_D1.test(message) && !TRANSIENT_D1.test(cause)) throw err;
+    console.warn("d1 read failed with an internal error, retrying once", err);
+    await new Promise((resolve) => setTimeout(resolve, opts.delayMs ?? D1_RETRY_DELAY_MS));
+    return read();
+  }
+}
+
 /** A `D1DatabaseSession`, named for what it is used for. */
 export type DbSession = ReturnType<D1Database["withSession"]>;
 

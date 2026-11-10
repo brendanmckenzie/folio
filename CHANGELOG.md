@@ -8,6 +8,20 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.5.2
+
+A patch release: nothing to run or edit on an existing host. No migration, no wire
+change, no change to the `exports` surface or to any `createFolio()` key.
+
+### Fixed
+
+- **A transient D1 `internal error` on a read is retried once, everywhere reads run.** D1
+  occasionally answers `D1_ERROR: internal error; reference = ...`, and only the registry
+  read retried it, so one blip was a 500 on a page render or a failed cron tick. The page
+  read path, the schedule sweep and option-source refresh now share the registry's policy
+  (`retryRead` in `server/db.ts`): one retry after a short delay, only for that message, logged
+  at `warn`. Writes are never retried, and other D1 errors still fail at once.
+
 ## 1.5.1
 
 A patch release: nothing to run or edit on an existing host. No migration, no wire

@@ -21,7 +21,7 @@ import {
   type SiteStatus,
   type Surface,
 } from "../core/sites";
-import { type FolioDb, PRIMARY_FIRST } from "./db";
+import { type FolioDb, PRIMARY_FIRST, retryRead } from "./db";
 import { FolioError } from "./errors";
 
 /* ------------------------------------------------------- internal headers --- */
@@ -151,7 +151,8 @@ export interface RegistrySnapshot {
  * alone so the next request retries the read. That copy is served only while it is
  * younger than `SNAPSHOT_MAX_STALE_MS`, and `drop()` clears it, so a registry write
  * is never answered from a copy that predates it. With nothing servable (a cold
- * isolate, a dropped or too-old copy) the read is retried once, then rejects.
+ * isolate, a dropped or too-old copy) the read goes through `retryRead`: a transient
+ * internal error is retried once, and a second failure rejects.
  */
 export function registrySnapshot(
   opts: {
@@ -177,12 +178,15 @@ export function registrySnapshot(
         if (generation === started) held = { registry, at };
         return registry;
       };
-      return read(db).then(keep, (err: unknown) => {
+      // A servable copy answers a failure at once; only a read with nothing to fall
+      // back on is worth waiting a retry for.
+      const fallback = held !== null && now() - held.at < maxStale;
+      return (fallback ? read(db) : retryRead(() => read(db))).then(keep, (err: unknown) => {
         if (held && now() - held.at < maxStale) {
           console.warn("registry refresh failed, serving the held copy", err);
           return held.registry;
         }
-        return read(db).then(keep);
+        throw err;
       });
     },
     drop: () => {

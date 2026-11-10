@@ -24,7 +24,7 @@ import {
 } from "../core/option-sources";
 import { BUILT_IN_ORDERS } from "../core/query";
 import type { DocumentType, SchemaIndex } from "../core/schema";
-import { bindChunks, type FolioDb, PRIMARY_FIRST } from "./db";
+import { bindChunks, type FolioDb, PRIMARY_FIRST, retryRead } from "./db";
 import { FolioError } from "./errors";
 import { type PurgeCapability, purgeOptionSource } from "./cache-purge";
 import type { ResolvedForms, ResolvedOptionSource } from "./form-responses";
@@ -601,9 +601,11 @@ export async function referencedLists(
   env: unknown,
   db: FolioDb,
 ): Promise<HostList[]> {
-  const { results } = await db
-    .prepare(`select id, fields, site_id from forms where fields like '%"optionsFrom"%'`)
-    .all<{ id: string; fields: string; site_id: string }>();
+  const { results } = await retryRead(() =>
+    db
+      .prepare(`select id, fields, site_id from forms where fields like '%"optionsFrom"%'`)
+      .all<{ id: string; fields: string; site_id: string }>(),
+  );
   if (results.length === 0) return [];
   const only = rt.brands.get(null);
   const registry = only ? undefined : await rt.sites?.registry(env);
@@ -635,10 +637,12 @@ export async function dueLists(
   }
   const due: HostList[] = [];
   for (const [brand, group] of byBrand) {
-    const rows = await readLists(
-      db,
-      brand,
-      group.map((l) => l.ref),
+    const rows = await retryRead(() =>
+      readLists(
+        db,
+        brand,
+        group.map((l) => l.ref),
+      ),
     );
     for (const list of group) {
       if (listStatus(rows.get(listId(list.ref)), list.source.ttl, now) !== "fresh") due.push(list);
@@ -785,10 +789,12 @@ export async function refreshOptionSources(
 
 /** Deletes the rows past `PRUNE_AFTER_MS` that `referenced` (canonical keys) does not name. */
 export async function pruneLists(db: FolioDb, referenced: ReadonlySet<string>, now: number) {
-  const { results } = await db
-    .prepare(`select brand, source, key from option_lists where attempted_at < ?`)
-    .bind(now - PRUNE_AFTER_MS)
-    .all<{ brand: string; source: string; key: string }>();
+  const { results } = await retryRead(() =>
+    db
+      .prepare(`select brand, source, key from option_lists where attempted_at < ?`)
+      .bind(now - PRUNE_AFTER_MS)
+      .all<{ brand: string; source: string; key: string }>(),
+  );
   const stale = results.filter((r) => !referenced.has(`${r.brand}\u0000${r.source}\u0000${r.key}`));
   // `attempted_at < ?` again: a save may have claimed and loaded this row since the
   // select, and a delete by key alone would remove what it just wrote.

@@ -45,7 +45,7 @@ import type { HookRunnerCtx } from "./hooks";
 import type { FolioRuntime } from "./runtime";
 import { FolioError } from "./errors";
 import { publish, type PublishDeps, type StorySelector, unpublish } from "./publish";
-import type { FolioDb } from "./db";
+import { type FolioDb, retryRead } from "./db";
 import type { DeliveryRunReport } from "./form-actions";
 import {
   completeScheduleStatement,
@@ -241,12 +241,8 @@ export async function runSchedules(
   );
 
   const resuming = (opts.continueFrom ?? null) !== null;
-  const { rows, next } = await dueSchedules(
-    deps.db,
-    now,
-    opts.continueFrom ?? null,
-    batch,
-    deps.scopes,
+  const { rows, next } = await retryRead(() =>
+    dueSchedules(deps.db, now, opts.continueFrom ?? null, batch, deps.scopes),
   );
   if (rows.length === 0) {
     // **One read, and this branch is where that claim is paid.** The ordinary cron
@@ -260,7 +256,7 @@ export async function runSchedules(
     // behind the cursor, still pending and still due.
     return {
       ...EMPTY(dryRun),
-      remaining: resuming ? await countDue(deps.db, now, deps.scopes) : 0,
+      remaining: resuming ? await retryRead(() => countDue(deps.db, now, deps.scopes)) : 0,
     };
   }
 
@@ -310,7 +306,7 @@ export async function runSchedules(
     await clearRow(deps.db, row, logger);
   }
 
-  report.remaining = await countDue(deps.db, now, deps.scopes);
+  report.remaining = await retryRead(() => countDue(deps.db, now, deps.scopes));
   return report;
 }
 
@@ -327,7 +323,7 @@ async function workflowFor(
   row: Schedule,
 ): Promise<[PublishDeps, StorySelector]> {
   if (!("depsFor" in deps)) return [deps, row.storyId];
-  const story = await storyById(deps.db, row.storyId);
+  const story = await retryRead(() => storyById(deps.db, row.storyId));
   if (!story) throw new FolioError("not_found", "Unknown story");
   const branded = await deps.depsFor(story);
   if (!branded) {

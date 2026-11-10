@@ -72,7 +72,7 @@ import {
 } from "./redirects";
 import type { MissArm } from "./types";
 import { clearSchedulesStatements } from "./schedules";
-import { BIND_BUDGET, bindChunks, type FolioDb } from "./db";
+import { BIND_BUDGET, bindChunks, type FolioDb, retryRead } from "./db";
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
               published_at as publishedAt, unpublished_at as unpublishedAt,
@@ -1515,10 +1515,12 @@ async function rowsAt(
   if (chain.length === 0) return { stories: [], redirects: [] };
   const stories = storiesAtStatement(db, chain, path, opts.doc === true);
   if (!opts.redirects) {
-    const { results } = await stories.all<PathRow>();
+    const { results } = await retryRead(() => stories.all<PathRow>());
     return { stories: results, redirects: [] };
   }
-  const [storyRows, redirectRows] = await db.batch([stories, redirectAtStatement(db, chain, path)]);
+  const [storyRows, redirectRows] = await retryRead(() =>
+    db.batch([stories, redirectAtStatement(db, chain, path)]),
+  );
   return {
     stories: (storyRows?.results ?? []) as PathRow[],
     redirects: (redirectRows?.results ?? []) as ScopedRedirect[],
