@@ -266,6 +266,10 @@ describe("activeItem", () => {
     expect(activeItem(groups, { name: "responses", id: "frm_1" })).toEqual({ name: "forms" });
   });
 
+  it("lights up Access for one editor's page", () => {
+    expect(activeItem(groups, { name: "accessUser", id: "usr_1" })).toEqual({ name: "access" });
+  });
+
   it("lights up Content for an open page, so the sidebar never highlights nothing", () => {
     expect(activeItem(groups, { name: "edit", id: "sty_x" })).toEqual({ name: "content" });
   });

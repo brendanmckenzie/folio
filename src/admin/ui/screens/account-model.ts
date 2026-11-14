@@ -224,6 +224,8 @@ export function eventLabel(row: Pick<EventRow, "kind" | "provider">): string {
       return "Signed out other browsers";
     case "passkey_rejected":
       return "A passkey sign-in was refused";
+    case "email_changed":
+      return "Sign-in address changed";
     case "user_invited":
       return "Invited";
     case "user_removed":

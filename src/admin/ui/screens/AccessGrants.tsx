@@ -2,15 +2,11 @@ import { useState } from "react";
 import type { Grants, Role } from "../../../server/auth/roles";
 import type { Me } from "../../me";
 import { Button } from "../Button";
-import { Dialog } from "../Dialog";
 import { Select } from "../Field";
 import css from "./Access.module.css";
 import {
-  type AccessUser,
   grantScopeLabel,
   grantScopeOptions,
-  grantsOf,
-  grantsRefusal,
   nextScope,
   ROLE_MEANING,
   ROLE_OPTIONS,
@@ -109,60 +105,5 @@ export function GrantsEditor({
       ) : null}
       <p className={css.help}>{ROLE_MEANING[role]}</p>
     </div>
-  );
-}
-
-/**
- * Editing one person's grants. Absent, not disabled, for a person whose grants an
- * identity provider placed (`grantsReason`): the route would answer 409, and the
- * screen says why in place of the button instead.
- */
-export function AccessGrantsDialog({
-  me,
-  user,
-  onClose,
-  onSave,
-}: {
-  me: Me;
-  user: AccessUser;
-  onClose: () => void;
-  onSave: (grants: Grants) => Promise<void>;
-}) {
-  const [grants, setGrants] = useState<Grants>(() => grantsOf(user));
-  const [pending, setPending] = useState(false);
-  const refusal = grantsRefusal(grants);
-
-  const save = async () => {
-    if (refusal) return;
-    setPending(true);
-    try {
-      await onSave(grants);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <Dialog
-      title={`Access for ${user.name}`}
-      description="A role per scope. They will need to sign in again."
-      size="wide"
-      onClose={onClose}
-      actions={
-        <>
-          <Button onClick={onClose}>Cancel</Button>
-          <Button
-            variant="primary"
-            disabled={pending || refusal !== undefined}
-            reason={pending ? "Saving…" : refusal}
-            onClick={() => void save()}
-          >
-            Save access
-          </Button>
-        </>
-      }
-    >
-      <GrantsEditor me={me} value={grants} onChange={setGrants} />
-    </Dialog>
   );
 }

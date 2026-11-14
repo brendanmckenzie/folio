@@ -407,12 +407,46 @@ describe("Access", () => {
     // Per scope, and the one naming a deleted scope is listed and says it reaches nothing.
     expect(screen.getByText("Alpha: publisher")).toBeTruthy();
     expect(screen.getByText("ghost: editor (ignored)")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Edit access" })).toBeTruthy();
+    // The row opens the person's page; the Edit access dialog and Actions column are gone.
+    expect(screen.getByRole("button", { name: /^Bo/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit access" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
     document.body.innerHTML = "";
     await mountAt("/folio/access", ADMIN);
     // The table is empty here, so the header is not drawn; the screen’s own heading is.
     expect(screen.queryByRole("columnheader", { name: "Access" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit access" })).toBeNull();
+  });
+
+  it("edits a person's grants, details and passkeys on their own page", async () => {
+    await mountAt("/folio/~alpha/access/users/usr_bo", PLATFORM);
+    expect(await screen.findByLabelText("Role on Alpha")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Save access" })).toBeTruthy();
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("bo@example.com");
+    expect(screen.getByText("Bo's laptop")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove all passkeys" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove Bo" })).toBeTruthy();
+    // Nothing changed, so there is nothing to save.
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+    document.body.innerHTML = "";
+    await mountAt("/folio/access/users/usr_bo", ADMIN);
+    // One role and no grants editor on a deployment without sites.
+    expect(await screen.findByLabelText("Role")).toBeTruthy();
+    expect(screen.queryByLabelText("Role on Alpha")).toBeNull();
+  });
+
+  it("keeps an unsaved name when Save access refreshes the page", async () => {
+    await mountAt("/folio/access/users/usr_bo", ADMIN);
+    const role = await screen.findByLabelText("Role");
+    const name = screen.getByLabelText("Name") as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(name, { target: { value: "Bobby" } });
+      fireEvent.change(role, { target: { value: "publisher" } });
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save access" }));
+    });
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Bobby");
   });
 
   it("refuses a site admin, in the platform’s words", async () => {

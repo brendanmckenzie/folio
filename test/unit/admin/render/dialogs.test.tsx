@@ -35,7 +35,6 @@ import type { AssetRow } from "../../../../src/admin/ui/screens/assets-model";
 import type { DocumentType, SchemaIndex } from "../../../../src/core/schema";
 import { indexManifest } from "../../../../src/core/schema";
 import type { DocumentRow } from "../../../../src/admin/ui/screens/documents-model";
-import { AccessGrantsDialog } from "../../../../src/admin/ui/screens/AccessGrants";
 import { AccessInviteDialog } from "../../../../src/admin/ui/screens/AccessInviteDialog";
 import { AccessTokenDialog } from "../../../../src/admin/ui/screens/AccessTokenDialog";
 import { AccountPasskeyDialog } from "../../../../src/admin/ui/screens/AccountPasskeyDialog";
@@ -53,7 +52,7 @@ import { OneTimeSecretDialog } from "../../../../src/admin/ui/screens/OneTimeSec
 import { SharePreview } from "../../../../src/admin/ui/screens/SharePreview";
 import { SiteDialog } from "../../../../src/admin/ui/screens/SiteDialog";
 import { emptyForm } from "../../../../src/admin/ui/screens/sites-model";
-import { ADMIN, API, MANIFEST, MOUNT, stubFetch } from "./fixture";
+import { API, MANIFEST, MOUNT, stubFetch } from "./fixture";
 
 const SCHEMA: SchemaIndex = indexManifest(MANIFEST);
 const PAGE_TYPE = MANIFEST.types[0] as DocumentType;
@@ -108,29 +107,6 @@ const asyncNoop = async () => {};
  * failure says which surface rather than which index.
  */
 const SURFACES: [name: string, mount: () => React.ReactElement][] = [
-  [
-    "AccessGrants",
-    () => (
-      <AccessGrantsDialog
-        me={ADMIN}
-        user={{
-          id: "usr_a",
-          email: "a@example.com",
-          name: "A",
-          role: "editor",
-          colour: null,
-          provider: null,
-          roleFrom: null,
-          createdAt: 1,
-          lastSeenAt: null,
-          passkeys: 0,
-          grants: [{ scope: "*", role: "editor", roleFrom: null }],
-        }}
-        onClose={noop}
-        onSave={asyncNoop}
-      />
-    ),
-  ],
   [
     "OneTimeSecretDialog",
     () => <OneTimeSecretDialog title="Copy this now" secret="s3cret" onClose={noop} />,
@@ -277,10 +253,12 @@ describe("every interaction-only surface mounts", () => {
  * `fields/` is deliberately excluded: those render inside `Inspector`, which the
  * `edit` routes mount, and they have no props of their own to give.
  */
-describe("the forty-one screens are all accounted for", () => {
+describe("the forty-two screens are all accounted for", () => {
   /** Reached by `screens.test.tsx`'s nineteen URLs, directly or nested. */
   const BY_ROUTE = [
     "Access",
+    "AccessGrants",
+    "AccessUser",
     "ActionsEditor",
     "Account",
     "AssetBrowser",
@@ -319,7 +297,7 @@ describe("the forty-one screens are all accounted for", () => {
 
     const covered = [...BY_ROUTE, ...BY_PORTAL, ...SURFACES.map(([name]) => name)].sort();
 
-    expect(files.length).toBe(41);
+    expect(files.length).toBe(42);
     expect(covered).toEqual(files);
   });
 });

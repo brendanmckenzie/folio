@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { blocks, defineBlock, text } from "../../src/core";
 import type { ClientMsg, ServerFrame, ServerMsg } from "../../src/core/protocol";
 import { PROTOCOL_VERSION } from "../../src/core/protocol";
-import type { AuthConfig, MagicLinkMail, Role } from "../../src/server";
+import type { AuthConfig, AuthProvider, MagicLinkMail, Role } from "../../src/server";
 import { createFolio, magicLink } from "../../src/server";
 import { SECURE_COOKIE } from "../../src/server/auth/cookie";
 import { createChallenge } from "../../src/server/auth/challenges";
@@ -115,6 +115,7 @@ beforeEach(async () => {
   outbox = [];
   await env.DB.batch([
     env.DB.prepare("delete from sessions"),
+    env.DB.prepare("delete from passkeys"),
     env.DB.prepare("delete from api_tokens"),
     env.DB.prepare("delete from login_challenges"),
     env.DB.prepare("delete from auth_events"),
@@ -738,6 +739,81 @@ describe("api tokens", () => {
     expect(listed).not.toContain(body.token);
   });
 
+  describe("deleting a revoked token", () => {
+    const del = (cookie: string, id: string, path = "record") =>
+      call(`/folio/api/tokens/${id}/${path}`, { method: "DELETE", headers: { cookie } });
+    const exists = async (id: string) =>
+      (await env.DB.prepare("select 1 as n from api_tokens where id = ?").bind(id).first()) !==
+      null;
+
+    it("removes the row and its grants once the token is revoked", async () => {
+      const admin = await signIn("admin");
+      const { row } = await createToken(env.DB, { name: "old", scopes: ["content:read"] });
+      await env.DB.prepare(
+        `insert into site_grants (id, token_id, site_id, created_at, expires_at)
+         values ('sgr_del', ?, 'default', 1, 2)`,
+      )
+        .bind(row.id)
+        .run();
+      expect(
+        (
+          await call(`/folio/api/tokens/${row.id}`, {
+            method: "DELETE",
+            headers: { cookie: admin.cookie },
+          })
+        ).status,
+      ).toBe(200);
+
+      const res = await del(admin.cookie, row.id);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ deleted: true });
+      expect(await exists(row.id)).toBe(false);
+      const grants = await env.DB.prepare(
+        "select count(*) as n from site_grants where id = 'sgr_del'",
+      ).first<{
+        n: number;
+      }>();
+      expect(grants?.n).toBe(0);
+    });
+
+    it("refuses an active token and leaves it working", async () => {
+      const admin = await signIn("admin");
+      const { row, token } = await createToken(env.DB, { name: "live", scopes: ["content:read"] });
+      const res = await del(admin.cookie, row.id);
+      expect(res.status).toBe(409);
+      expect(await exists(row.id)).toBe(true);
+      expect(
+        (await call("/folio/api/stories", { headers: { authorization: `Bearer ${token}` } }))
+          .status,
+      ).toBe(200);
+    });
+
+    it("404s an unknown id, and a second delete", async () => {
+      const admin = await signIn("admin");
+      expect((await del(admin.cookie, "nope")).status).toBe(404);
+      const { row } = await createToken(env.DB, { name: "old", scopes: ["content:read"] });
+      await env.DB.prepare("update api_tokens set revoked_at = 1 where id = ?").bind(row.id).run();
+      expect((await del(admin.cookie, row.id)).status).toBe(200);
+      expect((await del(admin.cookie, row.id)).status).toBe(404);
+    });
+
+    it("is refused to a non-admin and to a token, like revoke", async () => {
+      const publisher = await signIn("publisher");
+      const { row } = await createToken(env.DB, { name: "old", scopes: ["admin"] });
+      await env.DB.prepare("update api_tokens set revoked_at = 1 where id = ?").bind(row.id).run();
+      expect((await del(publisher.cookie, row.id)).status).toBe(403);
+      const other = await createToken(env.DB, { name: "writer", scopes: ["content:write"] });
+      const viaToken = await call(`/folio/api/tokens/${row.id}/record`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${other.token}` },
+      });
+      expect(viaToken.status).toBe(403);
+      expect(await exists(row.id)).toBe(true);
+      const anon = await call(`/folio/api/tokens/${row.id}/record`, { method: "DELETE" });
+      expect([401, 403]).toContain(anon.status);
+    });
+  });
+
   it("refuses a scope that does not exist rather than quietly dropping it", async () => {
     const admin = await signIn("admin");
     const res = await call("/folio/api/tokens", {
@@ -746,6 +822,163 @@ describe("api tokens", () => {
       body: JSON.stringify({ name: "bad", scopes: ["content:destroy"] }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+/* ------------------------------------------------------- the user page --- */
+
+describe("an editor's sign-in address and passkeys, edited by an admin", () => {
+  const patch = (cookie: string, id: string, body: unknown, f = folio) =>
+    f.handle(
+      new Request(`${API}/users/${id}`, {
+        method: "PATCH",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      }),
+      env,
+      createExecutionContext(),
+    ) as Promise<Response>;
+  const emailOf = async (id: string) =>
+    (
+      await env.DB.prepare("select email from users where id = ?")
+        .bind(id)
+        .first<{ email: string }>()
+    )?.email;
+
+  it("changes the address, lowercased, revokes their sessions and records who did it", async () => {
+    const admin = await signIn("admin");
+    const ann = await signIn("editor", "ann@example.com");
+    const res = await patch(admin.cookie, ann.user.id, { email: "  Ann.New@Example.com " });
+    expect(res.status).toBe(200);
+    expect((await res.json<{ user: { email: string } }>()).user.email).toBe("ann.new@example.com");
+    expect(await emailOf(ann.user.id)).toBe("ann.new@example.com");
+    // Her browser was minted for the old address.
+    expect((await call("/folio/api/stories", { headers: { cookie: ann.cookie } })).status).toBe(
+      401,
+    );
+    const event = await env.DB.prepare(
+      "select actor, detail from auth_events where kind = 'email_changed' and user_id = ?",
+    )
+      .bind(ann.user.id)
+      .first<{ actor: string; detail: string }>();
+    expect(event?.actor).toBe(admin.user.id);
+    expect(JSON.parse(event!.detail)).toEqual({
+      from: "ann@example.com",
+      to: "ann.new@example.com",
+    });
+  });
+
+  it("refuses an address somebody else holds, whatever its case, with a 409", async () => {
+    const admin = await signIn("admin");
+    const ann = await signIn("editor", "ann@example.com");
+    await signIn("viewer", "bob@example.com");
+    const res = await patch(admin.cookie, ann.user.id, { email: "BOB@example.com" });
+    expect(res.status).toBe(409);
+    expect((await res.json<ErrorEnvelope>()).error.message).toContain("already signs in");
+    expect(await emailOf(ann.user.id)).toBe("ann@example.com");
+    // Saving the address she already has is not a clash and writes nothing.
+    expect((await patch(admin.cookie, ann.user.id, { email: "ANN@example.com" })).status).toBe(200);
+    expect((await call("/folio/api/stories", { headers: { cookie: ann.cookie } })).status).not.toBe(
+      401,
+    );
+  });
+
+  it("refuses your own address, a malformed one and an unknown user", async () => {
+    const admin = await signIn("admin");
+    expect((await patch(admin.cookie, admin.user.id, { email: "me2@example.com" })).status).toBe(
+      409,
+    );
+    const ann = await signIn("editor", "ann@example.com");
+    expect((await patch(admin.cookie, ann.user.id, { email: "not-an-address" })).status).toBe(400);
+    expect((await patch(admin.cookie, "usr_000000000000", { email: "x@example.com" })).status).toBe(
+      404,
+    );
+  });
+
+  it("refuses an address on, or moving off, a domain an identity provider owns", async () => {
+    const sso: AuthProvider<Cloudflare.Env> = {
+      kind: "redirect",
+      id: "sso",
+      label: "SSO",
+      domains: ["client.com"],
+      start: async () => ({ url: "https://idp.test/authorize", state: {} }),
+      callback: async () => ({ email: "x@client.com" }),
+    };
+    const enforced = build({ providers: [...auth.providers, sso] });
+    const admin = await signIn("admin");
+    const ann = await signIn("editor", "ann@example.com");
+    const corp = await signIn("editor", "corp@client.com");
+    expect(
+      (await patch(admin.cookie, ann.user.id, { email: "ann@client.com" }, enforced)).status,
+    ).toBe(409);
+    expect(
+      (await patch(admin.cookie, corp.user.id, { email: "corp@gmail.com" }, enforced)).status,
+    ).toBe(409);
+    expect(await emailOf(corp.user.id)).toBe("corp@client.com");
+  });
+
+  it("refuses an address change for a person a provider placed per-site grants on", async () => {
+    const admin = await signIn("admin");
+    const ann = await signIn("editor", "ann@example.com");
+    await env.DB.prepare(
+      "insert into site_roles (user_id, scope_id, role, role_from, created_at) values (?, 'alpha', 'editor', 'sso', 1)",
+    )
+      .bind(ann.user.id)
+      .run();
+    expect((await patch(admin.cookie, ann.user.id, { email: "ann@gmail.com" })).status).toBe(409);
+    expect(await emailOf(ann.user.id)).toBe("ann@example.com");
+  });
+
+  it("is admin-only, like a rename", async () => {
+    const publisher = await signIn("publisher");
+    const ann = await signIn("editor", "ann@example.com");
+    expect((await patch(publisher.cookie, ann.user.id, { email: "a2@example.com" })).status).toBe(
+      403,
+    );
+    expect(await emailOf(ann.user.id)).toBe("ann@example.com");
+  });
+
+  it("answers one user with their passkeys, and removes one passkey at a time", async () => {
+    const admin = await signIn("admin");
+    const ann = await signIn("editor", "ann@example.com");
+    for (const id of ["cred_a", "cred_b"]) {
+      await env.DB.prepare(
+        `insert into passkeys (id, user_id, public_key, alg, counter, name, backed_up, created_at)
+         values (?, ?, 'k', -7, 0, ?, 0, 1)`,
+      )
+        .bind(id, ann.user.id, id)
+        .run();
+    }
+    const detail = await call(`/folio/api/users/${ann.user.id}`, {
+      headers: { cookie: admin.cookie },
+    });
+    const body = await detail.json<{
+      user: { email: string; passkeys: number };
+      passkeys: { id: string }[];
+    }>();
+    expect(body.user.email).toBe("ann@example.com");
+    expect(body.passkeys.map((p) => p.id)).toEqual(["cred_a", "cred_b"]);
+    expect(JSON.stringify(body)).not.toContain("public_key");
+    expect(
+      (await call("/folio/api/users/usr_000000000000", { headers: { cookie: admin.cookie } }))
+        .status,
+    ).toBe(404);
+
+    const del = (cookie: string, uid: string, pid: string) =>
+      call(`/folio/api/users/${uid}/passkeys/${pid}`, { method: "DELETE", headers: { cookie } });
+    expect((await del(ann.cookie, ann.user.id, "cred_a")).status).toBe(403);
+    expect((await del(admin.cookie, ann.user.id, "cred_a")).status).toBe(200);
+    expect((await del(admin.cookie, ann.user.id, "cred_a")).status).toBe(404);
+    const left = await env.DB.prepare("select id from passkeys where user_id = ?")
+      .bind(ann.user.id)
+      .all<{ id: string }>();
+    expect(left.results.map((r) => r.id)).toEqual(["cred_b"]);
+    const event = await env.DB.prepare(
+      "select actor from auth_events where kind = 'passkey_removed' and user_id = ?",
+    )
+      .bind(ann.user.id)
+      .first<{ actor: string }>();
+    expect(event?.actor).toBe(admin.user.id);
   });
 });
 

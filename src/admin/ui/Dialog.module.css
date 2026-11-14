@@ -69,9 +69,17 @@
   color: var(--fg-muted);
 }
 
+/*
+ * **The bottom padding is not zero, and it is the focus ring's room.** `overflow: auto`
+ * clips at the padding edge, and the global ring is a 2px outline at a 1px offset, so
+ * it reaches 3px past the control. With `padding-bottom: 0` a control that was the
+ * last thing in the body (the Rename dialog's only input) had the bottom of its ring
+ * cut off by the scrollport, which read as a half-drawn box. The footer's own padding
+ * sits below this one, so the extra 4px costs the layout nothing visible.
+ */
 .body {
   min-height: 0;
-  padding: var(--space-3) var(--space-4) 0;
+  padding: var(--space-3) var(--space-4) var(--space-1);
   overflow: auto;
 }
 

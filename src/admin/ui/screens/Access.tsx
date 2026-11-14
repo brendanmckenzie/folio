@@ -8,7 +8,7 @@ import { Badge } from "../Badge";
 import { Button } from "../Button";
 import { Dialog } from "../Dialog";
 import { EmptyState } from "../EmptyState";
-import { Field, Input, Select } from "../Field";
+import { Select } from "../Field";
 import { ListHeader } from "../List";
 import { scopeOptionGroups } from "../nav";
 import { type Column, Table } from "../Table";
@@ -18,7 +18,6 @@ import {
   type AccessUser,
   ROLE_MEANING,
   ROLE_OPTIONS,
-  SELF_REMOVE_REASON,
   SELF_ROLE_REASON,
   accessGate,
   accessQuery,
@@ -27,7 +26,6 @@ import {
   grantsReason,
   isSelf,
   parseAccessUrl,
-  removePasskeysRefusal,
   revokeRefusal,
   roleFromReason,
   showsGrants,
@@ -35,7 +33,6 @@ import {
   tokenStatus,
   tokenStatusTone,
 } from "./access-model";
-import { AccessGrantsDialog } from "./AccessGrants";
 import { AccessInviteDialog } from "./AccessInviteDialog";
 import { AccessTokenDialog, type Minted, MintedTokenDialog } from "./AccessTokenDialog";
 import { type PagedList, useAccess } from "./useAccess";
@@ -53,9 +50,8 @@ interface Props {
    * a person and the screen behind it. */
   onQuery: (next: Record<string, string | undefined>) => void;
   onNotice: (message: string) => void;
-  /** Tells the shell a user's name changed; it applies it when that user is the
-   * signed-in one, so the user menu follows an admin renaming themselves. */
-  onRenamed?: (id: string, name: string) => void;
+  /** Opens an editor's page (`{base}/access/users/:id`): the name cell is a link to it. */
+  onOpenUser: (id: string) => void;
   /**
    * The shell's boot is still in flight, so `me` is a guess rather than an answer.
    *
@@ -120,20 +116,15 @@ const SKELETON = ["s1", "s2", "s3", "s4"];
  *    unreachable by keyboard" — and rather than have the two tables disagree, both
  *    put it in a named column.
  */
-export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loading }: Props) {
+export function Access({ apiBase, me, query, onQuery, onNotice, onOpenUser, loading }: Props) {
   const gate = accessGate(me);
   const url = parseAccessUrl(query);
   const data = useAccess(apiBase, !loading && gate.kind === "ok");
 
   const [busy, setBusy] = useState(false);
   const [minted, setMinted] = useState<Minted | null>(null);
-  const [removing, setRemoving] = useState<AccessUser | null>(null);
-  const [renaming, setRenaming] = useState<AccessUser | null>(null);
-  const [draftName, setDraftName] = useState("");
   const [revoking, setRevoking] = useState<TokenRow | null>(null);
-  const [removingPasskeys, setRemovingPasskeys] = useState<AccessUser | null>(null);
-  // Multi-site: whose grants are open in the editor. Always null with no `sites`.
-  const [editingGrants, setEditingGrants] = useState<AccessUser | null>(null);
+  const [deletingToken, setDeletingToken] = useState<TokenRow | null>(null);
   const many = showsGrants(me);
 
   const close = useCallback(() => onQuery(accessQuery({ open: null })), [onQuery]);
@@ -188,16 +179,6 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
     if (ok) close();
   };
 
-  const changeGrants = async (user: AccessUser, grants: Grants) => {
-    const ok = await run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}`, "PATCH", { grants });
-      // As a role change: the route drops their sessions so an old grant does not
-      // outlive its edit in an open socket, and a preview it admitted ends with them.
-      return `${user.name}’s access is updated. They will need to sign in again.`;
-    }, data.users.reload);
-    if (ok) setEditingGrants(null);
-  };
-
   const changeRole = (user: AccessUser, role: Role) =>
     void run(async () => {
       await send(`/users/${encodeURIComponent(user.id)}`, "PATCH", { role });
@@ -206,36 +187,6 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
       // accepting. Saying so here means it does not look like a bug when it happens
       // to somebody.
       return `${user.name} is now a ${role}. They will need to sign in again.`;
-    }, data.users.reload);
-
-  const rename = async (user: AccessUser, name: string) => {
-    const ok = await run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}`, "PATCH", { name });
-      // Unlike a role change this drops nobody's sessions, so there is no
-      // sign-in warning to give.
-      onRenamed?.(user.id, name);
-      return `${user.name} is now ${name}.`;
-    }, data.users.reload);
-    if (ok) setRenaming(null);
-  };
-
-  const remove = (user: AccessUser) =>
-    void run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}`, "DELETE");
-      return `${user.name} no longer has access. Their edit history is untouched.`;
-    }, data.users.reload);
-
-  /**
-   * The one incident this covers: a lost or stolen device.
-   * `docs/specs/foundation/passkeys.md` checkpoint 4 — no per-passkey admin
-   * management, no "require passkeys" policy, just this. Magic link or SSO
-   * stays the way back in, which is the whole reason it is safe to do without
-   * asking the person first.
-   */
-  const removeAllPasskeys = (user: AccessUser) =>
-    void run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}/passkeys`, "DELETE");
-      return `Removed every passkey for ${user.name}. Magic link or single sign-on still gets them in.`;
     }, data.users.reload);
 
   const mint = async (body: {
@@ -257,6 +208,12 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
     void run(async () => {
       await send(`/tokens/${encodeURIComponent(token.id)}`, "DELETE");
       return `${token.name} is revoked. Anything using it stops working now.`;
+    }, data.tokens.reload);
+
+  const deleteToken = (token: TokenRow) =>
+    void run(async () => {
+      await send(`/tokens/${encodeURIComponent(token.id)}/record`, "DELETE");
+      return `${token.name} is deleted.`;
     }, data.tokens.reload);
 
   // Before the gate, because until `/me` answers the gate is guessing — see
@@ -324,17 +281,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
                 <span className={css.blank} title={placedBy}>
                   set by sign-in
                 </span>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  disabled={busy || self}
-                  reason={self ? SELF_ROLE_REASON : "A write is in flight"}
-                  onClick={() => setEditingGrants(user)}
-                >
-                  Edit access
-                </Button>
-              )}
+              ) : null}
             </span>
           );
         }
@@ -397,59 +344,19 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
           <span className={css.blank}>—</span>
         ),
     },
-    {
-      key: "act",
-      label: "Actions",
-      cell: (user) => {
-        const self = isSelf(user.id, selfId);
-        const passkeysRefusal = removePasskeysRefusal(user);
-        return (
-          <span className={css.rowActions}>
-            <Button
-              size="sm"
-              disabled={busy}
-              reason="A write is in flight"
-              onClick={() => {
-                setDraftName(user.name);
-                setRenaming(user);
-              }}
-            >
-              Rename
-            </Button>
-            <Button
-              size="sm"
-              disabled={busy || passkeysRefusal !== undefined}
-              reason={passkeysRefusal ?? "A write is in flight"}
-              onClick={() => setRemovingPasskeys(user)}
-            >
-              Remove all passkeys
-            </Button>
-            <Button
-              size="sm"
-              variant="danger"
-              disabled={busy || self}
-              reason={self ? SELF_REMOVE_REASON : "A write is in flight"}
-              onClick={() => setRemoving(user)}
-            >
-              Remove
-            </Button>
-          </span>
-        );
-      },
-    },
   ];
 
   const tokenColumns: Column<TokenRow>[] = [
     {
       key: "name",
       label: "Name",
-      width: "26%",
+      width: "20%",
       cell: (token) => <span className={css.name}>{token.name}</span>,
     },
     {
       key: "scopes",
       label: "Permissions",
-      width: "24%",
+      width: "25%",
       cell: (token) => (
         <span className={css.scopeList}>
           {token.scopes.length === 0 ? (
@@ -468,11 +375,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
              * scope is not a state. The one that matters stays legible because it
              * says `admin`, which is the widest word available.
              */
-            token.scopes.map((scope) => (
-              <Badge key={scope} mono>
-                {scope}
-              </Badge>
-            ))
+            <ScopeChips scopes={token.scopes} />
           )}
         </span>
       ),
@@ -482,7 +385,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
           {
             key: "site",
             label: "Works on",
-            width: "12%",
+            width: "16%",
             cell: (token: TokenRow) => <Badge mono>{bindingLabel(me, token.site)}</Badge>,
           },
         ]
@@ -490,7 +393,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
     {
       key: "status",
       label: "Status",
-      width: "10%",
+      width: "9%",
       cell: (token) => {
         const status = tokenStatus(token);
         return (
@@ -508,13 +411,13 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
     {
       key: "created",
       label: "Created",
-      width: "12%",
+      width: "10%",
       cell: (token) => <span className={css.stamp}>{since(token.createdAt)}</span>,
     },
     {
       key: "used",
       label: "Last used",
-      width: "14%",
+      width: "10%",
       // Stamped whether the request succeeded or was refused for a missing scope
       // (`readToken`), because the question this column answers is "is this
       // credential in use", not "did it work".
@@ -523,8 +426,21 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
     {
       key: "act",
       label: "Actions",
-      width: "14%",
+      width: "10%",
       cell: (token) => {
+        if (token.revokedAt !== null) {
+          return (
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={busy}
+              reason="A write is in flight"
+              onClick={() => setDeletingToken(token)}
+            >
+              Delete
+            </Button>
+          );
+        }
         const refusal = revokeRefusal(token);
         return (
           <Button
@@ -570,6 +486,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
           label="Editors"
           columns={userColumns}
           rowKey={(user) => user.id}
+          onOpen={(user) => onOpenUser(user.id)}
           noun="editor"
           onRetry={data.users.reload}
           empty={
@@ -626,15 +543,6 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
         <AccessInviteDialog onClose={close} onInvite={invite} {...(many ? { me } : {})} />
       ) : null}
 
-      {editingGrants ? (
-        <AccessGrantsDialog
-          me={me}
-          user={editingGrants}
-          onClose={() => setEditingGrants(null)}
-          onSave={(grants) => changeGrants(editingGrants, grants)}
-        />
-      ) : null}
-
       {/*
         `&& minted === null` is not belt-and-braces, it is the handover.
         A successful mint does two things — it sets the secret and it clears
@@ -653,74 +561,6 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
         />
       ) : null}
       {minted ? <MintedTokenDialog minted={minted} onClose={() => setMinted(null)} /> : null}
-
-      {renaming ? (
-        <Dialog
-          title={`Rename ${renaming.name}`}
-          onClose={() => setRenaming(null)}
-          actions={
-            <>
-              <Button onClick={() => setRenaming(null)}>Cancel</Button>
-              <Button
-                variant="primary"
-                disabled={busy || !draftName.trim()}
-                onClick={() => void rename(renaming, draftName.trim())}
-              >
-                Save
-              </Button>
-            </>
-          }
-        >
-          <Field label="Name">
-            {(id) => (
-              <Input
-                id={id}
-                value={draftName}
-                maxLength={120}
-                onChange={(e) => setDraftName(e.target.value)}
-              />
-            )}
-          </Field>
-        </Dialog>
-      ) : null}
-
-      {removing ? (
-        <Dialog
-          title={`Remove ${removing.name}?`}
-          description="They lose access immediately."
-          danger
-          onClose={() => setRemoving(null)}
-          actions={
-            <>
-              <Button onClick={() => setRemoving(null)}>Cancel</Button>
-              <Button
-                variant="danger"
-                onClick={() => {
-                  const user = removing;
-                  setRemoving(null);
-                  remove(user);
-                }}
-              >
-                Remove
-              </Button>
-            </>
-          }
-        >
-          {/* Warn and proceed, the same shape as `DeleteDialog`: the dialog's job is
-              to make sure the person pressing the button knows what it costs, not to
-              decide for them. What it costs here is small and worth saying, because
-              the fear is that it is large — their sessions go, their history does
-              not. */}
-          <p className={css.dialogNote}>
-            <code className={css.inlineCode}>{removing.email}</code> can no longer sign in, and
-            every session they hold is dropped.
-          </p>
-          <p className={css.dialogNote}>
-            Their edit history stays. Version rows record who made a change as a string, not as a
-            link to an account, so removing somebody never rewrites the record of what they did.
-          </p>
-        </Dialog>
-      ) : null}
 
       {revoking ? (
         <Dialog
@@ -753,36 +593,66 @@ export function Access({ apiBase, me, query, onQuery, onNotice, onRenamed, loadi
         </Dialog>
       ) : null}
 
-      {removingPasskeys ? (
+      {deletingToken ? (
         <Dialog
-          title={`Remove every passkey for ${removingPasskeys.name}?`}
-          description="For a lost or stolen device. They keep whatever other way they have in."
+          title={`Delete ${deletingToken.name}?`}
+          description="The row is removed from the list for good. This cannot be undone."
           danger
-          onClose={() => setRemovingPasskeys(null)}
+          onClose={() => setDeletingToken(null)}
           actions={
             <>
-              <Button onClick={() => setRemovingPasskeys(null)}>Cancel</Button>
+              <Button onClick={() => setDeletingToken(null)}>Cancel</Button>
               <Button
                 variant="danger"
                 onClick={() => {
-                  const user = removingPasskeys;
-                  setRemovingPasskeys(null);
-                  removeAllPasskeys(user);
+                  const token = deletingToken;
+                  setDeletingToken(null);
+                  deleteToken(token);
                 }}
               >
-                Remove all passkeys
+                Delete
               </Button>
             </>
           }
         >
           <p className={css.dialogNote}>
-            None of their passkeys will sign in after this. Magic link or single sign-on, whichever
-            this site has, still works — that is the point of doing this rather than removing their
-            account.
+            The token is already revoked, so nothing that used it changes. Only the record of its
+            name and when it was turned off goes.
           </p>
         </Dialog>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * One chip, or two, then `+N`. A row's height is the point: four scope chips wrapped to
+ * two lines and made rows uneven. The `+N` is a focusable chip whose title and
+ * accessible name list every scope it stands for, so nothing is lost, only folded.
+ */
+function ScopeChips({ scopes }: { scopes: readonly string[] }) {
+  const shown = scopes.length > 2 ? scopes.slice(0, 1) : scopes;
+  const rest = scopes.slice(shown.length);
+  return (
+    <span className={css.scopeList}>
+      {shown.map((scope) => (
+        <Badge key={scope} mono>
+          {scope}
+        </Badge>
+      ))}
+      {rest.length > 0 ? (
+        <span
+          className={css.more}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: a keyboard-reachable tooltip target; the list is the accessible name
+          tabIndex={0}
+          role="note"
+          title={rest.join(", ")}
+          aria-label={`${rest.length} more: ${rest.join(", ")}`}
+        >
+          <Badge mono>+{rest.length}</Badge>
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -801,6 +671,7 @@ function Panel<T>({
   label,
   columns,
   rowKey,
+  onOpen,
   noun,
   empty,
   onRetry,
@@ -809,6 +680,7 @@ function Panel<T>({
   label: string;
   columns: readonly Column<T>[];
   rowKey: (row: T) => string;
+  onOpen?: (row: T) => void;
   /** Singular. The footer pluralises it. */
   noun: string;
   empty: ReactNode;
@@ -842,7 +714,14 @@ function Panel<T>({
 
   return (
     <>
-      <Table label={label} columns={columns} rows={page.rows} rowKey={rowKey} empty={empty} />
+      <Table
+        label={label}
+        columns={columns}
+        rows={page.rows}
+        rowKey={rowKey}
+        empty={empty}
+        {...(onOpen ? { onOpen } : {})}
+      />
       {page.rows.length === 0 ? null : (
         <div className={css.footer}>
           <span className={css.count}>
@@ -915,7 +794,7 @@ function Booting() {
  * the next step for a viewer is to ask somebody. Inventing a button for either would
  * be furniture.
  */
-function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: "ok" }> }) {
+export function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: "ok" }> }) {
   if (gate.kind === "open") {
     return (
       <div className={css.screen}>

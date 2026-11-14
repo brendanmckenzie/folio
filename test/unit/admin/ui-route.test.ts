@@ -54,6 +54,13 @@ describe("parse", () => {
       name: "responses",
       id: "frm_abc",
     });
+    expect(parse("/folio/access/users/usr_abc", MOUNT).screen).toEqual({
+      name: "accessUser",
+      id: "usr_abc",
+    });
+    // An empty id, or another noun under access, is not a user page.
+    expect(parse("/folio/access/users/", MOUNT).screen.name).toBe("missing");
+    expect(parse("/folio/access/people/usr_abc", MOUNT).screen.name).toBe("missing");
   });
 
   it("decodes a parameter, so a type name with a space is one segment not two", () => {
@@ -150,6 +157,7 @@ describe("href", () => {
       { name: "edit", id: "sty_abc" },
       { name: "form", id: "frm_abc" },
       { name: "responses", id: "frm_abc" },
+      { name: "accessUser", id: "usr_abc" },
     ] as const;
     for (const screen of screens) {
       expect(parse(href(screen, MOUNT), MOUNT).screen).toEqual(screen);
@@ -287,6 +295,14 @@ describe("crumbs", () => {
       { text: "Contact us", screen: { name: "form", id: "frm_1" } },
       { text: "Responses" },
     ]);
+  });
+
+  it("roots a user page at Access, then the person", () => {
+    expect(crumbs(parse("/folio/access/users/usr_1", MOUNT), { userLabel: () => "Ann" })).toEqual([
+      { text: "Access", screen: { name: "access" } },
+      { text: "Ann" },
+    ]);
+    expect(crumbs(parse("/folio/access/users/usr_1", MOUNT))[1]).toEqual({ text: "Editor" });
   });
 
   it("names a type list by its label, falling back to the type name", () => {

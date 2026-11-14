@@ -8,6 +8,33 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.5.4
+
+A patch release: nothing to run or edit on an existing host. No migration, no wire
+change, no change to the `exports` surface or to any `createFolio()` key. The new
+routes are under the admin-internal `{base}/api`, not `/api/v1`.
+
+### Added
+
+- **A page per person under Access** (`{base}/access/users/:id`), replacing the Rename
+  and Edit access dialogs: name and email, access, passkeys (remove one or all) and
+  removal, in one place. A name in the Editors table links to it.
+- **An admin can change a person's sign-in email.** The address is normalised the way
+  sign-in normalises it and must be unused. Every session the person holds is ended and
+  an `email_changed` event is recorded; passkeys stay. Refused for your own address, for
+  an address on a domain an identity provider owns (old or new), and for anyone holding
+  a provider-placed grant, so a directory-managed account cannot be moved out of reach
+  of the directory.
+- **A revoked API token can be deleted**, with its site grants. An active token must be
+  revoked first.
+
+### Fixed
+
+- The Access tables keep every row on one line: a permission list shows its first scope
+  and a `+N` chip naming the rest, and the Editors row actions moved onto the person's
+  page.
+- A dialog's last control no longer has the bottom of its focus ring clipped.
+
 ## 1.5.3
 
 A patch release: nothing to run or edit on an existing host. No migration, no wire

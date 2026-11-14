@@ -29,6 +29,8 @@ export type Screen =
   | { name: "assets" }
   | { name: "edit"; id: string }
   | { name: "access" }
+  /** One editor: their details, access, passkeys and the removal. `{base}/access/users/:id`. */
+  | { name: "accessUser"; id: string }
   | { name: "model" }
   | { name: "redirects" }
   | { name: "schedules" }
@@ -164,6 +166,7 @@ const SCOPE_STABLE: ReadonlySet<Screen["name"]> = new Set([
   "model",
   "settings",
   "access",
+  "accessUser",
 ]);
 
 /**
@@ -224,6 +227,10 @@ function screenOf(segments: string[], path: string): Screen {
     if (head === "responses") return { name: "responses", id: second };
   }
 
+  if (segments.length === 3 && head === "access" && second === "users" && segments[2]) {
+    return { name: "accessUser", id: segments[2] };
+  }
+
   return { name: "missing", path };
 }
 
@@ -278,6 +285,8 @@ function pathOf(screen: Screen): string {
       return `/form/${encodeURIComponent(screen.id)}`;
     case "responses":
       return `/responses/${encodeURIComponent(screen.id)}`;
+    case "accessUser":
+      return `/access/users/${encodeURIComponent(screen.id)}`;
     case "missing":
       return screen.path;
     default:
@@ -362,10 +371,12 @@ export interface CrumbContext {
    * (`docs/specs/content-model/forms.md` phase 6).
    */
   formLabel?: (id: string) => string | undefined;
+  /** The open editor's name on the Access user page, for the same reason. */
+  userLabel?: (id: string) => string | undefined;
 }
 
 const TITLES: Record<
-  Exclude<ScreenName, "documents" | "edit" | "form" | "responses" | "missing">,
+  Exclude<ScreenName, "documents" | "edit" | "form" | "responses" | "accessUser" | "missing">,
   string
 > = {
   home: "Home",
@@ -398,6 +409,13 @@ export function crumbs(route: Route, ctx: CrumbContext = {}): Crumb[] {
     return [
       { text: "Forms", screen: { name: "forms" } },
       { text: ctx.formLabel?.(s.id) ?? "Form" },
+    ];
+  }
+
+  if (s.name === "accessUser") {
+    return [
+      { text: "Access", screen: { name: "access" } },
+      { text: ctx.userLabel?.(s.id) ?? "Editor" },
     ];
   }
 
