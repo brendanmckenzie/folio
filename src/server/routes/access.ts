@@ -18,9 +18,9 @@ import { ALL_SCOPES, type Registry, SHARED_SCOPE, servingRegistry } from "../../
 import type { Grants, Scope } from "../auth/roles";
 import { ADMIN, actorString, ROLES } from "../auth/roles";
 import { roleSetByReason } from "../auth/roles-from";
-import { countPasskeysByUser } from "../auth/passkeys";
+import { countPasskeysByUser, listPasskeys } from "../auth/passkeys";
 import { listEvents, oldestEventAt, recordEventStatement } from "../auth/events";
-import { createToken, listTokens, revokeToken } from "../auth/tokens";
+import { createToken, deleteRevokedToken, listTokens, revokeToken } from "../auth/tokens";
 import {
   createUserStatement,
   deleteUser,
@@ -33,11 +33,19 @@ import {
   type UserRow,
 } from "../auth/users";
 import { revokeUserSessions, userSessionsDelete } from "../auth/session";
+import { domainOf } from "../auth/sign-in";
 import { FolioError } from "../errors";
 import { requireAccess, requireAuthConfigured } from "../middleware";
 import type { FolioRuntime } from "../runtime";
 import type { FolioEnv } from "../types";
-import { idParam, parseBody, TokenCreateBody, UserCreateBody, UserPatchBody } from "../validate";
+import {
+  EMAIL,
+  idParam,
+  parseBody,
+  TokenCreateBody,
+  UserCreateBody,
+  UserPatchBody,
+} from "../validate";
 import { limitParam, requireCursor } from "../validate";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,7 +68,10 @@ const TokenMintBody = v.object(
   OBJECT,
 );
 const UserInviteBody = v.object({ ...UserCreateBody.entries, grants: v.optional(GRANTS) }, OBJECT);
-const UserEditBody = v.object({ ...UserPatchBody.entries, grants: v.optional(GRANTS) }, OBJECT);
+const UserEditBody = v.object(
+  { ...UserPatchBody.entries, email: v.optional(EMAIL), grants: v.optional(GRANTS) },
+  OBJECT,
+);
 
 /**
  * A scope a grant or a binding may name: `*`, `shared`, or a site or group the
@@ -189,6 +200,21 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   });
 
   /**
+   * One person, for the Access screen's per-user page: the row, the same shape
+   * `GET /users` rows have, and their passkeys (never a public key; `PasskeyRow`
+   * has none). The passkeys are read whether or not a passkey provider is
+   * configured, because a host that took the provider out can still have rows to clear.
+   */
+  app.get("/users/:id", async (c) => {
+    const id = idParam("id", c.req.param("id"));
+    const db = c.var.bindings().db;
+    const user = await userById(db, id);
+    if (!user) throw new FolioError("not_found", "Unknown user");
+    const passkeys = await listPasskeys(db, id);
+    return c.json({ user: { ...toJson(user), passkeys: passkeys.length }, passkeys });
+  });
+
+  /**
    * Invites an editor. There is no mail here and deliberately so: the row *is*
    * the invitation, and the person signs in through whichever provider the site
    * has configured. A library that mailed an invitation would be back to owning
@@ -230,7 +256,7 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   });
 
   /**
-   * Renames someone or changes their role.
+   * Renames someone, changes their sign-in address or their role.
    *
    * A role change revokes their sessions. Without that, a demotion from
    * `publisher` to `viewer` would leave the old role in every open socket's
@@ -316,6 +342,80 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       previousRole = target.role;
     }
 
+    /**
+     * **The sign-in address.** An account is identified by its address alone: every
+     * provider (`completeSignIn`) finds the row by `userByEmail`, and no table keeps
+     * a provider's own subject id. So there is no linked identity to detach, but
+     * three things would be wrong to allow, and each is a 409 here rather than a
+     * quiet success:
+     *
+     * - **Somebody else's address.** `users.email` is unique and lowercased, the same
+     *   normalisation sign-in applies, so a clash is refused before the write and the
+     *   constraint is the backstop for a race. Letting one account take another's
+     *   address would let its owner's next sign-in land in the wrong account.
+     * - **A directory's account.** If either the old or the new address is on a domain
+     *   an identity provider is the only door for (`domains`), the account is that
+     *   directory's: moving it off the domain would escape the revocation the client
+     *   expects, and moving one onto it would hand the directory somebody it never
+     *   vouched for. Likewise a role a provider placed (`roleFrom`).
+     * - **Your own.** The one edit that locks you out with a typo, and the recovery is
+     *   `wrangler d1 execute`. Another admin does it for you, as for a role.
+     *
+     * Sessions are revoked, in the batch with the write and one `email_changed` row.
+     * They were minted for the old address; whoever holds it (or an ex-colleague's
+     * browser) must prove the new one by signing in again. Passkeys are kept: they
+     * are bound to the account and not to an address, and "Remove all passkeys" is a
+     * separate, deliberate act on the same page.
+     */
+    let emailChange: { from: string; to: string } | null = null;
+    if (body.email !== undefined) {
+      const current = target ?? (await userById(db, id));
+      if (!current) throw new FolioError("not_found", "Unknown user");
+      if (body.email !== current.email) {
+        if (self?.kind === "user" && self.id === id) {
+          throw new FolioError(
+            "conflict",
+            "You cannot change your own sign-in address. Ask another admin to change it for you.",
+          );
+        }
+        const domains = rt.auth.mode === "session" ? rt.auth.domains : new Map<string, string>();
+        const bound = [current.email, body.email].find((a) => domains.has(domainOf(a)));
+        // Any grant a provider placed, not only `*`: the role guard above says why.
+        const placed = current.grants.some((g) => g.roleFrom !== null) || current.roleFrom !== null;
+        if (bound !== undefined || placed) {
+          throw new FolioError(
+            "conflict",
+            "This account is managed by an identity provider, so its address is changed there.",
+          );
+        }
+        const clash = await userByEmail(db, body.email);
+        if (clash && clash.id !== id) {
+          throw new FolioError("conflict", "Someone else already signs in with that address.");
+        }
+        emailChange = { from: current.email, to: body.email };
+      }
+    }
+    const applyEmail = async (): Promise<void> => {
+      if (!emailChange) return;
+      try {
+        await db.batch([
+          db.prepare("update users set email = ? where id = ?").bind(emailChange.to, id),
+          ...userSessionsDelete(db, id),
+          recordEventStatement(db, {
+            kind: "email_changed",
+            userId: id,
+            actor: actorString(self),
+            detail: emailChange,
+          }),
+        ]);
+      } catch (err) {
+        if (String(err).includes("UNIQUE")) {
+          throw new FolioError("conflict", "Someone else already signs in with that address.");
+        }
+        throw err;
+      }
+    };
+
     if (grants !== undefined && target) {
       /**
        * The whole set, replaced, in one batch with what a role change owes: every
@@ -324,6 +424,7 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
        */
       const before = grantMap(target.grants);
       const changed = JSON.stringify(sorted(before)) !== JSON.stringify(sorted(grants));
+      await applyEmail();
       const renamed = await updateUser(db, id, { name: body.name });
       await db.batch([
         ...replaceGrantsStatements(db, id, grants, null),
@@ -344,7 +445,9 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       return c.json({ user: toJson(updated) });
     }
 
-    const updated = await updateUser(db, id, body);
+    await applyEmail();
+    const { email: _email, ...rest } = body;
+    const updated = await updateUser(db, id, rest);
     if (!updated) throw new FolioError("not_found", "Unknown user");
     if (body.role !== undefined) {
       await revokeUserSessions(db, id);
@@ -476,14 +579,33 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json({ token: minted.token, row: minted.row }, 201);
   });
 
-  /** Revoked, not deleted: the name stays answerable and the hash can never be
-   * minted again by chance. */
+  /**
+   * Revoking keeps the row: the name stays answerable ("which token was that, and when
+   * did we turn it off") until somebody removes it with `DELETE .../record` below.
+   */
   app.delete("/tokens/:id", async (c) => {
     const id = idParam("id", c.req.param("id"));
     if (!(await revokeToken(c.var.bindings().db, id))) {
       throw new FolioError("not_found", "Unknown or already-revoked token");
     }
     return c.json({ revoked: true });
+  });
+
+  /**
+   * Removes a revoked token's row for good, so the list does not fill with dead rows.
+   * A sub-resource like `DELETE /users/:id/passkeys` rather than a `?purge` flag, so
+   * `DELETE /tokens/:id` can never be one query string away from destroying the record
+   * and each verb on the path says what it does. An active token is refused (409): it
+   * must be revoked first, so delete is never a one-step way to kill a live credential.
+   */
+  app.delete("/tokens/:id/record", async (c) => {
+    const id = idParam("id", c.req.param("id"));
+    const outcome = await deleteRevokedToken(c.var.bindings().db, id);
+    if (outcome === "missing") throw new FolioError("not_found", "Unknown token");
+    if (outcome === "active") {
+      throw new FolioError("conflict", "Revoke this token before deleting it.");
+    }
+    return c.json({ deleted: true });
   });
 
   return app;

@@ -459,9 +459,9 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Remove **all** of somebody's passkeys: checkpoint 4's one action, for the
    * one incident it exists for — a lost or stolen device.
    *
-   * There is deliberately no per-passkey admin management and no "require
-   * passkeys" policy: magic link or SSO stays the way back in, which is the
-   * whole reason this is safe to do without asking the person first.
+   * There is no "require passkeys" policy: magic link or SSO stays the way back
+   * in, which is the whole reason this is safe to do without asking the person
+   * first. One passkey can be removed too (below), for the per-user page.
    *
    * Not behind `requirePasskeys`, so a host that has since taken the provider
    * out can still clear what it left behind.
@@ -490,6 +490,37 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         }),
       ]);
       return c.json({ removed });
+    },
+  );
+
+  /**
+   * One of somebody's passkeys, for the per-user Access page: a single lost device
+   * rather than the whole incident. The same guards and the same event as the
+   * person removing their own (`passkey_removed`), except that `actor` is the admin.
+   * An id that is not this person's is a 404, as it is for them.
+   */
+  app.delete(
+    "/users/:id/passkeys/:passkeyId",
+    requireAuthConfigured<Env>(rt),
+    requireAccess<Env>(rt, ADMIN),
+    async (c) => {
+      const id = idParam("id", c.req.param("id"));
+      const passkeyId = idParam("passkeyId", c.req.param("passkeyId"));
+      const db = c.var.bindings().db;
+      if (!(await deletePasskey(db, id, passkeyId))) {
+        throw new FolioError("not_found", "Unknown passkey");
+      }
+      const self = c.var.actor;
+      await db.batch([
+        recordEventStatement(db, {
+          kind: "passkey_removed",
+          userId: id,
+          actor: self?.kind === "user" ? self.id : self ? `token:${self.name}` : null,
+          provider: "passkey",
+          detail: { passkey: passkeyId },
+        }),
+      ]);
+      return c.json({ deleted: true });
     },
   );
 

@@ -3856,7 +3856,9 @@ reconnect on a backoff forever. The admin's queue of unsent edits survives a
 `admin`. Presented as `Authorization: Bearer folio_<hex>`, stored as a hash, and
 `POST /folio/tokens` is the only response in the server that ever contains the
 raw value. A token cannot open the sync socket (4004): a script is not a person
-with a cursor.
+with a cursor. **Revoking keeps the row** (so "which token was that" stays
+answerable); a revoked token can then be **deleted** from the Access screen, which
+removes the row for good, and an active token cannot be deleted without revoking it first.
 
 **CSRF is handled by three overlapping defences and no token plumbing.** Every
 mutating route is a JSON `POST`/`PATCH`/`DELETE`, the cookie is `SameSite=Lax`,
@@ -4006,11 +4008,21 @@ security key with no PIN or biometric cannot enrol at all — a passkey is the
 only factor in this sign-in, and the local check is what makes it two factors
 by construction. That failure, too, is the browser's to report, not Folio's.
 
-**An admin can remove all of somebody's passkeys, never manage them one by
-one.** "Remove all passkeys" sits on the Access screen next to the ordinary
-"Remove" action, for a lost or stolen device; the way back in afterwards is
-magic link or SSO, whichever the deployment also lists — removing passkeys is
-never the only door left standing.
+**An admin can remove one of somebody's passkeys or all of them.** Both are on
+that person's page in the Access screen (open it from the Editors table), beside
+the ordinary "Remove" action, for a lost or stolen device; the way back in
+afterwards is magic link or SSO, whichever the deployment also lists — removing
+passkeys is never the only door left standing.
+
+**The per-person page is where an editor is edited.** `{base}/access/users/:id`
+holds their name and sign-in address (one Save), their access (a role, or a role
+per site on a multi-site deployment), their passkeys, and the removal. The
+Editors table is a list: its name cell opens the page. **Changing an address
+signs the person out everywhere** and is refused when it would take an address
+another account holds (case-insensitively, as sign-in compares them), when either
+address is on a domain an identity provider owns, when a provider placed their
+role, and for your own account, which another admin must do. Passkeys survive an
+address change because they belong to the account, not to the address.
 
 Out of scope, deliberately: **site-visitor auth** — who may *read* a published
 page. That is a different problem, and reading a published page still needs no

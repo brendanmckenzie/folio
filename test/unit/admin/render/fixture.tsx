@@ -420,6 +420,46 @@ function bodyFor(url: string): unknown {
     };
   }
 
+  // One person's page (`{base}/access/users/:id`): the same Bo, with a passkey, and the
+  // grants only where the deployment has sites.
+  if (path === `${API}/users/usr_bo`) {
+    return {
+      user: {
+        id: "usr_bo",
+        email: "bo@example.com",
+        name: "Bo",
+        role: "viewer",
+        colour: null,
+        provider: null,
+        roleFrom: null,
+        createdAt: 1,
+        lastSeenAt: null,
+        passkeys: 1,
+        ...(currentMe.sites
+          ? {
+              grants: [
+                { scope: "alpha", role: "publisher", roleFrom: null },
+                { scope: "ghost", role: "editor", roleFrom: null },
+              ],
+            }
+          : {}),
+      },
+      passkeys: [
+        {
+          id: "cred_1",
+          userId: "usr_bo",
+          alg: -7,
+          transports: null,
+          aaguid: null,
+          name: "Bo's laptop",
+          backedUp: false,
+          createdAt: 1,
+          lastUsedAt: null,
+        },
+      ],
+    };
+  }
+
   // The registry, for the Sites screen, and one inherited page for Home's block.
   if (path === `${API}/sites`) return served.registry ?? REGISTRY;
   if (path === `${API}/inherited`) {

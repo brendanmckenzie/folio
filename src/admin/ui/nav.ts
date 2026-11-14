@@ -263,6 +263,7 @@ export function activeItem(groups: readonly NavGroup[], screen: Screen, type?: s
   // one item that answers "where does this belong". Checked before `edit`'s own
   // early return since neither screen name is `'edit'`.
   if (screen.name === "form" || screen.name === "responses") return { name: "forms" };
+  if (screen.name === "accessUser") return { name: "access" };
   if (screen.name !== "edit") return screen;
   const match = groups
     .flatMap((g) => g.items)

@@ -147,6 +147,37 @@ export async function revokeToken(db: FolioDb, id: string): Promise<boolean> {
   return (result.meta.changes ?? 0) > 0;
 }
 
+export type DeleteTokenResult = "deleted" | "active" | "missing";
+
+/**
+ * Removes a **revoked** token's row for good, so the list does not fill with dead
+ * credentials. Refuses an active one: delete is never a one-step way to kill a live
+ * credential, because revoke is the act that says so in the UI and the audit story.
+ *
+ * What is lost is the thing `revokeToken` keeps: the hash, so a leaked token could in
+ * principle be minted again. It cannot be in practice (a token is 256 random bits), and
+ * a revoked row is refused at the door either way, so nothing gets weaker.
+ *
+ * `site_grants.token_id` has no foreign key (`0011_sites.sql`), so its rows are
+ * deleted in the same batch rather than cascading; they are already dead (`readGrant`
+ * joins `revoked_at is null`) and would otherwise be orphans until their expiry sweep.
+ * Both statements carry the revoked condition themselves, so nothing here can remove a
+ * live token's row or its grants.
+ */
+export async function deleteRevokedToken(db: FolioDb, id: string): Promise<DeleteTokenResult> {
+  const [, result] = await db.batch([
+    db
+      .prepare(
+        "delete from site_grants where token_id = ? and exists (select 1 from api_tokens where id = ? and revoked_at is not null)",
+      )
+      .bind(id, id),
+    db.prepare("delete from api_tokens where id = ? and revoked_at is not null").bind(id),
+  ]);
+  if ((result?.meta.changes ?? 0) > 0) return "deleted";
+  const row = await db.prepare("select 1 as n from api_tokens where id = ?").bind(id).first();
+  return row ? "active" : "missing";
+}
+
 /**
  * The actor behind a presented bearer token, or null.
  *

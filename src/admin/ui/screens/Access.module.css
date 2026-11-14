@@ -100,10 +100,19 @@
   color: var(--fg-subtle);
 }
 
+/* One line, always: `ScopeChips` folds the overflow into a `+N` chip rather than
+   letting a row wrap to two lines and go uneven. */
 .scopeList {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: var(--space-1);
+}
+
+.more {
+  display: inline-flex;
+  border-radius: var(--radius-full);
+  cursor: help;
 }
 
 /* Two actions in one cell now that "Remove all passkeys" sits beside "Remove" —
@@ -111,7 +120,27 @@
    more than one control names its own wrapper. */
 .rowActions {
   display: flex;
+  align-items: center;
   gap: var(--space-1);
+}
+
+/* ----------------------------------------------------------------- user page --- */
+
+/* One person's page: a readable column rather than the full table width, since it is
+   forms and a short passkeys table, not a roster. */
+.userPage {
+  max-width: 760px;
+}
+
+.userForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.userFormActions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 /* ------------------------------------------------------------------ layout --- */

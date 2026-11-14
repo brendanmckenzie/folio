@@ -51,7 +51,9 @@ export type AuthEventKind =
   | "passkey_rejected"
   | "passkey_removed"
   | "passkeys_removed"
-  | "sessions_revoked";
+  | "sessions_revoked"
+  /** An admin changed the address an account signs in with: `detail` is `{ from, to }`. */
+  | "email_changed";
 
 export interface AuthEventInput {
   kind: AuthEventKind;

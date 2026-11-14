@@ -52,6 +52,7 @@ import { Assets } from "./screens/Assets";
 import { Content } from "./screens/Content";
 import { Documents } from "./screens/Documents";
 import { FormBuilder } from "./screens/FormBuilder";
+import { AccessUserPage } from "./screens/AccessUser";
 import { Forms } from "./screens/Forms";
 import { Model } from "./screens/Model";
 import { Redirects } from "./screens/Redirects";
@@ -169,6 +170,8 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * and it is what `formLabel` below relies on.
    */
   const [formTitle, setFormTitle] = useState<{ id: string; label: string } | null>(null);
+  /** The open Access user page's name, for its breadcrumb; matched by id like `formTitle`. */
+  const [userTitle, setUserTitle] = useState<{ id: string; label: string } | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -481,6 +484,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
       // navigation: leaving the builder for a different form simply stops
       // matching, and the crumb falls back to "Form" until the new one loads.
       formLabel: (id) => (formTitle?.id === id ? formTitle.label : undefined),
+      userLabel: (id) => (userTitle?.id === id ? userTitle.label : undefined),
       ...(open
         ? {
             chain: local
@@ -494,7 +498,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           }
         : {}),
     }),
-    [siteName, types, open, local, fetched.chain, formTitle],
+    [siteName, types, open, local, fetched.chain, formTitle, userTitle],
   );
   const trail = crumbs(route, crumbContext);
 
@@ -713,6 +717,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           setHistoryOpen,
           preview: previewFor(open, previewType, previewHost, boot.base, isMultiSite(me)),
           onFormLabel: (id, formLabel) => setFormTitle({ id, label: formLabel }),
+          onUserLabel: (id, label) => setUserTitle({ id, label }),
           registerReload,
         })}
       </Shell>
@@ -788,6 +793,8 @@ interface ScreenArgs {
    * builder's job is to call this once its fetch answers, not to hold the
    * breadcrumb itself. */
   onFormLabel: (id: string, label: string) => void;
+  /** The Access user page reports the editor's name once its fetch answers. */
+  onUserLabel: (id: string, label: string) => void;
   /**
    * How a list screen hands its own `reload` to the shell, so the space channel
    * can re-read the list when somebody else moves, publishes or deletes a page.
@@ -1065,9 +1072,26 @@ function screenFor(a: ScreenArgs) {
           query={route.query}
           onQuery={(next) => a.replace({ name: "access" }, { ...route.query, ...next })}
           onNotice={a.notify}
-          onRenamed={a.renamed}
+          onOpenUser={(id) => a.go({ name: "accessUser", id })}
         />
       );
+
+    case "accessUser": {
+      const userId = route.screen.id;
+      return (
+        <AccessUserPage
+          key={userId}
+          apiBase={boot.apiBase}
+          me={a.me}
+          id={userId}
+          loading={a.loading}
+          onNotice={a.notify}
+          onRenamed={a.renamed}
+          onLabel={(label) => a.onUserLabel(userId, label)}
+          onBack={() => a.go({ name: "access" })}
+        />
+      );
+    }
 
     case "model":
       return <Model apiBase={boot.apiBase} mount={boot.base} me={a.me} onNotice={a.notify} />;

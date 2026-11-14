@@ -258,6 +258,13 @@
       "rollback": "safe",
       "migrations": [],
       "headings": []
+    },
+    {
+      "version": "1.5.4",
+      "date": "2026-11-14",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
     }
   ]
 }

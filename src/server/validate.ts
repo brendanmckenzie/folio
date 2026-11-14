@@ -574,7 +574,7 @@ export function storyPathParam(raw: string | undefined): string {
  * circulation refuses addresses that genuinely exist, and the address is
  * *verified* by whether the sign-in link is ever clicked, not by this schema.
  */
-const EMAIL = v.pipe(
+export const EMAIL = v.pipe(
   v.string("must be a string"),
   v.trim(),
   v.toLowerCase(),
