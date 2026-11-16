@@ -3,7 +3,7 @@
 # Run EVERY end-to-end script, each against its own fresh server and database,
 # several at a time.
 #
-#   ./scripts/e2e-all.sh                        # all 26
+#   ./scripts/e2e-all.sh                        # all 27
 #   ./scripts/e2e-all.sh scripts/sync-test.mjs scripts/space-test.mjs   # a subset
 #   FOLIO_E2E_JOBS=2 ./scripts/e2e-all.sh       # two at a time (default: half the CPUs, 2 to 6)
 #
@@ -15,7 +15,7 @@
 # pool is `scripts/lib/e2e-sweep.mjs`, and what each script does is `e2e.sh`. Setup
 # that is the same for all of them (the library build, migrate and seed) runs once
 # and is copied, so the sweep is bounded by its slowest script and the CPU count
-# rather than by 26 times a 20 second setup.
+# rather than by 27 times a 20 second setup.
 #
 # Exits non-zero if any script did, and names each with its output and server-log
 # paths; a passing run removes its temp files, a failing one keeps them.
