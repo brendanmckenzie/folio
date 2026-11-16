@@ -12,6 +12,7 @@ import {
   updateAsset,
   uploadAsset,
 } from "../../src/server/assets";
+import { drainAssetPurges } from "../../src/server/cache-purge";
 import type { FolioDb } from "../../src/server/db";
 import type { AssetAccessDomain } from "../../src/server/gate";
 
@@ -149,6 +150,60 @@ describe("deleting a folder never opens a file", () => {
     expect(await eff("assets", own1)).toBe('"premium"');
     expect(await eff("asset_folders", pub.id)).toBe('"public"');
     expect(await queued()).toEqual([]);
+  });
+});
+
+describe("an access-only patch recomputes from the live folder", () => {
+  it("does not bind a folder id read before the batch, so a racing move is not undone", async () => {
+    const pub = await createFolder(env.DB, { name: "Pub" });
+    const gated = await createFolder(env.DB, { name: "Gated", access: "members" });
+    const f = await seedAsset(pub.id);
+    // A db that lets a move commit right after `updateAsset` has read the row (its
+    // `assetById`), which is the window between that read and the batch.
+    let moved = false;
+    const racing = new Proxy(env.DB, {
+      get(target, prop) {
+        if (prop !== "prepare") {
+          const v = (target as never)[prop] as unknown;
+          return typeof v === "function" ? (v as (...x: unknown[]) => unknown).bind(target) : v;
+        }
+        return (sql: string) => {
+          const stmt = target.prepare(sql);
+          if (moved || !/from assets where id = \?$/.test(sql.trim())) return stmt;
+          return new Proxy(stmt, {
+            get(t, p) {
+              if (p === "bind") {
+                return (...b: unknown[]) => {
+                  const bound = t.bind(...b);
+                  return new Proxy(bound, {
+                    get(bt, bp) {
+                      if (bp !== "first") return (bt as never)[bp];
+                      return async (...a: unknown[]) => {
+                        const out = await (bt.first as (...x: unknown[]) => Promise<unknown>)(...a);
+                        moved = true;
+                        await env.DB.prepare(
+                          "update assets set folder_id = ?, effective_access = ? where id = ?",
+                        )
+                          .bind(gated.id, '"members"', f)
+                          .run();
+                        return out;
+                      };
+                    },
+                  });
+                };
+              }
+              return (t as never)[p];
+            },
+          });
+        };
+      },
+    }) as unknown as FolioDb;
+
+    await updateAsset(racing, f, { access: null });
+    expect(moved).toBe(true);
+    // Filed in the gated folder by the racing move, and still gated: the recompute read
+    // the live `folder_id`, not the public folder `updateAsset` had read.
+    expect(await eff("assets", f)).toBe('"members"');
   });
 });
 
@@ -375,8 +430,20 @@ describe("the purge queue", () => {
     await updateAsset(env.DB, real.id, { access: "members" }, "default", gating());
     expect(await queued()).toContain(real.id);
     await deleteAsset(env.DB, media, real.id);
-    expect(await queued()).not.toContain(real.id);
     expect(await assetById(env.DB, real.id)).toBeNull();
+    // The edge copy is named by tag and outlives the row, so the owed purge survives the
+    // delete and a drain still issues it.
+    expect(await queued()).toContain(real.id);
+    const issued: string[][] = [];
+    await drainAssetPurges(
+      env.DB,
+      async () => async (options) => {
+        issued.push([...((options as { tags?: string[] }).tags ?? [])]);
+        return { success: true, errors: [] } as unknown as CachePurgeResult;
+      },
+      Date.now(),
+    );
+    expect(issued[0]).toContain(`asset:${real.id}`);
   });
 
   it("queues nothing and records nothing without a gating context", async () => {

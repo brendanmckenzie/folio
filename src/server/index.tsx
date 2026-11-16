@@ -1328,6 +1328,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       if (drafted) {
         admitted = within.chain.includes(scope);
       } else if (access === "granted") {
+        // The signature binds only the key, and the route admits it without asking the
+        // file's own brand, so a file this page's chain does not reach is never signed:
+        // the rendering brand's `allowsAsset` is not the question its owner would ask.
+        if (!within.chain.includes(scope)) return src;
         let verdict = assetVerdicts.get(file);
         if (!verdict) {
           verdict = (async () => {

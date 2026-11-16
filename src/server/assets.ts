@@ -878,9 +878,8 @@ export async function updateAsset(
       await update.run();
     } else {
       // A new folder or a new own value changes what the route reads. The recompute is a
-      // statement of its own, **after** the one that sets `folder_id`, binding the
-      // destination (`asset-access.md` decision 3).
-      const destination = patch.folderId !== undefined ? patch.folderId : row.folderId;
+      // statement of its own, **after** the one that sets `folder_id`, reading the live
+      // column rather than a folder id read before the batch (`asset-access.md` decision 3).
       await trackTransitions(
         db,
         gating,
@@ -892,7 +891,6 @@ export async function updateAsset(
               db,
               id,
               site,
-              destination,
               gating ? { public: gating.domain.public, now: Date.now() } : null,
             ),
           ]),
@@ -941,8 +939,9 @@ export async function deleteAsset(
   await db.batch([
     db.prepare("delete from assets where id = ? and site_id = ?").bind(id, site),
     ...clearInboundRefStatements(db, [row.key]),
-    // No foreign key (`0019`): the queued purge of a deleted file has nothing left to purge.
-    db.prepare("delete from asset_purges where asset_id = ?").bind(id),
+    // `asset_purges` is deliberately **not** touched: the owed purge names an edge copy
+    // by tag (`asset:<id>`), which outlives the row and the object, so a file gated and
+    // then deleted still has its public copy to purge. The drain retires the row.
   ]);
   try {
     await bucket.delete(row.key);

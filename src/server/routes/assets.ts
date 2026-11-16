@@ -447,6 +447,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post("/assets/tags", requireAccess<Env>(rt, ASSETS), async (c) => {
     const body = await parseBody(c.req, AssetTagBody);
     const { tag, created } = await ensureTag(c.var.bindings().db, body.name, scopeOf(c));
+    await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
     return c.json(tag, created ? 201 : 200);
   });
 
@@ -462,6 +463,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, AssetTagBody);
     const row = await renameTag(c.var.bindings().db, id, body.name, scopeOf(c));
     if (!row) throw new FolioError("not_found", "Unknown tag");
+    await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
     return c.json(row);
   });
 
@@ -475,6 +477,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = idParam("id", c.req.param("id"));
     const report = await deleteTag(c.var.bindings().db, id, scopeOf(c));
     if (!report) throw new FolioError("not_found", "Unknown tag");
+    await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
     return c.json({ deleted: true, ...report });
   });
 
@@ -854,6 +857,8 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         },
         row,
       );
+      // A write like any other: it retries a purge an earlier write left owed.
+      await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
       return c.json({
         asset: (await presentAssetRows(db, await withTags(db, [outcome.row]), assetDomainOf(c)))[0],
         skipped: outcome.skipped,

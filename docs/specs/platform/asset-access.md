@@ -732,7 +732,7 @@ page is a stale page and for a newly gated file is a public copy for a year. So:
   minutes behind could have let in. D1 publishes no bound on replica lag; ten minutes is
   this spec's bound, and lag beyond it is the residual (Edge cases).
 - **Visible when it is behind.** Every access-changing route answers `purge: { pending }`,
-  the scope's rows with `purged_at` null, and the Assets screen shows "N files may still be
+  the scope's rows still owed (`purged_at` null, or stamped but not yet after `settle_at`), and the Assets screen shows "N files may still be
   served from the edge cache; Folio is retrying" from `GET {base}/api/assets/purges`
   (`{ pending, oldest }`) while that count is non-zero. The `assetAccessChanged` hook payload
   carries the issued `purge` and `pending`.
@@ -906,8 +906,8 @@ alter table asset_folders add column effective_access text;
 
 -- Edge purges owed for files that went from public to gated (decision 10). A row is
 -- written in the same batch as the transition and retired only by a purge that
--- succeeded after settle_at. No foreign key, following 0010: deleteAsset deletes
--- the row in its own batch.
+-- succeeded after settle_at. No foreign key, following 0010, and deleteAsset leaves
+-- the row: the edge copy is named by tag and outlives the file.
 create table asset_purges (
   asset_id   text primary key,
   site_id    text not null,
@@ -1156,8 +1156,8 @@ machinery and wires no route; 6 wires every route, purge calls included.
      `folderId?` (checked against the scope like `updateAsset`'s) and inserts both columns;
      `updateAsset` takes `patch.access` and appends `assetRecomputeStatement` after the
      `folder_id` update; `assetFilterSql` gains `gated` (`effective_access is not null and
-     effective_access <> ?`, binding the encoded public value); `deleteAsset` deletes the
-     file's `asset_purges` row in its batch.
+     effective_access <> ?`, binding the encoded public value); `deleteAsset` leaves the
+     file's `asset_purges` row, which the drain retires (the edge copy outlives the row).
    - `asset-folders.ts`: `createFolder`, `updateFolder` (access, rename, move) append
      `folderRecomputeStatements`; `deleteFolder` adds decision 4's two materialising
      statements ahead of the re-parent.

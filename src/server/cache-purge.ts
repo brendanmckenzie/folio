@@ -491,7 +491,14 @@ export async function drainAssetPurges(
   }
 }
 
-/** The scope's owed purges: rows never yet purged, and the oldest one's `queued_at`. */
+/**
+ * The scope's owed purges, and the oldest one's `queued_at`. **A row is owed until the
+ * purge that retires it has succeeded after `settle_at`**, which is when the drain
+ * deletes it: so a row purged once inside its window (`purged_at` set, `settle_at`
+ * still ahead of it) is still counted. Counting only `purged_at is null` reported a
+ * clean edge while the post-settle purge, the one that clears a lagging replica's
+ * copies, had not yet run, and a host with no cron would never run it.
+ */
 export async function pendingAssetPurges(
   db: FolioDb,
   site: string | null,
@@ -499,7 +506,7 @@ export async function pendingAssetPurges(
   const row = await db
     .prepare(
       `select count(*) as pending, min(queued_at) as oldest from asset_purges
-        where purged_at is null ${site === null ? "" : "and site_id = ?"}`,
+        where (purged_at is null or purged_at < settle_at) ${site === null ? "" : "and site_id = ?"}`,
     )
     .bind(...(site === null ? [] : [site]))
     .first<{ pending: number; oldest: number | null }>();

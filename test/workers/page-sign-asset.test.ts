@@ -72,15 +72,15 @@ const folio = createFolio<Cloudflare.Env>({
 });
 
 let n = 0;
-async function file(effective: string | null): Promise<Json> {
+async function file(effective: string | null, site = "default"): Promise<Json> {
   n += 1;
   const id = `ast_${(0xc00000 + n).toString(16).padStart(12, "0")}`;
   const key = `${id}-f.pdf`;
   await env.DB.prepare(
     `insert into assets (id, key, filename, content_type, size, created_at, site_id, effective_access)
-     values (?, ?, 'f.pdf', 'application/pdf', 1, 1, 'default', ?)`,
+     values (?, ?, 'f.pdf', 'application/pdf', 1, 1, ?, ?)`,
   )
-    .bind(id, key, effective)
+    .bind(id, key, site, effective)
     .run();
   return { key, filename: "f.pdf", contentType: "application/pdf", size: 1, alt: "" } as Json;
 }
@@ -200,5 +200,55 @@ describe("page.signAsset", () => {
     const page = (await open("ps-members", MEMBER).page("ps-members"))!;
     expect(isSigned(await signedFor(page, free))).toBe(false);
     expect(isSigned(await page.signAsset({ src: "https://cdn.example/x.pdf" }))).toBe(false);
+  });
+});
+
+/**
+ * **A signature binds only the key, and the route admits a valid one without asking the
+ * file's own brand**, so `signAsset` must not sign a gated file the page's chain does not
+ * reach: the rendering brand's `allowsAsset` is not the question the file's owner would ask.
+ */
+describe("page.signAsset across scopes", () => {
+  const sited = createFolio<Cloudflare.Env>({
+    blocks: [root],
+    types,
+    bindings,
+    basePath: "/folio",
+    assets: { admin: "/a.js", preview: "/p.js" },
+    auth: "open",
+    route: (p) => (p ? `/${p}` : "/"),
+    gate,
+    assetSigning: { keys: () => [KEY] },
+    sites: { admin: "https://cms.example" },
+  });
+
+  it("signs a file of the page's own site and refuses another site's", async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
+           ('alpha', 'site', 'Alpha', null, 'live', null, 0, 0),
+           ('bravo', 'site', 'Bravo', null, 'live', null, 0, 0)`,
+      ),
+      env.DB.prepare(
+        "insert into site_hosts (host, site_id) values ('alpha.example', 'alpha'), ('bravo.example', 'bravo')",
+      ),
+    ]);
+    const own = await file('"members"', "alpha");
+    const foreign = await file('"members"', "bravo");
+    await env.DB.prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title, created_at, updated_at,
+                            site_id, published_doc, published_at)
+       values ('sty_ps_alpha', 'psPage', null, 'ps-alpha', 'ps-alpha', 'a0', 'T', 1, 1, 'alpha', ?, 1)`,
+    )
+      .bind(JSON.stringify(doc({ access: "members", hero: own, extras: [foreign] })))
+      .run();
+    const reader = sited.reader(
+      env,
+      new Request("https://alpha.example/ps-alpha", { headers: { cookie: MEMBER } }),
+    );
+    const page = (await reader.page("ps-alpha"))!;
+    expect(page.access).toBe("granted");
+    expect(isSigned(await signedFor(page, own))).toBe(true);
+    expect(isSigned(await signedFor(page, foreign))).toBe(false);
   });
 });

@@ -359,14 +359,14 @@ async function one(
       // used on a published page cannot change a byte of that page.
       //
       // The one thing a move does change is what the route reads (`asset-access.md`
-      // decision 4): the destination is bound explicitly in the recompute that follows,
-      // never read off the row the `update` is still rewriting.
+      // decision 4): the recompute that follows reads the row's live `folder_id`, which
+      // the `update` before it has already set, never an id read before the batch.
       await trackTransitions(db, gating, only, () =>
         db.batch([
           db
             .prepare("update assets set folder_id = ? where id = ? and site_id = ?")
             .bind(opts.folderId ?? null, row.id, scope),
-          ...assetRecomputeStatements(db, row.id, scope, opts.folderId ?? null, gate),
+          ...assetRecomputeStatements(db, row.id, scope, gate),
         ]),
       );
       return;
@@ -379,7 +379,7 @@ async function one(
           db
             .prepare("update assets set access = ? where id = ? and site_id = ?")
             .bind(access, row.id, scope),
-          ...assetRecomputeStatements(db, row.id, scope, row.folderId, gate),
+          ...assetRecomputeStatements(db, row.id, scope, gate),
         ]),
       );
       return;

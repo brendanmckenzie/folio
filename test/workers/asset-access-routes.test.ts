@@ -222,7 +222,8 @@ describe("PATCH /api/assets/:id with access", () => {
       id: f.id,
       access: "members",
       effectiveAccess: "members",
-      purge: { pending: 0 },
+      // Purged inside its settle window: still owed until the post-settle purge.
+      purge: { pending: 1 },
     });
     expect(await stored(f.id)).toEqual({ access: '"members"', effective: '"members"' });
     expect(purges.calls[0]).toContain(`asset:${f.id}`);
@@ -312,6 +313,72 @@ describe("PATCH /api/assets/:id with access", () => {
     expect(Object.keys(row.body)).not.toContain("access");
     expect(Object.keys(row.body)).not.toContain("effectiveAccess");
     expect(Object.keys(row.body)).not.toContain("purge");
+  });
+});
+
+describe("moving a public file under a gated folder queues its purge", () => {
+  const gatedFolder = async () =>
+    (
+      await json<{ id: string }>(gated, "/api/assets/folders", {
+        method: "POST",
+        json: { name: "Member downloads", access: "members" },
+      })
+    ).body.id;
+
+  it("through PATCH /assets/:id { folderId }", async () => {
+    const folder = await gatedFolder();
+    const f = await seed();
+    const { body } = await json(gated, `/api/assets/${f.id}`, {
+      method: "PATCH",
+      json: { folderId: folder },
+    });
+    expect(body).toMatchObject({ effectiveAccess: "members" });
+    expect((await queued()).map((r) => r.asset_id)).toEqual([f.id]);
+    expect(purges.calls[0]).toContain(`asset:${f.id}`);
+    expect(hookEvents[0]?.assets[0]).toMatchObject({ id: f.id, from: null, to: "members" });
+  });
+
+  it("through PATCH /assets/folders/:id { parentId }", async () => {
+    const folder = await gatedFolder();
+    const child = await json<{ id: string }>(gated, "/api/assets/folders", {
+      method: "POST",
+      json: { name: "Public stuff" },
+    });
+    const f = await seed({ folder: child.body.id });
+    const { status } = await json(gated, `/api/assets/folders/${child.body.id}`, {
+      method: "PATCH",
+      json: { parentId: folder },
+    });
+    expect(status).toBe(200);
+    expect((await stored(f.id))?.effective).toBe('"members"');
+    expect((await queued()).map((r) => r.asset_id)).toEqual([f.id]);
+    expect(purges.calls[0]).toContain(`asset:${f.id}`);
+  });
+
+  it("through POST /assets/bulk/move", async () => {
+    const folder = await gatedFolder();
+    const a = await seed();
+    const b = await seed();
+    const { body } = await json(gated, "/api/assets/bulk/move", {
+      method: "POST",
+      json: { selection: { ids: [a.id, b.id] }, folderId: folder },
+    });
+    expect(body).toMatchObject({ done: 2 });
+    expect((await queued()).map((r) => r.asset_id)).toEqual([a.id, b.id].sort());
+    expect(purges.calls[0]).toEqual(expect.arrayContaining([`asset:${a.id}`, `asset:${b.id}`]));
+  });
+
+  it("and a later, unrelated asset write retries a purge that failed", async () => {
+    purges.result = "refused";
+    const f = await seed();
+    await json(gated, `/api/assets/${f.id}`, { method: "PATCH", json: { access: "members" } });
+    expect(await queued()).toEqual([{ asset_id: f.id, purged_at: null }]);
+    purges.result = "ok";
+    purges.calls.length = 0;
+    const other = await seed();
+    await json(gated, `/api/assets/${other.id}`, { method: "PATCH", json: { alt: "unrelated" } });
+    expect(purges.calls[0]).toContain(`asset:${f.id}`);
+    expect((await queued())[0]?.purged_at).not.toBeNull();
   });
 });
 
@@ -523,7 +590,7 @@ describe("POST /api/assets/bulk/access", () => {
       json: { selection: { ids: [a.id, b.id] }, access: "members" },
     });
     expect(done.body).toMatchObject({ action: "access", done: 2, continueFrom: null });
-    expect(done.body.purge).toEqual({ pending: 0 });
+    expect(done.body.purge).toEqual({ pending: 2 });
     expect((await stored(b.id))?.effective).toBe('"members"');
     expect(purges.calls).toHaveLength(1);
     expect(purges.calls[0]).toEqual(expect.arrayContaining([`asset:${a.id}`, `asset:${b.id}`]));
@@ -588,7 +655,7 @@ describe("{base}/api/v1/assets", () => {
       alt: "Hello",
       access: "members",
       effectiveAccess: "members",
-      purge: { pending: 0 },
+      purge: { pending: 1 },
     });
     const clear = await json(gated, `/api/v1/assets/${f.id}`, {
       method: "PATCH",

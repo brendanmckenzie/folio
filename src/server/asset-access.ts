@@ -357,16 +357,19 @@ export function folderRecomputeStatements(
 
 /**
  * One asset's effective value after its own value or folder changed (decision 3's
- * third bullet): a statement **after** the one that set `folder_id`, binding the
- * destination folder id explicitly. SQLite evaluates every `set` expression
- * against the row as it was before the statement, so folding this into
- * `updateAsset`'s single `update` would read the folder the file is leaving.
+ * third bullet): a statement **after** the one that set `folder_id`, reading the
+ * folder from the row's **live** `folder_id`. Never from an id the caller read
+ * earlier: a move that commits between that read and this batch would otherwise
+ * be recomputed against the folder the file has already left, and a file filed in a
+ * gated folder would serve public. (SQLite evaluates every `set` expression against
+ * the row as it was before the statement, so folding this into `updateAsset`'s
+ * single `update` would read the folder the file is leaving; as a separate statement
+ * after it, the live column is the destination.)
  */
 export function assetRecomputeStatements(
   db: FolioDb,
   id: string,
   site: string,
-  folderId: string | null,
   gate: { public: string | number | boolean; now: number } | null = null,
 ) {
   return [
@@ -381,10 +384,10 @@ export function assetRecomputeStatements(
     db
       .prepare(
         `update assets set effective_access = coalesce(access, (
-           select effective_access from asset_folders where id = ?))
+           select effective_access from asset_folders where id = assets.folder_id))
          where id = ? and site_id = ?`,
       )
-      .bind(folderId, id, site),
+      .bind(id, site),
   ];
 }
 

@@ -147,7 +147,9 @@ describe("drainAssetPurges", () => {
     await queue("ast_a");
     await drainAssetPurges(env.DB, f.capability, NOW + MIN, logger);
     expect(await rows()).toMatchObject([{ asset_id: "ast_a", purged_at: NOW + MIN }]);
-    expect((await pendingAssetPurges(env.DB, "default")).pending).toBe(0);
+    // Purged once, but not yet after `settle_at`: still owed, and reported as such, so a
+    // host with no cron is told the post-settle purge has not happened.
+    expect((await pendingAssetPurges(env.DB, "default")).pending).toBe(1);
 
     // Inside its window a second drain spends nothing on it...
     await drainAssetPurges(env.DB, f.capability, NOW + 2 * MIN, logger);
@@ -161,6 +163,7 @@ describe("drainAssetPurges", () => {
     await drainAssetPurges(env.DB, f.capability, NOW + 11 * MIN, logger);
     expect(f.calls).toHaveLength(3);
     expect(await rows()).toEqual([]);
+    expect((await pendingAssetPurges(env.DB, "default")).pending).toBe(0);
   });
 
   it("a failure after settle_at does not retire a row", async () => {
@@ -248,14 +251,14 @@ describe("afterAccessChange", () => {
       now: NOW + 1000,
       sleep: async (ms) => void slept.push(ms),
     });
-    expect(out.pending).toBe(0);
+    expect(out.pending).toBe(1);
     expect(out.purge).toEqual({ tags: ["asset:ast_a"] });
     await Promise.all(later);
     expect(slept).toEqual([SITE_PURGE_DELAY_MS]);
     // the drain, the repeat, and the best-effort lock tags
     expect(f.calls.filter((c) => c.includes("asset:ast_a")).length).toBeGreaterThanOrEqual(2);
     expect(hookCalls).toHaveLength(1);
-    expect(hookCalls[0]).toMatchObject({ pending: 0, truncated: false, actor: "usr_x" });
+    expect(hookCalls[0]).toMatchObject({ pending: 1, truncated: false, actor: "usr_x" });
     expect(hookCalls[0]?.purge).toEqual({ tags: ["asset:ast_a"] });
   });
 
@@ -338,7 +341,7 @@ describe("runSchedules' assetPurges pass", () => {
     const folio = folioWith(f.capability, true);
     await queue("ast_a");
     const first = await folio.runSchedules(env, { now: NOW + MIN });
-    expect(first.assetPurges).toEqual({ issued: { tags: ["asset:ast_a"] }, pending: 0 });
+    expect(first.assetPurges).toEqual({ issued: { tags: ["asset:ast_a"] }, pending: 1 });
     expect(first.assetPurgesFailed).toBeUndefined();
     expect(await rows()).toHaveLength(1);
 
