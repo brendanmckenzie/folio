@@ -1,14 +1,25 @@
 import type { ReactNode } from "react";
 import { useEffect, useId, useRef, useState } from "react";
+import type { Json } from "../../../core/doc";
 import type { StoryMeta } from "../../../core/story";
 import { Badge } from "../Badge";
 import { Button } from "../Button";
+import { Dialog } from "../Dialog";
 import { Field, Input, Select, Textarea } from "../Field";
 import { href } from "../route";
+import { LOCK_ICON } from "../icons";
+import { AssetAccessControl } from "./AssetAccessControl";
 import {
+  accessLabel,
+  accessSummary,
   addedAgo,
   addedOn,
+  type AssetAccessConfig,
+  assetInheritLabel,
   type AssetRow,
+  lockLabel,
+  moveImpact,
+  moveImpactText,
   dimensionsOf,
   folderNameFor,
   humanSize,
@@ -74,6 +85,12 @@ export interface AssetDetailProps {
    * closed.
    */
   mayWrite: boolean;
+  /** The manifest's `assetAccess`, where the deployment gates files: the access control,
+   * the access fact and the move confirmation's count. Absent draws none of them. */
+  assetAccess?: AssetAccessConfig;
+  /** The file's access, or its effective one through a move, changed: the screen
+   * re-reads the pending-purge count. */
+  onAccessChanged?: () => void;
 }
 
 /**
@@ -105,6 +122,8 @@ export function AssetDetail({
   onChanged,
   onNotice,
   mayWrite,
+  assetAccess,
+  onAccessChanged,
 }: AssetDetailProps) {
   const titleId = useId();
   const panel = useRef<HTMLElement>(null);
@@ -156,6 +175,14 @@ export function AssetDetail({
         <Fact label="Added">
           <span title={addedOn(row.createdAt)}>{addedAgo(row.createdAt)}</span>
         </Fact>
+        {assetAccess && lockLabel(row, assetAccess) ? (
+          <Fact label="Access">
+            <span className={css.lockFact}>
+              {LOCK_ICON}
+              {accessLabel(row.effectiveAccess, assetAccess)}
+            </span>
+          </Fact>
+        ) : null}
         <Fact label="Key">
           {/* The R2 key, because it is what a *document* stores and therefore what
               somebody debugging a broken reference is looking for. Monospace: a key
@@ -174,11 +201,28 @@ export function AssetDetail({
             onNotice={onNotice}
           />
           <DescribeAction apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
-          <FolderEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+          <FolderEditor
+            apiBase={apiBase}
+            row={row}
+            onChanged={onChanged}
+            onNotice={onNotice}
+            {...(assetAccess ? { assetAccess } : {})}
+            {...(onAccessChanged ? { onAccessChanged } : {})}
+          />
+          {assetAccess ? (
+            <AccessEditor
+              apiBase={apiBase}
+              row={row}
+              config={assetAccess}
+              onChanged={onChanged}
+              onNotice={onNotice}
+              {...(onAccessChanged ? { onAccessChanged } : {})}
+            />
+          ) : null}
           <TagsEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
         </>
       ) : (
-        <ReadOnlyMeta apiBase={apiBase} row={row} />
+        <ReadOnlyMeta apiBase={apiBase} row={row} {...(assetAccess ? { assetAccess } : {})} />
       )}
 
       {/*
@@ -257,7 +301,15 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  * document actually renders when there is no human one. Rendering only `alt` here
  * would say "no alt text" about a file that has some.
  */
-function ReadOnlyMeta({ apiBase, row }: { apiBase: string; row: AssetRow }) {
+function ReadOnlyMeta({
+  apiBase,
+  row,
+  assetAccess,
+}: {
+  apiBase: string;
+  row: AssetRow;
+  assetAccess?: AssetAccessConfig;
+}) {
   // The same hook `FolderEditor` uses, for the same one fact: `row.folderId` is an
   // id and the panel wants the name. `row.tags` needs no fetch — the list route
   // carries them, which is why `AssetRow` widens the server's row with them.
@@ -267,6 +319,9 @@ function ReadOnlyMeta({ apiBase, row }: { apiBase: string; row: AssetRow }) {
       <Fact label="Alt text">{row.alt || row.altAuto || EMPTY}</Fact>
       <Fact label="Description">{row.description || row.descriptionAuto || EMPTY}</Fact>
       <Fact label="Folder">{folderNameFor(row.folderId, folders)}</Fact>
+      {assetAccess ? (
+        <Fact label="Access">{accessSummary(row, folders.folders, assetAccess)}</Fact>
+      ) : null}
       <Fact label="Tags">
         {row.tags.length === 0 ? EMPTY : row.tags.map((tag) => tag.name).join(", ")}
       </Fact>
@@ -612,14 +667,29 @@ function FolderEditor({
   row,
   onChanged,
   onNotice,
+  assetAccess,
+  onAccessChanged,
 }: {
   apiBase: string;
   row: AssetRow;
   onChanged: (row: AssetRow) => void;
   onNotice: (message: string) => void;
+  assetAccess?: AssetAccessConfig;
+  onAccessChanged?: () => void;
 }) {
   const folders = useFolders(apiBase);
   const [saving, setSaving] = useState(false);
+  /**
+   * A move that would change the file between gated and public, held until the editor
+   * agrees (`asset-access.md` decision 4). Only ever set on a deployment that gates
+   * files, and only when the count is non-zero: any other move commits on `change` as it
+   * always did.
+   */
+  const [confirming, setConfirming] = useState<{
+    folderId: string | null;
+    text: string;
+    name: string;
+  } | null>(null);
 
   const commit = async (folderId: string | null) => {
     if (folderId === row.folderId) return;
@@ -632,6 +702,121 @@ function FolderEditor({
       });
       if (!res.ok) throw new Error(await messageOf(res));
       onChanged((await res.json()) as AssetRow);
+      if (assetAccess) onAccessChanged?.();
+    } catch (e) {
+      onNotice((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const choose = (folderId: string | null) => {
+    if (folderId === row.folderId) return;
+    const destination = folderId ? folders.folders.find((f) => f.id === folderId) : undefined;
+    const text = assetAccess
+      ? moveImpactText(
+          moveImpact(
+            [row],
+            { all: false, ids: new Set([row.id]) },
+            destination?.effectiveAccess,
+            assetAccess,
+          ),
+        )
+      : null;
+    if (text) setConfirming({ folderId, text, name: destination?.name ?? "Unfiled" });
+    else void commit(folderId);
+  };
+
+  return (
+    <>
+      <Field
+        label="Folder"
+        help="Metadata only (decision 1) — filing this never changes its URL or moves the object."
+      >
+        {(id) => (
+          <Select
+            id={id}
+            value={row.folderId ?? ""}
+            disabled={saving || folders.loading}
+            onChange={(e) => choose(e.target.value || null)}
+          >
+            <option value="">Unfiled</option>
+            {folders.folders.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {indentedFolderName(folder)}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+      {confirming ? (
+        <Dialog
+          title={`Move ${row.filename} to ${confirming.name}?`}
+          description="Filing a file takes the access of its new folder, unless it has a value of its own."
+          onClose={() => setConfirming(null)}
+          actions={
+            <>
+              <Button onClick={() => setConfirming(null)}>Cancel</Button>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  const target = confirming.folderId;
+                  setConfirming(null);
+                  void commit(target);
+                }}
+              >
+                Move
+              </Button>
+            </>
+          }
+        >
+          <p className={css.warn} role="status">
+            {confirming.text}
+          </p>
+        </Dialog>
+      ) : null}
+    </>
+  );
+}
+
+/* --------------------------------------------------------------------- access --- */
+
+/**
+ * Who may open this file (`asset-access.md` decision 3): its own value, or "Inherit"
+ * with the label naming what that resolves to and where it comes from. Committing on
+ * `change`, like the folder, because a `<select>` has no keystrokes to debounce. The
+ * line under it says what the file is **now** and why, which is what the editor opened
+ * the panel to find out.
+ */
+function AccessEditor({
+  apiBase,
+  row,
+  config,
+  onChanged,
+  onNotice,
+  onAccessChanged,
+}: {
+  apiBase: string;
+  row: AssetRow;
+  config: AssetAccessConfig;
+  onChanged: (row: AssetRow) => void;
+  onNotice: (message: string) => void;
+  onAccessChanged?: () => void;
+}) {
+  const folders = useFolders(apiBase);
+  const [saving, setSaving] = useState(false);
+
+  const commit = async (access: Json | null) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ access }),
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      onChanged((await res.json()) as AssetRow);
+      onAccessChanged?.();
     } catch (e) {
       onNotice((e as Error).message);
     } finally {
@@ -640,24 +825,19 @@ function FolderEditor({
   };
 
   return (
-    <Field
-      label="Folder"
-      help="Metadata only (decision 1) — filing this never changes its URL or moves the object."
-    >
+    <Field label="Access" note={saving ? "Saving…" : undefined}>
       {(id) => (
-        <Select
-          id={id}
-          value={row.folderId ?? ""}
-          disabled={saving || folders.loading}
-          onChange={(e) => void commit(e.target.value || null)}
-        >
-          <option value="">Unfiled</option>
-          {folders.folders.map((folder) => (
-            <option key={folder.id} value={folder.id}>
-              {indentedFolderName(folder)}
-            </option>
-          ))}
-        </Select>
+        <>
+          <AssetAccessControl
+            id={id}
+            config={config}
+            value={row.access}
+            inherit={assetInheritLabel(row, folders.folders, config)}
+            disabled={saving || folders.loading}
+            onChange={(next) => void commit(next)}
+          />
+          <p className={css.accessLine}>{accessSummary(row, folders.folders, config)}</p>
+        </>
       )}
     </Field>
   );

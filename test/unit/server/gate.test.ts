@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { asset, blocks, boolean, number, richtext, select, text } from "../../../src/core/fields";
 import type { DocumentType, SchemaIndex } from "../../../src/core/schema";
-import { validateGate } from "../../../src/server/gate";
+import { assetAccessManifest, validateGate } from "../../../src/server/gate";
 import type { FolioConfig, FolioGate } from "../../../src/server/types";
 
 /**
@@ -351,5 +351,36 @@ describe("validateGate: asset gating", () => {
     expect(() =>
       validateGate(gate({ allowsAsset, assetDenied: () => null }), TYPES, schema),
     ).not.toThrow();
+  });
+});
+
+describe("assetAccessManifest", () => {
+  const allowsAsset = () => true;
+
+  it("is empty without allowsAsset, so a deployment that does not gate files has no key", () => {
+    expect(assetAccessManifest(validateGate(gate(), TYPES, schema))).toEqual({});
+    expect(assetAccessManifest(null)).toEqual({});
+  });
+
+  it("carries the field, the public value and the select's options with allowsAsset", () => {
+    expect(assetAccessManifest(validateGate(gate({ allowsAsset }), TYPES, schema))).toEqual({
+      assetAccess: {
+        field: "access",
+        public: "public",
+        options: [
+          { value: "public", label: "Everyone" },
+          { value: "members", label: "Members" },
+        ],
+      },
+    });
+  });
+
+  it("omits options for a primitive gate", () => {
+    const resolved = validateGate(
+      gate({ allowsAsset, public: 0 }),
+      TYPES,
+      schemaWith(number({ indexed: true })),
+    );
+    expect(assetAccessManifest(resolved)).toEqual({ assetAccess: { field: "access", public: 0 } });
   });
 });

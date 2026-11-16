@@ -913,7 +913,12 @@ function screenFor(a: ScreenArgs) {
            * assertion in `inspector.test.ts` fails if a key is ever renamed, so this
            * spread cannot drift into a runtime `undefined`.
            */
-          inspector={(slot) => <Inspector {...slot} />}
+          inspector={(slot) => (
+            <Inspector
+              {...slot}
+              {...(a.manifest?.assetAccess ? { assetAccess: a.manifest.assetAccess } : {})}
+            />
+          )}
           history={(slot) =>
             // No document yet means no history to consult, and `HistoryPanel` needs a
             // `Doc` to phrase an activity entry against. The slide-over cannot be open
@@ -994,6 +999,7 @@ function screenFor(a: ScreenArgs) {
           apiBase={boot.apiBase}
           mount={boot.base}
           me={a.me}
+          {...(a.manifest?.assetAccess ? { assetAccess: a.manifest.assetAccess } : {})}
           query={route.query}
           onQuery={(next) => a.replace({ name: "assets" }, { ...route.query, ...next })}
           onNotice={a.notify}

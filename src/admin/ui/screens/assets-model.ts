@@ -17,7 +17,9 @@
  * the last of which is a *field's* concern rather than this screen's, and says so).
  */
 import type { AssetFilter, AssetFolder, AssetSort, AssetTag } from "../../../core/assets";
-import type { AssetValue } from "../../../core/values";
+import type { Doc, Json } from "../../../core/doc";
+import type { ManifestAssetAccess, SchemaIndex } from "../../../core/schema";
+import { type AssetValue, isImageAsset } from "../../../core/values";
 import type { AssetRow as ServerAssetRow } from "../../../server/assets";
 
 /**
@@ -30,6 +32,13 @@ import type { AssetRow as ServerAssetRow } from "../../../server/assets";
  */
 export interface AssetRow extends ServerAssetRow {
   tags: AssetTag[];
+  /**
+   * Own access value (null inherits) and the one the route reads (null is public).
+   * Present **only** where the scope's brand gates files (`asset-access.md` decision 13);
+   * a row from a deployment that does not has neither key.
+   */
+  access?: Json | null;
+  effectiveAccess?: Json | null;
 }
 
 /* ------------------------------------------------------------------- kinds --- */
@@ -154,6 +163,13 @@ export interface AssetsUrl {
    */
   failed: boolean;
   /**
+   * Files whose effective access is a gated value (`asset-access.md` decision 11). Only
+   * drawn where the manifest carries `assetAccess`; exclusive with nothing, like the
+   * backlog filters, because "gated" is a question asked inside a folder, a tag or a
+   * search.
+   */
+  gated: boolean;
+  /**
    * The asset whose detail panel is open.
    *
    * In the URL because **an asset is a thing somebody sends a colleague**: "have a
@@ -192,6 +208,7 @@ export function parseAssetsUrl(
     untagged: tags.length === 0 && query.untagged === "1",
     undescribed: query.undescribed === "1",
     failed: query.failed === "1",
+    gated: query.gated === "1",
     asset: query.asset || undefined,
   };
 }
@@ -226,6 +243,7 @@ export function assetsQuery(url: AssetsUrl): Record<string, string | undefined> 
     untagged: url.untagged ? "1" : undefined,
     undescribed: url.undescribed ? "1" : undefined,
     failed: url.failed ? "1" : undefined,
+    gated: url.gated ? "1" : undefined,
     asset: url.asset,
   };
 }
@@ -291,7 +309,7 @@ export function withFilter(
   patch: Partial<
     Pick<
       AssetsUrl,
-      "kind" | "q" | "folder" | "unfiled" | "tags" | "untagged" | "undescribed" | "failed"
+      "kind" | "q" | "folder" | "unfiled" | "tags" | "untagged" | "undescribed" | "failed" | "gated"
     >
   >,
 ): AssetsUrl {
@@ -331,6 +349,7 @@ export const NO_FILTERS = {
   untagged: false,
   undescribed: false,
   failed: false,
+  gated: false,
 } as const satisfies Parameters<typeof withFilter>[1];
 
 /**
@@ -346,7 +365,8 @@ export function isNarrowed(url: AssetsUrl): boolean {
     url.tags.length > 0 ||
     url.untagged ||
     url.undescribed ||
-    url.failed
+    url.failed ||
+    url.gated
   );
 }
 
@@ -382,6 +402,7 @@ export function assetsParams(
   if (url.untagged) params.set("untagged", "1");
   if (url.undescribed) params.set("undescribed", "1");
   if (url.failed) params.set("failed", "1");
+  if (url.gated) params.set("gated", "1");
   if (opts.count) params.set("count", "1");
   if (opts.cursor) params.set("cursor", opts.cursor);
   // A picker reads everything the scope may use — its own library and the chain's —
@@ -1041,6 +1062,7 @@ export function capturedFilter(url: AssetsUrl): AssetFilter {
     ...(url.untagged ? { untagged: true } : {}),
     ...(url.undescribed ? { undescribed: true } : {}),
     ...(url.failed ? { failed: true } : {}),
+    ...(url.gated ? { gated: true } : {}),
   };
 }
 
@@ -1112,5 +1134,356 @@ export function backlogSelection(
     filter: { ...ticked.filter, undescribed: true } satisfies AssetFilter,
     expected,
     ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
+  };
+}
+
+/* ------------------------------------------------------------------ access --- */
+
+/**
+ * Visitor access to files (`../../../../docs/specs/platform/asset-access.md`), the
+ * half of it the admin can decide without a server: what a value is called, whether a
+ * row is gated, what "Inherit" means in this folder, and what a move will change.
+ *
+ * **Every function takes the manifest's `assetAccess` and answers nothing without it.**
+ * A deployment whose brand has no `allowsAsset` has no such key, and then no row is
+ * gated, no label exists and no control is offered, which is how that deployment keeps
+ * drawing exactly what it drew before this feature.
+ */
+export type AssetAccessConfig = ManifestAssetAccess;
+
+/**
+ * Gated is "a value, and not the one that means ungated". Strict equality, the
+ * comparison the server makes (`isUngated`): `0` and `""` are values like any other,
+ * and `null` is the one effective value that means public.
+ */
+export function isGatedValue(
+  value: Json | null | undefined,
+  config: AssetAccessConfig | undefined,
+): boolean {
+  if (!config || value === null || value === undefined) return false;
+  return value !== config.public;
+}
+
+/** A library row is gated by its **effective** value, never its own. */
+export function rowGated(
+  row: Pick<AssetRow, "effectiveAccess">,
+  config: AssetAccessConfig | undefined,
+): boolean {
+  return isGatedValue(row.effectiveAccess, config);
+}
+
+/**
+ * The name a lock carries, or null when the file is not gated. The one test every
+ * surface that draws a lock asks, so a tile, a row and the panel cannot disagree.
+ */
+export function lockLabel(
+  row: Pick<AssetRow, "effectiveAccess">,
+  config: AssetAccessConfig | undefined,
+): string | null {
+  if (!config || !rowGated(row, config)) return null;
+  return accessLabel(row.effectiveAccess, config);
+}
+
+/** What the public value is called: the gate field's own label for it, else "Public". */
+export function publicLabel(config: AssetAccessConfig): string {
+  return config.options?.find((o) => o.value === config.public)?.label ?? "Public";
+}
+
+/**
+ * A value's name. A `select`'s label where there is one, "Public" for the ungated value
+ * and for no value at all, and the value itself for anything else (a number or free
+ * text has no other name).
+ */
+export function accessLabel(value: Json | null | undefined, config: AssetAccessConfig): string {
+  if (value === null || value === undefined) return publicLabel(config);
+  const option = config.options?.find((o) => o.value === value);
+  if (option) return option.label;
+  if (value === config.public) return publicLabel(config);
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/** What the access control offers: a fixed list, or a value to type. */
+export type AccessChoices =
+  | { kind: "options"; options: { value: Json; label: string }[] }
+  | { kind: "text" | "number" };
+
+/**
+ * The control's vocabulary, from the same field the page gate uses. A `select` lists its
+ * options (the server has already narrowed them to what every declaring page type
+ * shares), a boolean has its two values, and a number or free text is typed.
+ */
+export function accessChoices(config: AssetAccessConfig): AccessChoices {
+  if (config.options) {
+    return {
+      kind: "options",
+      options: config.options.map((o) => ({ value: o.value, label: o.label })),
+    };
+  }
+  if (typeof config.public === "boolean") {
+    const other = !config.public;
+    return {
+      kind: "options",
+      options: [
+        { value: config.public, label: publicLabel(config) },
+        { value: other, label: `Gated (${config.field}: ${String(other)})` },
+      ],
+    };
+  }
+  return { kind: typeof config.public === "number" ? "number" : "text" };
+}
+
+/** A typed value for a number or free-text gate, or why it cannot be one. */
+export function parseAccessInput(
+  config: AssetAccessConfig,
+  raw: string,
+): { ok: true; value: Json } | { ok: false; error: string } {
+  const text = raw.trim();
+  if (text === "") return { ok: false, error: "Enter a value first" };
+  if (typeof config.public === "number") {
+    const value = Number(text);
+    return Number.isFinite(value) ? { ok: true, value } : { ok: false, error: "Enter a number" };
+  }
+  if (text.length > 200) return { ok: false, error: "Use 200 characters or fewer" };
+  return { ok: true, value: text };
+}
+
+/** The folders by id, for walking a chain. */
+function byId(folders: readonly AssetFolder[]): Map<string, AssetFolder> {
+  return new Map(folders.map((f) => [f.id, f]));
+}
+
+/**
+ * The folder whose own value an inheriting file or folder is actually taking: the
+ * nearest one at or above `start` that has an own value. Null when nothing above sets
+ * one, which is public. A depth guard rather than trust, because a parent loop in bad
+ * data must not hang the panel.
+ */
+export function accessSource(
+  folders: readonly AssetFolder[],
+  start: string | null | undefined,
+): AssetFolder | null {
+  const index = byId(folders);
+  let at = start ? index.get(start) : undefined;
+  for (let hops = 0; at && hops < 64; hops += 1) {
+    if (at.access !== null && at.access !== undefined) return at;
+    at = at.parentId ? index.get(at.parentId) : undefined;
+  }
+  return null;
+}
+
+/** "Inherit (Members, from Member downloads)", or "Inherit (Public)" with no source. */
+export function inheritLabel(
+  effective: Json | null | undefined,
+  source: Pick<AssetFolder, "name"> | null,
+  config: AssetAccessConfig,
+): string {
+  const value = accessLabel(effective, config);
+  return source ? `Inherit (${value}, from ${source.name})` : `Inherit (${value})`;
+}
+
+/** The null option's label for a **file**: its folder's effective value and where it comes from. */
+export function assetInheritLabel(
+  row: Pick<AssetRow, "folderId">,
+  folders: readonly AssetFolder[],
+  config: AssetAccessConfig,
+): string {
+  const folder = row.folderId ? folders.find((f) => f.id === row.folderId) : undefined;
+  return inheritLabel(folder?.effectiveAccess, accessSource(folders, row.folderId), config);
+}
+
+/** The null option's label for a **folder**: its parent's effective value and source. */
+export function folderInheritLabel(
+  folder: Pick<AssetFolder, "parentId">,
+  folders: readonly AssetFolder[],
+  config: AssetAccessConfig,
+): string {
+  const parent = folder.parentId ? folders.find((f) => f.id === folder.parentId) : undefined;
+  return inheritLabel(parent?.effectiveAccess, accessSource(folders, folder.parentId), config);
+}
+
+/**
+ * The summary line under a file's control: what it is, and why. "Members only, set on
+ * this file", "Members, inherited from Member downloads", or "Public".
+ */
+export function accessSummary(
+  row: Pick<AssetRow, "access" | "effectiveAccess" | "folderId">,
+  folders: readonly AssetFolder[],
+  config: AssetAccessConfig,
+): string {
+  const label = accessLabel(row.effectiveAccess, config);
+  if (row.access !== null && row.access !== undefined) return `${label}, set on this file`;
+  const source = accessSource(folders, row.folderId);
+  return source ? `${label}, inherited from ${source.name}` : label;
+}
+
+/**
+ * The folder id an upload should be filed in: the folder the editor has open
+ * (`decision 4`), or none for All files, Unfiled, or a path no longer in the list.
+ */
+export function folderIdForPath(
+  folders: readonly AssetFolder[],
+  path: string | undefined,
+): string | undefined {
+  if (path === undefined) return undefined;
+  return folders.find((f) => f.path === path)?.id;
+}
+
+/* -------------------------------------------------------------------- moves --- */
+
+export interface MoveImpact {
+  /** Selected files that are gated now and public after the move. */
+  toPublic: number;
+  /** Selected files that are public now and gated after the move. */
+  toGated: number;
+  /**
+   * Whether every selected file was in hand. A captured *select all matching* can name
+   * rows this page does not hold, and their access is not known here; the count is then
+   * of the files shown, and the sentence says so.
+   */
+  complete: boolean;
+}
+
+/**
+ * How many selected files change between gated and public if they are filed in a folder
+ * whose effective value is `destination` (null for Unfiled). A file with an own value
+ * keeps it wherever it goes; one without takes the destination's (decision 4). Counted
+ * from the rows on screen, so a deployment that does not gate files, whose rows carry no
+ * access, counts nothing.
+ */
+export function moveImpact(
+  rows: readonly AssetRow[],
+  ticked: Ticked,
+  destination: Json | null | undefined,
+  config: AssetAccessConfig | undefined,
+): MoveImpact {
+  const none: MoveImpact = { toPublic: 0, toGated: 0, complete: true };
+  if (!config) return none;
+  let toPublic = 0;
+  let toGated = 0;
+  let shown = 0;
+  for (const row of rows) {
+    if (!isTicked(ticked, row.id)) continue;
+    shown += 1;
+    const before = rowGated(row, config);
+    const own = row.access;
+    const after = isGatedValue(own !== null && own !== undefined ? own : destination, config);
+    if (before && !after) toPublic += 1;
+    else if (!before && after) toGated += 1;
+  }
+  return { toPublic, toGated, complete: shown >= tickCount(ticked) };
+}
+
+/** The sentence a move confirmation adds, or null when no file changes. */
+export function moveImpactText(impact: MoveImpact): string | null {
+  const files = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "file" : "files"}`;
+  const parts: string[] = [];
+  if (impact.toPublic > 0) parts.push(`${files(impact.toPublic)} will change from gated to public`);
+  if (impact.toGated > 0) parts.push(`${files(impact.toGated)} will change from public to gated`);
+  if (parts.length === 0) return null;
+  const body = `${parts.join(", and ")}.`;
+  return impact.complete
+    ? body
+    : `Of the files shown here, ${body} Files not shown on this page are not counted.`;
+}
+
+/* ------------------------------------------------------------------ decoding --- */
+
+/** The pending-purge answer, `{ pending, oldest }`; anything unreadable is "nothing owed". */
+export interface PurgeState {
+  pending: number;
+  oldest: number | null;
+}
+
+export function decodePurges(body: unknown): PurgeState {
+  const raw = (body ?? {}) as { pending?: unknown; oldest?: unknown };
+  const pending =
+    typeof raw.pending === "number" && Number.isFinite(raw.pending) && raw.pending > 0
+      ? Math.floor(raw.pending)
+      : 0;
+  const oldest = typeof raw.oldest === "number" && Number.isFinite(raw.oldest) ? raw.oldest : null;
+  return { pending, oldest: pending === 0 ? null : oldest };
+}
+
+/** The notice a non-zero queue shows, or null when nothing is owed. */
+export function purgeNotice(state: PurgeState): string | null {
+  if (state.pending <= 0) return null;
+  const n = state.pending.toLocaleString("en-US");
+  return state.pending === 1
+    ? `${n} file may still be served from the edge cache; Folio is retrying.`
+    : `${n} files may still be served from the edge cache; Folio is retrying.`;
+}
+
+/**
+ * `GET {base}/api/assets/access`'s answer: `{ [key]: value }` for gated keys only. A
+ * body that is not an object, and a null or missing value, decode to nothing, so a
+ * malformed answer draws no lock rather than a wrong one.
+ */
+export function decodeAccessMap(body: unknown): Record<string, Json> {
+  const out: Record<string, Json> = {};
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return out;
+  for (const [key, value] of Object.entries(body)) {
+    if (value !== null && value !== undefined) out[key] = value as Json;
+  }
+  return out;
+}
+
+/** The most keys one `GET {base}/api/assets/access` takes (`routes/assets.ts`). */
+export const MAX_ACCESS_KEYS = 500;
+
+/** The query for the inspector's lookup: every key, repeated, deduplicated and capped. */
+export function accessKeysQuery(keys: readonly string[]): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const key of [...new Set(keys)].slice(0, MAX_ACCESS_KEYS)) params.append("key", key);
+  return params;
+}
+
+/* ---------------------------------------------------------------- inspector --- */
+
+/**
+ * Whether the document being edited is a **public page** for decision 14's warning: its
+ * root does not declare the gate field, or declares it and holds the public value. A
+ * root that declares the field and holds nothing is gated (a missing value fails closed,
+ * spec 31), so it is not public and draws no warning.
+ */
+export function isPublicPage(
+  doc: Doc | null,
+  schema: SchemaIndex,
+  config: AssetAccessConfig | undefined,
+): boolean {
+  if (!doc || !config) return false;
+  const root = doc.bloks[doc.root];
+  if (!root) return false;
+  if (!schema[root.type]?.fields[config.field]) return true;
+  return root.data[config.field] === config.public;
+}
+
+/**
+ * What the inspector hands an asset field so its cards can draw a lock: the gated keys of
+ * the open document, the manifest's vocabulary, and whether the page is public.
+ */
+export interface AssetLocks {
+  gated: Readonly<Record<string, Json>>;
+  config: AssetAccessConfig;
+  publicPage: boolean;
+}
+
+/**
+ * What an asset card shows for one file: a lock when the file is gated, and the warning
+ * only for an embedded **image** on a public page. A link or a non-image in an asset
+ * field is a download offer, which is the legitimate case (decision 14).
+ */
+export function assetLock(
+  asset: AssetValue,
+  gated: Readonly<Record<string, Json>>,
+  config: AssetAccessConfig,
+  publicPage: boolean,
+): { label: string; warning: string | null } | null {
+  const value = asset.key ? gated[asset.key] : undefined;
+  if (value === undefined || !isGatedValue(value, config)) return null;
+  const label = accessLabel(value, config);
+  return {
+    label,
+    warning:
+      publicPage && isImageAsset(asset) ? `${label}: most visitors will see a broken image` : null,
   };
 }

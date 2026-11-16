@@ -8,6 +8,7 @@ import {
 } from "../../../../core/query";
 import type { Resolution } from "../../../../core/resolve";
 import type { DocumentType, SchemaIndex } from "../../../../core/schema";
+import type { AssetLocks } from "../assets-model";
 import { Input, Select, Textarea } from "../../Field";
 import { AssetField, MultiAssetField } from "./AssetField";
 import { CollectionField } from "./CollectionField";
@@ -35,6 +36,9 @@ export interface FieldEnv {
   /** What the preview is rendered with. Carries the resolved story rows for every id
    * this document points at, and the answers to its collection queries. */
   resolution: Resolution;
+  /** Where the deployment gates files: the open document's gated keys, for the asset
+   * cards' lock and warning. Absent draws neither. */
+  assetLocks?: AssetLocks;
 }
 
 export interface ControlProps {
@@ -262,6 +266,7 @@ export function Control(props: ControlProps) {
           mount={env.mount}
           editable={editable}
           onChange={onChange}
+          {...(env.assetLocks ? { locks: env.assetLocks } : {})}
         />
       );
 
@@ -288,6 +293,7 @@ export function Control(props: ControlProps) {
           mount={env.mount}
           editable={editable}
           onChange={onChange}
+          {...(env.assetLocks ? { locks: env.assetLocks } : {})}
         />
       );
 

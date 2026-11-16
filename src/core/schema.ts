@@ -193,6 +193,24 @@ export interface Manifest {
    * type is deployment-wide and `/me` carries it.
    */
   settings?: string;
+  /**
+   * What the media library's access control draws from: the brand's gate field, the
+   * value that means ungated, and the declared `select` options when there are any
+   * (`../../docs/specs/platform/asset-access.md` decision 13). **Present only when the
+   * brand's gate has `allowsAsset`**, so a deployment that does not gate files has a
+   * byte-identical manifest and an admin with no access control at all.
+   */
+  assetAccess?: ManifestAssetAccess;
+}
+
+/** `Manifest.assetAccess`. */
+export interface ManifestAssetAccess {
+  /** `gate.field`, the page field whose vocabulary a file's access value shares. */
+  field: string;
+  /** `gate.public`: the value that means ungated. */
+  public: string | number | boolean;
+  /** The options every declaring `select` lists; absent for text, number and boolean. */
+  options?: { value: string; label: string }[];
 }
 
 export function indexManifest(manifest: Manifest): SchemaIndex {

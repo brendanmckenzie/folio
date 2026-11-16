@@ -5,6 +5,7 @@ import { Dialog } from "../Dialog";
 import { scopeOfApiBase } from "../route";
 import { useRememberedString } from "../remembered";
 import {
+  type AssetAccessConfig,
   type AssetRow,
   type AssetsUrl,
   type AssetView,
@@ -43,6 +44,9 @@ export interface AssetPickerProps {
    * client-side. */
   onPick: (value: AssetValue) => void;
   onClose: () => void;
+  /** The manifest's `assetAccess`, where the deployment gates files: the lock on a gated
+   * tile and the *Gated* filter. Absent draws neither. */
+  assetAccess?: AssetAccessConfig;
   /**
    * Whether the person may upload from inside the picker — `ASSETS` on the
    * server. Forwarded to `AssetBrowser`, and **optional, defaulting to true,
@@ -101,6 +105,7 @@ export function AssetPicker({
   onPick,
   onClose,
   mayWrite = true,
+  assetAccess,
 }: AssetPickerProps) {
   const remembered = useRememberedString<AssetView>(
     ASSET_VIEW_KEY,
@@ -133,6 +138,7 @@ export function AssetPicker({
     untagged: false,
     undescribed: false,
     failed: false,
+    gated: false,
     asset: undefined,
   }));
   const [selected, setSelected] = useState<string | undefined>(undefined);
@@ -232,6 +238,7 @@ export function AssetPicker({
           accept={accept}
           compact
           mayWrite={mayWrite}
+          {...(assetAccess ? { assetAccess } : {})}
         />
         {drop.over ? (
           <div className={css.dropVeil} aria-hidden="true">

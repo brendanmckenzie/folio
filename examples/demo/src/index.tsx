@@ -59,6 +59,10 @@ const gate: FolioGate<Env> = {
     return /(?:^|;\s*)demo_member=1(?:;|$)/.test(cookie) ? { id: "demo-member" } : null;
   },
   allows: (visitor) => visitor !== null,
+  // `asset-access.md`: the same fake check for the media library's files, so the admin's
+  // access controls draw in the demo. Same warning as above; phase 9 adds `assetDenied`
+  // and `assetSigning` beside it.
+  allowsAsset: (visitor) => visitor !== null,
 };
 
 /**

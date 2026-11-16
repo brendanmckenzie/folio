@@ -103,6 +103,7 @@ const url = (extra: Partial<AssetsUrl> = {}): AssetsUrl => ({
   untagged: false,
   undescribed: false,
   failed: false,
+  gated: false,
   asset: undefined,
   ...extra,
 });
@@ -190,6 +191,7 @@ describe("NO_FILTERS", () => {
       { untagged: true },
       { undescribed: true },
       { failed: true },
+      { gated: true },
     ];
     for (const narrowing of narrowings) {
       const narrowed = url(narrowing);

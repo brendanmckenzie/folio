@@ -1440,3 +1440,86 @@
   font-size: var(--text-sm);
   color: var(--fg-muted);
 }
+
+/* ------------------------------------------------------------------ access --- */
+
+/*
+ * The lock on a gated file (`asset-access.md` phase 7). Over the tile's top-right
+ * corner, **absolutely positioned so it holds no layout**: the tick sits top-left and a
+ * mark that took a line of its own would push every gated tile's name down against its
+ * neighbours. Always visible, because it states a fact about the file rather than
+ * offering an action.
+ */
+.tileLock {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+}
+
+/* In a table row the lock sits after the filename, in flow: a row has the width. */
+.cellLock {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  color: var(--fg-muted);
+}
+
+.accessControl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.accessRow {
+  display: flex;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* The line under a file's control saying what it is and why. */
+.accessLine {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-muted);
+}
+
+/*
+ * The pending-purge notice: a strip above the browser, not a toast, because it stays
+ * for as long as the number is non-zero. `flex: none` so the screen's height chain
+ * (`.screen` into `.body`) gives it exactly its own height and no more.
+ */
+.purgeNotice {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  font-size: var(--text-sm);
+}
+
+.purgeText {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--fg-muted);
+}
+
+/* The "Access" fact's value: the lock beside its name, in flow. */
+.lockFact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

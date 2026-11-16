@@ -8,16 +8,24 @@ import type {
   AssetTag,
 } from "../../../core/assets";
 import type { BulkFailure, BulkRefusal, BulkReport } from "../../../core/bulk";
+import type { Json } from "../../../core/doc";
 import { Button } from "../Button";
 import { Dialog } from "../Dialog";
 import { EmptyState } from "../EmptyState";
 import { Field, Input, Select } from "../Field";
 import { columnsOf } from "../fit";
+import { LOCK_ICON } from "../icons";
 import { type Column, Table } from "../Table";
+import { AssetAccessControl } from "./AssetAccessControl";
 import {
   addedAgo,
   ASSET_COLUMNS,
+  type AssetAccessConfig,
   type AssetColumn,
+  folderInheritLabel,
+  lockLabel,
+  moveImpact,
+  moveImpactText,
   type AssetRow,
   type AssetsUrl,
   type AssetView,
@@ -195,6 +203,20 @@ export interface AssetBrowserProps {
    * the picker's sake, which never passes `bulk` and so never draws the control.
    */
   mayDescribe?: boolean;
+  /**
+   * The manifest's `assetAccess`, **present only where the deployment gates files**
+   * (`asset-access.md` phase 7). It switches on everything access: the lock on a gated
+   * tile and row, the *Gated* filter, *Set access*, the folder dialogs' access control
+   * and the move confirmations' counts. Absent, none of it exists, and the browser is
+   * what it was before the feature.
+   */
+  assetAccess?: AssetAccessConfig;
+  /** An access value or an effective one changed (a bulk access, a move, a folder's
+   * value): the screen re-reads the pending-purge count. */
+  onAccessChanged?: () => void;
+  /** Extra controls at the end of the controls row, after *Upload*. The screen's
+   * *Clear cached files* is the one user. */
+  extraActions?: ReactNode;
 }
 
 /**
@@ -227,7 +249,7 @@ export interface AssetBrowserProps {
 export function AssetBrowser(props: AssetBrowserProps) {
   const { apiBase, mount, url, onUrl, data, upload, selected, label, kinds, accept, compact } =
     props;
-  const { bulk, onNotice } = props;
+  const { bulk, onNotice, assetAccess, onAccessChanged } = props;
   const mayWrite = props.mayWrite ?? true;
   const mayDescribe = props.mayDescribe ?? true;
   const grid = useRef<HTMLDivElement>(null);
@@ -358,6 +380,9 @@ export function AssetBrowser(props: AssetBrowserProps) {
     }
     setTicked(NOTHING);
     data.reload();
+    // A move changes effective values as surely as *Set access* does, and either may
+    // have queued a purge.
+    if (assetAccess && (action === "access" || action === "move")) onAccessChanged?.();
     // The vocabulary's counts moved, and a tag can have been left carrying
     // nothing at all.
     if (action === "tag" || action === "untag") tags.reload();
@@ -574,6 +599,13 @@ export function AssetBrowser(props: AssetBrowserProps) {
           onUrl={onUrl}
           compact={compact}
           mayWrite={mayWrite}
+          {...(assetAccess ? { assetAccess } : {})}
+          // A folder's value changes the effective value of every file under it, so the
+          // grid's locks are re-read along with the purge count.
+          onAccessChanged={() => {
+            data.reload();
+            onAccessChanged?.();
+          }}
           {...(onNotice ? { onNotice } : {})}
         />
 
@@ -671,6 +703,26 @@ export function AssetBrowser(props: AssetBrowserProps) {
             ) : null}
 
             {/*
+              The access filter, drawn only where the deployment gates files. A
+              chip like the backlog ones: it narrows the grid and clears nothing,
+              because "which of these are gated" is asked inside a folder, a tag
+              or a search.
+            */}
+            {assetAccess ? (
+              <fieldset className={css.chips}>
+                <legend className={css.srOnly}>Filter by access</legend>
+                <button
+                  type="button"
+                  className={`${css.chip} ${url.gated ? css.chipOn : ""}`}
+                  aria-pressed={url.gated}
+                  onClick={() => onUrl(withFilter(url, { gated: !url.gated }))}
+                >
+                  Gated
+                </button>
+              </fieldset>
+            ) : null}
+
+            {/*
           The sort, in grid mode only. The table's own headers carry the same two
           facts — which column and which direction — and offering both at once is how
           two controls over one piece of state start disagreeing about it.
@@ -709,7 +761,12 @@ export function AssetBrowser(props: AssetBrowserProps) {
               </fieldset>
             ) : null}
 
-            {uploadButton ? <span className={css.controlsEnd}>{uploadButton}</span> : null}
+            {uploadButton || props.extraActions ? (
+              <span className={css.controlsEnd}>
+                {props.extraActions}
+                {uploadButton}
+              </span>
+            ) : null}
           </div>
 
           {/*
@@ -781,6 +838,16 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 >
                   Move
                 </Button>
+                {assetAccess ? (
+                  <Button
+                    size="sm"
+                    disabled={count === 0 || running}
+                    reason={running ? "Working…" : "Select some files first"}
+                    onClick={() => setJob("access")}
+                  >
+                    Set access
+                  </Button>
+                ) : null}
                 {/*
                   Absent on two independent counts, and both are the same rule:
                   with no `describe` configured, and for anybody below `ADMIN`.
@@ -921,6 +988,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                     key={row.id}
                     row={row}
                     mount={mount}
+                    lock={lockLabel(row, assetAccess)}
                     selected={row.id === selected}
                     focusable={row.id === focusable}
                     onSelect={() => props.onSelect(row.id)}
@@ -933,7 +1001,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
             ) : (
               <Table
                 label={label}
-                columns={columns.map((column) => tableColumn(column, mount))}
+                columns={columns.map((column) => tableColumn(column, mount, assetAccess))}
                 rows={rows}
                 rowKey={(row) => row.id}
                 {...(bulk
@@ -1025,8 +1093,32 @@ export function AssetBrowser(props: AssetBrowserProps) {
           count={count}
           folders={folders.folders}
           busy={running}
+          // What filing here would change between gated and public, counted off the
+          // rows in hand and the destination's effective value (decision 4).
+          impactFor={(folderId) =>
+            assetAccess
+              ? moveImpactText(
+                  moveImpact(
+                    rows,
+                    ticked,
+                    folderId
+                      ? folders.folders.find((f) => f.id === folderId)?.effectiveAccess
+                      : null,
+                    assetAccess,
+                  ),
+                )
+              : null
+          }
           onClose={() => setJob(null)}
           onRun={(folderId) => void run("move", { folderId })}
+        />
+      ) : job === "access" && assetAccess ? (
+        <BulkAccessDialog
+          count={count}
+          config={assetAccess}
+          busy={running}
+          onClose={() => setJob(null)}
+          onRun={(access) => void run("access", { access })}
         />
       ) : job === "delete" ? (
         <BulkDeleteDialog
@@ -1444,6 +1536,8 @@ function Sidebar({
   onUrl,
   compact,
   mayWrite,
+  assetAccess,
+  onAccessChanged,
   onNotice,
 }: {
   /** Held by `AssetBrowser` and passed down, so the sidebar, the bulk *Tag*
@@ -1462,6 +1556,10 @@ function Sidebar({
    * second `Dialog` cannot open from inside the picker's", this is "a viewer's
    * folder rename can never succeed". See `AssetBrowser`'s own prop. */
   mayWrite: boolean;
+  /** Where the deployment gates files: the folder dialogs' access control. */
+  assetAccess?: AssetAccessConfig;
+  /** A folder's value or parent changed, so what files are can have changed too. */
+  onAccessChanged: () => void;
   onNotice?: (message: string) => void;
 }) {
   const [creating, setCreating] = useState(false);
@@ -1585,10 +1683,12 @@ function Sidebar({
       {creating ? (
         <NewFolderDialog
           folders={folders.folders}
+          {...(assetAccess ? { assetAccess } : {})}
           onClose={() => setCreating(false)}
           onCreate={async (input) => {
             const folder = await folders.create(input);
             setCreating(false);
+            if (input.access !== undefined) onAccessChanged();
             onUrl(withFilter(url, { folder: folder.path }));
           }}
         />
@@ -1596,15 +1696,22 @@ function Sidebar({
         <FolderEditDialog
           folder={editing}
           folders={folders.folders}
+          {...(assetAccess ? { assetAccess } : {})}
           onClose={() => setEditing(null)}
           onSave={async (patch) => {
             const folder = await folders.update(editing.id, patch);
             setEditing(null);
+            // A new value, or a new parent, can change what every file below it is.
+            if (patch.access !== undefined || patch.parentId !== undefined) onAccessChanged();
             // The path moved, so a filter pointing at the old one now matches
             // nothing. Following it is what makes a rename feel like a rename
             // rather than like the folder disappearing.
             if (url.folder !== undefined) onUrl(withFilter(url, { folder: folder.path }));
-            onNotice?.(`Renamed to ${folder.name}`);
+            onNotice?.(
+              patch.access !== undefined && patch.name === undefined && patch.parentId === undefined
+                ? `Changed access on ${folder.name}`
+                : `Renamed to ${folder.name}`,
+            );
           }}
           onDelete={async () => {
             const report = await folders.remove(editing.id);
@@ -1687,15 +1794,19 @@ function deletedFolderSummary(
  */
 function NewFolderDialog({
   folders,
+  assetAccess,
   onClose,
   onCreate,
 }: {
   folders: readonly AssetFolder[];
+  assetAccess?: AssetAccessConfig;
   onClose: () => void;
-  onCreate: (input: { name: string; parentId: string | null }) => Promise<void>;
+  onCreate: (input: { name: string; parentId: string | null; access?: Json }) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState("");
+  // Null inherits from the parent, which is what a folder with no choice made does.
+  const [access, setAccess] = useState<Json | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1705,7 +1816,11 @@ function NewFolderDialog({
     setPending(true);
     setError(null);
     try {
-      await onCreate({ name: trimmed, parentId: parentId || null });
+      await onCreate({
+        name: trimmed,
+        parentId: parentId || null,
+        ...(access === null ? {} : { access }),
+      });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1769,6 +1884,23 @@ function NewFolderDialog({
             </Select>
           )}
         </Field>
+        {assetAccess ? (
+          <Field
+            label="Who can open its files"
+            help="Files in this folder, and in folders under it, take this unless they have a value of their own."
+          >
+            {(id) => (
+              <AssetAccessControl
+                id={id}
+                config={assetAccess}
+                value={access}
+                inherit={folderInheritLabel({ parentId: parentId || null }, folders, assetAccess)}
+                disabled={pending}
+                onChange={setAccess}
+              />
+            )}
+          </Field>
+        ) : null}
       </form>
     </Dialog>
   );
@@ -1794,18 +1926,26 @@ function NewFolderDialog({
 function FolderEditDialog({
   folder,
   folders,
+  assetAccess,
   onClose,
   onSave,
   onDelete,
 }: {
   folder: AssetFolder;
   folders: readonly AssetFolder[];
+  assetAccess?: AssetAccessConfig;
   onClose: () => void;
-  onSave: (patch: { name?: string; parentId?: string | null }) => Promise<void>;
+  onSave: (patch: {
+    name?: string;
+    parentId?: string | null;
+    access?: Json | null;
+  }) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const [name, setName] = useState(folder.name);
   const [parentId, setParentId] = useState(folder.parentId ?? "");
+  const ownAccess = folder.access ?? null;
+  const [access, setAccess] = useState<Json | null>(ownAccess);
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1822,7 +1962,9 @@ function FolderEditDialog({
     }
   };
 
-  const changed = name.trim() !== folder.name || (parentId || null) !== folder.parentId;
+  const accessChanged = assetAccess !== undefined && access !== ownAccess;
+  const changed =
+    name.trim() !== folder.name || (parentId || null) !== folder.parentId || accessChanged;
 
   return (
     <Dialog
@@ -1861,6 +2003,7 @@ function FolderEditDialog({
                     ...((parentId || null) === folder.parentId
                       ? {}
                       : { parentId: parentId || null }),
+                    ...(accessChanged ? { access } : {}),
                   }),
                 )
               }
@@ -1920,6 +2063,23 @@ function FolderEditDialog({
               </Select>
             )}
           </Field>
+          {assetAccess ? (
+            <Field
+              label="Who can open its files"
+              help="Files in this folder, and in folders under it, take this unless they have a value of their own."
+            >
+              {(id) => (
+                <AssetAccessControl
+                  id={id}
+                  config={assetAccess}
+                  value={access}
+                  inherit={folderInheritLabel({ parentId: parentId || null }, folders, assetAccess)}
+                  disabled={pending}
+                  onChange={setAccess}
+                />
+              )}
+            </Field>
+          ) : null}
           <div>
             <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>
               Delete folder
@@ -2142,17 +2302,21 @@ function BulkMoveDialog({
   count,
   folders,
   busy,
+  impactFor,
   onClose,
   onRun,
 }: {
   count: number;
   folders: readonly AssetFolder[];
   busy: boolean;
+  /** The sentence for files that would change between gated and public, or null. */
+  impactFor: (folderId: string | null) => string | null;
   onClose: () => void;
   onRun: (folderId: string | null) => void;
 }) {
   const [folderId, setFolderId] = useState("");
   const files = `${count.toLocaleString("en-US")} ${count === 1 ? "file" : "files"}`;
+  const impact = impactFor(folderId || null);
 
   return (
     <Dialog
@@ -2188,6 +2352,68 @@ function BulkMoveDialog({
               </option>
             ))}
           </Select>
+        )}
+      </Field>
+      {impact ? (
+        <p className={css.warn} role="status">
+          {impact}
+        </p>
+      ) : null}
+    </Dialog>
+  );
+}
+
+/**
+ * *Set access* over a selection (`asset-access.md` decision 11). A value is chosen,
+ * never "inherit": a selection of files is given one outright, and returning one to its
+ * folder's value is the file's own panel. Nothing runs until a value is chosen, so the
+ * dialog cannot be confirmed by pressing Enter on its way up.
+ */
+function BulkAccessDialog({
+  count,
+  config,
+  busy,
+  onClose,
+  onRun,
+}: {
+  count: number;
+  config: AssetAccessConfig;
+  busy: boolean;
+  onClose: () => void;
+  onRun: (access: Json) => void;
+}) {
+  const [value, setValue] = useState<Json | null>(null);
+  const files = `${count.toLocaleString("en-US")} ${count === 1 ? "file" : "files"}`;
+
+  return (
+    <Dialog
+      title={`Set access on ${files}`}
+      description="Each file's own value replaces whatever its folder gives it."
+      onClose={onClose}
+      actions={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={busy || value === null}
+            reason={busy ? "Working…" : "Choose who can open them first"}
+            onClick={() => value !== null && onRun(value)}
+          >
+            Set access
+          </Button>
+        </>
+      }
+    >
+      <Field label="Who can open these files">
+        {(id) => (
+          <AssetAccessControl
+            id={id}
+            config={config}
+            value={value}
+            placeholder="Choose…"
+            disabled={busy}
+            onChange={(next) => setValue(next)}
+          />
         )}
       </Field>
     </Dialog>
@@ -2275,6 +2501,7 @@ function BulkDeleteDialog({
 function Tile({
   row,
   mount,
+  lock,
   selected,
   focusable,
   onSelect,
@@ -2283,6 +2510,8 @@ function Tile({
 }: {
   row: AssetRow;
   mount: string;
+  /** The access's name when the file is gated, which is also the lock's label. */
+  lock: string | null;
   selected: boolean;
   focusable: boolean;
   onSelect: () => void;
@@ -2333,6 +2562,16 @@ function Tile({
           onChange={onTick}
         />
       ) : null}
+      {lock ? (
+        <span
+          className={css.tileLock}
+          role="img"
+          aria-label={`Gated: ${lock}`}
+          title={`Gated: ${lock}`}
+        >
+          {LOCK_ICON}
+        </span>
+      ) : null}
       <span className={css.tileFrame}>
         {isRenderableImage(row) ? (
           <img
@@ -2358,17 +2597,31 @@ function Tile({
 
 /* ------------------------------------------------------------------- table --- */
 
-function tableColumn(column: AssetColumn, mount: string): Column<AssetRow> {
+function tableColumn(
+  column: AssetColumn,
+  mount: string,
+  assetAccess?: AssetAccessConfig,
+): Column<AssetRow> {
   return {
     key: column.key,
     label: column.label,
     ...(column.numeric ? { numeric: true } : {}),
     ...(column.sort ? { sortable: true } : {}),
-    cell: (row) => <Cell row={row} column={column} mount={mount} />,
+    cell: (row) => <Cell row={row} column={column} mount={mount} assetAccess={assetAccess} />,
   };
 }
 
-function Cell({ row, column, mount }: { row: AssetRow; column: AssetColumn; mount: string }) {
+function Cell({
+  row,
+  column,
+  mount,
+  assetAccess,
+}: {
+  row: AssetRow;
+  column: AssetColumn;
+  mount: string;
+  assetAccess: AssetAccessConfig | undefined;
+}) {
   switch (column.kind) {
     case "filename":
       return (
@@ -2387,6 +2640,16 @@ function Cell({ row, column, mount }: { row: AssetRow; column: AssetColumn; moun
             <span className={css.cellExt}>{typeLabel(row)}</span>
           )}
           <span className={css.cellName}>{row.filename}</span>
+          {lockLabel(row, assetAccess) ? (
+            <span
+              className={css.cellLock}
+              role="img"
+              aria-label={`Gated: ${lockLabel(row, assetAccess)}`}
+              title={`Gated: ${lockLabel(row, assetAccess)}`}
+            >
+              {LOCK_ICON}
+            </span>
+          ) : null}
         </span>
       );
     case "type":

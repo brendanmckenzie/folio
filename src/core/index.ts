@@ -329,6 +329,7 @@ export type {
   DocumentKind,
   DocumentType,
   Manifest,
+  ManifestAssetAccess,
   SchemaIndex,
 } from "./schema";
 

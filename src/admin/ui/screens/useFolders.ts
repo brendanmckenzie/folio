@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AssetFolder } from "../../../core/assets";
+import type { Json } from "../../../core/doc";
 import type { Page } from "../../../core/pagination";
 import { messageOf } from "./useContent";
 
@@ -33,14 +34,21 @@ export interface FoldersData {
    * or an unknown parent — for the caller to show. Reloads on success, so a
    * caller does not also have to remember to.
    */
-  create: (input: { name: string; parentId?: string | null }) => Promise<AssetFolder>;
+  create: (input: {
+    name: string;
+    parentId?: string | null;
+    access?: Json;
+  }) => Promise<AssetFolder>;
   /**
    * Rename, move, or both — one `PATCH`, because on a materialised path they are
    * the same operation (`server/asset-folders.ts`'s `updateFolder`). Throws the
    * server's own message: a 409 naming the sibling it would collide with, or the
    * path that would make the move a cycle.
    */
-  update: (id: string, patch: { name?: string; parentId?: string | null }) => Promise<AssetFolder>;
+  update: (
+    id: string,
+    patch: { name?: string; parentId?: string | null; access?: Json | null },
+  ) => Promise<AssetFolder>;
   /**
    * Deletes the folder and **nothing else** (decision 14): children re-parent to
    * its own parent and its files land back in *Unfiled*. Answers the two counts
@@ -50,12 +58,18 @@ export interface FoldersData {
   remove: (id: string) => Promise<{ unfiled: number; reparented: number }>;
 }
 
-export function useFolders(apiBase: string): FoldersData {
+export function useFolders(apiBase: string, enabled = true): FoldersData {
   const [folders, setFolders] = useState<readonly AssetFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
+    // Off, for a mount that wants the hook's shape and not its request (`Assets.tsx`,
+    // which reads folders only to file an upload and only where files are gated).
+    if (!enabled) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -68,14 +82,14 @@ export function useFolders(apiBase: string): FoldersData {
     } finally {
       setLoading(false);
     }
-  }, [apiBase]);
+  }, [apiBase, enabled]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
 
   const create = useCallback(
-    async (input: { name: string; parentId?: string | null }) => {
+    async (input: { name: string; parentId?: string | null; access?: Json }) => {
       const res = await fetch(`${apiBase}/assets/folders`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -90,7 +104,10 @@ export function useFolders(apiBase: string): FoldersData {
   );
 
   const update = useCallback(
-    async (id: string, patch: { name?: string; parentId?: string | null }) => {
+    async (
+      id: string,
+      patch: { name?: string; parentId?: string | null; access?: Json | null },
+    ) => {
       const res = await fetch(`${apiBase}/assets/folders/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json" },

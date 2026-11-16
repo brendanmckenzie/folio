@@ -86,7 +86,7 @@ import {
 } from "./option-sources";
 import { gateValue, isUngated } from "../core/gate";
 import { decodeAccess, gatedValues, isPublicEffective, rememberGatedScopes } from "./asset-access";
-import { type ResolvedGate, validateGate } from "./gate";
+import { assetAccessManifest, type ResolvedGate, validateGate } from "./gate";
 import {
   createHookRunner,
   type FolioHooks,
@@ -2166,6 +2166,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       manifest: {
         ...toManifest(registry, types, globals, locales),
         ...manifestHooks(config.hooks),
+        ...assetAccessManifest(gate),
         ...(b.id !== null && b.label !== null ? { brand: { id: b.id, label: b.label } } : {}),
         ...(b.id !== null && b.settings ? { settings: b.settings } : {}),
       },

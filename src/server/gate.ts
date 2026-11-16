@@ -12,7 +12,7 @@
  * in the schema and the message is the only thing that says which schema.
  */
 import { type IndexableField, isIndexableKind } from "../core/index-projection";
-import type { DocumentType, SchemaIndex } from "../core/schema";
+import type { DocumentType, ManifestAssetAccess, SchemaIndex } from "../core/schema";
 import type { FolioGate } from "./types";
 
 /**
@@ -165,6 +165,24 @@ export function validateGate<Env>(
   }
 
   return { config: gate, roots, types: typeNames, assets: assetDomain(gate, selects) };
+}
+
+/**
+ * `Manifest.assetAccess` for a brand's gate: absent without `allowsAsset`, so a
+ * deployment that does not gate files serves a manifest byte for byte as before.
+ */
+export function assetAccessManifest(
+  gate: ResolvedGate | null,
+): { assetAccess: ManifestAssetAccess } | Record<string, never> {
+  const assets = gate?.assets;
+  if (!gate || !assets) return {};
+  return {
+    assetAccess: {
+      field: gate.config.field,
+      public: assets.public,
+      ...(assets.options ? { options: assets.options.map((o) => ({ ...o })) } : {}),
+    },
+  };
 }
 
 /** `ResolvedGate.assets`: null without `allowsAsset`, else the primitive and the shared options. */
