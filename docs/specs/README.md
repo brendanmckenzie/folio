@@ -86,6 +86,7 @@ sequence because the dependency graph is the same one.
 | 40 | [Authoring guidance and content checks](content-model/authoring-guidance.md) | content model | L | — | none | owner, 2026-11-04 |
 | 41 | [An agent-friendly CLI](foundation/agent-cli.md) | foundation | M | — | none | owner, 2026-11-04 |
 | 42 | [The command palette](editing/command-palette.md) | editing | M | — | none | owner, 2026-11-04 |
+| 43 | [Visitor access for media library assets](platform/asset-access.md) | platform | L | — | `0019` (claimed) | issue #178 |
 
 **40 and 41 are done** (built 2026-11-04, shipping together in v1.4.0, sharing no source
 file). **39 and 42 are `draft`** (2026-11-04) and build in the order 39 (v1.5:
