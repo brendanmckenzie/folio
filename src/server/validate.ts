@@ -280,6 +280,21 @@ export const AssetPatchBody = v.object(
 );
 
 /**
+ * `PATCH {base}/api/v1/assets/:id` (`asset-access.md` decision 11): the three fields a
+ * script may change. **`v.strictObject`**: `folderId` and `tags` stay admin-only (folder
+ * and tag ids have no versioned routes), and a stripped key would answer 200 for a move
+ * that never happened.
+ */
+export const ApiAssetPatchBody = v.strictObject(
+  {
+    access: v.optional(v.nullable(ACCESS_SCALAR)),
+    alt: v.optional(bounded(500)),
+    description: v.optional(bounded(2000)),
+  },
+  OBJECT,
+);
+
+/**
  * A tag, created or renamed (`../../docs/specs/content-model/media-library.md` decision 4).
  *
  * `name` is what was typed and is what is displayed; the identity is
@@ -1683,6 +1698,17 @@ export const AssetBulkMoveBody = v.object(
   OBJECT,
 );
 
+/**
+ * `POST {base}/api/assets/bulk/access` (`asset-access.md` decision 11). `access` is required
+ * and never null: inheriting is a per-file and per-folder edit, and "set these forty to
+ * inherit" is an operation nobody asked for. The value is checked against the brand's gate
+ * field by `runAssetBulk`, once, before the walk.
+ */
+export const AssetBulkAccessBody = v.object(
+  { ...ASSET_BULK_CONTROL, access: ACCESS_SCALAR },
+  OBJECT,
+);
+
 /** `POST {base}/api/assets/bulk/delete`. Nothing beyond the selection: there is
  * no redirect switch to offer, because an asset has no path to redirect from. */
 export const AssetBulkBody = v.object(ASSET_BULK_CONTROL, OBJECT);
@@ -1726,6 +1752,7 @@ export const AssetDescribeBody = v.object(
 
 export type AssetBulkTagInput = v.InferOutput<typeof AssetBulkTagBody>;
 export type AssetBulkMoveInput = v.InferOutput<typeof AssetBulkMoveBody>;
+export type AssetBulkAccessInput = v.InferOutput<typeof AssetBulkAccessBody>;
 export type AssetBulkInput = v.InferOutput<typeof AssetBulkBody>;
 export type AssetDescribeInput = v.InferOutput<typeof AssetDescribeBody>;
 

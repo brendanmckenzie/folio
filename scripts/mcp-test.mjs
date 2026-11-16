@@ -230,6 +230,45 @@ check(
   !names.includes("delete_document"),
 );
 
+/* --- assets: upload_asset and update_asset (spec 43) ---------------------- */
+
+const assetToken = await mint("e2e mcp assets", ["assets:write"]);
+const assetNames = ((await rpc("tools/list", {}, assetToken)).json?.result?.tools ?? []).map(
+  (t) => t.name,
+);
+check(
+  "an assets:write token is offered upload_asset and update_asset and nothing else",
+  assetNames.length === 2 &&
+    assetNames.includes("upload_asset") &&
+    assetNames.includes("update_asset"),
+  assetNames.join(", "),
+);
+const pixel = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+).toString("base64");
+const pushed = await callTool("upload_asset", { filename: "mcp.png", data: pixel }, assetToken);
+const assetId = pushed.value?.asset?.id;
+check("upload_asset stores the file", typeof assetId === "string", JSON.stringify(pushed));
+const described = await callTool("update_asset", { id: assetId, alt: "Set by MCP" }, assetToken);
+check(
+  "update_asset saves alt text and answers the row",
+  described.value?.alt === "Set by MCP",
+  JSON.stringify(described),
+);
+const refused = await callTool("update_asset", { id: assetId, access: "members" }, assetToken);
+check(
+  "update_asset refuses access on a site that does not gate files",
+  refused.error !== undefined || refused.value?.error !== undefined,
+  JSON.stringify(refused),
+);
+const refusedUpload = await callTool(
+  "upload_asset",
+  { filename: "mcp2.png", data: pixel, access: "members" },
+  assetToken,
+);
+check("and so does upload_asset", refusedUpload.error !== undefined, JSON.stringify(refusedUpload));
+
 /* --- create, write, preview, publish -------------------------------------- */
 
 const created = await callTool(

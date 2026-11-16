@@ -16,13 +16,13 @@
  * one site disagree about what exists. `get_schema` reports the fields;
  * `write_content` takes them.
  *
- * **`preview_document` is the seventeenth row, and it is the one tool that is
+ * **`preview_document` is the eighteenth row, and it is the one tool that is
  * *not* a v1 route** — it is `?_folio=draft` plus a `browser` binding
  * (decisions 5, 5a), so it has no `method`/`path` at all. Both fields are
  * optional for exactly that one row; `test/unit/mcp/tools.test.ts`'s
  * route-round-trip skips a tool with no path, and `routes/mcp.ts`'s
  * `tools/call` branches to `../mcp/shot.ts`'s `previewDocument` instead of the
- * internal-dispatch path the other sixteen share.
+ * internal-dispatch path the other seventeen share.
  */
 import {
   type Access,
@@ -552,14 +552,43 @@ export const MCP_TOOLS: readonly McpTool[] = [
       properties: {
         filename: { type: "string", description: "Original filename, including its extension." },
         data: { type: "string", description: "The file bytes, base64-encoded." },
+        access: {
+          type: ["string", "number", "boolean"],
+          description:
+            "Who may download the file, from the site's gate field (get_schema's `assetAccess`). Absent inherits the folder's value, which is public for an unfiled file. A site that does not gate files refuses it.",
+        },
       },
       required: ["filename", "data"],
       additionalProperties: false,
     },
     method: "POST",
     path: "/assets",
-    query: ["filename"],
+    query: ["filename", "access"],
     body: "base64",
+    need: ASSETS,
+  },
+  {
+    name: "update_asset",
+    description:
+      "Change a library file's access, alt text or description. `access` is the site's gate value, or null to inherit the folder's; leave it out to keep it. Changing it queues the cache purge that keeps a newly gated file from being served from the edge.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "The asset id." },
+        access: {
+          type: ["string", "number", "boolean", "null"],
+          description:
+            "Who may download the file, or null to inherit the folder's value. A site that does not gate files refuses it.",
+        },
+        alt: { type: "string", description: "Alt text." },
+        description: { type: "string", description: "What the file is." },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+    method: "PATCH",
+    path: "/assets/:id",
+    body: "json",
     need: ASSETS,
   },
 ];

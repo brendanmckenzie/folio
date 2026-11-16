@@ -86,6 +86,7 @@ describe("tools/list, per token scope", () => {
       "publish_document",
       "delete_document",
       "upload_asset",
+      "update_asset",
     ]) {
       expect([name, offered]).toEqual([name, expect.not.arrayContaining([name])]);
     }
@@ -122,8 +123,8 @@ describe("tools/list, per token scope", () => {
    * **The whole reason `assets:write` is a separate scope**: it implies nothing
    * about content, so a token minted to push images cannot read a page.
    */
-  it("assets:write — upload_asset and nothing else", () => {
-    expect(named(token("assets:write"))).toEqual(["upload_asset"]);
+  it("assets:write — the two asset tools and nothing else", () => {
+    expect(named(token("assets:write"))).toEqual(["upload_asset", "update_asset"]);
   });
 
   it("admin — every tool in the table", () => {

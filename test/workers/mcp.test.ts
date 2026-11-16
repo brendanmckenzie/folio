@@ -570,14 +570,14 @@ describe("tools/list", () => {
 
   /** `IMPLIES` grants `assets:write` no content access at all, which is why it is
    * a separate scope rather than a rung on a ladder. */
-  it("assets:write — upload_asset and nothing else", async () => {
-    expect(await listed(await tokenFor("assets:write"))).toEqual(["upload_asset"]);
+  it("assets:write — the two asset tools and nothing else", async () => {
+    expect(await listed(await tokenFor("assets:write"))).toEqual(["upload_asset", "update_asset"]);
   });
 
   it("admin — every tool, including delete_document", async () => {
     const offered = await listed(await tokenFor("admin"));
     expect(offered).toContain("delete_document");
-    expect(offered).toHaveLength(17);
+    expect(offered).toHaveLength(18);
   });
 
   /**
@@ -601,7 +601,7 @@ describe("tools/list", () => {
    * has no access control by choice, and MCP is not the place to invent some.
    */
   it("offers every tool on an open deployment, with no credential at all", async () => {
-    expect(await listed(undefined, open)).toHaveLength(17);
+    expect(await listed(undefined, open)).toHaveLength(18);
   });
 
   /** Names the site's own declared types, which is a bounded list of strings

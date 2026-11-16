@@ -203,6 +203,9 @@ export const UNSCOPED_API: readonly RegExp[] = [
   /^\/audit$/,
   /^\/migrations$/,
   /^\/assets\/describe$/,
+  // `ADMIN` is the platform tier (decision 10), and a flush of every scope's edge copies
+  // is exactly that: spec 43's "Clear cached files" (`asset-access.md` decision 10).
+  /^\/assets\/purge-all$/,
 ];
 
 /**

@@ -533,6 +533,43 @@ export async function presentAssetRows<T extends { id: string }>(
   });
 }
 
+/**
+ * `presentAssetRows` for folders: `access` (own, null inherits) and `effectiveAccess`
+ * (null is public) off `asset_folders`, only where the scope's brand gates files. With
+ * no `domain` the rows come back untouched and nothing is read.
+ */
+export async function presentFolderRows<T extends { id: string }>(
+  db: FolioDb,
+  rows: readonly T[],
+  domain: AssetAccessDomain | null,
+): Promise<readonly T[] | WithAccess<T>[]> {
+  if (!domain || rows.length === 0) return rows;
+  const stored = new Map<string, { access: string | null; effective: string | null }>();
+  await Promise.all(
+    bindChunks(
+      rows.map((r) => r.id),
+      1,
+    ).map(async (chunk) => {
+      const { results } = await db
+        .prepare(
+          `select id, access, effective_access as effective from asset_folders
+            where id in (${chunk.map(() => "?").join(", ")})`,
+        )
+        .bind(...chunk)
+        .all<{ id: string; access: string | null; effective: string | null }>();
+      for (const row of results) stored.set(row.id, row);
+    }),
+  );
+  return rows.map((row) => {
+    const own = stored.get(row.id);
+    return {
+      ...row,
+      access: present(own?.access ?? null),
+      effectiveAccess: present(own?.effective ?? null),
+    };
+  });
+}
+
 function present(stored: string | null): Json | null {
   if (stored === null) return null;
   try {

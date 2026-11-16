@@ -356,7 +356,8 @@ function platform(method: string, below: string): boolean {
   if (["/api/auth-events", "/api/reindex", "/api/migrate", "/api/audit"].includes(below)) {
     return true;
   }
-  return method === "POST" && below === "/api/assets/describe";
+  // `purge-all` flushes every scope's edge copies, so a site admin may not (spec 43).
+  return method === "POST" && ["/api/assets/describe", "/api/assets/purge-all"].includes(below);
 }
 
 /**
@@ -367,7 +368,7 @@ function platform(method: string, below: string): boolean {
 function unscopedApi(below: string): boolean {
   const rest = below.slice("/api".length);
   return (
-    /^\/(schema|v1\/schema|logout|auth-events|reindex|migrate|audit|migrations|assets\/describe)$/.test(
+    /^\/(schema|v1\/schema|logout|auth-events|reindex|migrate|audit|migrations|assets\/describe|assets\/purge-all)$/.test(
       rest,
     ) || /^\/(me|users|tokens|sites|v1\/sites)(\/|$)/.test(rest)
   );
@@ -823,6 +824,8 @@ describe("every id loader is a fence", () => {
     ["GET", "/api/assets/:id", "read", "asset"],
     ["GET", "/api/assets/:id/usage", "read", "asset"],
     ["PATCH", "/api/assets/:id", "write", "asset"],
+    // Spec 43: the versioned edit of one file (`{ access?, alt?, description? }`).
+    ["PATCH", "/api/v1/assets/:id", "write", "asset"],
     ["DELETE", "/api/assets/:id", "write", "asset"],
     ["POST", "/api/assets/:id/describe", "write", "asset"],
     ["PATCH", "/api/assets/folders/:id", "write", "folder"],

@@ -342,6 +342,7 @@ describe("the v1 route list", () => {
     "GET /documents/by-path/:path{.*}",
     "GET /schema",
     "GET /search",
+    "PATCH /assets/:id",
     "PATCH /documents/:id",
     "PATCH /documents/:id/fields",
     "POST /assets",
