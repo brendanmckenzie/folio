@@ -59,11 +59,34 @@ const gate: FolioGate<Env> = {
     return /(?:^|;\s*)demo_member=1(?:;|$)/.test(cookie) ? { id: "demo-member" } : null;
   },
   allows: (visitor) => visitor !== null,
-  // `asset-access.md`: the same fake check for the media library's files, so the admin's
-  // access controls draw in the demo. Same warning as above; phase 9 adds `assetDenied`
-  // and `assetSigning` beside it.
+  // `platform/asset-access.md`: the same fake check for the media library's files, so the
+  // admin's access controls draw in the demo. Same warning as above: `demo_member=1` proves
+  // nothing, and a real `allowsAsset` compares the member's entitlement to `value`.
   allowsAsset: (visitor) => visitor !== null,
+  // A stranger who follows a gated file's link is sent to the host's own sign-in page,
+  // unless the request is an `<img>`, `<video>` or other sub-resource: a redirect to an HTML
+  // page is not an image, so those get the bare 403 (`null`) instead. `Sec-Fetch-Dest` is
+  // sent by every current browser; a client that omits it gets the redirect.
+  assetDenied: (req, _env, ctx) => {
+    const dest = req.headers.get("sec-fetch-dest");
+    if (dest !== null && dest !== "document" && dest !== "iframe") return null;
+    const next = encodeURIComponent(new URL(req.url).pathname);
+    return Response.redirect(
+      new URL(`/sign-in?next=${next}&need=${encodeURIComponent(String(ctx.value))}`, req.url),
+      302,
+    );
+  },
 };
+
+/**
+ * `assetSigning` (`platform/asset-access.md` decision 9): the one secret behind signed file
+ * URLs. **A constant in source, exactly as `demo_member=1` is a fake gate, and for the same
+ * reason: so `scripts/asset-access-test.mjs` runs with nothing to provision.** Anyone who
+ * reads this file can mint a link to any gated file in the demo. A real host returns secrets
+ * from `env` (a Workers secret), one per deployment, at least 32 characters, newest first
+ * so the old one keeps verifying while a rotation drains.
+ */
+const DEMO_ASSET_KEY = "demo-only-asset-signing-key-not-a-secret";
 
 /**
  * A trusted-identity provider that believes a request header.
@@ -266,6 +289,8 @@ const folio = createFolio<Env>({
   },
   // See `gate` above (`platform/visitor-access.md`).
   gate,
+  // See `DEMO_ASSET_KEY` above (`platform/asset-access.md`).
+  assetSigning: { keys: () => [DEMO_ASSET_KEY] },
   /**
    * content-model/forms.md. Everything about a form is built in the admin; the
    * two things only a host can answer live here.
@@ -464,6 +489,27 @@ export default {
         ).run();
       }
       return Response.json({ fail: countriesDown });
+    }
+    // Where `gate.assetDenied` sends a stranger who opens a gated file. A host's own page,
+    // not a Folio route; the real one would be the host's sign-in or purchase flow.
+    if (url.pathname === "/sign-in") {
+      return new Response(
+        `<!doctype html><title>Sign in</title><p>Members only. (Demo: set <code>demo_member=1</code>.)</p>`,
+        { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } },
+      );
+    }
+    // Local development only, like `/dev/last-signin`: a host route that has made its own
+    // entitlement decision answers a signed URL for `?src=` (`folio.signAsset`), so
+    // `scripts/asset-access-test.mjs` can open a gated file with no cookie at all.
+    if (url.pathname === "/dev/sign-asset") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
+      }
+      const src = url.searchParams.get("src") ?? "";
+      const expiresIn = Number(url.searchParams.get("expiresIn") ?? "") || undefined;
+      return Response.json({
+        url: await folio.signAsset(env, src, expiresIn === undefined ? {} : { expiresIn }),
+      });
     }
     if (url.pathname === "/sitemap.xml") {
       return sitemap(await folio.stories(env), url.origin);

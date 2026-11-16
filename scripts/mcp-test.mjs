@@ -256,18 +256,28 @@ check(
   described.value?.alt === "Set by MCP",
   JSON.stringify(described),
 );
-const refused = await callTool("update_asset", { id: assetId, access: "members" }, assetToken);
+const gatedByMcp = await callTool("update_asset", { id: assetId, access: "members" }, assetToken);
 check(
-  "update_asset refuses access on a site that does not gate files",
+  "update_asset sets access on a site that gates files",
+  gatedByMcp.value?.access === "members" && gatedByMcp.value?.effectiveAccess === "members",
+  JSON.stringify(gatedByMcp),
+);
+const refused = await callTool("update_asset", { id: assetId, access: "gold" }, assetToken);
+check(
+  "and refuses a value the gate field does not list",
   refused.error !== undefined || refused.value?.error !== undefined,
   JSON.stringify(refused),
 );
-const refusedUpload = await callTool(
+const gatedUpload = await callTool(
   "upload_asset",
   { filename: "mcp2.png", data: pixel, access: "members" },
   assetToken,
 );
-check("and so does upload_asset", refusedUpload.error !== undefined, JSON.stringify(refusedUpload));
+check(
+  "upload_asset takes access, so the file is gated from its first byte",
+  gatedUpload.value?.asset?.effectiveAccess === "members",
+  JSON.stringify(gatedUpload),
+);
 
 /* --- create, write, preview, publish -------------------------------------- */
 
