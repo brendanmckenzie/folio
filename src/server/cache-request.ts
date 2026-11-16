@@ -94,8 +94,9 @@ export function cacheKeyFor(url: string | URL): string {
  *      live *outside* `basePath` and would otherwise fall through to the host's
  *      `null` branch and be judged as an ordinary page.
  *   5. **`{base}/asset/:key`** is the one Folio surface that must be cached:
- *      public by design, high volume, one indexed read and an R2 GET, and it
- *      already answers immutable cache headers. Note it is singular —
+ *      public by design, high volume, an R2 GET (and one indexed row read when the
+ *      deployment gates files, spec 43; none otherwise), and it already answers
+ *      immutable cache headers for a public file. Note it is singular —
  *      `{base}/api/assets` is the admin's gated list and is caught by the next
  *      rule.
  *   6. **Anything else under `{base}`** is the admin, its JSON, its sockets and

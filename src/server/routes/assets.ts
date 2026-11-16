@@ -40,6 +40,7 @@ import {
   updateAsset,
   uploadAsset,
 } from "../assets";
+import { decideAsset } from "../asset-gate";
 import { ADMIN, ASSETS, EDIT, READ } from "../auth/roles";
 import {
   DEFAULT_DESCRIBE_BATCH,
@@ -861,14 +862,23 @@ export function assetFileRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get("/asset/:key", async (c) => {
     const { media, images } = c.var.bindings();
     if (!media) throw new FolioError("unsupported", "No media bucket is configured");
-    return serveAsset(
-      media,
-      images,
-      assetKeyParam(c.req.param("key")),
-      parseTransform(new URL(c.req.url).searchParams),
-      c.req.raw,
-      rt.logger,
-    );
+    const key = assetKeyParam(c.req.param("key"));
+    const transform = parseTransform(new URL(c.req.url).searchParams);
+    // No asset gating on the deployment: today's call, verbatim, and no D1 read.
+    if (!rt.assetGating) {
+      return serveAsset(media, images, key, transform, c.req.raw, rt.logger);
+    }
+    const decision = await decideAsset(c, rt, key);
+    if (decision.kind === "respond") return decision.response;
+    if (decision.kind === "granted") {
+      return serveAsset(media, images, key, transform, c.req.raw, rt.logger, "private");
+    }
+    // Public file on a gated deployment: today's bytes and headers, plus the tag a purge
+    // can reach (decision 10). A 404 for a missing object stays today's thrown error.
+    const res = await serveAsset(media, images, key, transform, c.req.raw, rt.logger);
+    const headers = new Headers(res.headers);
+    headers.set("cache-tag", decision.tags);
+    return new Response(res.body, { status: res.status, headers });
   });
 
   return app;

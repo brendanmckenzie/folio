@@ -1036,7 +1036,7 @@ const DEGRADED = "public, max-age=60";
  * the bucket by something other than `uploadAsset`) cannot run as this origin —
  * a second layer behind `nosniff`, not a replacement for it.
  */
-const CSP = "default-src 'none'; sandbox";
+export const CSP = "default-src 'none'; sandbox";
 
 /**
  * Headers common to every response this route returns. `nosniff` and the CSP
