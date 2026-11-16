@@ -1273,7 +1273,7 @@ compose as AND. Filtering by a folder includes its descendants.
 **Filing a file never moves an object.** A folder is a nullable column on the
 library row and nothing else — not a key prefix, not a path, not a URL. This is
 the load-bearing decision of the whole feature, because `/folio/asset/:key` is
-public and **its URL is baked into every published page's HTML**: an asset's key
+a stable URL and **it is baked into every published page's HTML**: an asset's key
 is minted once at upload, and moving the object would mean rewriting every
 document and every draft that names the old one, purging every page that
 rendered it, and widening the one regex that keeps the public read narrow. So
@@ -1294,6 +1294,58 @@ moved. A bulk delete's confirmation says how many of the selected files are used
 on published pages before it acts, and then it proceeds anyway if you say so: a
 broken image is visible and fixable, and a delete that refuses leaves an editor
 unable to remove a file at all.
+
+### Who may download a file
+
+On a deployment whose `gate` has `allowsAsset` (see "Visitor access", "Gating files"), a file
+and a folder carry an **access value**, in the gate field's own vocabulary: the options of
+a `select` gate, any text for a text gate, a number or a boolean for those kinds. The
+library draws the control only on such a deployment; elsewhere nothing about it exists
+and the routes answer `unsupported` to a body naming `access`.
+
+- **A file's value is its own, or it inherits.** *Inherit* (stored as `null`) means "take
+  my folder's value", and a file with no value anywhere is public. The detail panel shows
+  which it is. The value Folio checks when the file is requested is the **effective**
+  value, kept on the file and on the folder and always recomputed from the own values, so
+  the asset route reads one column and never walks a tree.
+- **A folder's value reaches everything in it**, the folders beneath it and the files
+  filed directly in any of them, until something nearer says otherwise. Gating a folder
+  gates its contents in one statement.
+- **Moving changes the value; deleting a folder does not.** A file moved out of
+  *Member downloads* into *Press* takes Press's value, which may be public, and the move
+  confirmation says how many files change from gated to public (and the reverse) before
+  you commit. Deleting a folder is tidying, not a decision about access, so before its
+  children re-parent every file filed directly in it, and every child folder, that
+  inherited takes its inherited value as its own. Every effective value is unchanged by
+  the delete and no file opens. Re-creating the folder later leaves those files with an
+  explicit value rather than *Inherit*, which an editor can reset.
+- **An upload made while a folder is open is filed in it**, and takes its value in the
+  same insert, so the file is gated from its first byte served. Without that, a file
+  uploaded "into" *Member downloads* and linked from a gated page would be public until
+  somebody filed it. The inspector's upload has no folder in view and stays unfiled, so
+  a script, or an editor uploading from a field, sets the value explicitly.
+- **A selection can be gated in one action**: *Set access* in the bulk bar, over a
+  selection or a select-all, with no *Inherit* choice (inheriting is a decision made one
+  file or one folder at a time). The list filters to gated files with `?gated=1`.
+
+The same value is set through the APIs: `access` on `PATCH {base}/api/assets/:id`
+and on a folder, `?access=` (and, on the admin route, `?folderId=`) on an upload,
+`access` on the Content API's `PATCH /api/v1/assets/:id` and `?access=` on its upload,
+and `access` on the MCP tools `upload_asset` and `update_asset`. Absent leaves it alone,
+`null` inherits (a file or a folder, not an upload), and a value the gate field does not
+accept is refused before any byte is read.
+
+**Metadata stays public.** A gated file's filename, alt text, description, dimensions and
+tags are answered by every list, by `folio.query` and by `collection` exactly as before;
+only the bytes behind `{base}/asset/:key` are gated. Rows gain `access` and
+`effectiveAccess` on a deployment that gates files.
+
+**Gating a file that was public queues a purge**, because its copies are already at the
+edge. A write that changes access answers `purge: { pending }`, and the library shows
+"N files may still be served from the edge cache; Folio is retrying" while any are owed.
+An administrator also has *Clear cached files*, which flushes every cached file
+(`POST {base}/api/assets/purge-all`). How the purge works, and what makes it
+trustworthy, is under "Caching".
 
 ### Machine-written alt text
 
@@ -3636,6 +3688,79 @@ cache-control: public, max-age=0, s-maxage=604800, must-revalidate
 cache-tag:     site,global:header,story:sty_about,story:sty_home,type:insight
 ```
 
+### Files: the asset tags and the purge queue
+
+A file has the opposite problem to a page. `{base}/asset/:key` is the one Folio surface
+that is cached on purpose (a year, `immutable`), so when an editor gates a file that was
+public, every copy already at the edge has to go, on every host, and the guarantee has
+to survive a purge that fails.
+
+- **The tag.** On a deployment whose `gate` has `allowsAsset`, every public response from
+  the asset route carries `Cache-Tag: asset:<id>,asset:*`. The id is the first sixteen
+  characters of the key, so no read is needed to build it. Gating a file purges
+  `asset:<id>`, which Cloudflare applies to every host, preview surface and `cf.cacheKey`
+  variant that stored the file; `asset:*` is the coarse tag for clearing every file
+  without flushing pages. A deployment without `allowsAsset` emits no tag, and a gated
+  response is never stored, so it has nothing to tag. A published page that renders a
+  gated file also carries `asset:<id>`, so the purge that clears the file refreshes the
+  lock the page drew for it.
+- **The queue.** A purge cannot join the database transaction that gates the file, it
+  can fail, and it shares Workers Caching's five-a-minute budget with every publish. So
+  gating a public file writes a row to `asset_purges` **in the same batch as the change**,
+  and a gated file without an owed purge cannot be committed. A drain reads up to 101
+  rows and issues exactly one purge call, `asset:<id>` per row, or `asset:*` when there are
+  more than 100, so a folder of 600 files costs one call. On success it stamps the rows;
+  on failure it records the attempt and leaves them.
+- **The settling window.** The asset route reads on a D1 session that may be a replica,
+  so a request racing the gating can read the old public value, answer `immutable` and be
+  stored just after the purge succeeded. A row is therefore retired only by a purge that
+  succeeds **after** its `settle_at`, ten minutes after it was queued. D1 publishes no
+  bound on replica lag, and ten minutes is Folio's own; a copy that a replica lagging
+  beyond that lets in is not reached.
+- **Who drains.** The write that queued the rows, after it commits (the response says what
+  is still owed); the same write again 25 seconds later; every later asset write; and
+  **`folio.runSchedules`**, which is the only thing that purges a second time once the
+  window has passed if nobody writes another asset. A host that never calls
+  `runSchedules` from a cron has no settling guarantee. The report's `assetPurges`
+  (`{ issued, pending }`) says what a run did.
+- **It says when it is behind.** Every write that changes access answers
+  `purge: { pending }`, the files whose purge is not yet confirmed after their window,
+  and the library shows a notice while that count is not zero. `GET {base}/api/assets/purges`
+  is the count. The `assetAccessChanged` hook fires after each such write with the files
+  changed (`id`, `key`, `scope`, `from`, `to`) and `pending`.
+- **Best effort.** Pages that link a newly gated file, and pages that drew a lock for a
+  file whose value changed, are purged by `story:` and `asset:` tags in the same call
+  when the budget allows. A page that missed it shows its stale lock until its next
+  purge; the file itself is gated at the route either way.
+
+**The entrypoint rule applies to files, twice over.** A purge is scoped to the entrypoint
+that issued it, so an asset write routed to the default entrypoint (and the cron
+that retries) drains into an empty namespace and reports success. Route every
+write, `PATCH` and `POST` alike, and `runSchedules`, through the cached entrypoint as
+above; the cron is the retry mechanism, so one that skips it leaves the queue to a
+write that may never come. On a gateway, `{base}/asset/:key` with a `sig` parameter, and
+any request carrying a Folio cookie, is `bypass`, so a signed or an editor's request is
+never stored.
+
+**Adopting it.** A copy cached before `allowsAsset` was turned on carries no tag, and no
+tag purge reaches it. Turning it on is a deploy, and the Worker version is part of the
+cache key, so the new version never serves an entry an older one stored. Two cases are not
+covered by that, and `UPGRADING.md` names both: a host sharing the cache across versions
+runs `POST {base}/api/assets/purge-all` once after the deploy (it issues the one
+`purgeEverything` that reaches an untagged entry, and is the library's *Clear cached
+files* for an administrator), and a gradual rollout must reach 100% of traffic before any
+file is gated, because the older version still answers some requests from its own
+untagged copies. The same applies to turning `allowsAsset` off and on again. **This is why
+v1.6.0 is roll-forward only**: redeploying an older version brings back the cache entries
+it stored, every one of them a public copy from before a file was gated.
+
+**Verify it.** `scripts/cache-probe.mjs <url> --asset <key> --token …` gates a public file
+and asserts that every warmed copy (the original and a `?w=320` variant, on each site
+host, the admin origin and the preview origin) stops being served and is denied, again
+after the settling window, and that a member and a stranger arriving together at one cold
+URL never share a response. It restores the file whatever happens. Run it against a
+staging deployment before tagging a release that touches the asset route.
+
 ### Why the tags are computed at render
 
 The tempting design is a reverse index: `content_refs` already records which
@@ -3710,6 +3835,10 @@ overridable, because a host that wants a short edge TTL wants a different design
 - **A deploy invalidates everything**, because the Worker version is part of the
   cache key. That is right for a CMS: a renderer change should not serve pre-change
   HTML.
+- **A gated file is never in the edge cache, and a public one is for a year.** The
+  difference between them is one write, so gating a file that was public is effective
+  from the edge inward and takes a purge to finish (see "Files: the asset tags and the
+  purge queue"). A copy already in a visitor's browser or a proxy is beyond any purge.
 - **Turning caching off does not purge.** Disabling is not an invalidation; a stale
   entry can still be served for a while after you redeploy with `enabled: false`.
   Purge first, then disable.
@@ -3740,7 +3869,7 @@ or `scripts/*-test.mjs` against `wrangler dev` — can observe a hit or a purge.
 computation is therefore a pure function with tests behind it, and
 [`scripts/cache-probe.mjs`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/scripts/cache-probe.mjs) covers the rest against a real
 deployment: it asserts MISS→HIT, triggers a purge for each tag prefix and reports
-time-to-fresh. It needs a deployed Worker, so it is a tool rather than a test and CI
+time-to-fresh, and with `--asset <key>` gates a file and checks that no copy of it survives. It needs a deployed Worker, so it is a tool rather than a test and CI
 never runs it. Run it after changing the purge hook or the tag vocabulary. It cannot
 tell you whether a purge propagated to any colo other than the one answering it —
 that is not observable from one client.
@@ -3826,8 +3955,10 @@ scripts.
 A `viewer` **does** get the sync socket, read-only: watching live changes is the
 point of read access, and the object answers their `tx` frames with the ordinary
 `reject` envelope, so a read-only editor degrades into a read-only editor rather
-than a broken one. `GET /folio/asset/:key` stays public — published pages point
-`<img>` tags at it, so it is exactly as public as the page that embeds it.
+than a broken one. `GET /folio/asset/:key` is public unless the host gates files
+(`gate.allowsAsset`, see "Visitor access"): published pages point `<img>` tags at it, so
+by default it is exactly as public as the page that embeds it, and a file given an access
+value is answered to a visitor the host admits.
 
 **Editor identity is server-supplied.** The Worker validates the session before
 the WebSocket upgrade and hands the verified identity to the Durable Object as a
@@ -4120,6 +4251,144 @@ the host's route answers a paywall rather than a 500.
 No admin change: there is no lock glyph in the content tree, and the inspector
 already edits any root-block field under "Page settings" — the same place an
 editor already goes to change `title` or `noindex`.
+
+### Gating files
+
+Pages are only half of what a members-only site publishes. `GET /folio/asset/:key`
+serves every file in the library to anyone holding its URL, and a PDF linked from a
+members-only page is public bytes in a shared cache under a stable URL. The key is
+random, which makes it hard to guess and does nothing about a forwarded link.
+
+Gating files is **its own opt-in**: a second method on the same `gate`, beside `allows`.
+
+```ts
+gate: {
+  field: 'access',
+  public: 'public',
+  visitor: (req, env) => getMember(req, env),
+  allows: (visitor, value, ctx) => visitor?.plan === value,
+  // May this visitor download a file whose access value is `value`?
+  allowsAsset: (visitor, value, ctx) => visitor?.plan === value,
+},
+```
+
+**`allowsAsset` being present is the whole of "this deployment gates files".** Absent,
+the asset route runs the code it always ran and reads no row, and nothing below applies.
+An asset, and a media-library folder, carries a value in the gate field's own vocabulary
+(`public`, `members`, `premium` for the `select` above), set in the library or through
+the APIs (see Assets). `ctx` is the file (`id`, `key`, `filename`, `contentType`,
+`size`, `folderId`), the scope that owns it, the site whose host served the request, and
+`inherited`, true when the value came from a folder.
+
+**The route decides, cheapest question first, and stops at the first yes.** It reads the
+file's row (no row is a `404`, because an orphaned object must never go out
+`public, immutable`). A file with no value, or the public one, is served as it always was,
+with no host call, so a library that is mostly public keeps its caching. A gated file is
+then admitted by, in order: a valid signature on the URL; a Folio credential that may
+read the file's scope; a share cookie whose page uses the file; and last your `visitor`
+and `allowsAsset`. `allowsAsset` is never called for a public file, a Folio credential or
+a valid signature. `visitor` or `allowsAsset` throwing is logged and is a denial, as it is for a page.
+A stored value that cannot be read reaches `allowsAsset` as `undefined` and the file is
+treated as gated.
+
+**A granted response is `private, no-store`, originals and variants alike.** Workers
+Caching stores neither, so a gated file never enters the edge cache. A resized variant
+keeps its own copy in the Cache API under a separate key, behind the same check, so a
+members-only photo gallery does not pay for an Images transformation on every view.
+
+**A denial is a bare `403`**: empty body, `private, no-store`. A `403` and not a `404`,
+because a gated file's existence is not a secret this protects (the page that links it,
+its filename and its metadata are public). `gate.assetDenied` turns the denial into a
+sign-in or purchase page. Folio rebuilds whatever it returns with `private, no-store`
+forced, because the answer varies by visitor, and `null` (or a throw, which is logged)
+is the bare `403`:
+
+```ts
+assetDenied: (req, env, ctx) => {
+  // An <img>, <video> or fetch() cannot render an HTML page, so only a navigation is
+  // redirected. A browser sends Sec-Fetch-Dest on every request; one that omits it
+  // is treated as a navigation.
+  const dest = req.headers.get('sec-fetch-dest')
+  if (dest !== null && dest !== 'document' && dest !== 'iframe') return null
+  const next = encodeURIComponent(new URL(req.url).pathname)
+  // ctx.value is the value that refused this visitor: send a "premium" file to the
+  // purchase page and a "members" file to sign-in.
+  return Response.redirect(new URL(`/sign-in?next=${next}&need=${ctx.value}`, req.url), 302)
+},
+```
+
+`assetDenied` without `allowsAsset` throws at construction, because it would never be
+called.
+
+**Folio credentials see a gated file the way they see a gated page.** An editor's
+session reads any file in a scope where they hold a role, which is what lets the admin's
+thumbnails and the preview iframe draw gated images (a file has no draft to choose
+between, so the draft cookie is not needed). A token reads a file when its scopes reach
+`content:read` in the file's scope. A preview-origin grant reads a file in its site's
+chain. Under `auth: 'open'` the draft cookie admits. A reviewer with a share link reads
+only the files their page's draft uses, in a scope the page's chain holds.
+
+**Signed URLs are an opt-in credential, minted by the host for a visitor it has itself
+admitted.** A download manager, an emailed "your purchase" link or an external PDF
+viewer re-fetches a URL without the visitor's cookie; a signature on the URL is what
+admits it.
+
+```ts
+createFolio({
+  assetSigning: { keys: (env) => [env.ASSET_KEY_2026_11, env.ASSET_KEY_2026_05] },
+})
+
+// A host route that has made its own entitlement decision (checked the purchase),
+// then redirects to a link valid for five minutes:
+return Response.redirect(await folio.signAsset(env, asset.src), 302)
+
+// Inside a render, for a file the page itself has admitted this visitor to:
+<a href={await page.signAsset(file)}>Download</a>
+```
+
+`folio.signAsset(env, src, { expiresIn })` signs unconditionally, so the route calling
+it owns the entitlement decision. `page.signAsset(asset, { expiresIn })` signs only when
+the page admitted this visitor to this file's own value (an editor's draft, or a
+`granted` page where `allowsAsset` says yes for the file), and answers the plain URL on
+a `public` or `denied` page, whatever that page's headers are. **Never sign in a page
+that is cached**: a signature baked into a shared page authorises every visitor who
+receives it and expires in minutes while the page lives for a week. `expiresIn` defaults
+to 300 seconds and is capped at 86 400. A signature covers the key and the expiry and not
+the transform, so one serves every variant. The first key signs and all verify, which is
+rotation: add the new key first, wait out the longest expiry, then drop the old one. Each
+key must be at least 32 characters. **Use a different key in staging and production**: the
+signature names no deployment, so a shared key lets a staging link open a production file.
+A signed request is never edge-cached, and its response sends `Referrer-Policy:
+no-referrer`. A host on another origin implements the same HMAC:
+`base64url(HMAC-SHA256(key, "folio-asset\n" + assetKey + "\n" + exp))`, with `exp` in Unix
+seconds and no padding on the encoding. `assetSigning` is deployment-level, not per brand,
+and applies to a gated file only (a signed link to a public file is harmless).
+
+**A page can show a lock without knowing who is looking.** `resolveAsset(value,
+resolution)` and an asset link answer `access`, the file's stored value, only for a gated
+file. It is the same for every visitor, so the page stays cacheable, and Folio never
+renders whether *this* visitor may open it. A host that wants "Download" for members and
+"Buy" for everyone else renders a gated page and calls its own check there, or links to
+the file and lets `assetDenied` send the rest to the purchase page.
+
+**What it does not protect.** Search, lists and metadata stay public: a gated file's
+filename, alt text, description, dimensions and tags are answered by `folio.query`,
+`collection` and the APIs exactly as before, which is this feature's position for pages
+too. The gate protects the bytes. And a copy already in a browser's cache or an
+intermediary proxy, fetched while the file was public, is out of reach of any purge:
+gating a file that was public is effective from the edge inward.
+
+**A gated image embedded on a public page is a broken image for most visitors.**
+`check_document` reports `gated-asset-embedded` (a warning) and the inspector says so
+under the image. A gated file in a link or a download field is the legitimate case and
+is not warned about.
+
+A brand whose gate has no `allowsAsset` serves its files as it always did: that is the
+sanctioned way to switch the feature off for one brand. A gated file whose scope resolves
+to no brand (a brand removed from config) is a bare `403`, never served. Read
+`UPGRADING.md`, "Visitor access for files (v1.6.0)", before the first deploy: it says in
+what order to apply, deploy and gate, and why v1.6.0 cannot be rolled back once a file
+is gated.
 
 ## Many sites in one deployment
 
@@ -5057,6 +5326,22 @@ a block author already sees in `render`. `toNested` and `fromNested`
 (`folio/engine`) are the conversion, and they are public because an importer needs
 them too.
 
+### Files
+
+`GET /api/v1/assets` lists the library, `POST /api/v1/assets?filename=…` uploads a file
+and answers `{ asset, value }`, and `PATCH /api/v1/assets/:id` edits `alt`,
+`description` and, on a deployment that gates files, `access`. A body naming `folderId` or
+`tags` is a `400` rather than ignored: folders and tags have no versioned routes.
+
+On a deployment whose `gate` has `allowsAsset`, rows carry `access` (the file's own value,
+`null` for inherit) and `effectiveAccess` (what the asset route enforces, `null` for
+public), an upload takes `?access=`, and a `PATCH` takes `access` (`null` inherits the
+folder's value, absent leaves it alone). Each answers `purge: { pending }`. A script
+that loads protected files **sets `?access=` on the upload itself**, so the file is gated from
+its first byte served and never exists as a public one. Elsewhere `access` is refused with
+`unsupported`. A token that reads a gated file's bytes needs only `content:read`, so a
+script can verify an upload it just made. See "Visitor access", "Gating files".
+
 ### A write is read, diff, commit
 
 ```
@@ -5179,8 +5464,8 @@ Two surfaces over one set of services.
 
 ## An MCP server, for assistants
 
-`{base}/mcp` is the same content again, for Claude or any other MCP client: seventeen
-tools, sixteen of them a v1 route above dispatched internally, so there is no second
+`{base}/mcp` is the same content again, for Claude or any other MCP client: eighteen
+tools, seventeen of them a v1 route above dispatched internally, so there is no second
 implementation of the access gate, the validation or the document shape. **Connecting one
 is documented in [`mcp.md`](mcp.md)** — mint a token on the admin's Access
 screen, then one `claude mcp add` command.
@@ -5199,6 +5484,13 @@ Three things about it are worth knowing here, because they are design rather tha
 - **An agent's edit is an ordinary edit.** It goes through the mutation log like a
   keystroke, so it appears live in an open editor, reads as `token:<name>` in the activity
   trail, and comes back under Cmd+Z.
+- **`upload_asset` and `update_asset` set who may download a file.** Both take an optional
+  `access`, from the site's gate field: `get_schema` answers the vocabulary as
+  `assetAccess`, and a site that does not gate files refuses the argument. `update_asset`
+  (the eighteenth tool, `assets:write`) also edits `alt` and `description`, and takes
+  `null` to inherit the folder's value. An agent loading protected material passes
+  `access` on the upload, so the file is never public. Changing a public file's access
+  queues the cache purge, and the answer reports `purge.pending`.
 - **`preview_document` returns an image**, so an assistant can see whether a page looks
   right rather than infer it from markup. That one needs a Cloudflare Browser Rendering
   binding; without it the tool answers the draft URL and the rendered HTML and says why.

@@ -3,9 +3,9 @@
 > **Group:** platform
 > **Build order:** 43
 > **Size:** L
-> **Status:** draft
+> **Status:** done (built 2026-11-16, ships in `v1.6.0`)
 > **Wire version:** none. Nothing here crosses the socket or the admin↔preview bridge; `PROTOCOL_VERSION` stays where spec 39 leaves it.
-> **Migration:** `0019_asset_access.sql` (claimed). `0018` is spec 39's claim (`editing/agent-suggestions.md`). If this spec builds first, it still takes `0019`: the two are independent, additive files, and wrangler applies whatever is unapplied by filename, so a database that takes `0019` first takes `0018` later exactly as `0013` was taken before `0012`.
+> **Migration:** `0019_asset_access.sql` (landed). `0018` is spec 39's claim (`editing/agent-suggestions.md`). If this spec builds first, it still takes `0019`: the two are independent, additive files, and wrangler applies whatever is unapplied by filename, so a database that takes `0019` first takes `0018` later exactly as `0013` was taken before `0012`.
 > **Build sequence:** after 31 (visitor access), 32 (media library), 17 (caching), 21 (draft sharing), 23 (multi-site) and 34 (multi-brand), all done. Independent of 39 and 42; shares no source file with 39 except `CLAUDE.md` and the ledgers.
 > **Release:** v1.6.0.
 > **Tracker:** GitHub issue #178.
@@ -782,7 +782,7 @@ primitive and, where any declaring root's field is a `select`, one of the option
 declaring root's `select` lists, so a file's value means the same thing whichever page type
 links it. A text value is capped at 200 characters. An unknown value is `400 bad_request`
 naming the allowed values. Setting `access` on a scope whose brand has no `allowsAsset` is
-`400 unsupported` ("This site does not gate files"), the shape `describe` uses for an
+`501 unsupported` ("This site does not gate files"), the shape `describe` uses for an
 unconfigured feature.
 
 Every one of these writes goes through `asset-access.ts`, which queues decision 10's purge
@@ -876,7 +876,7 @@ field, is a download offer, which is the legitimate case this spec exists for.
 - **The inspector**: `AssetCard` (`fields/AssetField.tsx`) shows a lock glyph on any gated
   file and, on a public page, a one-line warning under an embedded gated image ("Members
   only: most visitors will see a broken image"). Its data comes from one new internal route
-  per open document, `GET {base}/api/assets/access?key=…` (repeated, at most 50, `READ`,
+  per open document, `GET {base}/api/assets/access?key=…` (repeated, at most 500, `READ`,
   the request's chain), answering `{ [key]: value }` for gated keys only.
 
 **Rejected: refuse to publish.** A teaser page that shows a members-only cover image to
@@ -953,8 +953,8 @@ Additive throughout; no stored document or mutation log changes.
   `FolioAssetGateContext`, `FolioAssetDeniedContext`; `assetSigning?: { keys(env): readonly
   string[] }` on both config shapes; `FolioPage.signAsset(asset, opts?): Promise<string>`;
   `Folio.signAsset(env, src, opts?): Promise<string>`; `HookPayloadMap.assetAccessChanged`.
-- `server/scheduler.ts`: `ScheduleRunReport.assetPurges?: { purged: number; pending: number;
-  failed?: string }`.
+- `server/scheduler.ts`: `ScheduleRunReport.assetPurges?: { issued: PurgeIssued | null; pending: number }` and
+  `assetPurgesFailed?: true`.
 - `Manifest.assetAccess?` (decision 13).
 
 `PurgeIssued` is unchanged: an asset drain issues `{ tags }`. `folio/core` exports
@@ -981,7 +981,7 @@ Additive throughout; no stored document or mutation log changes.
 
 Every `access` input: absent leaves it alone; `null` inherits (`PATCH` and folders only);
 a value is validated (decision 11). Errors: `400 bad_request` (wrong primitive, unknown
-option, over 200 characters, unknown folder), `400 unsupported` (no asset gating for this
+option, over 200 characters, unknown folder), `501 unsupported` (no asset gating for this
 scope; every new admin route but `purge-all` answers it on such a scope).
 
 ## Acceptance criteria
@@ -1448,3 +1448,76 @@ machinery and wires no route; 6 wires every route, purge calls included.
   its own cron.
 - **`access` on collection item cards** (decision 12).
 - **R2 presigned URLs** (decisions 5 and 9).
+
+## Implementation notes
+
+Built 2026-11-16 on `feat/asset-access` in the plan's order, phases 1 to 8 committed
+separately, phase 9 (the demo, the documents, the end-to-end script and the cache probe)
+last. One migration, `0019_asset_access.sql`; no wire change, `PROTOCOL_VERSION` stays where
+it was. Ships as `v1.6.0` and is roll-forward only (`UPGRADING.md`). A code review after phase
+8 closed its findings in one commit before the admin phase. The Wire and decision text above
+is corrected where a number was wrong (`501`, 500 keys, the scheduler report); the
+differences below are the ones the text still describes as planned.
+
+**Where the spec was wrong or ambiguous, and what was done.**
+
+1. **`unsupported` is `501`.** The spec says `400 unsupported`; `errors.ts` maps `unsupported` to
+   `501`, the status every existing one (describe, the `gated` filter) already answers. Kept.
+2. **The purge is queued in SQL, not from a JS list.** The 501-row read cap would have lost rows
+   for a folder of 600 files, so the queue is an `insert into asset_purges ... select` over the
+   pre-image (`assets.effective_access`) and the post-image (the folders), in the write's batch.
+   The transitions the hook reports are still read, capped at 500 with `truncated`.
+3. **A drain reads only rows never purged or past `settle_at`.** The repeat 25 seconds after a
+   write reads all of them (`all: true`). Otherwise every asset write spends the shared
+   five-a-minute budget re-purging rows still inside their window. `pendingAssetPurges` counts
+   `purged_at is null or purged_at < settle_at`, so the notice shows for the whole window after
+   every gating, which is why the cron is required for the settling guarantee.
+4. **`deleteAsset` leaves its `asset_purges` row** (the review's S2). The file is gone but its copies
+   may not be, and the row is what purges them. Migration `0019`'s comment still says the delete
+   removes it; a landed file is not edited.
+5. **`withActor` resolves a preview grant for `{base}/asset/*`**, only when `rt.assetGating`.
+   Otherwise a grant was never read on the asset route and decision 8's grant rule could not apply.
+6. **Public-mode responses on a gating deployment carry the asset tags for every ungated file**,
+   including files of a brand with no `allowsAsset`, as the decision's own text says.
+7. **A gated file whose scope has no brand is a `403`; a no-row asset is a `404`** with the existing
+   error body plus `private, no-store`.
+8. **`assetRecomputeStatements` reads `assets.folder_id` live** (the review's S1), and a bulk
+   `access` no longer binds a pre-read folder id.
+9. **`page.signAsset` signs a granted file only when its scope is in the render's chain** (the
+   review's B1). The test is single-brand multi-site; a two-brand fixture was not built, and it is
+   the same code path. Per-key scopes ride in a `WeakMap` keyed by the `Resolution`, not in it.
+10. **The checks' `gated-asset-embedded` is a sibling of `targetFindings`** (`gatedEmbedFindings`),
+    because it reads asset rows, not story rows; `CheckBrand.gate` and `CheckContext.gatedAssets`
+    carry its inputs.
+11. **`Manifest.assetAccess` is built by `assetAccessManifest(gate)` in `server/gate.ts`** and spread
+    in `runtime.ts`, not in `toManifest`: core cannot see the resolved gate. `ManifestAssetAccess`
+    is exported from `folio/core`.
+12. **`POST {base}/api/assets/purge-all` is in `UNSCOPED_API`**, the platform tier, because it flushes
+    every scope's copies. It answers `{ ok: false }`, never a 500, with no purge capability.
+    `GET {base}/api/assets/access` takes 500 keys, not 50.
+13. **Routes beyond the table.** A scope with gating answers `purge: { pending }` on every write
+    (patch, upload, delete, bulk, folder); `presentFolderRows` gives folders `access` and
+    `effectiveAccess`; the v1 `PATCH` has a strict body (`folderId` and `tags` are `400`).
+14. **Signing details.** `exp` must be canonical decimal and `exp` equal to now is expired. The key
+    is the last path segment after `/asset/`, so no `assetBase` is needed. An unusable key list is
+    logged once and every signature is treated as invalid. The describer signs when the file has an
+    effective value, which costs one extra read only when `assetSigning` is set.
+15. **Admin.** The library's upload takes the open folder only when the manifest has `assetAccess`;
+    the inspector's upload stays unfiled. The inspector makes one `GET /assets/access` per stage
+    document. A select-all move confirmation counts the rows on screen and says so when it cannot
+    count the rest. Bulk *Set access* has no *Inherit*. *Clear cached files* is behind a confirm
+    dialog whose wording is the build's own. The gate-value labels for a boolean gate are
+    placeholder copy.
+16. **`assetPurgeCapability` is a hidden config key**, like `formPurgeCapability`: the seam the
+    tests inject a purge through.
+
+**What the tests cannot see.** The edge cache does not exist locally, so
+`scripts/cache-probe.mjs --asset <key>` is the check that a tag purge reaches every host,
+surface and variant, and that none survives the settling window. **It must be run against a
+consumer's staging deployment before the release is tagged; a surviving copy blocks it.** The
+end-to-end script `scripts/asset-access-test.mjs` covers the headers, a folder, a delete and a
+signed URL. The `auth: 'open'` draft-cookie and preview-grant admissions are covered by
+`asset-gate.test.ts`; a draft page linking a file outside its chain is implemented and not
+tested.
+
+**Deferred.** Nothing from the plan. Not taken: the review's nits N1 to N5.

@@ -12,7 +12,7 @@ state on your behalf. The cost of implementing one revision is that a client whi
 *only* speak a handshake-based revision (`2025-11-25` or earlier) cannot connect; it gets
 a `400` naming what would work. Current clients negotiate this automatically.
 
-Seventeen tools, sixteen of them an existing v1 route dispatched internally (see
+Eighteen tools, seventeen of them an existing v1 route dispatched internally (see
 [`docs/specs/platform/mcp-server.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/mcp-server.md) decision 2). So an assistant can do what a person can
 do, an agent's edit appears live in an open editor, and it lands in the activity trail
 attributed to the token rather than to whoever minted it.
@@ -36,13 +36,13 @@ Scopes, and what each buys:
 | `content:read:draft` | the above, plus `preview_document` |
 | `content:write` | the above, plus `create_document`, `write_content`, `patch_fields`, `move_document`, `duplicate_document`, `restore_version` |
 | `publish` | the reads, plus `publish_document`, `unpublish_document` |
-| `assets:write` | `upload_asset`, **and nothing else** |
+| `assets:write` | `upload_asset`, `update_asset`, **and nothing else** |
 | `admin` | everything, including `delete_document` |
 
 Two of those are worth knowing rather than discovering:
 
 - **`assets:write` implies no content access at all**, which is the whole reason it is a
-  separate scope. A token holding only it gets one tool.
+  separate scope. A token holding only it gets those two tools.
 - **`check_document` checks the draft by default, which needs `content:read:draft`.** A
   `content:read` token is offered it and is refused that call naming the scope; it can
   still check the published copy with `status: "published"`. Every token that can write
