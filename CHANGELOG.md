@@ -8,6 +8,51 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.6.0
+
+A minor release with one migration, `0019_asset_access.sql`. **Apply it before you deploy the Worker**, and
+read [Visitor access for files](UPGRADING.md#visitor-access-for-files-v160) and
+[v1.6.0 is roll-forward only](UPGRADING.md#v160-is-roll-forward-only) first: once a file
+is gated, a v1.5.x build cannot be redeployed over the database without serving it to
+anyone holding its URL. A host that does not configure `gate.allowsAsset` runs the asset
+route exactly as before.
+
+### Added
+
+- **Visitor access for media-library files** (spec 43, #178). A file and a folder carry an
+  access value in the page gate's own vocabulary, a folder's reaches the files in it, and
+  `{base}/asset/:key` asks the host's new `gate.allowsAsset` for a file that is not public.
+  A granted response is `private, no-store`, originals and variants alike; a denied one is
+  a bare `403`, or whatever `gate.assetDenied` answers. A file with no value is served as
+  it always was, with no host call. The library, the admin API, `PATCH` and `POST` on
+  `{base}/api/v1/assets` (`access`, `?access=`) and the MCP tools `upload_asset` and
+  `update_asset` set it.
+- **Signed file URLs.** The top-level `assetSigning` key, `folio.signAsset(env, src,
+  opts)` and `page.signAsset(asset, opts)` mint a link that admits a request with no
+  cookie, for a download manager, an emailed link or a headless front end.
+- **A durable edge purge for a newly gated file.** Gating a public file queues a row in
+  `asset_purges` in the same batch, tagged `asset:<id>`, and a drain retries until a purge
+  has succeeded after a ten-minute settling window. `folio.runSchedules` carries the retry
+  and reports `assetPurges`. `POST {base}/api/assets/purge-all` and the library's *Clear
+  cached files* flush every cached file.
+- **`resolveAsset` and asset links answer `access`** for a gated file, so a block can draw
+  a lock without varying the page per visitor; `check_document` warns about a gated image
+  embedded on a public page (`gated-asset-embedded`).
+- **The `assetAccessChanged` hook**, and `assetAccess` on the manifest and `get_schema`.
+- **`scripts/cache-probe.mjs --asset <key>`** gates a public file on a deployment and
+  asserts that no cached copy survives.
+
+### Changed
+
+- **`update_asset`** is the eighteenth MCP tool.
+- **A file with no row is a `404`** on a deployment that gates files, never served.
+
+### Breaking changes
+
+None to the `exports` surface or to `createFolio()` keys; every key above is new and
+optional. The operational change is the migration order and the roll-forward-only rule
+in [`UPGRADING.md`](UPGRADING.md#visitor-access-for-files-v160).
+
 ## 1.5.4
 
 A patch release: nothing to run or edit on an existing host. No migration, no wire
