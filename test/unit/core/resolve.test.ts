@@ -644,3 +644,45 @@ describe("known bugs", () => {
     expect(decodeURIComponent(url.pathname)).toBe(`/folio/asset/${key}`);
   });
 });
+
+describe("gated assets (asset-access.md decision 12)", () => {
+  const withGated: Resolution = {
+    stories: {},
+    assetBase: "/folio/asset",
+    gatedAssets: { "ast_000000000001-a.pdf": "members", "ast_000000000003-c.png": 2 },
+  };
+  const file = (key: string) => assetValue({ key });
+
+  it("carries `access` on a gated library file and on nothing else", () => {
+    expect(resolveAsset(file("ast_000000000001-a.pdf"), withGated)?.access).toBe("members");
+    expect(resolveAsset(file("ast_000000000003-c.png"), withGated)?.access).toBe(2);
+    const open = resolveAsset(file("ast_000000000002-b.png"), withGated);
+    expect(open).not.toHaveProperty("access");
+    // An externally hosted file has no key and so no library row to be gated.
+    const external = resolveAsset(assetValue({ url: "https://cdn.example/x.png" }), withGated);
+    expect(external).not.toHaveProperty("access");
+    expect(
+      resolveAssets(
+        [file("ast_000000000001-a.pdf"), file("ast_000000000002-b.png")],
+        withGated,
+      ).map((a) => a.access),
+    ).toEqual(["members", undefined]);
+  });
+
+  it("carries it on an asset link to a gated file, and not on one to a public file", () => {
+    const gatedLink = resolveLink(
+      { kind: "asset", asset: file("ast_000000000001-a.pdf") },
+      withGated,
+    );
+    expect(gatedLink).toMatchObject({ kind: "asset", access: "members" });
+    expect(
+      resolveLink({ kind: "asset", asset: file("ast_000000000002-b.png") }, withGated),
+    ).not.toHaveProperty("access");
+  });
+
+  it("does not mistake an inherited property for a gated key", () => {
+    const hostile: Resolution = { stories: {}, assetBase: "/a", gatedAssets: {} };
+    expect(resolveAsset(file("constructor"), hostile)).not.toHaveProperty("access");
+    expect(resolveAsset(file("__proto__"), hostile)).not.toHaveProperty("access");
+  });
+});

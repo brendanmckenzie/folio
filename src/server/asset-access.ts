@@ -466,6 +466,23 @@ export async function gatedValues(
   return out;
 }
 
+/**
+ * The scope that owns each gated file a resolution drew a lock for, kept beside the
+ * resolution rather than in it (decision 12: `site_id` "is kept on the reader, not the
+ * resolution"), so the serialised payload carries nothing a visitor has no use for.
+ * Keyed by the resolution object `resolve()` returned, which `pageOf` hands on whole.
+ */
+const gatedScopes = new WeakMap<object, ReadonlyMap<string, string>>();
+
+export function rememberGatedScopes(resolution: object, scopes: ReadonlyMap<string, string>): void {
+  gatedScopes.set(resolution, scopes);
+}
+
+/** The owning scope of a gated key in this resolution, or undefined when it is not one. */
+export function gatedScopeOf(resolution: object, key: string): string | undefined {
+  return gatedScopes.get(resolution)?.get(key);
+}
+
 /* ------------------------------------------------------------- presenting --- */
 
 /**

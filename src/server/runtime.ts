@@ -33,7 +33,7 @@ import {
   type ContentQuery,
   type ResolvedCollection,
 } from "../core/query";
-import { formIds, linkedIds, referencedIdsAllLocales } from "../core/refs";
+import { assetKeys, formIds, linkedIds, referencedIdsAllLocales } from "../core/refs";
 import type { PreviewWrap } from "../core/render-wrap";
 import { buildResolution, type Resolution } from "../core/resolve";
 import {
@@ -85,6 +85,7 @@ import {
   refreshList,
 } from "./option-sources";
 import { gateValue, isUngated } from "../core/gate";
+import { decodeAccess, gatedValues, isPublicEffective, rememberGatedScopes } from "./asset-access";
 import { type ResolvedGate, validateGate } from "./gate";
 import {
   createHookRunner,
@@ -1719,7 +1720,23 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           })
         : undefined;
 
-      const [answers, lists] = await Promise.all([
+      /**
+       * The library files this render reaches whose effective value is gated
+       * (`asset-access.md` decision 12): one statement over the keys of the document,
+       * the pulled-in documents and the globals, **in the same `Promise.all`** so it adds
+       * no round trip. Only on a brand whose gate has `allowsAsset` and only when there
+       * is a key to ask about: every other render issues nothing here.
+       */
+      const gatedFetch = async (): Promise<Awaited<ReturnType<typeof gatedValues>> | null> => {
+        if (!gate?.assets) return null;
+        const keys = new Set<string>();
+        for (const pulled of [doc, ...Object.values(docs), ...Object.values(globalDocs ?? {})]) {
+          if (pulled) for (const key of assetKeys(pulled, schema)) keys.add(key);
+        }
+        return keys.size > 0 ? gatedValues(db, [...keys]) : null;
+      };
+
+      const [answers, lists, gatedRows] = await Promise.all([
         Promise.all(
           [...queries].map(
             async ([key, q]) =>
@@ -1730,7 +1747,22 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           ),
         ),
         listsOf,
+        gatedFetch(),
       ]);
+      const gatedAssets: Record<string, Json> = {};
+      const gatedScopes = new Map<string, string>();
+      for (const [key, row] of gatedRows ?? []) {
+        // `isUngated` is the one comparison there is: a file whose effective value is the
+        // gate's own public value is public, whatever the stored text says.
+        if (isPublicEffective(row.value, gate!.assets!.public, logger)) continue;
+        gatedAssets[key] = decodeAccess(row.value, logger) ?? row.value;
+        gatedScopes.set(key, row.site);
+      }
+      /** The scopes ride beside the resolution for `page.signAsset`, not in it. */
+      const finish = (r: Resolution): Resolution => {
+        if (gatedScopes.size > 0) rememberGatedScopes(r, gatedScopes);
+        return r;
+      };
 
       const collate = active?.code ?? locales?.default;
       const forms = Object.fromEntries(
@@ -1760,12 +1792,14 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         ...(Object.keys(docs).length > 0 ? { docs } : {}),
         ...(globalDocs ? { globals: globalDocs } : {}),
         ...(Object.keys(forms).length > 0 ? { forms } : {}),
+        // Absent rather than `{}` for the same reason: no gated file, no key.
+        ...(gatedScopes.size > 0 ? { gatedAssets } : {}),
         // Multi-site only, and last, so a single-site resolution has neither key
         // and serialises byte for byte as it always did (decision 15).
         ...(render ? { site: siteContext(render) } : {}),
         ...(render && opts?.story?.path != null ? { path: opts.story.path } : {}),
       };
-      if (queries.size === 0) return resolution;
+      if (queries.size === 0) return finish(resolution);
 
       const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers);
 
@@ -1805,7 +1839,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         }
       }
 
-      return { ...resolution, collections };
+      return finish({ ...resolution, collections });
     };
 
     /** What `runQuery` needs, assembled from this runtime. */

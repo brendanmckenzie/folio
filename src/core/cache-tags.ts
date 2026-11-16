@@ -185,6 +185,7 @@ function collectionTypes(keys: readonly string[]): { types: string[]; any: boole
  * story:<id>      every id in resolution.stories, plus opts.story
  * global:<name>   every key in resolution.globals
  * form:<id>       every key in resolution.forms
+ * asset:<id>      every gated file in resolution.gatedAssets (its drawn lock)
  * type:<name>     the document type of every distinct collection query
  * type:*          a collection query that filters no type at all
  * site            always
@@ -237,6 +238,10 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
     for (const name of Object.keys(resolution.globals ?? {})) tags.add(globalTag(name));
   }
   for (const id of Object.keys(resolution.forms ?? {})) tags.add(formTag(id));
+  // A gated file the page drew a lock for (`asset-access.md` decision 12): the drain that
+  // clears the file's copies refreshes the page. Only gated keys, so a page with no gated
+  // file carries exactly the tags it did before; the id is the key's `ast_<12 hex>` prefix.
+  for (const key of Object.keys(resolution.gatedAssets ?? {})) tags.add(assetTag(key.slice(0, 16)));
 
   const collections = collectionTypes(Object.keys(resolution.collections ?? {}));
   // A sourced question tags like an index over its type (spec 37 decision 5): the

@@ -42,6 +42,7 @@ import {
   duplicateDocument,
   moveDocument,
 } from "../../documents";
+import { gatedValues } from "../../asset-access";
 import { checkDocument } from "../../checks";
 import { answerMiss, FolioError, rethrow } from "../../errors";
 import {
@@ -488,6 +489,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ...(locale !== undefined ? { locale } : {}),
         bare: (await layerOption(c, rt, story)).layer === "bare",
         targets: (ids) => storiesFor(db, ids, [], chain),
+        ...(brand.gate?.assets ? { gatedAssets: (keys) => gatedValues(db, keys) } : {}),
       }),
     );
   });
