@@ -272,7 +272,7 @@
     },
     {
       "version": "1.6.0",
-      "date": "2026-11-16",
+      "date": "2026-11-17",
       "rollback": "none",
       "migrations": [
         "0019_asset_access.sql"
