@@ -45,6 +45,24 @@ export interface ResolvedGate {
   roots: ReadonlySet<string>;
   /** Document type names whose root is one of `roots`. */
   types: ReadonlySet<string>;
+  /**
+   * What a media-library file's access value may be
+   * (`../../docs/specs/platform/asset-access.md` decision 1): null when
+   * `allowsAsset` is absent, and then nothing about asset gating runs.
+   */
+  assets: AssetAccessDomain | null;
+}
+
+/**
+ * The vocabulary of an asset or folder access value: the gate field's own
+ * primitive, and, where a declaring root's field is a `select`, the options
+ * **every** declaring `select` lists, so a file's value means the same thing
+ * whichever page type links it. Absent `options` is free text, number or boolean.
+ * Labels come from the first declaration.
+ */
+export interface AssetAccessDomain {
+  primitive: "string" | "number" | "boolean";
+  options?: readonly { value: string; label: string }[];
 }
 
 /** The five scalar kinds a gate field may be, for the message that refuses the
@@ -59,9 +77,26 @@ export function validateGate<Env>(
 ): ResolvedGate | null {
   if (!gate) return null;
 
+  // Decision 1: a key that reads as a constraint and enforces nothing throws.
+  if (gate.allowsAsset !== undefined && typeof gate.allowsAsset !== "function") {
+    throw new Error("folio: `gate.allowsAsset` must be a function");
+  }
+  if (gate.assetDenied !== undefined) {
+    if (typeof gate.assetDenied !== "function") {
+      throw new Error("folio: `gate.assetDenied` must be a function");
+    }
+    if (gate.allowsAsset === undefined) {
+      throw new Error(
+        "folio: `gate.assetDenied` is set without `gate.allowsAsset`; it would never be called, because files are not gated",
+      );
+    }
+  }
+
   const field = gate.field;
   const roots = new Set<string>();
   const typeNames = new Set<string>();
+  // Every declaring root's `select`, once per root, for the asset vocabulary.
+  const selects = new Map<string, readonly { value: string; label: string }[]>();
 
   for (const type of types) {
     // A `record` or `singleton` root declaring the field is ignored, not an
@@ -113,6 +148,12 @@ export function validateGate<Env>(
 
     roots.add(type.root);
     typeNames.add(type.name);
+    if (declared.kind === "select" && !selects.has(type.root)) {
+      selects.set(
+        type.root,
+        declared.options.map((o) => ({ value: o.value, label: o.label })),
+      );
+    }
   }
 
   if (roots.size === 0) {
@@ -121,7 +162,36 @@ export function validateGate<Env>(
     );
   }
 
-  return { config: gate, roots, types: typeNames };
+  return { config: gate, roots, types: typeNames, assets: assetDomain(gate, selects) };
+}
+
+/** `ResolvedGate.assets`: null without `allowsAsset`, else the primitive and the shared options. */
+function assetDomain(
+  gate: FolioGate<unknown>,
+  selects: ReadonlyMap<string, readonly { value: string; label: string }[]>,
+): AssetAccessDomain | null {
+  if (gate.allowsAsset === undefined) return null;
+  const primitive = typeof gate.public as AssetAccessDomain["primitive"];
+  if (selects.size === 0) return { primitive };
+
+  const declared = [...selects.entries()];
+  const [, first] = declared[0]!;
+  const options = first.filter((o) =>
+    declared.every(([, list]) => list.some((x) => x.value === o.value)),
+  );
+  // Two roots whose selects share nothing but the public value could never agree
+  // on a gated file's meaning, so the value would mean one thing on one page
+  // type and another on the next.
+  if (declared.length > 1 && options.every((o) => o.value === gate.public)) {
+    throw new Error(
+      `folio: gate field '${gate.field}' is a select on ${declared
+        .map(([root]) => `'${root}'`)
+        .join(
+          " and ",
+        )} with no option in common but ${JSON.stringify(gate.public)}; a gated file's value must mean the same on every page type that links it`,
+    );
+  }
+  return { primitive, options };
 }
 
 /**

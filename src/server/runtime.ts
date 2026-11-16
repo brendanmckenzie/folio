@@ -356,6 +356,12 @@ export interface FolioRuntime {
    */
   brands: ReadonlyMap<string | null, BrandRuntime>;
   /**
+   * True when any brand's gate has `allowsAsset` (`asset-access.md` decision 1).
+   * False is the whole of "this deployment does not gate files": the asset route
+   * runs its original code path and reads no D1 row.
+   */
+  assetGating: boolean;
+  /**
    * The brand of a scope or site, by the registry snapshot the caller already
    * holds. With no `brands`: always the one. With them: null for `shared`, for no
    * scope, and for a scope the snapshot does not hold — which decision 4 has
@@ -2189,6 +2195,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   const deployment = {
     brands,
+    assetGating: [...brands.values()].some((b) => b.gate?.assets != null),
     forScope,
     locales,
     localeOf,

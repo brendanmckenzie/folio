@@ -16,7 +16,7 @@
  * (`docs/specs/content-model/form-actions.md`), which has both; `submitted` below
  * stays the unlogged, unretried hook this paragraph describes.
  */
-import type { Doc } from "../core/doc";
+import type { Doc, Json } from "../core/doc";
 import { DEFAULT_SITE, type GroupRef, type SiteRef } from "../core/sites";
 import type { StoryMeta } from "../core/story";
 import type { PurgeIssued } from "./cache-purge";
@@ -38,7 +38,8 @@ export type HookEvent =
   | "redirectsChanged"
   | "formChanged"
   | "submitted"
-  | "siteChanged";
+  | "siteChanged"
+  | "assetAccessChanged";
 
 /**
  * The same list at runtime, for `validateHooks`. A name must appear in both or
@@ -61,6 +62,7 @@ const HOOK_EVENTS: readonly HookEvent[] = [
   "formChanged",
   "submitted",
   "siteChanged",
+  "assetAccessChanged",
 ];
 
 /** Every hook payload's common shape. Nothing else is injected: a hook that
@@ -262,6 +264,24 @@ export interface SiteChangedHookPayload<Env> extends HookBase<Env> {
   row: SiteRef | GroupRef | null;
 }
 
+/**
+ * The access value of media-library files changed
+ * (`../../docs/specs/platform/asset-access.md` decision 11): an asset or folder
+ * written, moved or bulk-set. Folio queues and drains the edge purge itself;
+ * this is for a headless host that caches on an entrypoint of its own and
+ * forwards `purge` there (multi-site decision 16's precedent).
+ *
+ * `site` is the scope that owns the files. `assets` holds at most 500 entries;
+ * `truncated` is true when more changed. `from` and `to` are the effective
+ * values, decoded; null is public.
+ */
+export interface AssetAccessChangedHookPayload<Env> extends HookBase<Env> {
+  assets: readonly { id: string; key: string; scope: string; from: Json | null; to: Json | null }[];
+  truncated: boolean;
+  /** Files whose purge is still owed in this scope after the drain. */
+  pending: number;
+}
+
 /** Every event's full payload, keyed by name — what `FolioHooks` hands a
  * handler and what `HookRunner.run` builds before calling one. */
 export interface HookPayloadMap<Env> {
@@ -278,6 +298,7 @@ export interface HookPayloadMap<Env> {
   formChanged: FormChangedHookPayload<Env>;
   submitted: SubmittedHookPayload<Env>;
   siteChanged: SiteChangedHookPayload<Env>;
+  assetAccessChanged: AssetAccessChangedHookPayload<Env>;
 }
 
 /**
@@ -330,6 +351,12 @@ export interface FolioHooks<Env> {
    * keeps a front end's host map or cache of its own.
    */
   siteChanged?: (e: SiteChangedHookPayload<Env>) => unknown;
+  /**
+   * The effective access of media-library files changed. Folio's own purge queue
+   * (`asset-access.md` decision 10) already clears the edge; this is for a host
+   * that caches elsewhere.
+   */
+  assetAccessChanged?: (e: AssetAccessChangedHookPayload<Env>) => unknown;
   /** Events to await before responding. Everything else rides `waitUntil`. */
   await?: readonly HookEvent[];
 }

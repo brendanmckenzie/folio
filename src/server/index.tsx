@@ -385,7 +385,14 @@ export type { CacheVerdict } from "./cache-request";
  * back off `FolioPage.access`. `PageAccess` also ships from `folio/core`, with
  * the pure half — `redactDoc` and friends — a host never needs to call itself.
  */
-export type { FolioGate, FolioGateContext } from "./types";
+export type {
+  AssetSignOptions,
+  FolioAssetDeniedContext,
+  FolioAssetGateContext,
+  FolioAssetSigning,
+  FolioGate,
+  FolioGateContext,
+} from "./types";
 export type { PageAccess } from "../core/gate";
 /**
  * The describe seam (`../../docs/specs/content-model/media-library.md`
@@ -1431,6 +1438,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             ? { "content-security-policy": `frame-ancestors ${rt.sites.admin}` }
             : {}),
         },
+        // Phase 8 of `asset-access.md` supplies signing; until then no URL is
+        // ever signed, which is the fail-closed answer.
+        signAsset: async (asset) => asset.src,
       };
     };
 
@@ -1820,6 +1830,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     handle,
     reader,
     cacheProps,
+    // Stub until phase 8 of `asset-access.md`: nothing is signed yet.
+    signAsset: async (_env, src) => src,
     settings,
     /**
      * The locale does not select a document — there is one per story, holding
