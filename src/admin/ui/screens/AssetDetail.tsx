@@ -731,7 +731,11 @@ function FolderEditor({
     <>
       <Field
         label="Folder"
-        help="Metadata only (decision 1) — filing this never changes its URL or moves the object."
+        help={
+          assetAccess
+            ? "Filing this never changes its URL or moves the file. Its access follows its folder unless you set it on the file."
+            : "Filing this never changes its URL or moves the file."
+        }
       >
         {(id) => (
           <Select

@@ -98,6 +98,14 @@
   color: var(--fg-inverse);
 }
 
+/* `.chip:hover` is as specific as `.chipOn`, so without this a hovered active chip took the
+   hover's dark text onto its own dark fill. */
+.chipOn:hover {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--fg-inverse);
+}
+
 /* ------------------------------------------------------------------- cells --- */
 
 .stamp {

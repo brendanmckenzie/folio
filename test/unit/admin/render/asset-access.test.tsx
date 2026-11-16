@@ -16,8 +16,9 @@ import { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Manifest, ManifestAssetAccess } from "../../../../src/core/schema";
 import type { AssetValue } from "../../../../src/core/values";
+import { AssetDetail } from "../../../../src/admin/ui/screens/AssetDetail";
 import { AssetField } from "../../../../src/admin/ui/screens/fields/AssetField";
-import { API, MANIFEST, mountAt, resetServed, serve } from "./fixture";
+import { API, MANIFEST, MOUNT, mountAt, resetServed, serve, stubFetch } from "./fixture";
 
 afterEach(resetServed);
 
@@ -225,5 +226,45 @@ describe("a deployment that gates files", () => {
     );
     expect(screen.getByTitle("Gated: Members")).not.toBeNull();
     expect(screen.queryByText(/broken image/)).toBeNull();
+  });
+});
+
+describe("the detail panel's folder help", () => {
+  const mountDetail = async (assetAccess?: ManifestAssetAccess) => {
+    stubFetch();
+    const view = render(
+      <AssetDetail
+        apiBase={API}
+        mount={MOUNT}
+        row={row("ast_one", "one.png", { access: null, effectiveAccess: null }) as never}
+        onClose={() => {}}
+        onDelete={() => {}}
+        onChanged={() => {}}
+        onNotice={() => {}}
+        mayWrite
+        {...(assetAccess ? { assetAccess } : {})}
+      />,
+    );
+    for (let i = 0; i < 4; i++) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    return view;
+  };
+
+  it("says only that filing is metadata when files are not gated", async () => {
+    await mountDetail();
+    expect(screen.getByText(/Filing this never changes its URL/)).not.toBeNull();
+    expect(screen.queryByText(/decision 1/)).toBeNull();
+    expect(screen.queryByText(/follows its folder/)).toBeNull();
+  });
+
+  it("adds that access follows the folder when files are gated", async () => {
+    await mountDetail(ACCESS);
+    expect(
+      screen.getByText(/Its access follows its folder unless you set it on the file/),
+    ).not.toBeNull();
+    expect(screen.queryByText(/decision 1/)).toBeNull();
   });
 });

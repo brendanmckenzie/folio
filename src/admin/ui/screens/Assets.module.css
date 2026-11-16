@@ -453,6 +453,14 @@
   color: var(--fg-inverse);
 }
 
+/* `.chip:hover` is as specific as `.chipOn`, so without this a hovered active chip took the
+   hover's dark text onto its own dark fill. */
+.chipOn:hover {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--fg-inverse);
+}
+
 .sortGroup {
   display: flex;
   align-items: center;
@@ -1460,9 +1468,9 @@
   width: 22px;
   height: 22px;
   border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
+  background: var(--fg);
+  color: var(--fg-inverse);
+  border: 1px solid var(--bg);
 }
 
 /* In a table row the lock sits after the filename, in flow: a row has the width. */
@@ -1470,7 +1478,7 @@
   display: inline-grid;
   flex: none;
   place-items: center;
-  color: var(--fg-muted);
+  color: var(--fg);
 }
 
 .accessControl {
