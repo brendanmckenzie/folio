@@ -183,6 +183,7 @@ export function apiRoutes<Env>(
               env: c.env,
               logger: rt.logger,
               scoped: rt.sites !== null,
+              ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
             },
             row,
           ),

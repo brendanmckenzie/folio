@@ -98,7 +98,8 @@ export function cacheKeyFor(url: string | URL): string {
  *      deployment gates files, spec 43; none otherwise), and it already answers
  *      immutable cache headers for a public file. Note it is singular —
  *      `{base}/api/assets` is the admin's gated list and is caught by the next
- *      rule.
+ *      rule. **Except with a `sig` parameter**, a signed URL (spec 43), which
+ *      bypasses.
  *   6. **Anything else under `{base}`** is the admin, its JSON, its sockets and
  *      its sign-in. Never.
  */
@@ -120,7 +121,12 @@ export function cacheVerdictFor(req: Request, base: string): CacheVerdict {
   const mode = url.searchParams.get("_folio");
   if (mode === "preview" || mode === "draft") return "bypass";
 
-  if (url.pathname === `${base}/asset` || url.pathname.startsWith(`${base}/asset/`)) return "cache";
+  const isAsset = url.pathname === `${base}/asset` || url.pathname.startsWith(`${base}/asset/`);
+  // A signed URL is a credential in the query (`asset-access.md` decision 9): the
+  // response it earns is `private, no-store` and must neither populate nor be answered
+  // from the entry the public reads. Above the `cache` line, so it cannot be reached.
+  if (isAsset && url.searchParams.has("sig")) return "bypass";
+  if (isAsset) return "cache";
   if (url.pathname === base || url.pathname.startsWith(`${base}/`)) return "bypass";
 
   return null;

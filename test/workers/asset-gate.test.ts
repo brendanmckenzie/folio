@@ -4,6 +4,10 @@ import { asset, defineBlock, select, text } from "../../src/core";
 import type { DocumentType } from "../../src/core/schema";
 import type { FolioBindings, FolioConfig, FolioGate } from "../../src/server";
 import { createFolio, magicLink } from "../../src/server";
+import { signAssetUrl } from "../../src/server/asset-signing";
+import { cacheVerdictFor } from "../../src/server/cache-request";
+import { SECURE_DRAFT_COOKIE, SECURE_GRANT_COOKIE } from "../../src/server/auth/cookie";
+import { consumeGrantCode, mintGrantCode } from "../../src/server/auth/grants";
 import { clearShareKeyMemo } from "../../src/server/asset-gate";
 import { SECURE_COOKIE, SECURE_SHARE_COOKIE } from "../../src/server/auth/cookie";
 import type { Scope } from "../../src/server/auth/roles";
@@ -141,6 +145,9 @@ const gate: FolioGate<Cloudflare.Env> = {
 };
 
 const BASE = "https://example.com/folio";
+const K1 = "asset-sign-key-one-0123456789abcdef";
+const K2 = "asset-sign-key-two-0123456789abcdef";
+let signKeys: string[] = [K1];
 
 function config(withGate: boolean): FolioConfig<Cloudflare.Env> {
   return {
@@ -153,6 +160,7 @@ function config(withGate: boolean): FolioConfig<Cloudflare.Env> {
     route: (p) => (p ? `/${p}` : "/"),
     logger,
     draftMode: true,
+    assetSigning: { keys: () => signKeys },
     ...(withGate ? { gate } : {}),
   };
 }
@@ -210,6 +218,7 @@ beforeAll(async () => {
 });
 beforeEach(() => {
   reset();
+  signKeys = [K1];
   clearShareKeyMemo();
 });
 
@@ -610,5 +619,153 @@ describe("on a deployment with brands", () => {
   it("still serves a public file from a scope with no brand", async () => {
     const shared = await seed(null, "shared");
     expect((await at("ba.example", shared.key)).status).toBe(200);
+  });
+});
+
+/* ----------------------------------------------------------- signed URLs --- */
+
+describe("a signed URL", () => {
+  const signed = async (key: string, expiresIn = 60) =>
+    gated.signAsset(env, `/folio/asset/${key}`, { expiresIn });
+  const getSigned = (key: string, url: string, init: RequestInit = {}) =>
+    get(gated, key, { url: `https://example.com${url}`, ...init });
+
+  it("is served private, no-store with no referrer to a visitor with no cookie, and the host is never asked", async () => {
+    const f = await seed('"members"');
+    const url = await signed(f.key);
+    const res = await getSigned(f.key, url);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+    expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(calls.visitor).toBe(0);
+    expect(calls.allowsAsset).toBe(0);
+    // And the edge is told never to store it.
+    expect(cacheVerdictFor(new Request(`https://example.com${url}`), "/folio")).toBe("bypass");
+  });
+
+  it("covers every transform of the file, each served private", async () => {
+    const f = await seed('"members"');
+    const url = await signed(f.key);
+    const res = await getSigned(f.key, `${url}&w=200&f=webp`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("falls through to the host when expired, tampered, far-future, for another file, or unsigned", async () => {
+    const f = await seed('"members"');
+    const other = await seed('"members"');
+    const base = `/folio/asset/${f.key}`;
+    const url = await signed(f.key);
+    const expired = await signAssetUrl([K1], base, 60, Date.now() - 120_000);
+    const far = await signAssetUrl([K1], base, 60, Date.now() + 2 * 86_400_000);
+    const wrongKey = await signAssetUrl([K2], base, 60, Date.now());
+    const flipped = url.replace(/sig=(.)/, (_m, ch: string) => `sig=${ch === "A" ? "B" : "A"}`);
+    const forOther = await signed(other.key);
+    const swapped = `${base}?${forOther.split("?")[1]}`;
+    for (const bad of [expired, far, wrongKey, flipped, swapped, base]) {
+      calls.visitor = 0;
+      const res = await getSigned(f.key, bad);
+      expect(res.status, bad).toBe(403);
+      expect(calls.visitor, bad).toBe(1);
+    }
+  });
+
+  it("falls through to the member's own cookie when expired", async () => {
+    const f = await seed('"members"');
+    const expired = await signAssetUrl([K1], `/folio/asset/${f.key}`, 60, Date.now() - 120_000);
+    verdict = () => true;
+    const res = await getSigned(f.key, expired, { headers: { "x-member": "1" } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("referrer-policy")).toBeNull();
+    expect(calls.visitor).toBe(1);
+  });
+
+  it("is invalid when a configured key is under 32 characters, with one logged line", async () => {
+    const f = await seed('"members"');
+    const url = await signed(f.key);
+    signKeys = [K1, "short"];
+    const res = await getSigned(f.key, url);
+    expect(res.status).toBe(403);
+    expect(errors.some((e) => e.includes("assetSigning keys are unusable"))).toBe(true);
+    await expect(gated.signAsset(env, `/folio/asset/${f.key}`)).rejects.toThrow(/32 characters/);
+  });
+
+  it("is ignored on a deployment with no assetSigning, and signAsset answers the plain URL", async () => {
+    const f = await seed('"members"');
+    const url = await signed(f.key);
+    const noSigning = createFolio<Cloudflare.Env>({ ...config(true), assetSigning: undefined });
+    const res = await get(noSigning, f.key, { url: `https://example.com${url}` });
+    expect(res.status).toBe(403);
+    expect(await noSigning.signAsset(env, `/folio/asset/${f.key}`)).toBe(`/folio/asset/${f.key}`);
+  });
+});
+
+/* ------------------------------------------- grants and open + draft cookie --- */
+
+describe("a preview-origin grant", () => {
+  const PREVIEW = "https://prev-preview.example";
+  const multi = createFolio<Cloudflare.Env>({
+    ...config(true),
+    sites: { admin: "https://cms.example" },
+    route: (p, _l, site) =>
+      site ? `https://${site.hosts[0] ?? `${site.id}.invalid`}/${p}` : p ? `/${p}` : "/",
+  });
+
+  beforeAll(async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `insert or ignore into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
+           ('prev', 'site', 'Prev', null, 'live', ?, 0, 0),
+           ('prevother', 'site', 'Other', null, 'live', 'https://prevother-preview.example', 0, 0)`,
+      ).bind(PREVIEW),
+      env.DB.prepare(
+        `insert or ignore into site_hosts (host, site_id) values ('prev.example', 'prev'), ('prevother.example', 'prevother')`,
+      ),
+    ]);
+  });
+
+  async function grantCookie(site: string, role: "editor" | "viewer" = "editor") {
+    const user = await createUser(env.DB, {
+      email: `${site}-${role}@ag.example`,
+      grants: { [site]: role },
+    });
+    const { sessionId } = (await createSession(env.DB, user.id)) as unknown as {
+      sessionId?: string;
+      token: string;
+    };
+    const row = await env.DB.prepare("select id from sessions where user_id = ?")
+      .bind(user.id)
+      .first<{ id: string }>();
+    const minted = await mintGrantCode(env.DB, { sessionId: sessionId ?? row!.id }, site);
+    const redeemed = await consumeGrantCode(env.DB, minted.code, site);
+    return `${SECURE_GRANT_COOKIE}=${redeemed!.token}`;
+  }
+  const at = (origin: string, key: string, cookie: string) =>
+    get(multi, key, { url: `${origin}/folio/asset/${key}`, headers: { cookie } });
+
+  it("admits a file of its own scope and refuses another scope's, with no host call", async () => {
+    const mine = await seed('"members"', "prev");
+    const theirs = await seed('"members"', "prevother");
+    const cookie = await grantCookie("prev");
+    const ok = await at(PREVIEW, mine.key, cookie);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("cache-control")).toBe("private, no-store");
+    expect(calls.visitor).toBe(0);
+    expect((await at(PREVIEW, theirs.key, cookie)).status).toBe(403);
+    // Its grant is no credential on another site's preview origin.
+    expect((await at("https://prevother-preview.example", theirs.key, cookie)).status).toBe(403);
+  });
+});
+
+describe("auth: 'open'", () => {
+  const open = createFolio<Cloudflare.Env>({ ...config(true), auth: "open" });
+
+  it("admits a gated file on the draft cookie alone, and refuses without it", async () => {
+    const f = await seed('"members"');
+    const ok = await get(open, f.key, { headers: { cookie: `${SECURE_DRAFT_COOKIE}=1` } });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("cache-control")).toBe("private, no-store");
+    expect(calls.visitor).toBe(0);
+    expect((await get(open, f.key)).status).toBe(403);
   });
 });

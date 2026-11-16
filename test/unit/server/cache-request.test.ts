@@ -203,3 +203,21 @@ describe("cacheKeyFor", () => {
     );
   });
 });
+
+describe("cacheVerdictFor and signed asset URLs (asset-access.md decision 9)", () => {
+  it("bypasses an asset path carrying sig, whatever else it carries", () => {
+    expect(cacheVerdictFor(req("/folio/asset/abc123?exp=1&sig=AAAA"), BASE)).toBe("bypass");
+    expect(cacheVerdictFor(req("/folio/asset/abc123?w=300&sig="), BASE)).toBe("bypass");
+    expect(cacheVerdictFor(req("/folio/asset/abc123?sig=x", { method: "HEAD" }), BASE)).toBe(
+      "bypass",
+    );
+  });
+
+  it("leaves every unsigned asset request, and an exp alone, as it was", () => {
+    expect(cacheVerdictFor(req("/folio/asset/abc123"), BASE)).toBe("cache");
+    expect(cacheVerdictFor(req("/folio/asset/abc123?w=300&f=webp"), BASE)).toBe("cache");
+    expect(cacheVerdictFor(req("/folio/asset/abc123?exp=1"), BASE)).toBe("cache");
+    // A host page that happens to take ?sig= is not Folio's to judge.
+    expect(cacheVerdictFor(req("/shop?sig=1"), BASE)).toBeNull();
+  });
+});

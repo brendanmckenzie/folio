@@ -113,6 +113,7 @@ import type {
   BrandRef,
   FolioBrand,
   FolioBrandedConfig,
+  FolioAssetSigning,
   FolioConfig,
   FolioLogger,
   FolioSingleConfig,
@@ -430,6 +431,11 @@ export interface FolioRuntime {
    * and set by a workers test to observe the drain's calls.
    */
   assetPurgeCapability?: PurgeCapability;
+  /**
+   * `FolioConfig.assetSigning` (`asset-access.md` decision 9): deployment-level, never
+   * per brand. Absent means no signature is ever accepted.
+   */
+  assetSigning?: FolioAssetSigning<unknown>;
   /**
    * The host's raw D1 binding for `env`, not a request's session. For the one read
    * that must open a session of its own: the submit route's primary re-read after a
@@ -2247,6 +2253,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     logger,
     formPurgeCapability,
     assetPurgeCapability,
+    ...(config.assetSigning
+      ? { assetSigning: config.assetSigning as FolioAssetSigning<unknown> }
+      : {}),
     rawDb: (env: unknown) => config.bindings(env as Env).db,
     base,
     sites,

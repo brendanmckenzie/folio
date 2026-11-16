@@ -48,7 +48,14 @@ import { filterBatch, idBatch, readCursor, reasonOf } from "./bulk-walk";
 import { bindChunks, type FolioDb } from "./db";
 import { FolioError } from "./errors";
 import { clampText, SERVED_CONTENT_TYPES } from "./validate";
-import type { DescribeInput, DescribeResult, FolioDescribe, FolioLogger } from "./types";
+import { signAssetUrl } from "./asset-signing";
+import type {
+  DescribeInput,
+  DescribeResult,
+  FolioAssetSigning,
+  FolioDescribe,
+  FolioLogger,
+} from "./types";
 
 /** In-flight model calls per batch when a host names none. */
 export const DEFAULT_DESCRIBE_CONCURRENCY = 4;
@@ -165,6 +172,8 @@ export interface DescribeDeps {
   media: R2Bucket;
   images?: ImagesBinding | undefined;
   assetBase: string;
+  /** When set, a gated file's `DescribeInput.url` is a five-minute signed URL (spec 43 decision 9). */
+  signing?: FolioAssetSigning<unknown>;
   describe: ResolvedDescribe;
   env: unknown;
   /**
@@ -250,6 +259,27 @@ export function describeUrl(
   const key = row.key.split("/").map(encodeURIComponent).join("/");
   const src = `${assetBase.replace(/\/$/, "")}/${key}`;
   return images ? `${src}?w=${DESCRIBE_WIDTH}&f=webp` : src;
+}
+
+/**
+ * `describeUrl`, signed for five minutes when the file is gated and `assetSigning` is
+ * configured, so a provider fetching it is not answered a `403`. A signing failure leaves
+ * the plain URL: the describer still has `inline()`.
+ */
+async function describeUrlFor(deps: DescribeDeps, row: AssetRow): Promise<string> {
+  const url = describeUrl(deps.assetBase, row, deps.images);
+  if (!deps.signing) return url;
+  try {
+    const gated = await deps.db
+      .prepare("select effective_access as e from assets where id = ?")
+      .bind(row.id)
+      .first<{ e: string | null }>();
+    if (!gated || gated.e === null) return url;
+    return await signAssetUrl(deps.signing.keys(deps.env), url, 300, Date.now());
+  } catch (err) {
+    (deps.logger ?? console).error("folio: could not sign a describe URL", err);
+    return url;
+  }
 }
 
 /** One number, so the URL and the rendition `inline()` builds cannot disagree. */
@@ -429,7 +459,7 @@ export async function describeAsset(
     contentType: row.contentType,
     width: row.width,
     height: row.height,
-    url: describeUrl(deps.assetBase, row, deps.images),
+    url: await describeUrlFor(deps, row),
     // Lazy, and R2 is only reached if the host asks. A `null` object — deleted
     // between the row being read and the host calling — is an empty buffer
     // rather than a throw the host has to guard: `fn` is where the failure

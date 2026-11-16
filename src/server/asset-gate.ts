@@ -25,6 +25,7 @@ import { assetKeys } from "../core/refs";
 import { ALL_SCOPES, chain, type Registry } from "../core/sites";
 import { type AssetAccessRow, assetAccessByKey, decodeAccess } from "./asset-access";
 import { CSP } from "./assets";
+import { verifyAssetSignature } from "./asset-signing";
 import { hasDraftCookie, shareCookieTokens } from "./auth/cookie";
 import {
   allows,
@@ -42,7 +43,7 @@ import type { FolioAssetGateContext, FolioEnv } from "./types";
 /** What the route does with a request once the gate has looked at it. */
 export type AssetDecision =
   | { kind: "public"; tags: string }
-  | { kind: "granted" }
+  | { kind: "granted"; signed?: true }
   | { kind: "respond"; response: Response };
 
 const BARE_HEADERS = {
@@ -77,11 +78,31 @@ export function assetTags(key: string): string {
 }
 
 /**
- * Signature verification (decision 9) answers "absent" until phase 8: a request is never
- * admitted by one here.
+ * Step 3a (decision 9): a live signature over this key admits with no host call. Anything
+ * else (absent, malformed, expired, tampered, far-future, an unconfigured deployment, a
+ * key under 32 characters) falls through to the steps below. A bad key list is logged.
  */
-async function signatureAdmits(): Promise<boolean> {
-  return false;
+async function signatureAdmits<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+  key: string,
+): Promise<boolean> {
+  if (!rt.assetSigning) return false;
+  const params = new URL(c.req.url).searchParams;
+  const sig = params.get("sig");
+  if (sig === null) return false;
+  try {
+    return await verifyAssetSignature(
+      rt.assetSigning.keys(c.env),
+      key,
+      params.get("exp"),
+      sig,
+      Date.now(),
+    );
+  } catch (err) {
+    rt.logger.error("folio: assetSigning keys are unusable; ignoring signatures", err);
+    return false;
+  }
 }
 
 export async function decideAsset<Env>(
@@ -133,7 +154,7 @@ export async function decideAsset<Env>(
     inherited: row.access === null,
   };
 
-  if (await signatureAdmits()) return { kind: "granted" };
+  if (await signatureAdmits(c, rt, key)) return { kind: "granted", signed: true };
   if (credentialAdmits(c, rt, row, registry)) return { kind: "granted" };
   if (await shareAdmits(c, rt, row, key, brand, registry)) return { kind: "granted" };
 

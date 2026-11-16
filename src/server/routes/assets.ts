@@ -648,6 +648,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           env: c.env,
           logger: rt.logger,
           scoped: rt.sites !== null,
+          ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
           ...(sweep ? { scopes: sweep.scopes } : {}),
         },
         body.selection,
@@ -714,6 +715,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           env: c.env,
           logger: rt.logger,
           scoped: rt.sites !== null,
+          ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
         },
         row,
       );
@@ -795,6 +797,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               env: c.env,
               logger: rt.logger,
               scoped: rt.sites !== null,
+              ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
             },
             row,
           ),
@@ -871,7 +874,20 @@ export function assetFileRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const decision = await decideAsset(c, rt, key);
     if (decision.kind === "respond") return decision.response;
     if (decision.kind === "granted") {
-      return serveAsset(media, images, key, transform, c.req.raw, rt.logger, "private");
+      const served = await serveAsset(
+        media,
+        images,
+        key,
+        transform,
+        c.req.raw,
+        rt.logger,
+        "private",
+      );
+      if (!decision.signed) return served;
+      // A PDF that links out must not hand the signature on in a Referer.
+      const headers = new Headers(served.headers);
+      headers.set("referrer-policy", "no-referrer");
+      return new Response(served.body, { status: served.status, headers });
     }
     // Public file on a gated deployment: today's bytes and headers, plus the tag a purge
     // can reach (decision 10). A 404 for a missing object stays today's thrown error.
