@@ -8,6 +8,15 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.6.1
+
+A patch with no migration and no change to the package's code. **Pin `v1.6.1`, not `v1.6.0`.**
+The `v1.6.0` tag carries the same library, but its release gate failed and it has no GitHub
+Release: the fictional-brand rename in #179 rewrote a substring of the base64 PNG fixture in
+`scripts/fields-test.mjs`, so the end-to-end checks of image dimensions and transforms read a
+corrupt file. This restores the fixture. Everything in 1.6.0 below applies, including its
+migration and [v1.6.0 is roll-forward only](UPGRADING.md#v160-is-roll-forward-only).
+
 ## 1.6.0
 
 A minor release with one migration, `0019_asset_access.sql`. **Apply it before you deploy the Worker**, and

@@ -257,7 +257,7 @@ check("published page still ships no JS", !live.includes("<script"));
 // declines to transform it and returns an empty body, so the test proves nothing.
 const PNG = Uint8Array.from(
   atob(
-    "iVBORw0KGgoAAAANSUhEUgATLEAAAAAwCAIAAAAuKetIAAAAQ0lEQVR42u3PQQkATLgEsItjCPtj" +
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAwCAIAAAAuKetIAAAAQ0lEQVR42u3PQQkAAAgEsItjCPtj" +
       "LCv4FQYrsEzXaxEQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQuFoOKBDTXECg5QAA" +
       "AABJRU5ErkJggg==",
   ),
