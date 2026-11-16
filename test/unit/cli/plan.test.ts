@@ -73,9 +73,9 @@ const db = (env: string | null, name: string, id = `id-${name}`, envs = [env]): 
   binding: "FOLIO_DB",
 });
 const threeEnvs: Db[] = [
-  db("staging", "group-web-folio-staging"),
-  db(null, "group-web-folio"),
-  db("production", "group-web-folio-production"),
+  db("staging", "multi-brand-host-folio-staging"),
+  db(null, "multi-brand-host-folio"),
+  db("production", "multi-brand-host-folio-production"),
 ];
 
 function plan(over: Record<string, unknown> = {}): Plan {
@@ -158,7 +158,7 @@ describe("upgrade plans, 1.2.3 to 1.4.0", () => {
       "d1",
       "migrations",
       "apply",
-      "group-web-folio",
+      "multi-brand-host-folio",
       "--local",
     ]);
   });

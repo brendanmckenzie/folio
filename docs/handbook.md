@@ -4669,8 +4669,8 @@ serve every brand.
 const folio = createFolio<Env>({
   …,
   brands: {
-    allaboutafrica: { label: 'All About Africa', blocks: aaaBlocks, types: aaaTypes },
-    takeoffgo: { label: 'Take Off Go', blocks: tgoBlocks, types: tgoTypes },
+    atlas: { label: 'Atlas Guides', blocks: aaaBlocks, types: aaaTypes },
+    harbour: { label: 'Harbour Travel', blocks: hbrBlocks, types: hbrTypes },
   },
   sites: { admin: 'https://cms.example' },
 })
@@ -4740,7 +4740,7 @@ The sweeps walk the brands. `continueFrom` on a branded deployment is
 `<brand>/<inner>`, each call covers one brand in `brands` order, and in a migrate report
 `complete` means every brand's backlog, so a loop that reads the last report ends
 correctly. A brand's migrations run over that brand's scopes only, and ids carry the
-brand (`takeoffgo/0001-…`) because `schema_migrations` is one table keyed by id. The
+brand (`harbour/0001-…`) because `schema_migrations` is one table keyed by id. The
 routes (`POST /migrate`, `/reindex`, `GET /audit`, `/migrations`) are unscoped, so on a
 branded deployment they are `400 site_required`; under `~<scope>` each covers that
 scope's brand and reports `brand`.
@@ -4804,7 +4804,7 @@ no `brands`. `hooks` stays deployment-wide because the runner, `await` and every
 are deployment-level, so a handler tells brands apart by the field. `submitted` is the
 usual case, one brand forwarding to its own CRM. `MagicLinkMail.scope` is `{ id, name,
 brand }`, parsed from the sign-in's same-origin `next`, so one sender on the brand-neutral
-admin origin can write "Sign in to Take Off Go". `forms.verify` and `ratePerHour` are the
+admin origin can write "Sign in to Harbour Travel". `forms.verify` and `ratePerHour` are the
 brand's, chosen by the site a submission arrives on.
 
 ### What it costs, and what it leaves out

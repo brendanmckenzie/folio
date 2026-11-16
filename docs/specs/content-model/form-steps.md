@@ -19,10 +19,10 @@ pages: `FormLayout` holds only `sections` (`src/core/forms.ts:178-181`, whose ow
 comment calls it "the home for slice 3's `steps` too"). And every host writes the
 same state management around the engine by hand. Both live hosts parse the
 `folio_status` round trip themselves, keep their own map of status messages, and
-work out which questions to mark invalid. Take Off Go does this in
-`group-web/app/brands/takeoffgo/components/forms/EnquiryForm.tsx:190-240`, and All
-About Africa does it differently in
-`group-web/app/brands/allaboutafrica/components/FolioForm.tsx:32-48`, `:256-295`
+work out which questions to mark invalid. Harbour Travel does this in
+`multi-brand-host/app/brands/harbour/components/forms/EnquiryForm.tsx:190-240`, and Atlas
+Guides does it differently in
+`multi-brand-host/app/brands/atlas/components/FolioForm.tsx:32-48`, `:256-295`
 and `:405-413`. Both call `formLayout(form)` with no answers, so neither evaluates a
 condition in the browser.
 
@@ -182,19 +182,19 @@ that code does not exist yet.
   directory only) and `workers`. `@testing-library/react` and `happy-dom` are
   devDependencies.
 
-**hosts (`takeoffgo/group-web`, read-only, pinned to `v1.2.2`):**
+**hosts (`harbour/multi-brand-host`, read-only, pinned to `v1.2.2`):**
 
 - Both hosts post natively with a plain `<form>` and read the outcome from the
   router's location, so that the server render and the hydration agree
   (`EnquiryForm.tsx:206-208`, `FolioForm.tsx:250-256`). Both decide which form
   answered by comparing `folio_form` with `form.name`, but they handle an absent
-  `folio_form` differently. TOG treats it as this form's (`EnquiryForm.tsx:215`).
-  AAA treats it as nobody's (`FolioForm.tsx:263`).
-- AAA's own comment records the cost of a native refusal: "a redirect cannot carry
+  `folio_form` differently. Harbour treats it as this form's (`EnquiryForm.tsx:215`).
+  Atlas treats it as nobody's (`FolioForm.tsx:263`).
+- Atlas's own comment records the cost of a native refusal: "a redirect cannot carry
   what somebody typed, so a server-side rejection of a six-line brief loses the
   brief" (`FolioForm.tsx:96-99`). That is why it relies on browser validation and
   sets no `noValidate`.
-- TOG holds the submit button until Turnstile passes (`EnquiryForm.tsx:155-166`) and
+- Harbour holds the submit button until Turnstile passes (`EnquiryForm.tsx:155-166`) and
   prefills every question, hidden ones included, from the query string by hand
   (`:112-118`, `:135`).
 
@@ -419,7 +419,7 @@ answer while the engine judged another.
 This is spec 35 decision 7, packaged. On the server and on the first client render,
 `mounted` is `false`, `layout` is `formLayout(form)` with no answers, and every step
 is visible. `formProps()` sets no `noValidate`, so the browser's own validation runs
-on the no-JS path, as AAA wants. Navigation buttons (`nextProps`/`backProps`) are
+on the no-JS path, as Atlas wants. Navigation buttons (`nextProps`/`backProps`) are
 meant to be rendered only when `stepped` is true, and it is `false` here. After
 mount (one `useEffect`), the hook reads the DOM form and switches `layout` to
 `formLayout(form, answers)`. Non-current steps get the `hidden` attribute, and
@@ -500,7 +500,7 @@ and the final submit on the client, but it lets the browser post the form, and t
 outcome arrives as a 303 like today.
 
 **Why fetch is the default:** a refused native submission of a five-page form loses
-all five pages, because a redirect cannot carry answers. AAA records that hazard for
+all five pages, because a redirect cannot carry answers. Atlas records that hazard for
 a one-page form today (Ground truth). Since the hook validates every step with the
 server's own validator before sending, a refusal is rare: a file the server sniffs
 as the wrong type, a list that became unavailable, an action check. When it does
@@ -577,7 +577,7 @@ decision 6 rejects.
 belongs to that form. A status with no `folio_form` belongs to every form on the
 page. The route omits `folio_form` only when it could not identify the form at all
 (`routes/forms.ts:813-822`, `not_found`), and a form that has been deleted should
-say something rather than nothing. That is TOG's rule. AAA's opposite rule hides an
+say something rather than nothing. That is Harbour's rule. Atlas's opposite rule hides an
 error page from every form.
 
 The hook's `status.message` is chosen in this order. `ok` is `form.successMessage`.
@@ -589,8 +589,8 @@ carries Folio's own default sentence. **The host's per-status copy is one `messa
 option**, written once per site, and it replaces both hosts' maps.
 
 **Rejected: editor-written messages for `rate`, `verify`, `invalid` and `error`,
-stored on the form.** These sentences are about the site, not the form: AAA's name a
-support email address, and TOG's say "give us a call". A per-form setting would have
+stored on the form.** These sentences are about the site, not the form: Atlas's name a
+support email address, and Harbour's say "give us a call". A per-form setting would have
 an editor write the same four sentences on every form, and it would need new stored
 keys for no new capability. Spec 36 gave editors the refusal text because only the
 editor knows what an action's code means to a visitor. That reason does not apply
@@ -639,7 +639,7 @@ code"), and the visitor can go back to it.
 The hook calls `prefillAnswers(form, { query: search, values })` once per
 `(form, search, values)` and turns the result into `defaultValue` or `defaultChecked`
 in `controlProps`. That includes `hidden`-kind questions: their default is the
-prefill, then `field.value`, then `''`. This replaces TOG's
+prefill, then `field.value`, then `''`. This replaces Harbour's
 `params.get(field.name) ?? field.value` (`EnquiryForm.tsx:117`) for questions the
 editor opts in. Both renders compute the same values from the same `search`, so
 prefill never causes a hydration mismatch. Spec 35 decision 12's opt-in boundary is
@@ -1572,7 +1572,7 @@ this spec can name.
 - **Updating the browser URL after a fetch submission**: a router owns the
   location, and a `history.replaceState` behind its back puts the two out of sync.
   A reload after a fetch success shows the form again, which is harmless.
-- **Adopting the hook in `takeoffgo/group-web`**: a consumer change made in that
+- **Adopting the hook in `harbour/multi-brand-host`**: a consumer change made in that
   repository after this ships, guided by the handbook's migration section.
 
 ## Implementation notes

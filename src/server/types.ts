@@ -681,7 +681,7 @@ export interface FolioBrand<Env> {
   describe?: FolioDescribe<Env>;
   /** This brand's voice and avoided terms, served to agents on the gated v1 `/schema` only. */
   writing?: WritingGuide;
-  /** Ids carry the brand: `takeoffgo/0001-fifty-fifty-to-feature`. */
+  /** Ids carry the brand: `harbour/0001-fifty-fifty-to-feature`. */
   migrations?: readonly Migration[];
 }
 

@@ -1,4 +1,4 @@
-> **History, not current (stopped being current 2026-09-06).** This was the gap analysis for rebuilding the reference Storyblok and Next.js project on Folio, written before either consumer site ran on Folio. Both consumer sites, All About Africa and Take Off Go, now run on Folio, so the gaps are no longer a plan. The live version is [Uncovered from the reference project in ROADMAP.md](ROADMAP.md#uncovered-from-the-reference-project).
+> **History, not current (stopped being current 2026-09-06).** This was the gap analysis for rebuilding the reference Storyblok and Next.js project on Folio, written before either consumer site ran on Folio. Both consumer sites, Atlas Guides and Harbour Travel, now run on Folio, so the gaps are no longer a plan. The live version is [Uncovered from the reference project in ROADMAP.md](ROADMAP.md#uncovered-from-the-reference-project).
 
 # Parity roadmap: delivering a production Storyblok site on Folio
 

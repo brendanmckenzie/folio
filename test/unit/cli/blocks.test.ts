@@ -125,7 +125,7 @@ describe("add block against other hosts' modules", () => {
     expect((files[2] as File).after).toMatch(/"contactForm",\n {8}"quote",\n {6}\]/);
   });
 
-  it("handles a group-web-shaped module: wrap export, side-effect import, comments with brackets", () => {
+  it("handles a multi-brand-host-shaped module: wrap export, side-effect import, comments with brackets", () => {
     const root = host({ installed: null, tools: false, vite: null, wrangler: null });
     const dir = path.join(root, "src/blocks");
     mkdirSync(dir, { recursive: true });

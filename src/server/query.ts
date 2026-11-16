@@ -318,7 +318,7 @@ export function contentSql(
    * An item needs `data` — the root block's fields, which is what a card
    * renders from — and `data` lives inside `published_doc`. Selecting the whole
    * blob to read one object out of it means D1 ships every paragraph of every
-   * listed page on every cache miss: measured on All About Africa's production
+   * listed page on every cache miss: measured on a production
    * database, 542 kB of documents against 27 kB of root blocks across 32
    * published pages, and an eleven-item guides rail is a fifth of that on every
    * uncached render of every page that shows the rail.

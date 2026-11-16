@@ -35,9 +35,9 @@ import {
 const field = (name: string, over: Partial<FormField> = {}): FormField =>
   ({ name, kind: "text", label: name, ...over }) as FormField;
 
-const jambo: FormActionInfo = {
-  id: "jambo",
-  label: "File in Jambo",
+const crm: FormActionInfo = {
+  id: "crm",
+  label: "File in CRM",
   description: "Creates a lead.",
   inputs: [
     { name: "email", kind: "email", label: "Email", required: true },
@@ -68,12 +68,12 @@ const mailer: FormActionInfo = {
   check: false,
   deliver: true,
 };
-const infos = new Map([jambo, mailer].map((i) => [i.id, i]));
+const infos = new Map([crm, mailer].map((i) => [i.id, i]));
 
 const email = field("email", { kind: "email", required: true });
 const area = field("area");
 const attached: FormActionAttachment = {
-  action: "jambo",
+  action: "crm",
   map: { email: "email" },
   settings: { pipeline: "sales" },
 };
@@ -83,7 +83,7 @@ describe("removing a mapped question", () => {
   it("is refused with the action and the input named", () => {
     const reason = removeRefusal([email, area], {}, "email", ctx);
     expect(reason).toBe(
-      "File in Jambo reads its email from this question. Change the mapping first.",
+      "File in CRM reads its email from this question. Change the mapping first.",
     );
   });
 
@@ -110,7 +110,7 @@ describe("removing a mapped question", () => {
       attachments: [attached, { action: "mailer", map: { body: "email" } }],
       infos,
     };
-    expect(actionReaders(both, "email").map((r) => r.action)).toEqual(["jambo", "mailer"]);
+    expect(actionReaders(both, "email").map((r) => r.action)).toEqual(["crm", "mailer"]);
   });
 });
 
@@ -135,7 +135,7 @@ describe("renaming a mapped question", () => {
 describe("changing a mapped question", () => {
   it("refuses a retype to a kind the input does not accept", () => {
     const reason = changeRefusal([email], {}, "email", { ...email, kind: "text" }, ctx);
-    expect(reason).toContain("File in Jambo");
+    expect(reason).toContain("File in CRM");
     expect(reason).toContain("Change the mapping first.");
   });
 
@@ -168,9 +168,9 @@ describe("changing a mapped question", () => {
 
 describe("attachAction and the other reducers", () => {
   it("fills each declared default, and nothing else", () => {
-    const out = attachAction([], jambo);
+    const out = attachAction([], crm);
     expect(out).toEqual([
-      { action: "jambo", settings: { pipeline: "sales", retries: 3, live: true } },
+      { action: "crm", settings: { pipeline: "sales", retries: 3, live: true } },
     ]);
   });
 
@@ -179,22 +179,22 @@ describe("attachAction and the other reducers", () => {
   });
 
   it("does not attach twice, nor past the limit", () => {
-    const once = attachAction([], jambo);
-    expect(attachAction(once, jambo)).toEqual(once);
+    const once = attachAction([], crm);
+    expect(attachAction(once, crm)).toEqual(once);
     const full = Array.from({ length: MAX_FORM_ACTIONS }, (_, i) => ({ action: `a${i}` }));
-    expect(attachAction(full, jambo)).toHaveLength(MAX_FORM_ACTIONS);
+    expect(attachAction(full, crm)).toHaveLength(MAX_FORM_ACTIONS);
   });
 
   it("does not offer an attached action again", () => {
-    expect(offerableActions([jambo, mailer], attachAction([], jambo)).map((i) => i.id)).toEqual([
+    expect(offerableActions([crm, mailer], attachAction([], crm)).map((i) => i.id)).toEqual([
       "mailer",
     ]);
-    expect(offerableActions([jambo, mailer], [])).toHaveLength(2);
+    expect(offerableActions([crm, mailer], [])).toHaveLength(2);
   });
 
   it("offers nothing once the form is full", () => {
     const full = Array.from({ length: MAX_FORM_ACTIONS }, (_, i) => ({ action: `a${i}` }));
-    expect(offerableActions([jambo], full)).toEqual([]);
+    expect(offerableActions([crm], full)).toEqual([]);
   });
 
   it("detaches and reorders without mutating", () => {
@@ -207,34 +207,34 @@ describe("attachAction and the other reducers", () => {
   });
 
   it("maps and unmaps an input", () => {
-    const mapped = withMapping([{ action: "jambo" }], "jambo", "email", "email");
+    const mapped = withMapping([{ action: "crm" }], "crm", "email", "email");
     expect(mapped[0]?.map).toEqual({ email: "email" });
-    const cleared = withMapping(mapped, "jambo", "email", "");
-    expect(cleared[0]).toEqual({ action: "jambo" });
+    const cleared = withMapping(mapped, "crm", "email", "");
+    expect(cleared[0]).toEqual({ action: "crm" });
   });
 
   it("sets a setting and clears it on empty", () => {
-    const set = withActionSetting([{ action: "jambo" }], "jambo", "note", "hi");
+    const set = withActionSetting([{ action: "crm" }], "crm", "note", "hi");
     expect(set[0]?.settings).toEqual({ note: "hi" });
-    expect(withActionSetting(set, "jambo", "note", "")[0]).toEqual({ action: "jambo" });
-    expect(withActionSetting(set, "jambo", "note", undefined)[0]).toEqual({ action: "jambo" });
-    expect(withActionSetting(set, "jambo", "retries", 0)[0]?.settings).toEqual({
+    expect(withActionSetting(set, "crm", "note", "")[0]).toEqual({ action: "crm" });
+    expect(withActionSetting(set, "crm", "note", undefined)[0]).toEqual({ action: "crm" });
+    expect(withActionSetting(set, "crm", "retries", 0)[0]?.settings).toEqual({
       note: "hi",
       retries: 0,
     });
-    expect(withActionSetting(set, "jambo", "live", false)[0]?.settings?.live).toBe(false);
+    expect(withActionSetting(set, "crm", "live", false)[0]?.settings?.live).toBe(false);
   });
 
   it("writes a message to the source, or to a locale's translation", () => {
-    const source = withMessage([{ action: "jambo" }], "jambo", "error", "Sorry", "en", "en");
+    const source = withMessage([{ action: "crm" }], "crm", "error", "Sorry", "en", "en");
     expect(source[0]?.messages).toEqual({ error: "Sorry" });
-    const fr = withMessage(source, "jambo", "error", "Désolé", "fr", "en");
+    const fr = withMessage(source, "crm", "error", "Désolé", "fr", "en");
     expect(fr[0]?.i18n).toEqual({ fr: { messages: { error: "Désolé" } } });
     expect(messageText(fr[0] as FormActionAttachment, "error", "fr", "en")).toBe("Désolé");
     expect(messageText(fr[0] as FormActionAttachment, "error", "en", "en")).toBe("Sorry");
-    const cleared = withMessage(fr, "jambo", "error", "", "fr", "en");
+    const cleared = withMessage(fr, "crm", "error", "", "fr", "en");
     expect(cleared[0]?.i18n).toBeUndefined();
-    expect(withMessage(cleared, "jambo", "error", "", "en", "en")[0]).toEqual({ action: "jambo" });
+    expect(withMessage(cleared, "crm", "error", "", "en", "en")[0]).toEqual({ action: "crm" });
   });
 
   it("lists the questions an input may read, by kind", () => {
@@ -257,19 +257,19 @@ describe("addedActionProblems (the Save rule)", () => {
   });
 
   it("names a problem the draft adds", () => {
-    const draft = { ...saved, actions: [{ action: "jambo", settings: { pipeline: "sales" } }] };
+    const draft = { ...saved, actions: [{ action: "crm", settings: { pipeline: "sales" } }] };
     expect(addedActionProblems(saved, draft, infos)[0]).toContain(
-      "File in Jambo: Email needs a question",
+      "File in CRM: Email needs a question",
     );
   });
 
   it("holds back a newly attached action that is incomplete", () => {
-    const draft = { ...saved, actions: [{ action: "jambo" }] };
+    const draft = { ...saved, actions: [{ action: "crm" }] };
     expect(addedActionProblems({ ...saved, actions: [] }, draft, infos).length).toBeGreaterThan(0);
   });
 
   it("lets an already-incomplete attachment save, and a partial fix", () => {
-    const broken = { fields: [email, area], layout, actions: [{ action: "jambo" }] };
+    const broken = { fields: [email, area], layout, actions: [{ action: "crm" }] };
     expect(
       addedActionProblems(
         broken,
@@ -277,7 +277,7 @@ describe("addedActionProblems (the Save rule)", () => {
         infos,
       ),
     ).toEqual([]);
-    const fixed = { ...broken, actions: [{ action: "jambo", map: { email: "email" } }] };
+    const fixed = { ...broken, actions: [{ action: "crm", map: { email: "email" } }] };
     expect(addedActionProblems(broken, fixed, infos)).toEqual([]);
   });
 

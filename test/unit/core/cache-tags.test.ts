@@ -533,7 +533,7 @@ describe("cacheTags: option sources (spec 37 decision 5)", () => {
     const host = { source: "countries" };
     expect(cacheTags(sourcedForm(host), { story: "sty_page" }).tags).toContain("source:countries");
     expect(sourceTag("countries")).toBe("source:countries");
-    expect(sourceTag("countries", "takeoffgo")).toBe("source:countries@takeoffgo");
+    expect(sourceTag("countries", "harbour")).toBe("source:countries@harbour");
     const branded = {
       ...sourcedForm(host),
       path: "p",
@@ -545,11 +545,11 @@ describe("cacheTags: option sources (spec 37 decision 5)", () => {
         surface: "live",
         chain: ["alpha"],
         layered: [],
-        brand: "takeoffgo",
+        brand: "harbour",
       },
     } as never as Resolution;
     const { tags } = cacheTags(branded, { story: "sty_page" });
-    expect(tags).toContain("source:countries@takeoffgo");
+    expect(tags).toContain("source:countries@harbour");
     expect(tags).not.toContain("source:countries");
   });
 

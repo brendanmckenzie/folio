@@ -12,8 +12,8 @@ import { validateForms } from "../../../src/server/form-responses";
 type Env = Record<string, never>;
 
 const base = {
-  id: "jambo",
-  label: "File in Jambo",
+  id: "crm",
+  label: "File in CRM",
   deliver: () => {},
 };
 
@@ -30,7 +30,7 @@ describe("formAction", () => {
         void email;
       },
     });
-    expect(def.id).toBe("jambo");
+    expect(def.id).toBe("crm");
   });
 });
 
@@ -100,8 +100,8 @@ describe("validateForms: actions", () => {
       codes: { dupe: { label: "Dupe", message: "Already enquired." } },
       check: () => ({ ok: true }),
     })!;
-    expect(typeof forms.actions.get("jambo")?.check).toBe("function");
-    expect(forms.infos.get("jambo")?.codes.map((c) => c.code)).toEqual(["dupe", "error"]);
+    expect(typeof forms.actions.get("crm")?.check).toBe("function");
+    expect(forms.infos.get("crm")?.codes.map((c) => c.code)).toEqual(["dupe", "error"]);
   });
 
   it("keeps actions as a valid forms key", () => {
@@ -110,7 +110,7 @@ describe("validateForms: actions", () => {
 
   it.each([
     ["actions that is not an array", { actions: {} }, /must be an array/],
-    ["an id with capitals", { id: "Jambo" }, /not a valid action id/],
+    ["an id with capitals", { id: "CRM" }, /not a valid action id/],
     ["an id that is too long", { id: `a${"b".repeat(48)}` }, /not a valid action id/],
     ["no id", { id: undefined }, /not a valid action id/],
     ["no label", { label: " " }, /non-empty label/],
@@ -204,9 +204,9 @@ describe("the verify warning", () => {
   const infosOf = (...defs: object[]) => validateActions(defs).infos;
 
   it("names the action and brand for a check with codes and no verify", () => {
-    const lines = actionWarnings(infosOf(coded), false, "takeoffgo");
+    const lines = actionWarnings(infosOf(coded), false, "harbour");
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/"dup".*brand 'takeoffgo'/);
+    expect(lines[0]).toMatch(/"dup".*brand 'harbour'/);
   });
 
   it("is silent with a verify configured", () => {

@@ -12,7 +12,7 @@ import { createFolio } from "../../src/server";
  * POST naming a story of another site or another brand is `invalid`
  * (`form-option-sources.md` decision 8, and the multi-site and multi-brand invariants).
  *
- * Group `north` holds site `alpha`; `bravo` is a separate site of the same brand; `tgo`
+ * Group `north` holds site `alpha`; `bravo` is a separate site of the same brand; `hbr`
  * is a site of the other brand. Each has a published trip.
  */
 
@@ -33,8 +33,8 @@ const types = (): DocumentType[] => [
 ];
 
 const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
-  aaa: { label: "AAA", blocks: [page("pageRoot"), trip("tripRoot")], types: types() },
-  tgo: { label: "TGO", blocks: [page("pageRoot"), trip("tripRoot")], types: types() },
+  atl: { label: "ATL", blocks: [page("pageRoot"), trip("tripRoot")], types: types() },
+  hbr: { label: "HBR", blocks: [page("pageRoot"), trip("tripRoot")], types: types() },
 };
 
 const config: FolioConfig<Cloudflare.Env> = {
@@ -47,8 +47,8 @@ const config: FolioConfig<Cloudflare.Env> = {
   assets: {
     admin: "/folio-admin.js",
     brands: {
-      aaa: { preview: "/aaa.js", previewCss: ["/aaa.css"] },
-      tgo: { preview: "/tgo.js", previewCss: ["/tgo.css"] },
+      atl: { preview: "/atl.js", previewCss: ["/atl.css"] },
+      hbr: { preview: "/hbr.js", previewCss: ["/hbr.css"] },
     },
   },
   route: (p, _l, site) => (site ? `https://${site.hosts[0] ?? site.id}/${p}` : `/${p}`),
@@ -85,20 +85,20 @@ beforeAll(async () => {
   await env.DB.batch([
     env.DB.prepare(
       `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-         ('north', 'group', 'North', null, null, null, 'aaa', 0, 0),
-         ('alpha', 'site', 'Alpha', 'north', 'live', null, 'aaa', 0, 0),
-         ('bravo', 'site', 'Bravo', null, 'live', null, 'aaa', 0, 0),
-         ('tgo', 'site', 'TGO', null, 'live', null, 'tgo', 0, 0)`,
+         ('north', 'group', 'North', null, null, null, 'atl', 0, 0),
+         ('alpha', 'site', 'Alpha', 'north', 'live', null, 'atl', 0, 0),
+         ('bravo', 'site', 'Bravo', null, 'live', null, 'atl', 0, 0),
+         ('hbr', 'site', 'HBR', null, 'live', null, 'hbr', 0, 0)`,
     ),
     env.DB.prepare(
       `insert into site_hosts (host, site_id) values
-         ('alpha.example', 'alpha'), ('bravo.example', 'bravo'), ('tgo.example', 'tgo')`,
+         ('alpha.example', 'alpha'), ('bravo.example', 'bravo'), ('hbr.example', 'hbr')`,
     ),
   ]);
   await story("sty_alpha", "alpha", "Alpha trip");
   await story("sty_north", "north", "Group trip");
   await story("sty_bravo", "bravo", "Bravo trip");
-  await story("sty_tgo", "tgo", "TGO trip");
+  await story("sty_hbr", "hbr", "HBR trip");
   await story("sty_alpha_draft", "alpha", "Alpha draft", false);
 
   formId = "frm_0a0a0a0a0a0a";
@@ -163,7 +163,7 @@ describe("a content-sourced question is validated against the receiving site's c
   });
 
   it("refuses another brand's trip", async () => {
-    const { status, json } = await submit("alpha.example", "sty_tgo");
+    const { status, json } = await submit("alpha.example", "sty_hbr");
     expect(status).toBe(422);
     expect(json.fields).toEqual({ trip: "invalid" });
   });

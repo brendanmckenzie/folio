@@ -110,7 +110,7 @@ describe("meSites on a deployment with brands", () => {
   // `multi-brand.md` decision 5: no `shared` scope, so none is offered, even to a
   // platform admin or under `auth: 'open'`, for whom every scope reads as `admin`.
   const BRANDED: Registry = {
-    groups: [{ id: "north", name: "North", brand: "aaa" }],
+    groups: [{ id: "north", name: "North", brand: "atl" }],
     sites: [
       {
         id: "alpha",
@@ -119,7 +119,7 @@ describe("meSites on a deployment with brands", () => {
         status: "live",
         hosts: [],
         preview: null,
-        brand: "aaa",
+        brand: "atl",
       },
     ],
     shared: false,
@@ -136,8 +136,8 @@ describe("meSites on a deployment with brands", () => {
 
   it("gives each scope its brand ref and lists the brands, only when told them", () => {
     const brands = [
-      { id: "aaa", label: "All About Africa" },
-      { id: "tgo", label: "Take Off Go" },
+      { id: "atl", label: "Atlas Guides" },
+      { id: "hbr", label: "Harbour Travel" },
     ];
     const me = meSites(BRANDED, null, undefined, brands);
     expect(me.scopes.map((s) => [s.id, s.brand])).toEqual([

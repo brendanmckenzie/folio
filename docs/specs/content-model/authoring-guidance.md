@@ -16,7 +16,7 @@ what belongs in it. `get_schema` answers the manifest, and a field there carries
 `label`, an optional one-line `help` and its kind's constraints (`src/core/fields.ts:10-59`).
 There is nowhere to say "a hero heading is at most 60 characters", "write this in the
 second person", or "this brand never says *cheap*". A block carries no description
-at all (`src/core/schema.ts:29-47`), so an agent picking among AAA's 35 blocks
+at all (`src/core/schema.ts:29-47`), so an agent picking among Atlas's 35 blocks
 chooses from labels. Once it has written, it has no way to ask whether the page is
 sound. `src/server/validate.ts` validates HTTP request bodies, not documents (its
 header, `:1-19`). The content rules that exist are spread across three places that
@@ -851,10 +851,10 @@ AND its heading field carries help, length and guidance exactly as declared
 ```
 
 ```
-GIVEN brand takeoffgo declares writing and brand allaboutafrica does not
-WHEN get_schema is called on a takeoffgo site
-THEN the answer carries takeoffgo's writing
-WHEN it is called on an allaboutafrica site
+GIVEN brand harbour declares writing and brand atlas does not
+WHEN get_schema is called on a harbour site
+THEN the answer carries harbour's writing
+WHEN it is called on an atlas site
 THEN the answer has no writing key
 AND GET {base}/api/schema (open) carries no writing key on either
 AND server/discover's instructions contain no text from either guide

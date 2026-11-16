@@ -758,7 +758,7 @@ was wrong in a way nothing here could see, because the whole spec was written
 against lists of a dozen short documents and the cost is invisible until the
 documents are long.
 
-Measured on All About Africa, the first host to ship a real one: an eleven-item
+Measured on Atlas Guides, the first host to ship a real one: an eleven-item
 guides rail carried **250,450 bytes** of document bodies, on the home page and on
 all thirteen guide pages. 68% of a 367 kB response; 92% of the hydration payload
 once gzipped. Of 460 prose strings across the ten sibling guides on one page,

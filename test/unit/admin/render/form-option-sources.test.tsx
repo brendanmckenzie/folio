@@ -41,7 +41,7 @@ const sourced = (over: Record<string, unknown> = {}) => ({
 
 const COUNTRIES = {
   id: "countries",
-  label: "Countries (Jambo)",
+  label: "Countries (CRM)",
   ttl: 3600,
   localised: false,
   settings: {
@@ -74,7 +74,7 @@ describe("FormBuilder option sources", () => {
     await waitFor(() => expect(screen.getByText("Trip")).not.toBeNull());
     fireEvent.click(screen.getByText("Trip"));
     await waitFor(() => expect(screen.getByText("Serengeti")).not.toBeNull());
-    expect(screen.getByRole("option", { name: "Countries (Jambo)" })).not.toBeNull();
+    expect(screen.getByRole("option", { name: "Countries (CRM)" })).not.toBeNull();
     expect(screen.getByRole("option", { name: "Published content" })).not.toBeNull();
     expect(screen.getByText("Also offer")).not.toBeNull();
     expect(asked.some((a) => a.includes("/forms/registry"))).toBe(true);

@@ -267,7 +267,7 @@ export const DESCRIBE_WIDTH = 512;
  * hides: a self-fetch that does not come back leaves the *original* as the only
  * thing left to send, so a 13MB photograph goes to the provider — or is refused
  * by it — while every smaller asset in the same run quietly succeeds and nothing
- * says the cheap path stopped working. Observed on `staging.allaboutafrica.au`
+ * says the cheap path stopped working. Observed on `staging.atlas.example`
  * on 2026-09-07: 87 assets fine, one 12.8MB JPEG refused, the transform behind
  * the very same URL answering a 113kB WebP to `curl` the whole time.
  *
@@ -278,7 +278,7 @@ export const DESCRIBE_WIDTH = 512;
  * is 5MB). So the only images that can reach the fallback are the ones already
  * four times too large to send, and handing them back turns *this file could not
  * be resized* into whatever the provider says about size — on
- * `allaboutafrica.au`, a 20,096,380-byte JPEG 96kB over the binding's limit
+ * `atlas.example`, a 20,096,380-byte JPEG 96kB over the binding's limit
  * reported as "the image is 19MB … configure an Images binding", on a Worker
  * where the binding was configured and had just described 86 other assets
  * (#21). Serving the original there costs nothing and helps nothing; the throw

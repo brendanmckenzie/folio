@@ -20,23 +20,23 @@ A form is `forms.fields`: one flat, ordered JSON array of questions
 (`src/core/forms.ts:101-127`, `migrations/0010_forms.sql`), compiled key by key
 into `ResolvedForm.fields` (`src/server/forms.ts:349-442`). Nothing in the stored
 model, the descriptor, the server or the builder expresses a row, a group or a
-page. Take Off Go's `/contact` lost its first/last-name pair to this on 2026-09-07.
+page. Harbour Travel's `/contact` lost its first/last-name pair to this on 2026-09-07.
 
 Two facts about the live consumers constrain every design below, and both were
 checked in their source:
 
 - **Both hosts render `form.fields.map(Question)` and nothing else**
-  (`takeoffgo-website/app/components/forms/EnquiryForm.tsx:87`,
-  `allaboutafrica-website/app/components/FolioForm.tsx:348`). A design in which a
+  (`harbour-website/app/components/forms/EnquiryForm.tsx:87`,
+  `atlas-website/app/components/FolioForm.tsx:348`). A design in which a
   host that ignores layout no longer renders a correct form is a breaking change
   in practice, whatever the types say.
-- **Both render an unknown `kind` as a text input.** Take Off Go's `Question`
+- **Both render an unknown `kind` as a text input.** Harbour Travel's `Question`
   switch falls to `default: <input type="text">` (`Question.tsx:124`); the demo's
   last branch is `<input type={field.kind}>` (`examples/demo/src/blocks/contact.tsx`).
   So **no new kind may appear in `ResolvedForm.fields`**: a "row" or "section"
   item there becomes a stray text box named after it on both sites.
 
-(All About Africa already guesses layout from kind — a `WIDE` set of kinds "that
+(Atlas Guides already guesses layout from kind — a `WIDE` set of kinds "that
 would read as half a thought in half a column", `FolioForm.tsx:74-75`. That is the
 host doing, badly, what the descriptor should tell it.)
 
@@ -401,7 +401,7 @@ conditions cannot reason about.
 shape (`sections` with a single `section: null`, `shown` always `true`), the
 builder toggle and share select, the demo renderer and CSS, and the handbook
 section with the container-query pattern. No migration, no `shapeOf` change, no
-change to either live host until it chooses to adopt it — Take Off Go's
+change to either live host until it chooses to adopt it — Harbour Travel's
 `/contact` is fixed by an editor toggling one question and a host swapping its
 `fields.map` for `formLayout`.
 

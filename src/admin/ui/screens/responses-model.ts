@@ -628,7 +628,7 @@ export function deliveryTone(status: DeliveryStatus): DeliveryTone {
 }
 
 /** One cell badge per delivery. The action's label leads only when there are several,
- *  so the common single-action form reads `Delivered` rather than `File in Jambo: Delivered`. */
+ *  so the common single-action form reads `Delivered` rather than `File in CRM: Delivered`. */
 export function deliveryBadges(
   deliveries: readonly DeliverySummary[] | undefined,
   labelOf: (action: string) => string,

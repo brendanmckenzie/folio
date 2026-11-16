@@ -16,10 +16,10 @@ editor types: `FormField.options` (`src/core/forms.ts:121`), required non-empty 
 `validateOptions` (`src/core/forms.ts:227-233`) and capped at 100 by `FORM_FIELD`
 (`src/server/validate.ts:1838`, `:1875`). A form asking "which trip?" repeats a list
 the site already publishes, and drifts from it the first time a trip is added or
-retired. A list that lives somewhere else entirely, such as Jambo's country list,
-cannot be used at all. group-web's traveller form bypasses Folio for exactly this
+retired. A list that lives somewhere else entirely, such as CRM's country list,
+cannot be used at all. multi-brand-host's traveller form bypasses Folio for exactly this
 reason: it fetches about 250 countries on every load and every submit
-(`group-web/app/brands/allaboutafrica/routes/traveller-form.server.ts:61-70`,
+(`multi-brand-host/app/brands/atlas/routes/traveller-form.server.ts:61-70`,
 `:193-204`). That is over the cap, and the form is hand-built around it.
 
 This adds **option sources**. A question names a source and its settings in
@@ -170,10 +170,10 @@ Read at `0d769b9` (v1.2.4) with a clean tree.
 - `DocumentPicker` (`fields/DocumentPicker.tsx:61`) picks a routed document.
 - Responses show the stored value (`answerText`, `responses-model.ts:181-186`).
 
-**consumer (`takeoffgo/group-web`, read only):**
+**consumer (`harbour/multi-brand-host`, read only):**
 
-- One `createFolio` serves two brands. The traveller form needs Jambo `GetCountries`
-  (`traveller-form.server.ts:61-70`) and sorts by name (`:93-96`). Its Jambo client is
+- One `createFolio` serves two brands. The traveller form needs CRM `GetCountries`
+  (`traveller-form.server.ts:61-70`) and sorts by name (`:93-96`). Its CRM client is
   built from the request's hostname (`:58`). A source's `load` has no request, so its
   adoption has to choose the endpoint from `env`.
 
@@ -248,7 +248,7 @@ brand's `forms.sources`. The registry is a record keyed by id, like `brands`:
 forms: {
   sources: {
     countries: {
-      label: 'Countries (Jambo)',
+      label: 'Countries (CRM)',
       settings: { sort: select({ options: [{ value: 'name', label: 'Name' }, …] }) },
       ttl: 86_400,
       async load({ settings, locale, signal }, env) { … return [{ value, label }, …] },
@@ -710,8 +710,8 @@ in the form row, and changing that is outside this spec.
 `stry_9f2…`, which is the case #54 names. A host source's row can be pruned or
 changed. And the CSV would need a stories read per page of 200 rows.
 **Rejected: storing `{ value, label }` objects in `data`.** It changes
-`ResponseValue`, which is the `submitted` payload's type and which group-web redefines
-locally (`group-web/app/brands/allaboutafrica/folio/enquiry.server.ts:36`). That makes it a major bump for a
+`ResponseValue`, which is the `submitted` payload's type and which multi-brand-host redefines
+locally (`multi-brand-host/app/brands/atlas/folio/enquiry.server.ts:36`). That makes it a major bump for a
 CSV nicety.
 
 ### 14. The builder chooses a source per question, reuses the collection field's filter and sort controls, and previews the list
@@ -804,7 +804,7 @@ route and answers `actions` as `[]`. Spec 36 fills `actions` and adds nothing el
 
 **Rejected: `Manifest.forms.sources`.** The Manifest is served unauthenticated, and
 `app.ts:126-150` keeps it to what a client needs before signing in. A source's label
-names the vendor ("Countries (Jambo)"), its `ttl` is the refresh cadence, and its
+names the vendor ("Countries (CRM)"), its `ttl` is the refresh cadence, and its
 settings list the choices a host passes to its vendor. All three fail the file's own
 test: would you be content to see it in an unauthenticated `curl`? Only the signed-in
 builder needs them.

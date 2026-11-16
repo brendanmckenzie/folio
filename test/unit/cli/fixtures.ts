@@ -85,7 +85,7 @@ export const starterWrangler = () => ({
   ],
 });
 
-/** group-web's shape: FOLIO_* names, SpaceDO under new_classes, a database per environment. */
+/** multi-brand-host's shape: FOLIO_* names, SpaceDO under new_classes, a database per environment. */
 export const groupWebWrangler = () => {
   const db = (name: string) => ({
     binding: "FOLIO_DB",
@@ -101,11 +101,11 @@ export const groupWebWrangler = () => {
     ],
   };
   return {
-    name: "group-web",
+    name: "multi-brand-host",
     main: "./workers/app.ts",
     compatibility_date: "2026-07-27",
     triggers: { crons: ["* * * * *"] },
-    d1_databases: [db("group-web-folio")],
+    d1_databases: [db("multi-brand-host-folio")],
     durable_objects: dos,
     migrations: [
       { tag: "v1", new_sqlite_classes: ["StoryDO"] },
@@ -114,12 +114,12 @@ export const groupWebWrangler = () => {
     env: {
       staging: {
         triggers: { crons: ["* * * * *"] },
-        d1_databases: [db("group-web-folio-staging")],
+        d1_databases: [db("multi-brand-host-folio-staging")],
         durable_objects: dos,
       },
       production: {
         triggers: { crons: ["* * * * *"] },
-        d1_databases: [db("group-web-folio-production")],
+        d1_databases: [db("multi-brand-host-folio-production")],
         durable_objects: dos,
       },
     },

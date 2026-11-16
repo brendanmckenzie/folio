@@ -284,7 +284,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
           // `originalFileName` is the real file under the package: a consumer's
           // build tooling attributes a stylesheet to its source through the
           // asset's `originalFileNames`, and an emitted asset with none reads as
-          // CSS from nowhere (group-web's `check-brand-css` refuses it).
+          // CSS from nowhere (the multi-brand host's `check-brand-css` refuses it).
           for (const [name, { source, file }] of adminFiles()) {
             this.emitFile({ type: "asset", fileName: name, source, originalFileName: file });
           }

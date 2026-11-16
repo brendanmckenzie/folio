@@ -154,13 +154,13 @@ describe("doctor on a fresh scaffold", () => {
 });
 
 describe("doctor finds Folio's bindings under any name", () => {
-  it("passes the group-web shape, and notes SpaceDO is KV-backed", async () => {
+  it("passes the multi-brand-host shape, and notes SpaceDO is KV-backed", async () => {
     const root = host({ wrangler: groupWebWrangler(), localState: true });
     const rec = recorder((argv) => (argv.includes("execute") ? executeAnswer(SHIPPED) : undefined));
     const { by } = await check(root, { run: rec.run });
     expect(by["wrangler.d1"].status).toBe("pass");
     expect(by["wrangler.d1"].data?.databases).toEqual([
-      { binding: "FOLIO_DB", database_name: "group-web-folio", migrations_table: null },
+      { binding: "FOLIO_DB", database_name: "multi-brand-host-folio", migrations_table: null },
     ]);
     expect(by["wrangler.story"].data).toEqual({ binding: "FOLIO_STORY" });
     expect(by["wrangler.space"].data).toEqual({ binding: "FOLIO_SPACE" });
@@ -174,10 +174,14 @@ describe("doctor finds Folio's bindings under any name", () => {
     const rec = recorder((argv) => (argv.includes("execute") ? executeAnswer(SHIPPED) : undefined));
     const { by } = await check(root, { run: rec.run, env: "staging" });
     expect(by["wrangler.d1"].data?.databases).toEqual([
-      { binding: "FOLIO_DB", database_name: "group-web-folio-staging", migrations_table: null },
+      {
+        binding: "FOLIO_DB",
+        database_name: "multi-brand-host-folio-staging",
+        migrations_table: null,
+      },
     ]);
     const select = rec.calls.find((c) => c.argv.includes("execute"))?.argv ?? [];
-    expect(select[3]).toBe("group-web-folio-staging");
+    expect(select[3]).toBe("multi-brand-host-folio-staging");
     expect(select.slice(-2)).toEqual(["--env", "staging"]);
   });
 });

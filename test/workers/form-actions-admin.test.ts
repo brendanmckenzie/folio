@@ -42,9 +42,9 @@ const tripCode = formAction({
   inputs: { code: { kind: "text", label: "Trip code", required: true } },
   check: () => ({ ok: true }),
 });
-const jambo = formAction({
-  id: "jambo",
-  label: "File in Jambo",
+const crm = formAction({
+  id: "crm",
+  label: "File in CRM",
   inputs: {
     email: { kind: "email", label: "Email", required: true },
     first: { kind: "text", label: "First name", required: true },
@@ -85,7 +85,7 @@ const config = {
       { code: "fr", label: "Francais" },
     ],
   },
-  forms: { actions: [tripCode, jambo] },
+  forms: { actions: [tripCode, crm] },
   formPurgeCapability: capability,
 } satisfies FolioConfig<Cloudflare.Env> & { formPurgeCapability: PurgeCapability };
 const folio = createFolio<Cloudflare.Env>(config);
@@ -165,7 +165,7 @@ beforeEach(async () => {
 
 const COMPLETE: FormActionAttachment[] = [
   {
-    action: "jambo",
+    action: "crm",
     map: { email: "email", first: "first_name" },
     settings: { pipeline: "sales" },
     delivers: true,
@@ -204,7 +204,7 @@ describe("who may change actions (decision 8)", () => {
       {
         actions: [
           {
-            action: "jambo",
+            action: "crm",
             map: { email: "email", first: "first_name", gone: "nowhere" },
             settings: { pipeline: "support", undeclared: "x" },
             messages: { unknown_trip: "not a code of this action" },
@@ -218,7 +218,7 @@ describe("who may change actions (decision 8)", () => {
     expect(res.status).toBe(200);
     expect(JSON.parse((await stored()).actions)).toEqual([
       {
-        action: "jambo",
+        action: "crm",
         map: { email: "email", first: "first_name" },
         settings: { pipeline: "support" },
         delivers: true,
@@ -229,7 +229,7 @@ describe("who may change actions (decision 8)", () => {
   it("fills a declared default only into an attachment the save adds", async () => {
     await insertForm("frm_bbbbbbbbbbbb", [CODE], []);
     const res = await patch(
-      { actions: [{ action: "jambo", map: { email: "code", first: "code" } }] },
+      { actions: [{ action: "crm", map: { email: "code", first: "code" } }] },
       publisher,
       "frm_bbbbbbbbbbbb",
     );
@@ -238,7 +238,7 @@ describe("who may change actions (decision 8)", () => {
     const ok = await patch(
       {
         fields: [EMAIL, FIRST],
-        actions: [{ action: "jambo", map: { email: "email", first: "first_name" } }],
+        actions: [{ action: "crm", map: { email: "email", first: "first_name" } }],
       },
       publisher,
       "frm_bbbbbbbbbbbb",
@@ -288,7 +288,7 @@ describe("a save is refused only for a problem it adds (decision 13)", () => {
     const before = await stored();
     const res = await patch({ fields: [{ ...EMAIL, required: false }, FIRST] });
     expect(res.status).toBe(400);
-    expect((await message(res)).message).toContain("File in Jambo");
+    expect((await message(res)).message).toContain("File in CRM");
     expect(
       (await message(await patch({ fields: [{ ...EMAIL, required: false }, FIRST] }))).message,
     ).toContain("not always answered");
@@ -303,14 +303,14 @@ describe("a save is refused only for a problem it adds (decision 13)", () => {
 
   it("refuses a publisher's save that attaches an incomplete action", async () => {
     await insertForm(FORM, [EMAIL, FIRST], []);
-    const res = await patch({ actions: [{ action: "jambo", map: { email: "email" } }] }, publisher);
+    const res = await patch({ actions: [{ action: "crm", map: { email: "email" } }] }, publisher);
     expect(res.status).toBe(400);
     expect((await message(res)).message).toContain("First name needs a question");
     expect(JSON.parse((await stored()).actions)).toEqual([]);
   });
 
   describe("an attachment already incomplete", () => {
-    const INCOMPLETE = [{ action: "jambo", delivers: true, settings: { pipeline: "sales" } }];
+    const INCOMPLETE = [{ action: "crm", delivers: true, settings: { pipeline: "sales" } }];
     beforeEach(async () => {
       await insertForm(FORM, [EMAIL, FIRST], INCOMPLETE);
     });
@@ -498,7 +498,7 @@ describe("attention (decision 13)", () => {
 
   it("marks a form whose registered attachment has a problem, and only that form", async () => {
     await insertForm("frm_aaaaaaaaaaaa", [EMAIL, FIRST], COMPLETE);
-    await insertForm("frm_bbbbbbbbbbbb", [EMAIL, FIRST], [{ action: "jambo", delivers: true }]);
+    await insertForm("frm_bbbbbbbbbbbb", [EMAIL, FIRST], [{ action: "crm", delivers: true }]);
     await insertForm("frm_cccccccccccc", [EMAIL, FIRST], []);
     // Unregistered: the code no longer provides it, which the builder shows, not the list.
     await insertForm("frm_dddddddddddd", [EMAIL, FIRST], [{ action: "retired" }]);
@@ -520,7 +520,7 @@ describe("GET /forms/registry actions (decision 4)", () => {
     const res = await call("/api/forms/registry", await bearer("reader", ["content:read"]));
     const raw = await res.text();
     const { actions } = JSON.parse(raw) as { actions: Array<Record<string, unknown>> };
-    expect(actions.map((a) => a.id)).toEqual(["trip-code", "jambo"]);
+    expect(actions.map((a) => a.id)).toEqual(["trip-code", "crm"]);
     expect(Object.keys(actions[0]!).sort()).toEqual(
       ["check", "codes", "deliver", "id", "inputs", "label", "settings"].sort(),
     );
@@ -542,7 +542,7 @@ describe("GET /forms/registry actions (decision 4)", () => {
       forms: { actions: actions as never },
     });
     const branded = createFolio<Cloudflare.Env>({
-      brands: { aaa: brand([jambo]), tgo: brand([tripCode]), bare: brand([]) },
+      brands: { atl: brand([crm]), hbr: brand([tripCode]), bare: brand([]) },
       sites: { admin: "https://cms.example" },
       bindings,
       basePath: "/folio",
@@ -551,8 +551,8 @@ describe("GET /forms/registry actions (decision 4)", () => {
       assets: {
         admin: "/folio-admin.js",
         brands: {
-          aaa: { preview: "/a.js", previewCss: ["/a.css"] },
-          tgo: { preview: "/t.js", previewCss: ["/t.css"] },
+          atl: { preview: "/a.js", previewCss: ["/a.css"] },
+          hbr: { preview: "/t.js", previewCss: ["/t.css"] },
           bare: { preview: "/b.js", previewCss: ["/b.css"] },
         },
       },
@@ -563,8 +563,8 @@ describe("GET /forms/registry actions (decision 4)", () => {
       admin = await bearer("platform", ["admin"]);
       await env.DB.prepare(
         `insert or ignore into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-           ('fa-aaa', 'site', 'A', null, 'live', null, 'aaa', 0, 0),
-           ('fa-tgo', 'site', 'T', null, 'live', null, 'tgo', 0, 0),
+           ('fa-atl', 'site', 'A', null, 'live', null, 'atl', 0, 0),
+           ('fa-hbr', 'site', 'T', null, 'live', null, 'hbr', 0, 0),
            ('fa-bare', 'site', 'B', null, 'live', null, 'bare', 0, 0)`,
       ).run();
     });
@@ -598,8 +598,8 @@ describe("GET /forms/registry actions (decision 4)", () => {
             actions: Array<{ id: string }>;
           }
         ).actions.map((a) => a.id);
-      expect(await ids("fa-aaa")).toEqual(["jambo"]);
-      expect(await ids("fa-tgo")).toEqual(["trip-code"]);
+      expect(await ids("fa-atl")).toEqual(["crm"]);
+      expect(await ids("fa-hbr")).toEqual(["trip-code"]);
       expect(await ids("fa-bare")).toEqual([]);
       const none = await call("/api/forms/registry", admin, {}, branded);
       expect(none.status).toBe(400);

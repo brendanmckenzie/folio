@@ -311,8 +311,8 @@ describe("the Vite plugin, stylesheets Rollup hoisted out of an entry", () => {
  */
 describe("the Vite plugin, one preview bundle per brand", () => {
   const brands = {
-    allaboutafrica: "./app/brands/allaboutafrica/folio/blocks.ts",
-    takeoffgo: "./app/brands/takeoffgo/folio/blocks.ts",
+    atlas: "./app/brands/atlas/folio/blocks.ts",
+    harbour: "./app/brands/harbour/folio/blocks.ts",
   };
 
   function brandPlugin(): Plugin {
@@ -334,11 +334,11 @@ describe("the Vite plugin, one preview bundle per brand", () => {
     const input = brandConfig().environments.client.build.rollupOptions.input;
     expect(Object.keys(input).sort()).toEqual([
       "folio-admin",
-      "folio-preview-allaboutafrica",
-      "folio-preview-takeoffgo",
+      "folio-preview-atlas",
+      "folio-preview-harbour",
     ]);
-    expect(input["folio-preview-allaboutafrica"]).toBe("virtual:folio/preview/allaboutafrica");
-    expect(input["folio-preview-takeoffgo"]).toBe("virtual:folio/preview/takeoffgo");
+    expect(input["folio-preview-atlas"]).toBe("virtual:folio/preview/atlas");
+    expect(input["folio-preview-harbour"]).toBe("virtual:folio/preview/harbour");
   });
 
   it("bakes assets.brands with a bundle and a stylesheet per brand", () => {
@@ -347,13 +347,13 @@ describe("the Vite plugin, one preview bundle per brand", () => {
       admin: "/folio-admin.js",
       adminCss: ["/folio-admin.css"],
       brands: {
-        allaboutafrica: {
-          preview: "/folio-preview-allaboutafrica.js",
-          previewCss: ["/folio-preview-allaboutafrica.css"],
+        atlas: {
+          preview: "/folio-preview-atlas.js",
+          previewCss: ["/folio-preview-atlas.css"],
         },
-        takeoffgo: {
-          preview: "/folio-preview-takeoffgo.js",
-          previewCss: ["/folio-preview-takeoffgo.css"],
+        harbour: {
+          preview: "/folio-preview-harbour.js",
+          previewCss: ["/folio-preview-harbour.css"],
         },
       },
     });
@@ -363,8 +363,8 @@ describe("the Vite plugin, one preview bundle per brand", () => {
 
   it("serves each brand its own virtual entry in dev, with nothing to link", () => {
     const assets = JSON.parse(brandConfig({}, "serve").define.__FOLIO_ASSETS__ as string);
-    expect(assets.brands.takeoffgo).toEqual({
-      preview: "/@id/__x00__virtual:folio/preview/takeoffgo",
+    expect(assets.brands.harbour).toEqual({
+      preview: "/@id/__x00__virtual:folio/preview/harbour",
       previewCss: [],
     });
     expect(assets.devClient).toBe("/@vite/client");
@@ -374,11 +374,11 @@ describe("the Vite plugin, one preview bundle per brand", () => {
     const plugin = brandPlugin();
     const resolveId = plugin.resolveId as unknown as (id: string) => string | null;
     const load = plugin.load as unknown as (id: string) => string | null;
-    const id = resolveId("virtual:folio/preview/takeoffgo");
-    expect(id).toBe("\0virtual:folio/preview/takeoffgo");
+    const id = resolveId("virtual:folio/preview/harbour");
+    expect(id).toBe("\0virtual:folio/preview/harbour");
     const code = load(id as string) as string;
-    expect(code).toContain("takeoffgo/folio/blocks.ts");
-    expect(code).not.toContain("allaboutafrica");
+    expect(code).toContain("harbour/folio/blocks.ts");
+    expect(code).not.toContain("atlas");
     expect(load("\0virtual:folio/preview/unknown")).toBeNull();
   });
 
@@ -387,16 +387,16 @@ describe("the Vite plugin, one preview bundle per brand", () => {
     brandConfig();
     const emitted: string[] = [];
     const bundle = {
-      "folio-preview-takeoffgo.js": {
+      "folio-preview-harbour.js": {
         type: "chunk",
         imports: ["assets/shared-abc.js"],
-        viteMetadata: { importedCss: new Set(["folio-preview-takeoffgo.css"]) },
+        viteMetadata: { importedCss: new Set(["folio-preview-harbour.css"]) },
       },
       "assets/shared-abc.js": {
         type: "chunk",
         viteMetadata: { importedCss: new Set(["assets/shared-abc.css"]) },
       },
-      "folio-preview-takeoffgo.css": { type: "asset", source: ".a{}" },
+      "folio-preview-harbour.css": { type: "asset", source: ".a{}" },
     };
     const gen = plugin.generateBundle as unknown as {
       handler: (this: unknown, o: unknown, b: unknown) => void;
@@ -407,7 +407,7 @@ describe("the Vite plugin, one preview bundle per brand", () => {
       {},
       bundle,
     );
-    expect((bundle["folio-preview-takeoffgo.css"] as { source: string }).source).toBe(
+    expect((bundle["folio-preview-harbour.css"] as { source: string }).source).toBe(
       '@import url("/assets/shared-abc.css");\n.a{}',
     );
   });

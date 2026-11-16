@@ -1456,7 +1456,7 @@ describe("option_lists", () => {
         .bind(brand)
         .run();
     await insert("");
-    await insert("takeoffgo");
+    await insert("harbour");
     await expect(insert("")).rejects.toThrow();
   });
 });

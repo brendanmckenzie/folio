@@ -184,7 +184,7 @@ a client sent a draft to review gets the editor's outlines and dead links.
   `querySelector`, which is how it
   editor selects a block. **The same selector is what makes a per-block screenshot
   possible**, and it exists only because the visual editor needs it.
-- **Verified on a live render** (AAA dev server, bearer token,
+- **Verified on a live render** (Atlas dev server, bearer token,
   `/guides/east-africa?_folio=preview`): 200, 345KB, `<body class="folio-editing">`, 82
   `data-folio-uid` attributes, 2 `folio-marker` wrappers. So both halves are real — a
   token does reach a rendered draft, and what it reaches is not the published DOM.
@@ -285,7 +285,7 @@ A route means every Folio deployment has an MCP endpoint the moment it upgrades,
 authenticated by the token table it already has, with no second artifact to distribute.
 
 **Rejected as the whole answer, kept as Phase 0: a documented skill that teaches an agent
-to curl the API.** This works *today* — it is what the AAA import did — and it costs
+to curl the API.** This works *today* — it is what the Atlas import did — and it costs
 nothing, so it should exist regardless. What it cannot do: filter what the agent may
 attempt by scope, present structured errors a client can act on, or survive a session
 boundary without re-deriving the API from prose. A skill is a good stopgap and a bad
@@ -444,7 +444,7 @@ binding the tool answers the URL and the rendered HTML instead, and says which i
 an agent that has its own browser can then go and look, and one that does not can still
 check that the content is present.
 
-**Full-page is not the default, and a viewport is an argument.** An AAA guide renders
+**Full-page is not the default, and a viewport is an argument.** An Atlas guide renders
 about 12,000px tall; a full-page PNG of it downscales into something no model can read, so
 `fullPage` is opt-in. `viewport` defaults to 1440×900 and takes a mobile size, because a
 responsive break is the single most likely visual defect and the one that is invisible in
@@ -461,7 +461,7 @@ marker `<div>` are one flag today**, and the marker is the thing that shifts a g
 have to separate, and the split cannot be clean:
 
 - A block whose `render` returns a **host element** carries its uid as an attribute on that
-  element. No extra node, production geometry, clippable. This is 80 of AAA's 82.
+  element. No extra node, production geometry, clippable. This is 80 of Atlas's 82.
 - A block whose `render` returns a **component** has nowhere to put the attribute, which is
   why the marker exists. In `draft` mode it does not get one.
 
@@ -515,7 +515,7 @@ generate `create_hero_block`, `create_callout_block`, forty of them, from the ma
 **Rejected.** MCP clients discover a tool list once per session and cache it. A list
 derived from a host's schema changes shape when the host deploys a block, so two sessions
 against the same site disagree about what exists, and a client that reconnected mid-task
-finds its tools renamed. It also scales wrongly: AAA alone would contribute more than
+finds its tools renamed. It also scales wrongly: Atlas alone would contribute more than
 thirty tools whose only difference is a field list.
 
 Instead: `get_schema` (the manifest, from `GET /api/v1/schema`), plus `write_content` and
@@ -885,7 +885,7 @@ AND POST {base}/mcp answers
 ### Phase 0 — the skill that costs nothing (optional, ship whenever)
 
 1. `docs/agent-api.md`: the v1 route table, the scope table, how to mint a token, and the
-   three worked examples the AAA import needed. Prose, no code.
+   three worked examples the Atlas import needed. Prose, no code.
 2. Nothing depends on this and it unblocks the owner immediately. It is listed first
    because it is the only phase with no build.
 

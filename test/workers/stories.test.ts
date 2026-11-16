@@ -392,9 +392,9 @@ describe("updateStory", () => {
    * The handbook has always said a title-only patch "fires no `pathsChanged`, by
    * design". The code disagreed until 2026-09-06: `patch.title` was a slug
    * source on update as well as on create, so retyping a heading silently moved
-   * the page and left a redirect behind. It cost All About Africa's staging the
+   * the page and left a redirect behind. It cost Atlas Guides's staging the
    * hand-set `guides/safari`, which became
-   * `guides/comparing-safari-in-east-and-southern-africa` on one `PATCH {title}`.
+   * `guides/comparing-safari-regions` on one `PATCH {title}`.
    *
    * Creating still derives a slug from the title — that is `createStory`'s job
    * and the row has no URL yet. This is only about the update door.
