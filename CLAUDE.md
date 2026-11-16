@@ -173,10 +173,9 @@ When writing a new one, follow two conventions that already exist:
 
 `scripts/cache-probe.mjs` is **not** one of these and `e2e.sh` does not glob it: it
 takes a deployment URL, because Workers Cache does not exist locally. A tool, not a
-test, and it cannot gate a release. **There are deployments to point it at now** —
-`https://staging.allaboutafrica.au` and `https://allaboutafrica.au` — so the one
-thing no test in this repository can observe, a real cache hit and a real purge, is
-finally checkable. Use staging.
+test, and it cannot gate a release. **There are deployments to point it at now** (each consumer site has a staging and a
+production one), so the one thing no test in this repository can observe, a real cache
+hit and a real purge, is finally checkable. Point it at a consumer's staging deployment.
 
 ## Local login
 
@@ -202,9 +201,8 @@ stopped being true, in two steps, and the licence narrowed each time without eve
 being revoked. What is true now: **two consumers, one remote, four live
 deployments, and a version number.**
 
-- `takeoffgo/allaboutafrica-website` → `staging.allaboutafrica.au`,
-  `allaboutafrica.au`
-- `takeoffgo/takeoffgo-website` → `staging.takeoffgo.com`, `www.takeoffgo.com`
+- Two consumer sites, each its own private repository, each with a staging and a
+  production deployment.
 
 Both pin a full 40-character SHA, both hold real content in D1 and R2, and both
 have real editors signing in. (This section said "one consumer … two live
@@ -424,7 +422,7 @@ are free to go the next time that code is touched.
 - **A null brand serves nothing.** A row with no configured brand leaves the serving
   snapshot (`servingRegistry`); it is neither the first brand nor every brand. Token
   bindings and grants refuse it the way they refuse an unknown scope.
-- **Brand migration ids carry their brand** (`takeoffgo/0001-…`), refused at
+- **Brand migration ids carry their brand** (`harbour/0001-…`), refused at
   construction otherwise, because `schema_migrations` is keyed by id alone. A brand id
   is permanent once rows carry it.
 - **Every id-set read takes the chain** (spec 23). `storiesFor` and
@@ -677,7 +675,7 @@ when written and stale by the time it was built.
 
 Specs 40 (authoring guidance and content checks, `content-model/authoring-guidance.md`) and 41 (the agent CLI, `foundation/agent-cli.md`) were built 2026-11-04 and ship together as v1.4.0 (ledger date 2026-11-05); neither adds a migration or touches the wire. 40 added `GET {base}/api/v1/documents/:id/check` and the seventeenth MCP tool, `check_document`; 41 added `folio doctor`, `folio upgrade`, `folio add block` and `folio preview block`, and `upgrade-ledger.json`.
 
-Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on group-web staging; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
+Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on multi-brand-host staging; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
 
 **Specs 1–22, 24–38, 40 and 41 are done** (36–38 in v1.3.0, 40 and 41 in v1.4.0; 39 and 42 are `draft`) — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and

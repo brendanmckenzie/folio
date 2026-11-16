@@ -400,22 +400,22 @@ turn it on.
 ```ts
 createFolio<Env>({
   brands: {
-    allaboutafrica: {
-      label: 'All About Africa',
+    atlas: {
+      label: 'Atlas Guides',
       blocks: aaaBlocks,
       types: aaaTypes,
       settings: 'siteSettings',
-      previewCss: ['/aaa.css'],
+      previewCss: ['/atl.css'],
       previewWrap: AaaPreviewWrap,
       forms: { verify: verifyTurnstile, ratePerHour: 10 },
       describe: aaaDescribe,
     },
-    takeoffgo: {
-      label: 'Take Off Go',
-      blocks: tgoBlocks,
-      types: tgoTypes,
+    harbour: {
+      label: 'Harbour Travel',
+      blocks: hbrBlocks,
+      types: hbrTypes,
       forms: { verify: verifyHCaptcha, ratePerHour: 20 },
-      migrations: [fiftyFiftyToFeature], // id 'takeoffgo/0001-fifty-fifty-to-feature'
+      migrations: [fiftyFiftyToFeature], // id 'harbour/0001-fifty-fifty-to-feature'
     },
   },
   sites: { admin: 'https://cms.example' },
@@ -718,24 +718,24 @@ and up to two phases.
 ```ts
 import { formAction } from 'folio/server'
 
-export const jamboEnquiry = formAction({
-  id: 'jambo-enquiry',
-  label: 'File in Jambo',
+export const crmEnquiry = formAction({
+  id: 'crm-enquiry',
+  label: 'File in CRM',
   inputs: { email: { kind: 'email', label: 'Email', required: true } },
   settings: { area: { kind: 'text', label: 'Area', help: 'Defaults to the form slug' } },
   codes: { duplicate: { label: 'Already enquired', message: 'We already have your enquiry.' } },
   async check(ctx, env: Env) {
-    return (await jambo(env).exists(ctx.inputs.email, { signal: ctx.signal }))
+    return (await crm(env).exists(ctx.inputs.email, { signal: ctx.signal }))
       ? { ok: false, code: 'duplicate' }
       : { ok: true }
   },
   async deliver(ctx, env: Env) {
     if (!isLiveHost(ctx.host)) return { skipped: 'Not a production host' }
-    await jambo(env).file(ctx.inputs, { idempotencyKey: ctx.key, signal: ctx.signal })
+    await crm(env).file(ctx.inputs, { idempotencyKey: ctx.key, signal: ctx.signal })
   },
 })
 
-forms: { actions: [jamboEnquiry] }
+forms: { actions: [crmEnquiry] }
 ```
 
 **Two phases, with opposite postures.** A `check` runs after validation and before the
@@ -988,8 +988,8 @@ of brand id to blocks module, and the plugin builds one preview bundle each:
 ```ts
 folio({
   blocks: {
-    allaboutafrica: './app/brands/allaboutafrica/folio/blocks.ts',
-    takeoffgo: './app/brands/takeoffgo/folio/blocks.ts',
+    atlas: './app/brands/atlas/folio/blocks.ts',
+    harbour: './app/brands/harbour/folio/blocks.ts',
   },
 })
 ```

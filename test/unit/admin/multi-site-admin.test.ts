@@ -973,40 +973,40 @@ describe("grants", () => {
 /* --------------------------------------------------------------- multi-brand --- */
 
 const BRANDS = [
-  { id: "allaboutafrica", label: "All About Africa" },
-  { id: "takeoffgo", label: "Take Off Go" },
+  { id: "atlas", label: "Atlas Guides" },
+  { id: "harbour", label: "Harbour Travel" },
 ];
 
 /** What a platform admin's `/me` carries on a deployment with `brands`: no `shared`. */
 const BRANDED: Registry = {
-  groups: [{ id: "gtog", name: "Take Off Go group", brand: "takeoffgo" }],
+  groups: [{ id: "ghbr", name: "Harbour Travel group", brand: "harbour" }],
   sites: [
     {
-      id: "aaa",
-      name: "AAA",
+      id: "atl",
+      name: "ATL",
       group: null,
       status: "live",
-      hosts: ["allaboutafrica.example"],
-      preview: "https://p.aaa.example",
-      brand: "allaboutafrica",
+      hosts: ["atlas.example"],
+      preview: "https://p.atl.example",
+      brand: "atlas",
     },
     {
-      id: "tog",
-      name: "TOG",
-      group: "gtog",
+      id: "hbr",
+      name: "HBR",
+      group: "ghbr",
       status: "draft",
       hosts: [],
       preview: null,
-      brand: "takeoffgo",
+      brand: "harbour",
     },
     {
-      id: "tog2",
-      name: "TOG two",
+      id: "hbr2",
+      name: "HBR two",
       group: null,
       status: "draft",
       hosts: [],
       preview: null,
-      brand: "takeoffgo",
+      brand: "harbour",
     },
   ],
   shared: false,
@@ -1020,12 +1020,12 @@ const BRANDED_ME: Me = {
 describe("multi-brand: the switcher and the title", () => {
   it('groups the switcher by brand, each option reading just "<name>", groups before sites', () => {
     const groups = scopeOptionGroups(scopeChoices(BRANDED_ME));
-    expect(groups.map((g) => g.label)).toEqual(["All About Africa", "Take Off Go"]);
-    expect(groups[0]?.options).toEqual([{ id: "aaa", name: "AAA" }]);
+    expect(groups.map((g) => g.label)).toEqual(["Atlas Guides", "Harbour Travel"]);
+    expect(groups[0]?.options).toEqual([{ id: "atl", name: "ATL" }]);
     expect(groups[1]?.options).toEqual([
-      { id: "gtog", name: "Take Off Go group" },
-      { id: "tog", name: "TOG" },
-      { id: "tog2", name: "TOG two" },
+      { id: "ghbr", name: "Harbour Travel group" },
+      { id: "hbr", name: "HBR" },
+      { id: "hbr2", name: "HBR two" },
     ]);
   });
 
@@ -1034,7 +1034,7 @@ describe("multi-brand: the switcher and the title", () => {
   });
 
   it("carries each scope’s brand ref and the brand list on /me, and none on a single-brand one", () => {
-    expect(scopeChoices(BRANDED_ME).find((s) => s.id === "tog")?.brand).toEqual(BRANDS[1]);
+    expect(scopeChoices(BRANDED_ME).find((s) => s.id === "hbr")?.brand).toEqual(BRANDS[1]);
     expect(brandsOf(BRANDED_ME)).toEqual(BRANDS);
     // Single-brand: no brand on any scope, no `brands` key, so no brand UI anywhere.
     expect(scopeChoices(PLATFORM).every((s) => s.brand === null)).toBe(true);
@@ -1053,8 +1053,8 @@ describe("multi-brand: the switcher and the title", () => {
   });
 
   it("ends the tab title with the site name on a scope, and leaves it alone without one", () => {
-    expect(documentTitle(parse("/folio/content", "/folio"), { site: "TOG" })).toBe(
-      "Content · TOG · Folio",
+    expect(documentTitle(parse("/folio/content", "/folio"), { site: "HBR" })).toBe(
+      "Content · HBR · Folio",
     );
     expect(documentTitle(parse("/folio/content", "/folio"))).toBe("Content · Folio");
   });
@@ -1078,53 +1078,53 @@ describe("multi-brand: the Sites screen", () => {
     const form = { ...emptyForm("site", BRANDS), id: "x", name: "X" };
     expect(brandField(form, BRANDS)).toBe("choose");
     expect(formRefusal(form, "create", BRANDS)).toBe("Choose a brand first");
-    expect(formRefusal({ ...form, brand: "takeoffgo" }, "create", BRANDS)).toBeUndefined();
-    expect(emptyForm("group", [BRANDS[0]!]).brand).toBe("allaboutafrica");
+    expect(formRefusal({ ...form, brand: "harbour" }, "create", BRANDS)).toBeUndefined();
+    expect(emptyForm("group", [BRANDS[0]!]).brand).toBe("atlas");
   });
 
   it("sends the brand on create, and on edit only when it changed and is not empty", () => {
-    const form = { ...emptyForm("group", BRANDS), id: "g", name: "G", brand: "takeoffgo" };
-    expect(createBody(form)).toEqual({ id: "g", kind: "group", name: "G", brand: "takeoffgo" });
-    const row = siteRows(BRANDED).find((r) => r.id === "tog2")!;
+    const form = { ...emptyForm("group", BRANDS), id: "g", name: "G", brand: "harbour" };
+    expect(createBody(form)).toEqual({ id: "g", kind: "group", name: "G", brand: "harbour" });
+    const row = siteRows(BRANDED).find((r) => r.id === "hbr2")!;
     expect(patchBody(formOf(row), row)).toEqual({});
-    expect(patchBody({ ...formOf(row), brand: "allaboutafrica" }, row)).toEqual({
-      brand: "allaboutafrica",
+    expect(patchBody({ ...formOf(row), brand: "atlas" }, row)).toEqual({
+      brand: "atlas",
     });
     // Never `null`: the server refuses to un-brand a row.
     expect(patchBody({ ...formOf(row), brand: "" }, row)).toEqual({});
   });
 
   it("fixes a grouped site’s brand to its group’s, and offers only the brand’s groups", () => {
-    const form = { ...emptyForm("site", BRANDS), brand: "allaboutafrica" };
+    const form = { ...emptyForm("site", BRANDS), brand: "atlas" };
     expect(groupChoices(form, groups, BRANDS)).toEqual([]);
-    expect(groupChoices({ ...form, brand: "takeoffgo" }, groups, BRANDS)).toEqual(groups);
+    expect(groupChoices({ ...form, brand: "harbour" }, groups, BRANDS)).toEqual(groups);
     expect(groupChoices({ ...form, brand: "" }, groups, BRANDS)).toEqual(groups);
-    const joined = withGroup(form, "gtog", groups);
-    expect(joined).toMatchObject({ group: "gtog", brand: "takeoffgo" });
+    const joined = withGroup(form, "ghbr", groups);
+    expect(joined).toMatchObject({ group: "ghbr", brand: "harbour" });
     expect(brandField(joined, BRANDS)).toBe("fixed");
     // Changing brand drops a group of the other one; joining "no group" keeps the brand.
-    expect(withBrand(joined, "allaboutafrica", groups)).toMatchObject({
+    expect(withBrand(joined, "atlas", groups)).toMatchObject({
       group: "",
-      brand: "allaboutafrica",
+      brand: "atlas",
     });
-    expect(withGroup(joined, "", groups)).toMatchObject({ group: "", brand: "takeoffgo" });
+    expect(withGroup(joined, "", groups)).toMatchObject({ group: "", brand: "harbour" });
     expect(brandField(emptyForm("group", BRANDS), BRANDS)).toBe("choose");
   });
 
   it("labels a row’s brand, falling back to the id, and a dash for none", () => {
-    expect(brandLabel(BRANDS, "takeoffgo")).toBe("Take Off Go");
+    expect(brandLabel(BRANDS, "harbour")).toBe("Harbour Travel");
     expect(brandLabel(BRANDS, "gone")).toBe("gone");
     expect(brandLabel(BRANDS, null)).toBe("—");
     expect(siteRows(BRANDED).map((r) => r.brand)).toEqual([
-      "takeoffgo",
-      "allaboutafrica",
-      "takeoffgo",
-      "takeoffgo",
+      "harbour",
+      "atlas",
+      "harbour",
+      "harbour",
     ]);
   });
 
   it("lists settings scopes of the manifest’s brand only, with no shared, and all of them unbranded", () => {
-    expect(settingsScopes(BRANDED, "takeoffgo").map((s) => s.id)).toEqual(["gtog", "tog", "tog2"]);
+    expect(settingsScopes(BRANDED, "harbour").map((s) => s.id)).toEqual(["ghbr", "hbr", "hbr2"]);
     expect(settingsScopes(REGISTRY).map((s) => s.id)).toEqual([
       "shared",
       "north",
@@ -1134,35 +1134,35 @@ describe("multi-brand: the Sites screen", () => {
   });
 
   it("fixes the brand of a group that has sites, and offers the select to one that has none", () => {
-    const north = { ...emptyForm("group", BRANDS), brand: "takeoffgo" };
+    const north = { ...emptyForm("group", BRANDS), brand: "harbour" };
     expect(brandField(north, BRANDS, true)).toBe("fixed");
     expect(brandField(north, BRANDS, false)).toBe("choose");
-    expect(groupHasSites(BRANDED, "gtog")).toBe(true);
-    expect(groupHasSites({ ...BRANDED, sites: [] }, "gtog")).toBe(false);
+    expect(groupHasSites(BRANDED, "ghbr")).toBe(true);
+    expect(groupHasSites({ ...BRANDED, sites: [] }, "ghbr")).toBe(false);
   });
 
   it("never offers a group of no brand or of an unconfigured one", () => {
     const rows = [
-      { id: "east", brand: "takeoffgo" },
+      { id: "east", brand: "harbour" },
       { id: "lost", brand: null },
       { id: "gone", brand: "retired" },
     ];
     const form = emptyForm("site", BRANDS);
     expect(groupChoices(form, rows, BRANDS).map((g) => g.id)).toEqual(["east"]);
-    expect(groupChoices({ ...form, brand: "takeoffgo" }, rows, BRANDS).map((g) => g.id)).toEqual([
+    expect(groupChoices({ ...form, brand: "harbour" }, rows, BRANDS).map((g) => g.id)).toEqual([
       "east",
     ]);
   });
 
   it("says a scope at the bottom of its chain inherits nothing", () => {
-    const scopes = settingsScopes(BRANDED, "takeoffgo");
+    const scopes = settingsScopes(BRANDED, "harbour");
     expect(scopes.map((s) => [s.id, s.bottom])).toEqual([
-      ["gtog", true],
-      ["tog", false],
-      ["tog2", true],
+      ["ghbr", true],
+      ["hbr", false],
+      ["hbr2", true],
     ]);
-    expect(settingsBlurb("tog2", true)).not.toMatch(/inherit/i);
-    expect(settingsBlurb("tog", false)).toMatch(/Inherited/);
+    expect(settingsBlurb("hbr2", true)).not.toMatch(/inherit/i);
+    expect(settingsBlurb("hbr", false)).toMatch(/Inherited/);
     expect(settingsBlurb("shared")).toMatch(/base layer/);
   });
 });

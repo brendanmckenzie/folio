@@ -16,30 +16,30 @@ import { meSites } from "../../../../src/server/auth/me-sites";
 import { mountAt, MANIFEST, resetServed, serve } from "./fixture";
 
 const BRANDS = [
-  { id: "allaboutafrica", label: "All About Africa" },
-  { id: "takeoffgo", label: "Take Off Go" },
+  { id: "atlas", label: "Atlas Guides" },
+  { id: "harbour", label: "Harbour Travel" },
 ];
 
 const REGISTRY = {
   groups: [],
   sites: [
     {
-      id: "aaa",
-      name: "AAA",
+      id: "atl",
+      name: "ATL",
       group: null,
       status: "live",
-      hosts: ["allaboutafrica.example"],
-      preview: "https://p.aaa.example",
-      brand: "allaboutafrica",
+      hosts: ["atlas.example"],
+      preview: "https://p.atl.example",
+      brand: "atlas",
     },
     {
-      id: "tog",
-      name: "TOG",
+      id: "hbr",
+      name: "HBR",
       group: null,
       status: "draft",
       hosts: [],
       preview: null,
-      brand: "takeoffgo",
+      brand: "harbour",
     },
   ],
   shared: false,
@@ -60,8 +60,8 @@ const manifestOf = (brand: (typeof BRANDS)[number], extra: { name: string; label
 
 /** What the server does: the scope decides, and no scope is the neutral manifest. */
 const schemaAt = (scope: string | null): Manifest => {
-  if (scope === "tog") return manifestOf(BRANDS[1]!, { name: "tour", label: "Tour" });
-  if (scope === "aaa") return manifestOf(BRANDS[0]!, { name: "safari", label: "Safari" });
+  if (scope === "hbr") return manifestOf(BRANDS[1]!, { name: "tour", label: "Tour" });
+  if (scope === "atl") return manifestOf(BRANDS[0]!, { name: "safari", label: "Safari" });
   return { types: [], blocks: [], root: "", globals: [] };
 };
 
@@ -70,8 +70,8 @@ afterEach(resetServed);
 describe("the admin on a deployment with brands", () => {
   it("lists the scope’s brand’s types in the New menu, and the other brand’s in none", async () => {
     serve({ schemaAt, registry: REGISTRY });
-    const { asked } = await mountAt("/folio/~tog/content", BRANDED);
-    expect(asked.some((u) => u.endsWith("/folio/~tog/api/schema"))).toBe(true);
+    const { asked } = await mountAt("/folio/~hbr/content", BRANDED);
+    expect(asked.some((u) => u.endsWith("/folio/~hbr/api/schema"))).toBe(true);
     expect(asked.some((u) => u.endsWith("/folio/api/schema"))).toBe(false);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "New page" }));
@@ -83,7 +83,7 @@ describe("the admin on a deployment with brands", () => {
 
   it("is the other brand’s on the other brand’s scope", async () => {
     serve({ schemaAt, registry: REGISTRY });
-    await mountAt("/folio/~aaa/content", BRANDED);
+    await mountAt("/folio/~atl/content", BRANDED);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "New page" }));
     });
@@ -94,18 +94,18 @@ describe("the admin on a deployment with brands", () => {
 
   it("groups the switcher by brand, with no Shared", async () => {
     serve({ schemaAt, registry: REGISTRY });
-    await mountAt("/folio/~tog/content", BRANDED);
+    await mountAt("/folio/~hbr/content", BRANDED);
     const select = screen.getByLabelText("Site") as HTMLElement & { value: string };
     expect(
       Array.from(select.querySelectorAll("optgroup")).map((g) => g.getAttribute("label")),
-    ).toEqual(["All About Africa", "Take Off Go"]);
-    expect(select.value).toBe("tog");
-    expect(within(select as HTMLElement).getByText("TOG")).toBeTruthy();
+    ).toEqual(["Atlas Guides", "Harbour Travel"]);
+    expect(select.value).toBe("hbr");
+    expect(within(select as HTMLElement).getByText("HBR")).toBeTruthy();
   });
 
   it("draws stubs, not a crash, when the scoped manifest answers an error", async () => {
     serve({ schemaAt, registry: REGISTRY, schemaStatus: 404 });
-    await mountAt("/folio/~tog/content", BRANDED);
+    await mountAt("/folio/~hbr/content", BRANDED);
     expect(screen.queryByText("Tour")).toBeNull();
     // The server's own sentence reaches the toast, and the shell is still mounted.
     expect(screen.getByText("No site")).toBeTruthy();
@@ -113,8 +113,8 @@ describe("the admin on a deployment with brands", () => {
 
   it("names the site in the tab title", async () => {
     serve({ schemaAt, registry: REGISTRY });
-    await mountAt("/folio/~tog/content", BRANDED);
-    expect(document.title).toBe("Content · TOG · Folio");
+    await mountAt("/folio/~hbr/content", BRANDED);
+    expect(document.title).toBe("Content · HBR · Folio");
   });
 
   it("shows the brand on the Sites screen, and asks for it in the dialog", async () => {
@@ -122,7 +122,7 @@ describe("the admin on a deployment with brands", () => {
     await mountAt("/folio/sites", BRANDED);
     const table = screen.getByRole("table", { name: "Sites and groups" });
     expect(within(table).getByRole("columnheader", { name: "Brand" })).toBeTruthy();
-    expect(within(table).getByText("Take Off Go")).toBeTruthy();
+    expect(within(table).getByText("Harbour Travel")).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "New site" }));
     });
@@ -130,8 +130,8 @@ describe("the admin on a deployment with brands", () => {
     const brand = within(dialog).getByLabelText(/Brand/);
     expect(Array.from(brand.querySelectorAll("option")).map((o) => o.textContent)).toEqual([
       "Choose a brand",
-      "All About Africa",
-      "Take Off Go",
+      "Atlas Guides",
+      "Harbour Travel",
     ]);
   });
 

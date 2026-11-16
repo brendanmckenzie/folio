@@ -108,7 +108,7 @@ describe("readRegistry", () => {
           group_id: "north",
           status: "live",
           preview_origin: "https://preview.alpha.example",
-          brand: "aaa",
+          brand: "atl",
         },
         {
           id: "north",
@@ -117,7 +117,7 @@ describe("readRegistry", () => {
           group_id: null,
           status: null,
           preview_origin: null,
-          brand: "aaa",
+          brand: "atl",
         },
         {
           id: "odd",
@@ -143,7 +143,7 @@ describe("readRegistry", () => {
           status: "live",
           hosts: ["alpha.example", "www.alpha.example"],
           preview: "https://preview.alpha.example",
-          brand: "aaa",
+          brand: "atl",
         },
         // A site row with no status reads as the most closed state, never as live.
         {
@@ -156,7 +156,7 @@ describe("readRegistry", () => {
           brand: null,
         },
       ],
-      groups: [{ id: "north", name: "North", brand: "aaa" }],
+      groups: [{ id: "north", name: "North", brand: "atl" }],
       shared: true,
     });
   });

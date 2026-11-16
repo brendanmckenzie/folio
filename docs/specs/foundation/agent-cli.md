@@ -130,7 +130,7 @@ Read at `704fbf9` (main, v1.3.1). Line numbers are from that commit.
   `"migrations_dir": "./node_modules/folio/migrations"`
   (`examples/starter/wrangler.jsonc:53-61`); `examples/demo` points at
   `../../migrations` instead. Bindings are named by the host:
-  `takeoffgo/group-web/wrangler.jsonc` uses `FOLIO_DB`, `FOLIO_STORY`,
+  `harbour/multi-brand-host/wrangler.jsonc` uses `FOLIO_DB`, `FOLIO_STORY`,
   `FOLIO_SPACE`, with per-environment `database_name`s under `env.staging` /
   `env.production` and a comment that `triggers` is not inherited by a named
   environment. **So Folio's bindings can be found only by `class_name` and by
@@ -139,10 +139,10 @@ Read at `704fbf9` (main, v1.3.1). Line numbers are from that commit.
   `unstable_readConfig(args, options)` (`wrangler-dist/cli.d.ts:1084`), which reads
   `wrangler.json`/`.jsonc`/`.toml`, resolves a named `env`, and returns `main`,
   `d1_databases`, `durable_objects.bindings`, `triggers`, `migrations`,
-  `configPath`. Verified against `group-web` for the top level and `env: "staging"`:
+  `configPath`. Verified against `multi-brand-host` for the top level and `env: "staging"`:
   each returned its own `database_name`, both Folio DO bindings, and the crons. It
   also exports `unstable_getDurableObjectClassNameToUseSQLiteMap(migrations)`
-  (`:1092`), which for `group-web` answers `StoryDO → true`, `SpaceDO → false`
+  (`:1092`), which for `multi-brand-host` answers `StoryDO → true`, `SpaceDO → false`
   (SpaceDO deployed under `new_classes`, which `UPGRADING.md` "SpaceDO migration
   (v1.3.1)" says to leave alone).
 - `StoryDO` is SQLite-backed by necessity: `src/server/story-do.ts` has 15
@@ -170,8 +170,8 @@ Read at `704fbf9` (main, v1.3.1). Line numbers are from that commit.
 - The plugin exposes nothing of its options. `vite`'s exported
   `loadConfigFromFile({ command: "serve", mode: "development" }, undefined, root)`
   loads a host's config and its flattened `plugins` include the `"folio"` plugin:
-  verified against `group-web`'s `vite.config.ts` (39 plugins, one named `folio`,
-  brand record form `{ allaboutafrica: "./app/brands/allaboutafrica/folio/blocks/index.ts", takeoffgo: … }`).
+  verified against `multi-brand-host`'s `vite.config.ts` (39 plugins, one named `folio`,
+  brand record form `{ atlas: "./app/brands/atlas/folio/blocks/index.ts", harbour: … }`).
   It left that working tree clean.
 
 **Block modules as hosts write them:**
@@ -182,7 +182,7 @@ Read at `704fbf9` (main, v1.3.1). Line numbers are from that commit.
   "<name>", … })` in its own file.
 - Demo: `examples/demo/src/blocks/index.ts:21` onward, the same shape with longer
   comments inside the array.
-- `group-web`: `app/brands/takeoffgo/folio/blocks/index.ts`, a leading
+- `multi-brand-host`: `app/brands/harbour/folio/blocks/index.ts`, a leading
   `export { PreviewWrap as wrap } from "../render/PreviewWrap";`, a side-effect
   `import "../../styles/global.scss";`, then named imports and
   `export const blocks = [ pageRoot, hero, … ]`. Block names are camelCase
@@ -297,7 +297,7 @@ host's `package.json`), and the Vite config with the host's own `vite`
 easy; TOML, named-environment inheritance rules (which keys a named `env` inherits
 and which, like `triggers`, it does not) and a Vite config that is a function of the
 mode are not, and a reimplementation would be wrong in exactly the places hosts
-differ (`group-web` uses all three). The cost accepted: `unstable_readConfig` is
+differ (`multi-brand-host` uses all three). The cost accepted: `unstable_readConfig` is
 named unstable. It is pinned by a unit test run against the starter's wrangler, and
 a throw from it is reported as `wrangler.config` failing with the wrangler version
 named, never as a crash.
@@ -311,7 +311,7 @@ entry with `class_name: "StoryDO"` and no `script_name`; the space channel is
 `class_name: "SpaceDO"`.
 
 **Rejected: checking for `DB`, `STORY`, `SPACE`.** Those are the starter's names;
-`group-web` uses `FOLIO_DB`, `FOLIO_STORY`, `FOLIO_SPACE`, and `bindings: (env) =>
+`multi-brand-host` uses `FOLIO_DB`, `FOLIO_STORY`, `FOLIO_SPACE`, and `bindings: (env) =>
 …` lets a host call them anything. A name check would fail every real consumer.
 Real-path comparison also covers the demo's `../../migrations`, which is the same
 directory as its `node_modules/folio/migrations` through the workspace link.
@@ -327,7 +327,7 @@ database and needs Cloudflare credentials. `--url <origin>` adds the two server
 checks against a server the caller already started.
 
 **Rejected: `doctor --boot`, starting the dev server itself as the smoke test
-does.** The starter's dev server is `vite`, but `group-web`'s is `react-router dev`,
+does.** The starter's dev server is `vite`, but `multi-brand-host`'s is `react-router dev`,
 so there is no command a doctor could start that is right for every host. Asking for
 a URL also makes the same checks work against staging. The cost accepted: config
 sanity (createFolio's construction-time refusals) is checked only when a server is
@@ -390,8 +390,8 @@ per Folio database the config declares.
 **Rejected: `--apply` by default.** An agent runs a command to find out what it
 does; a default that edits `package.json` and reinstalls turns "what would this
 do" into a change. **Rejected: an `--apply --remote` mode.** Remote apply is
-coupled to a deploy the CLI does not own (`group-web` deploys from CI on a branch
-push, All About Africa from a laptop), `0011`'s "apply then deploy within minutes"
+coupled to a deploy the CLI does not own (`multi-brand-host` deploys from CI on a branch
+push, Atlas Guides from a laptop), `0011`'s "apply then deploy within minutes"
 cannot be honoured by a tool that does not do the deploy, and a remote apply ahead of
 a roll-forward-only release is the irreversible step. The cost accepted: the remote
 half of every upgrade stays a person's (or an explicitly instructed agent's) act.
@@ -448,7 +448,7 @@ caller must make by hand as an `edit` fix.
 (`typescript@7.0.2`), whose programmatic API is exported only under `./unstable/*`,
 and a host may have either major. Depending on it would make `add block` fail on
 whichever one a host does not have. **Rejected: regenerating the blocks module.**
-Hosts keep comments, a `wrap` export and side-effect imports in it (`group-web`); a
+Hosts keep comments, a `wrap` export and side-effect imports in it (`multi-brand-host`); a
 rewrite loses them. A small scanner that knows strings, template literals and both
 comment forms is enough to find one array literal's closing bracket, and refusing on
 anything unusual costs a manual two-line edit, which the output spells out.
@@ -492,7 +492,7 @@ with `basePath` defaulted to `/folio`. Vite documents `api` as the channel for
 plugin-to-plugin and tool-to-plugin data. `doctor` reports the blocks modules and
 base path from it, and `add block` and `preview block` read it instead of asking.
 
-**Rejected: a regex over `vite.config.ts`.** `group-web` builds its options inside a
+**Rejected: a regex over `vite.config.ts`.** `multi-brand-host` builds its options inside a
 function. Loading the config is what Vite itself does, so the answer is the one the
 build uses. A host whose installed plugin predates `api` gets a `warn` naming
 `--blocks` and `--base` as the explicit forms; nothing fails because of it.
@@ -692,7 +692,7 @@ ledger marks any of them `with-deploy`, and links the release's headings.
         { "id": "install", "phase": "local", "kind": "run", "local": true, "argv": ["pnpm", "install"], "status": "pending" },
         { "id": "d1-local", "phase": "local", "kind": "run", "local": true, "argv": ["node_modules/.bin/wrangler", "d1", "migrations", "apply", "folio", "--local"], "status": "pending" },
         { "id": "typecheck", "phase": "local", "kind": "run", "local": true, "argv": ["pnpm", "run", "typecheck"], "status": "pending" },
-        { "id": "d1-remote:staging", "phase": "deploy", "kind": "run", "local": false, "argv": ["node_modules/.bin/wrangler", "d1", "migrations", "apply", "group-web-folio-staging", "--remote", "--env", "staging"], "before": "deploy:staging" },
+        { "id": "d1-remote:staging", "phase": "deploy", "kind": "run", "local": false, "argv": ["node_modules/.bin/wrangler", "d1", "migrations", "apply", "multi-brand-host-folio-staging", "--remote", "--env", "staging"], "before": "deploy:staging" },
         { "id": "deploy", "phase": "deploy", "kind": "manual", "text": "Deploy the Worker, after the remote migrations above." }
       ]
     }
@@ -1148,12 +1148,12 @@ specifier like `release-notes.test.ts`):**
 - `d1.test.ts`: parsing the verified success and `no such table` outputs, an
   authentication error, set differences with gaps.
 - `doctor.test.ts`: fixture projects under `test/fixtures/cli/` (starter-shaped,
-  group-web-shaped with `FOLIO_*` names and named environments, broken variants for
+  multi-brand-host-shaped with `FOLIO_*` names and named environments, broken variants for
   each `fail` row), read with the real wrangler and vite from `examples/starter`'s
   `node_modules` and a recording runner for `wrangler d1 execute`. Asserts each
   check's status and that a `fail` always carries a non-empty `fix`.
 - `blocks.test.ts`: add-block against copies of the starter's, the demo's and a
-  group-web-shaped `index.ts` (wrap export, side-effect import, comments in the
+  multi-brand-host-shaped `index.ts` (wrap export, side-effect import, comments in the
   array); single-quote and no-semicolon styles; `--into`; every refusal; the
   write-all-or-nothing path (a failing write restores the first file).
 - `mcp.test.ts`: `MCP_VERSION` in `bin/lib/mcp.mjs` equals `MCP_PROTOCOL_VERSION`

@@ -512,17 +512,17 @@ describe("folio.refreshOptionSources", () => {
 
 describe("brands", () => {
   const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
-    aaa: {
-      label: "AAA",
+    atl: {
+      label: "ATL",
       blocks: [page("pageRoot"), trip("tripRoot")],
       types,
-      forms: { sources: { countries: source("AAA countries"), onlyaaa: source("Only AAA") } },
+      forms: { sources: { countries: source("ATL countries"), onlyatl: source("Only ATL") } },
     },
-    tgo: {
-      label: "TGO",
+    hbr: {
+      label: "HBR",
       blocks: [page("pageRoot"), trip("tripRoot")],
       types,
-      forms: { sources: { countries: source("TGO countries") } },
+      forms: { sources: { countries: source("HBR countries") } },
     },
   };
   const branded = createFolio<Cloudflare.Env>({
@@ -535,8 +535,8 @@ describe("brands", () => {
     assets: {
       admin: "/folio-admin.js",
       brands: {
-        aaa: { preview: "/aaa.js", previewCss: ["/aaa.css"] },
-        tgo: { preview: "/tgo.js", previewCss: ["/tgo.css"] },
+        atl: { preview: "/atl.js", previewCss: ["/atl.css"] },
+        hbr: { preview: "/hbr.js", previewCss: ["/hbr.css"] },
       },
     },
     route: (p) => `/${p}`,
@@ -548,9 +548,9 @@ describe("brands", () => {
     await env.DB.batch([
       env.DB.prepare(
         `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-           ('north', 'group', 'North', null, null, null, 'aaa', 0, 0),
-           ('alpha', 'site', 'Alpha', 'north', 'live', null, 'aaa', 0, 0),
-           ('tgosite', 'site', 'TGO', null, 'live', null, 'tgo', 0, 0),
+           ('north', 'group', 'North', null, null, null, 'atl', 0, 0),
+           ('alpha', 'site', 'Alpha', 'north', 'live', null, 'atl', 0, 0),
+           ('hbrsite', 'site', 'HBR', null, 'live', null, 'hbr', 0, 0),
            ('nobrand', 'site', 'Nobrand', null, 'live', null, null, 0, 0)`,
       ),
     ]);
@@ -575,19 +575,19 @@ describe("brands", () => {
 
   it("answers each brand's own sources, and 400 site_required unscoped", async () => {
     type Reg = { sources: Array<{ id: string; label: string }> };
-    const aaa = (await (await bcall("/~alpha/api/forms/registry")).json()) as Reg;
-    expect(aaa.sources.map((s) => s.label).sort()).toEqual(["AAA countries", "Only AAA"]);
-    const tgo = (await (await bcall("/~tgosite/api/forms/registry")).json()) as Reg;
-    expect(tgo.sources.map((s) => s.label)).toEqual(["TGO countries"]);
+    const atl = (await (await bcall("/~alpha/api/forms/registry")).json()) as Reg;
+    expect(atl.sources.map((s) => s.label).sort()).toEqual(["ATL countries", "Only ATL"]);
+    const hbr = (await (await bcall("/~hbrsite/api/forms/registry")).json()) as Reg;
+    expect(hbr.sources.map((s) => s.label)).toEqual(["HBR countries"]);
     const none = await bcall("/api/forms/registry");
     expect(none.status).toBe(400);
     expect(((await none.json()) as { error: { code: string } }).error.code).toBe("site_required");
   });
 
   it("refuses a source the form's brand does not register, and an unscoped preview", async () => {
-    await insertForm("frm_eeeeeeeeeeee", [], "tgosite");
-    const own = { source: "onlyaaa", settings: { token: "t" } };
-    const res = await bcall("/~tgosite/api/forms/frm_eeeeeeeeeeee", {
+    await insertForm("frm_eeeeeeeeeeee", [], "hbrsite");
+    const own = { source: "onlyatl", settings: { token: "t" } };
+    const res = await bcall("/~hbrsite/api/forms/frm_eeeeeeeeeeee", {
       method: "PATCH",
       body: { expectedUpdatedAt: 1000, fields: [field(own)] },
     });
@@ -606,24 +606,24 @@ describe("brands", () => {
   it("keeps two brands' rows and loads apart, and never crosses a scope in the cron", async () => {
     const from = { source: "countries", settings: { token: "t" } };
     await insertForm("frm_ffffffffffff", [field(from)], "alpha");
-    await insertForm("frm_gggggggggggg", [field(from)], "tgosite");
+    await insertForm("frm_gggggggggggg", [field(from)], "hbrsite");
     // A form of no brand names no row, and neither does one naming a source its brand lacks.
     await insertForm("frm_hhhhhhhhhhhh", [field(from)], "nobrand");
     await insertForm(
       "frm_iiiiiiiiiiii",
-      [field({ source: "onlyaaa", settings: { token: "t" } })],
-      "tgosite",
+      [field({ source: "onlyatl", settings: { token: "t" } })],
+      "hbrsite",
     );
 
     const report = await branded.refreshOptionSources(env);
     expect(report).toMatchObject({ due: 2, loaded: 2, failed: 0 });
     expect(calls.map((c) => [c.brand, c.source]).sort()).toEqual([
-      ["aaa", "AAA countries"],
-      ["tgo", "TGO countries"],
+      ["atl", "ATL countries"],
+      ["hbr", "HBR countries"],
     ]);
     expect((await rows()).map((r) => [r.brand, r.source])).toEqual([
-      ["aaa", "countries"],
-      ["tgo", "countries"],
+      ["atl", "countries"],
+      ["hbr", "countries"],
     ]);
   });
 });

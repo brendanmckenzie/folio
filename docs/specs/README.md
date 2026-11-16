@@ -333,7 +333,7 @@ claim is a stamp, not a landing, and every one of these restamped at least once 
 the build order settled — 28 and 29 both moved when 30 went first, and 23 moved to
 make room for 32.
 
-**Landed on `main`: `0001`–`0008` and `0010`, and applied to All About Africa's
+**Landed on `main`: `0001`–`0008` and `0010`, and applied to Atlas Guides's
 staging and production databases on 2026-09-06. `0011` (23) is built and lands on `main`
 with spec 23's release; `0012` (23) is claimed for the release after that and does not
 exist yet; `0013` (34) has landed on the branch `multi-brand` and reaches `main` with

@@ -376,7 +376,7 @@ describe("folio.miss(): one round trip for a path with no live page", () => {
    * resolves it against the page it is already on: `/guides/safari` →
    * `/guides/safari/guides/new`, a 404 with nothing anywhere saying why.
    *
-   * All About Africa shipped exactly that, from the `redirect(miss.to)` spelling
+   * Atlas Guides shipped exactly that, from the `redirect(miss.to)` spelling
    * AGENTS.md and README.md both showed. `miss` roots the target now, so the
    * obvious spelling and the careful `new URL(to, origin)` one agree.
    */

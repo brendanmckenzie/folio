@@ -735,13 +735,13 @@ truth; the answers are recorded here so the reasoning is not lost.
 
 - ~~**Is `Vary: Origin` on the demo's responses a dev artefact or a production
   one?**~~ **A dev artefact, and it never reached a deployment.** Measured
-  2026-09-07 on the published home page of all four: `staging.allaboutafrica.au`,
-  `allaboutafrica.au`, `staging.takeoffgo.com` and `www.takeoffgo.com`. **No
+  2026-09-07 on the published home page of all four: `staging.atlas.example`,
+  `atlas.example`, `staging.harbour.example` and `www.harbour.example`. **No
   `Vary` header of any kind** on any of them — not `Origin`, not anything else,
   so there is no cache variant to reason about.
 
   **Four rather than two, and the second pair is what makes this an answer rather
-  than an observation.** The takeoffgo pair is a different host Worker with its
+  than an observation.** The harbour pair is a different host Worker with its
   own configuration: a header set by Folio would appear on all four, and a header
   set by one host's own middleware would appear on two. It appears on none, which
   is the only shape of result that rules Folio out. This question could not be
@@ -912,7 +912,7 @@ what covers the rest, and cannot gate CI.
 ### What the first real deployment taught (2026-09-04)
 
 Three things, none of which this spec got wrong and none of which it could have
-known. All were found on `takeoffgo-website`, the first host to actually wire
+known. All were found on `harbour-website`, the first host to actually wire
 caching up; all three are silent when broken, and only the second was caught by
 a tool rather than by looking.
 

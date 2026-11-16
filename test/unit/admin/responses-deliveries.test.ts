@@ -30,7 +30,7 @@ import {
 
 const NOW = Date.UTC(2026, 10, 3, 12);
 const row = (over: Partial<DeliveryRow> = {}): DeliveryRow => ({
-  action: "jambo",
+  action: "crm",
   status: "failed",
   attempts: 1,
   nextAt: null,
@@ -55,18 +55,18 @@ describe("status text", () => {
   });
 
   it("names the action in a badge only when there are several", () => {
-    const label = (a: string) => (a === "jambo" ? "File in Jambo" : a);
-    const one = deliveryBadges([{ action: "jambo", status: "delivered", attempts: 1 }], label);
+    const label = (a: string) => (a === "crm" ? "File in CRM" : a);
+    const one = deliveryBadges([{ action: "crm", status: "delivered", attempts: 1 }], label);
     expect(one[0]?.text).toBe("Delivered");
-    expect(one[0]?.title).toBe("File in Jambo: Delivered");
+    expect(one[0]?.title).toBe("File in CRM: Delivered");
     const two = deliveryBadges(
       [
-        { action: "jambo", status: "failed", attempts: 8 },
+        { action: "crm", status: "failed", attempts: 8 },
         { action: "mailer", status: "delivered", attempts: 1 },
       ],
       label,
     );
-    expect(two.map((b) => b.text)).toEqual(["File in Jambo: Failed", "mailer: Delivered"]);
+    expect(two.map((b) => b.text)).toEqual(["File in CRM: Failed", "mailer: Delivered"]);
     expect(two.map((b) => b.tone)).toEqual(["danger", "ok"]);
     expect(deliveryBadges(undefined, label)).toEqual([]);
   });
@@ -131,8 +131,8 @@ describe("Retry", () => {
   });
 
   it("posts to the route, encoding both ids", () => {
-    expect(retryHref("/folio/api", "frm_1", "res_2", "file-in-jambo")).toBe(
-      "/folio/api/forms/frm_1/responses/res_2/deliveries/file-in-jambo/retry",
+    expect(retryHref("/folio/api", "frm_1", "res_2", "file-in-crm")).toBe(
+      "/folio/api/forms/frm_1/responses/res_2/deliveries/file-in-crm/retry",
     );
     expect(retryHref("/a", "f/1", "r 2", "x")).toBe(
       "/a/forms/f%2F1/responses/r%202/deliveries/x/retry",
@@ -140,11 +140,9 @@ describe("Retry", () => {
   });
 
   it("says how the inline attempt went, never quoting a failure", () => {
-    expect(retryNotice("Jambo", row({ status: "delivered", failure: null }))).toBe(
-      "Jambo: delivered.",
-    );
-    expect(retryNotice("Jambo", row({ status: "pending" }))).toContain("tried again");
-    expect(retryNotice("Jambo", row({ failure: "threw" }))).toContain(
+    expect(retryNotice("CRM", row({ status: "delivered", failure: null }))).toBe("CRM: delivered.");
+    expect(retryNotice("CRM", row({ status: "pending" }))).toContain("tried again");
+    expect(retryNotice("CRM", row({ failure: "threw" }))).toContain(
       "Details are in the Worker's logs.",
     );
   });
@@ -205,8 +203,8 @@ describe("banners", () => {
 
   it("names an attachment that needs attention, with its problem, and skips an unregistered one", () => {
     const info: FormActionInfo = {
-      id: "jambo",
-      label: "File in Jambo",
+      id: "crm",
+      label: "File in CRM",
       inputs: [{ name: "email", kind: "email", label: "Email", required: true }],
       settings: {},
       codes: [],
@@ -217,12 +215,12 @@ describe("banners", () => {
     const fields = [
       { name: "email", kind: "email", label: "Email", required: true },
     ] as FormField[];
-    expect(
-      attentionLines([{ action: "jambo", map: { email: "email" } }], infos, fields, {}),
-    ).toEqual([]);
-    const lines = attentionLines([{ action: "jambo" }, { action: "gone" }], infos, fields, {});
+    expect(attentionLines([{ action: "crm", map: { email: "email" } }], infos, fields, {})).toEqual(
+      [],
+    );
+    const lines = attentionLines([{ action: "crm" }, { action: "gone" }], infos, fields, {});
     expect(lines).toHaveLength(1);
-    expect(lines[0]?.text).toContain("File in Jambo needs attention: Email needs a question");
+    expect(lines[0]?.text).toContain("File in CRM needs attention: Email needs a question");
     expect(lines[0]?.text).toContain("Visitors are being refused");
     expect(
       responsesBanners({

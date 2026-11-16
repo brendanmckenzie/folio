@@ -15,7 +15,7 @@ import { createFolio } from "../../src/server";
  * oracle for other sites' or other brands' documents.
  *
  * Two brands, both declaring a page, and each its own record type: `person` is
- * allaboutafrica's, `guide` is takeoffgo's. `auth: 'open'` lets every preview origin
+ * atlas's, `guide` is harbour's. `auth: 'open'` lets every preview origin
  * show drafts, so the fences are the whole of what is being tested.
  */
 
@@ -38,17 +38,17 @@ const named = (name: string) =>
   defineBlock({ name, label: name, fields: { name: text() }, render: () => null });
 
 const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
-  allaboutafrica: {
-    label: "All About Africa",
-    blocks: [page("aaa"), named("personRoot")],
+  atlas: {
+    label: "Atlas Guides",
+    blocks: [page("atl"), named("personRoot")],
     types: [
       { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
       { name: "person", label: "Person", kind: "record", root: "personRoot", previewPath: "home" },
     ] satisfies DocumentType[],
   },
-  takeoffgo: {
-    label: "Take Off Go",
-    blocks: [page("tgo"), named("guideRoot")],
+  harbour: {
+    label: "Harbour Travel",
+    blocks: [page("hbr"), named("guideRoot")],
     types: [
       { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
       { name: "guide", label: "Guide", kind: "record", root: "guideRoot", previewPath: "home" },
@@ -72,8 +72,8 @@ const folio = createFolio<Cloudflare.Env>({
   assets: {
     admin: "/a.js",
     brands: {
-      allaboutafrica: { preview: "/aaa.js" },
-      takeoffgo: { preview: "/tgo.js" },
+      atlas: { preview: "/atl.js" },
+      harbour: { preview: "/hbr.js" },
     },
   },
   route: (p, _locale, site) =>
@@ -105,23 +105,23 @@ async function row(id: string, site: string, type: string, path: string | null, 
 
 beforeAll(async () => {
   await env.DB.batch([
-    env.DB.prepare("update sites set brand = 'allaboutafrica' where id = 'default'"),
+    env.DB.prepare("update sites set brand = 'atlas' where id = 'default'"),
     env.DB.prepare(
       `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-         ('east', 'group', 'East', null, null, null, 'allaboutafrica', 0, 0),
-         ('kenya', 'site', 'Kenya', 'east', 'live', 'https://preview.kenya.example', 'allaboutafrica', 0, 0),
-         ('uganda', 'site', 'Uganda', null, 'live', 'https://preview.uganda.example', 'allaboutafrica', 0, 0),
-         ('takeoffgo', 'site', 'Take Off Go', null, 'live', 'https://preview.takeoffgo.example', 'takeoffgo', 0, 0)`,
+         ('east', 'group', 'East', null, null, null, 'atlas', 0, 0),
+         ('kenya', 'site', 'Kenya', 'east', 'live', 'https://preview.kenya.example', 'atlas', 0, 0),
+         ('uganda', 'site', 'Uganda', null, 'live', 'https://preview.uganda.example', 'atlas', 0, 0),
+         ('harbour', 'site', 'Harbour Travel', null, 'live', 'https://preview.harbour.example', 'harbour', 0, 0)`,
     ),
     env.DB.prepare(
-      `insert into site_hosts (host, site_id) values ('kenya.example', 'kenya'), ('uganda.example', 'uganda'), ('takeoffgo.example', 'takeoffgo')`,
+      `insert into site_hosts (host, site_id) values ('kenya.example', 'kenya'), ('uganda.example', 'uganda'), ('harbour.example', 'harbour')`,
     ),
   ]);
   await row("sty_home", "kenya", "page", "home", doc("pageRoot", { title: "Kenya home" }));
   await row("sty_own", "kenya", "person", null, doc("personRoot", { name: "Own" }));
   await row("sty_group", "east", "person", null, doc("personRoot", { name: "Group" }));
   await row("sty_uganda", "uganda", "person", null, doc("personRoot", { name: "Uganda" }));
-  await row("sty_tgo_guide", "takeoffgo", "guide", null, doc("guideRoot", { name: "Guide" }));
+  await row("sty_hbr_guide", "harbour", "guide", null, doc("guideRoot", { name: "Guide" }));
   // A row in kenya's own site whose type is the *other* brand's: in the chain, not a
   // record of this brand.
   await row("sty_wrongtype", "kenya", "guide", null, doc("guideRoot", { name: "Wrong" }));
@@ -152,7 +152,7 @@ describe("?_folio=preview&record= on a deployment with sites and brands", () => 
   });
 
   it("hands back another brand's record, and a row of the other brand's type in the chain", async () => {
-    expect(await preview("sty_tgo_guide")).toBeNull();
+    expect(await preview("sty_hbr_guide")).toBeNull();
     expect(await preview("sty_wrongtype")).toBeNull();
   });
 });

@@ -242,19 +242,19 @@ describe("gate: decision 4’s table, every cell", () => {
 });
 
 /**
- * A registry with `brands` (`multi-brand.md` decisions 4 and 5): brand `aaa` has
- * group `north` holding `alpha`, and `bravo` with no group; brand `tgo` has
- * `tango`, and `mixed`, which names aaa's `north` — a row only SQL could write,
+ * A registry with `brands` (`multi-brand.md` decisions 4 and 5): brand `atl` has
+ * group `north` holding `alpha`, and `bravo` with no group; brand `hbr` has
+ * `tango`, and `mixed`, which names atl's `north` — a row only SQL could write,
  * since the registry routes refuse it.
  */
 const branded: Registry = {
   sites: [
-    site("alpha", { group: "north", brand: "aaa" }),
-    site("bravo", { brand: "aaa" }),
-    site("tango", { brand: "tgo" }),
-    site("mixed", { group: "north", brand: "tgo" }),
+    site("alpha", { group: "north", brand: "atl" }),
+    site("bravo", { brand: "atl" }),
+    site("tango", { brand: "hbr" }),
+    site("mixed", { group: "north", brand: "hbr" }),
   ],
-  groups: [{ id: "north", name: "North", brand: "aaa" }],
+  groups: [{ id: "north", name: "North", brand: "atl" }],
   shared: false,
 };
 
@@ -293,18 +293,18 @@ describe("with brands: a chain never leaves a brand, and there is no shared", ()
 describe("servingRegistry: what a deployment with brands serves from", () => {
   const rows: Registry = {
     sites: [
-      site("alpha", { group: "north", brand: "aaa" }),
+      site("alpha", { group: "north", brand: "atl" }),
       site("default"),
       site("ghost", { brand: "retired" }),
-      site("tango", { brand: "tgo" }),
+      site("tango", { brand: "hbr" }),
     ],
     groups: [
-      { id: "north", name: "North", brand: "aaa" },
+      { id: "north", name: "North", brand: "atl" },
       { id: "orphans", name: "Orphans", brand: null },
     ],
     shared: false,
   };
-  const served = servingRegistry(rows, ["aaa", "tgo"]);
+  const served = servingRegistry(rows, ["atl", "hbr"]);
 
   it("keeps the rows of configured brands, and has no shared scope", () => {
     expect(served.sites.map((s) => s.id)).toEqual(["alpha", "tango"]);

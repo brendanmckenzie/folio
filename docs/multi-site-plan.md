@@ -3,7 +3,7 @@
 This is the execution plan for spec 23, `docs/specs/foundation/multi-site.md`, and the
 **briefing file every subagent on that work reads first**. The spec says what to build
 and owns the design; this file says in what order, by whom, how each step is proven,
-and how the result reaches `staging.allaboutafrica.au`. Where the two disagree on
+and how the result reaches `staging.atlas.example`. Where the two disagree on
 *design*, the spec wins and the disagreement is a finding to report. Where they
 disagree on *sequencing, gates or the consumer rollout*, this file wins.
 
@@ -16,7 +16,7 @@ replaces the others.
 Paste this, unchanged, as the first message of the session that will run the build:
 
 ```
-Build Folio spec 23 (multi-site) end to end, following docs/multi-site-plan.md. Read CLAUDE.md, docs/multi-site-plan.md, and the Ground truth and Architecture decisions in docs/specs/foundation/multi-site.md before the first edit. The spec's decisions are settled by me; do not reopen them. If the code contradicts the spec's Ground truth, stop and tell me rather than building on the spec. End state: staging.allaboutafrica.au running the new Folio with multi-site turned on, verified from the far side as the plan's final phase describes. Production allaboutafrica.au and takeoffgo.com stay on their current pins; 0012 is not applied anywhere in this run. Work the phases in the plan's order, parallel only where it says so; gate every phase by exit code and commit each phase on a local branch in this repo's statement-subject style; run an adversarial review after phases 1, 3, 5 and 7 and fix what it confirms before moving on. Confirm with me before each outward-facing step the plan lists, one line each on what changes and how to roll it back. The spec's forcing case is a real client: never name any client, brand, site or domain in this repo other than allaboutafrica and takeoffgo.
+Build Folio spec 23 (multi-site) end to end, following docs/multi-site-plan.md. Read CLAUDE.md, docs/multi-site-plan.md, and the Ground truth and Architecture decisions in docs/specs/foundation/multi-site.md before the first edit. The spec's decisions are settled by me; do not reopen them. If the code contradicts the spec's Ground truth, stop and tell me rather than building on the spec. End state: staging.atlas.example running the new Folio with multi-site turned on, verified from the far side as the plan's final phase describes. Production atlas.example and harbour.example stay on their current pins; 0012 is not applied anywhere in this run. Work the phases in the plan's order, parallel only where it says so; gate every phase by exit code and commit each phase on a local branch in this repo's statement-subject style; run an adversarial review after phases 1, 3, 5 and 7 and fix what it confirms before moving on. Confirm with me before each outward-facing step the plan lists, one line each on what changes and how to roll it back. The spec's forcing case is a real client: never name any client, brand, site or domain in this repo other than atlas and harbour.
 ```
 
 ## Ground truth
@@ -31,22 +31,22 @@ re-measures rather than trusts it.
   (`docs/1.0-plan.md`) has phases 5 and 6 still to go. This plan cuts no tag and does
   not touch `version`; its release is a push to `origin/main`.
 - **Consumer pins at plan time**, to be re-read in Phase 0, not trusted:
-  - `allaboutafrica-website` `main` (production) pins
+  - `atlas-website` `main` (production) pins
     `3acc67edec8536459abe6714c3210a9b5f586aee`. Its `origin/staging` branch is six
     commits behind `main` and an ancestor of it.
-  - `takeoffgo-website` pins `133bb7fb8f9e6f764a74fdc88556f9bf6da268bb`.
-- **AAA staging deploys from a laptop.** The live staging version (`cea6224c…`,
+  - `harbour-website` pins `133bb7fb8f9e6f764a74fdc88556f9bf6da268bb`.
+- **Atlas staging deploys from a laptop.** The live staging version (`cea6224c…`,
   2026-09-24) carries `workers/triggered_by: version_upload`, source `wrangler`, and
-  has **no `JAMBO` service binding**. AAA's own `CLAUDE.md` says Workers Builds deploys
+  has **no `CRM` service binding**. Atlas's own `CLAUDE.md` says Workers Builds deploys
   a push to `staging`; this plan deploys with `npm run deploy:staging` and does not
-  push AAA's `staging` branch, so it does not depend on which of the two is current.
-- **AAA's working tree is dirty with somebody else's work**: an uncommitted
-  `wrangler.jsonc` hunk adding a `JAMBO` service binding to `jambo-web-staging`'s
+  push Atlas's `staging` branch, so it does not depend on which of the two is current.
+- **Atlas's working tree is dirty with somebody else's work**: an uncommitted
+  `wrangler.jsonc` hunk adding a `CRM` service binding to `crm-web-staging`'s
   `DocumentService`. A laptop deploy ships the working tree, so deploying from that
   checkout would ship an unreviewed binding that the live staging Worker does not
-  have. **Every AAA build and deploy in this plan runs from a clean `git worktree`**,
+  have. **Every Atlas build and deploy in this plan runs from a clean `git worktree`**,
   and the main checkout is never modified.
-- **AAA's Folio surface** (what multi-site forces it to change): `workers/app.ts`
+- **Atlas's Folio surface** (what multi-site forces it to change): `workers/app.ts`
   (`folio.handle`, `cacheVerdict`, `cacheKey`, the `CachedPages` loopback, crons);
   `app/routes/page.tsx:94` `folio.reader(env, request)`; three calls of
   `folio.reader(env)` **with no request** at `app/routes/sitemap-xml.tsx:49`,
@@ -55,10 +55,10 @@ re-measures rather than trusts it.
   `NON_CANONICAL_HOST = /^staging\./` in `workers/app.ts` decides which hosts get
   `x-robots-tag: noindex`. `scripts/folio-pages.mjs`, `scripts/folio-contact.mjs` and
   `scripts/media-ingest.mjs` take `FOLIO_BASE` (documented as
-  `https://staging.allaboutafrica.au/folio`) and write through `${FOLIO_BASE}/api/v1`
+  `https://staging.atlas.example/folio`) and write through `${FOLIO_BASE}/api/v1`
   (`scripts/lib/folio-api.mjs:17,37`, `media-ingest.mjs:97`). **`media-ingest.mjs:63`
   names its per-environment key map after `FOLIO_BASE`'s hostname**, and the staging
-  map is committed as `scripts/lib/media-map.staging.allaboutafrica.au.json`: moving
+  map is committed as `scripts/lib/media-map.staging.atlas.example.json`: moving
   `FOLIO_BASE` to another host without renaming that file makes the next run start
   from an empty map and upload every image a second time.
 - **`scripts/cache-probe.mjs` cannot probe a multi-site deployment as written.** It
@@ -70,7 +70,7 @@ re-measures rather than trusts it.
   that omits `env` is the typo (the registry read needs the binding). And
   `folio.reader(env)` with **no** `from` on a multi-site deployment throws the same
   error the one-shot reads throw, naming `folio.reader(env, req | { site })`: silently
-  answering as no site would make AAA's sitemap empty with nothing to say why.
+  answering as no site would make Atlas's sitemap empty with nothing to say why.
 
 ## The decisions, and what each beat
 
@@ -82,13 +82,13 @@ rollout decisions:
 | Decision | Beat |
 | --- | --- |
 | The release is a push of `main` through `scripts/release.mjs`, no tag | cutting `1.0.0` with multi-site in it; holding multi-site for 1.0 |
-| AAA's `sites` key is switched on by a **build-time define** set only by `build:staging` | an env-var read at request time (`createFolio` is module scope and `sites.admin` is a string); a staging-only branch of `config.server.ts` that a later fast-forward of `main` would carry into production |
-| Registry rows for AAA staging are written by SQL immediately after `0011`, then re-written through the API after the deploy | writing them only through the API after the deploy, which leaves every CMS page on staging a 404 for the minutes between the deploy and the write |
+| Atlas's `sites` key is switched on by a **build-time define** set only by `build:staging` | an env-var read at request time (`createFolio` is module scope and `sites.admin` is a string); a staging-only branch of `config.server.ts` that a later fast-forward of `main` would carry into production |
+| Registry rows for Atlas staging are written by SQL immediately after `0011`, then re-written through the API after the deploy | writing them only through the API after the deploy, which leaves every CMS page on staging a 404 for the minutes between the deploy and the write |
 | The browser matrix runs on the staging deployment, after release | a local run: the owner reaches this machine remotely and cannot open `localhost` pages in three browsers |
 | `0012` is not written, applied or tested for real in this run | shipping expand and contract together, which decision 18 exists to forbid |
-| **AAA staging's three hostnames** (owner, 2026-09-29): the admin origin moves to `staging-cms.allaboutafrica.au`; `staging.allaboutafrica.au` stays the `default` site's live host; the preview origin is `staging-preview.allaboutafrica.au` | keeping the admin on `staging.allaboutafrica.au` and moving the public staging URL; serving staging pages only on a preview origin, which 404s every CMS page on `staging.allaboutafrica.au` |
-| **A second, cross-site browser pass** (owner, 2026-09-29), with the preview origin pointed for its duration at the staging Worker's `workers.dev` hostname by a registry edit | a same-site check alone: `staging-cms` and `staging-preview` share the registrable domain `allaboutafrica.au`, so the pane is a same-site iframe and the check passes whether or not partitioning works; a preview origin on a `takeoffgo.com` subdomain, which needs DNS on a second zone for a temporary test |
-| Staging scripts address the site explicitly: `FOLIO_BASE=https://staging-cms.allaboutafrica.au/folio/~default` | minting every staging token bound to `default`, which works until somebody mints an unbound one and gets `400 site_required` |
+| **Atlas staging's three hostnames** (owner, 2026-09-29): the admin origin moves to `staging-cms.atlas.example`; `staging.atlas.example` stays the `default` site's live host; the preview origin is `staging-preview.atlas.example` | keeping the admin on `staging.atlas.example` and moving the public staging URL; serving staging pages only on a preview origin, which 404s every CMS page on `staging.atlas.example` |
+| **A second, cross-site browser pass** (owner, 2026-09-29), with the preview origin pointed for its duration at the staging Worker's `workers.dev` hostname by a registry edit | a same-site check alone: `staging-cms` and `staging-preview` share the registrable domain `atlas.example`, so the pane is a same-site iframe and the check passes whether or not partitioning works; a preview origin on a `harbour.example` subdomain, which needs DNS on a second zone for a temporary test |
+| Staging scripts address the site explicitly: `FOLIO_BASE=https://staging-cms.atlas.example/folio/~default` | minting every staging token bound to `default`, which works until somebody mints an unbound one and gets `400 site_required` |
 | On the live host, a request for the admin (`/folio`, `/folio/…` other than `asset/` and `f/`) is redirected to the same path on the admin origin, behind the same define | leaving it to fall through to React Router's 404, which is what every editor's bookmark would find |
 | Each phase is committed on the local branch `multi-site`; `main` is fast-forwarded to it only in Phase R | committing on `main` as the 1.0 run did, which puts half-built phases on the branch `release.mjs` publishes from |
 
@@ -112,7 +112,7 @@ Seven hard constraints. Everything else is grouped to keep two agents out of one
    documents describe what landed.
 7. **Release after 9 and a green `./scripts/e2e-all.sh`; staging after release.** A
    consumer pin must be a SHA reachable from `origin/main`, and `migrations_dir` in
-   AAA's wrangler config is `node_modules/folio/migrations`, so `0011` reaches the
+   Atlas's wrangler config is `node_modules/folio/migrations`, so `0011` reaches the
    staging D1 only through an installed pin.
 
 ## What the reviews of this spec found, as rules
@@ -254,7 +254,7 @@ with no `feat:`/`fix:` prefix and no trailing period (*"Every row belongs to one
 0011 adds the site dimension and the role table"*). The body argues the decision,
 names the alternative it beat, and says plainly when there is a sanctioned behaviour
 change. Add whatever attribution trailer the session's instructions require. In
-`allaboutafrica-website` the convention is Conventional Commits
+`atlas-website` the convention is Conventional Commits
 (`chore(deps): bump folio to <sha7> for multi-site`), per its `CLAUDE.md`.
 
 ## Steps that need the owner's confirmation
@@ -265,9 +265,9 @@ approval for the next.
 | # | Step | What changes | Rollback |
 | --- | --- | --- | --- |
 | C1 | Phase R: `node scripts/release.mjs --push` | `origin/main` moves to the multi-site head, which is publishing; nothing installs it until a pin is bumped | Consumers stay on their pins; a bad head is fixed forward with a new commit, never a force push, which would orphan pins |
-| C2 | Phase S, step 3: two new Workers custom domains on the `allaboutafrica.au` zone, `staging-cms.allaboutafrica.au` and `staging-preview.allaboutafrica.au`, both on `allaboutafrica-website-staging` | Two new proxied DNS records and their certificates; both names answer the current staging code until C4 | Detach both custom domains (Workers → `allaboutafrica-website-staging` → Settings → Domains & Routes), which deletes the records they created; the saved listing from step 2 shows nothing else existed at those names |
-| C3 | Phase S, steps 5–7: apply `0011` to `allaboutafrica-folio-staging` and write its registry rows, after the export and bookmark are saved | Staging D1 gains the site dimension, `site_roles`, `site_grants` and the `default` site's hosts | `wrangler d1 time-travel restore allaboutafrica-folio-staging --env staging --bookmark=<saved>`, or re-import the saved export into a fresh database; either way redeploy the previous staging version |
-| C4 | Phase S, steps 8–9: deploy staging from the pinned worktree | `staging.allaboutafrica.au` runs the new Folio with multi-site on; the admin moves to `staging-cms.allaboutafrica.au`, so staging editors sign in again there and re-enrol any passkey; open editor tabs are told to reload (wire version 5); the staging Worker's `workers.dev` hostname is switched on for Phase V's cross-site pass | `npx wrangler rollback <version id saved in step 2> --env staging`. Old code runs against `0011` except that it cannot create a form or an asset tag, so take C3's rollback too unless staging can go without both |
+| C2 | Phase S, step 3: two new Workers custom domains on the `atlas.example` zone, `staging-cms.atlas.example` and `staging-preview.atlas.example`, both on `atlas-website-staging` | Two new proxied DNS records and their certificates; both names answer the current staging code until C4 | Detach both custom domains (Workers → `atlas-website-staging` → Settings → Domains & Routes), which deletes the records they created; the saved listing from step 2 shows nothing else existed at those names |
+| C3 | Phase S, steps 5–7: apply `0011` to `atlas-folio-staging` and write its registry rows, after the export and bookmark are saved | Staging D1 gains the site dimension, `site_roles`, `site_grants` and the `default` site's hosts | `wrangler d1 time-travel restore atlas-folio-staging --env staging --bookmark=<saved>`, or re-import the saved export into a fresh database; either way redeploy the previous staging version |
+| C4 | Phase S, steps 8–9: deploy staging from the pinned worktree | `staging.atlas.example` runs the new Folio with multi-site on; the admin moves to `staging-cms.atlas.example`, so staging editors sign in again there and re-enrol any passkey; open editor tabs are told to reload (wire version 5); the staging Worker's `workers.dev` hostname is switched on for Phase V's cross-site pass | `npx wrangler rollback <version id saved in step 2> --env staging`. Old code runs against `0011` except that it cannot create a form or an asset tag, so take C3's rollback too unless staging can go without both |
 
 ## Progress
 
@@ -312,11 +312,11 @@ Sizes follow `PARITY.md`: **S** about a day, **M** a few days, **L** a week or t
    Phase 1 is not Phase 1's bug, and without this line that is unknowable.
 4. Re-read both consumer pins (`grep '"folio"' package.json` in each) and record them
    in Ground truth above if they moved.
-5. Read-only, against staging, from AAA's main checkout (a read ships nothing, so its
+5. Read-only, against staging, from Atlas's main checkout (a read ships nothing, so its
    dirty tree does not matter here):
-   `npx wrangler d1 execute allaboutafrica-folio-staging --remote --env staging --command "select name from d1_migrations order by id"`.
+   `npx wrangler d1 execute atlas-folio-staging --remote --env staging --command "select name from d1_migrations order by id"`.
    Expect `0001`–`0008` and `0010`, nothing later. Then
-   `node scripts/cache-probe.mjs https://staging.allaboutafrica.au` with no token, from
+   `node scripts/cache-probe.mjs https://staging.atlas.example` with no token, from
    Folio: record the single-site read-only result as the before picture.
 
 **Done when:** the tree is clean, five gates and the 22-script baseline are recorded
@@ -566,14 +566,14 @@ usage.
 
 ---
 
-### Phase L · AAA against the local Folio (rehearsal, nothing outward)
+### Phase L · Atlas against the local Folio (rehearsal, nothing outward)
 
-| Work | Files (in `allaboutafrica-website`) | Agent | Size |
+| Work | Files (in `atlas-website`) | Agent | Size |
 | --- | --- | --- | --- |
-| Wire multi-site behind a staging-only define, and move staging's admin | `vite.config.ts`; `app/folio/config.server.ts`; `workers/app.ts`; `wrangler.jsonc` (`env.staging` only); `app/routes/sitemap-xml.tsx`, `app/lib/page-index.server.ts`, `app/lib/guide-index.server.ts` and the loaders that call them; `scripts/folio-pages.mjs`, `scripts/folio-contact.mjs`, `scripts/media-ingest.mjs` (usage comments and the `:57` map note); `scripts/lib/media-map.staging.allaboutafrica.au.json` (renamed); `docs/folio-cms.md`; `CLAUDE.md` (the Deployment table) | `implementer`, **sonnet** | S |
+| Wire multi-site behind a staging-only define, and move staging's admin | `vite.config.ts`; `app/folio/config.server.ts`; `workers/app.ts`; `wrangler.jsonc` (`env.staging` only); `app/routes/sitemap-xml.tsx`, `app/lib/page-index.server.ts`, `app/lib/guide-index.server.ts` and the loaders that call them; `scripts/folio-pages.mjs`, `scripts/folio-contact.mjs`, `scripts/media-ingest.mjs` (usage comments and the `:57` map note); `scripts/lib/media-map.staging.atlas.example.json` (renamed); `docs/folio-cms.md`; `CLAUDE.md` (the Deployment table) | `implementer`, **sonnet** | S |
 
-Runs in a git worktree of AAA's `main`
-(`git -C /Users/brendan/work/takeoffgo/allaboutafrica-website worktree add <scratchpad>/aaa-multisite -b folio-multi-site main`),
+Runs in a git worktree of Atlas's `main`
+(`git -C /Users/brendan/work/harbour/atlas-website worktree add <scratchpad>/atl-multisite -b folio-multi-site main`),
 never in the main checkout, whose uncommitted `wrangler.jsonc` belongs to someone else.
 The dependency itself is not committed in this phase.
 
@@ -581,7 +581,7 @@ The dependency itself is not committed in this phase.
    `npm install --install-links file:/Users/brendan/work/personal/folio`. Reinstall
    after every Folio change. **Never commit this dependency.**
 2. **`vite.config.ts`** defines `__FOLIO_SITES_ADMIN__`: the string
-   `https://staging-cms.allaboutafrica.au` when `process.env.CLOUDFLARE_ENV === 'staging'`
+   `https://staging-cms.atlas.example` when `process.env.CLOUDFLARE_ENV === 'staging'`
    (which `build:staging` sets), `http://localhost:5173` when `FOLIO_SITES_LOCAL=1`
    (this rehearsal only), and `null` otherwise. **`config.server.ts`** passes
    `sites: { admin: __FOLIO_SITES_ADMIN__ }` only when it is non-null, so a production
@@ -594,41 +594,41 @@ The dependency itself is not committed in this phase.
    - the loopback becomes
      `this.ctx.exports.CachedPages({ props: await folio.cacheProps(request, this.env) }).fetch(…)`;
    - `NON_CANONICAL_HOST` becomes `/^staging[.-]|\.workers\.dev$/`, so
-     `staging.allaboutafrica.au`, `staging-cms.allaboutafrica.au`,
-     `staging-preview.allaboutafrica.au` and the Worker's `workers.dev` hostname are all
-     `noindex`, and `allaboutafrica.au` is not; its comment at `:105` names all four;
+     `staging.atlas.example`, `staging-cms.atlas.example`,
+     `staging-preview.atlas.example` and the Worker's `workers.dev` hostname are all
+     `noindex`, and `atlas.example` is not; its comment at `:105` names all four;
    - when `sites` is on and the request's host is neither the admin origin nor a
      preview origin (`folio.cacheProps(…).surface !== 'preview'`; redirecting a
      preview origin bounced the handoff's `site/enter`, found in this phase), a `GET` or
      `HEAD` for `/folio` or `/folio/…` other than `/folio/asset/…` and `/folio/f/…` is
      a `302` to the same path and query on the admin origin, before `folio.handle`.
 5. **`wrangler.jsonc`, `env.staging` only**: `routes` gains
-   `{ "pattern": "staging-cms.allaboutafrica.au", "custom_domain": true }` and
-   `{ "pattern": "staging-preview.allaboutafrica.au", "custom_domain": true }` beside
+   `{ "pattern": "staging-cms.atlas.example", "custom_domain": true }` and
+   `{ "pattern": "staging-preview.atlas.example", "custom_domain": true }` beside
    the existing entry, so a deploy can never detach the domains C2 attaches; and
    `"workers_dev": true`, which is what gives Phase V's cross-site pass a hostname
    without DNS. The top level is not touched.
 6. The three `folio.reader(env)` calls pass the request.
 7. **Scripts**: every documented staging `FOLIO_BASE` becomes
-   `https://staging-cms.allaboutafrica.au/folio/~default` (the `~default` segment is
+   `https://staging-cms.atlas.example/folio/~default` (the `~default` segment is
    what keeps an unbound token out of `400 site_required`; production's stays
-   `https://allaboutafrica.au/folio`, which has no `sites`). `git mv
-   scripts/lib/media-map.staging.allaboutafrica.au.json
-   scripts/lib/media-map.staging-cms.allaboutafrica.au.json`, because
+   `https://atlas.example/folio`, which has no `sites`). `git mv
+   scripts/lib/media-map.staging.atlas.example.json
+   scripts/lib/media-map.staging-cms.atlas.example.json`, because
    `media-ingest.mjs:63` keys the map by `FOLIO_BASE`'s hostname and an unrenamed map
    means every staging image uploaded twice. `media-audit.mjs`'s
-   `SITE=https://staging.allaboutafrica.au` is unchanged: it crawls public pages,
+   `SITE=https://staging.atlas.example` is unchanged: it crawls public pages,
    which stay on the live host.
-8. **Docs**: `docs/folio-cms.md` and AAA's `CLAUDE.md` Deployment table say that on
-   staging the admin is `https://staging-cms.allaboutafrica.au/folio`, drafts preview on
-   `staging-preview.allaboutafrica.au`, and `staging.allaboutafrica.au/folio` redirects.
+8. **Docs**: `docs/folio-cms.md` and Atlas's `CLAUDE.md` Deployment table say that on
+   staging the admin is `https://staging-cms.atlas.example/folio`, drafts preview on
+   `staging-preview.atlas.example`, and `staging.atlas.example/folio` redirects.
 9. **Local smoke**, with `FOLIO_SITES_LOCAL=1 npm run dev` after
-   `npx wrangler d1 migrations apply allaboutafrica-folio-staging --env staging --local`:
+   `npx wrangler d1 migrations apply atlas-folio-staging --env staging --local`:
    the admin on `http://localhost:5173`, the `default` site's live host
-   `aaa.localhost` and preview origin `http://preview.localhost:5173`, written through
+   `atl.localhost` and preview origin `http://preview.localhost:5173`, written through
    the local registry API (plain `http:` is valid on `*.localhost`). The magic link
    lands in `.wrangler/tmp/email/miniflare-*/email-text/*.txt`, not the console.
-   Check: a CMS page renders on `aaa.localhost:5173`; `aaa.localhost:5173/folio`
+   Check: a CMS page renders on `atl.localhost:5173`; `atl.localhost:5173/folio`
    redirects to the admin; the pane previews a draft through `site/start`; the sitemap
    lists the same URLs as before, absolute on the live host.
 
@@ -637,7 +637,7 @@ The dependency itself is not committed in this phase.
 `staging-cms` nor `localhost:5173` (grep the build output): the break-it check for the
 define is that removing the `null` branch makes that grep find the string.
 
-**Done when:** the smoke passes and the AAA changes are committed on the local
+**Done when:** the smoke passes and the Atlas changes are committed on the local
 `folio-multi-site` branch with the dependency still at its old pin. Restore with
 `git checkout -- package.json package-lock.json && npm install` before committing.
 
@@ -667,15 +667,15 @@ pre-change state saved to the scratchpad first: those files are the rollback.
 
 | Role | Hostname | What it serves |
 | --- | --- | --- |
-| Admin origin (`sites.admin`) | `staging-cms.allaboutafrica.au` (new) | The admin, sign-in, magic links, the registry, MCP. Passkeys (`rpId`) and sessions bind to it. |
-| Live host of the `default` site | `staging.allaboutafrica.au` (unchanged) | Published pages. `handle()` answers only `/folio/asset/:key` and `/folio/f/:id` here; AAA redirects the rest of `/folio` to the admin origin. |
-| Preview origin of the `default` site | `staging-preview.allaboutafrica.au` (new) | Drafts behind the grant, draft mode, shares, and published pages to anyone (the site is `live`). |
+| Admin origin (`sites.admin`) | `staging-cms.atlas.example` (new) | The admin, sign-in, magic links, the registry, MCP. Passkeys (`rpId`) and sessions bind to it. |
+| Live host of the `default` site | `staging.atlas.example` (unchanged) | Published pages. `handle()` answers only `/folio/asset/:key` and `/folio/f/:id` here; Atlas redirects the rest of `/folio` to the admin origin. |
+| Preview origin of the `default` site | `staging-preview.atlas.example` (new) | Drafts behind the grant, draft mode, shares, and published pages to anyone (the site is `live`). |
 
 **What that costs, said to the staging editors before C4:** they sign in again at
-`https://staging-cms.allaboutafrica.au/folio` (a session on
-`staging.allaboutafrica.au` does not move); a passkey enrolled on staging stops
+`https://staging-cms.atlas.example/folio` (a session on
+`staging.atlas.example` does not move); a passkey enrolled on staging stops
 working and is enrolled again from the new origin; bookmarks to
-`staging.allaboutafrica.au/folio` redirect; scripts use the new `FOLIO_BASE`.
+`staging.atlas.example/folio` redirect; scripts use the new `FOLIO_BASE`.
 
 1. **Worktree at the pin.** In the `folio-multi-site` worktree, set the dependency to
    `github:brendanmckenzie/folio#<Phase R SHA>` with plain `npm install`, confirm
@@ -683,55 +683,55 @@ working and is enrolled again from the new origin; bookmarks to
    commit (`chore(deps): bump folio to <sha7> for multi-site`). Gates as in Phase L.
 2. **Save the before state** to the scratchpad: the staging Worker's current version id
    (`npx wrangler deployments status --env staging`); its domains and routes; the
-   `allaboutafrica.au` zone's DNS records for `staging-cms` and `staging-preview` (none
+   `atlas.example` zone's DNS records for `staging-cms` and `staging-preview` (none
    expected); and
-   `npx wrangler d1 execute allaboutafrica-folio-staging --remote --env staging --command "select name from d1_migrations order by id"`.
-3. **C2.** Attach `staging-cms.allaboutafrica.au` and `staging-preview.allaboutafrica.au`
-   to `allaboutafrica-website-staging` as Workers custom domains (the same entries Phase L
+   `npx wrangler d1 execute atlas-folio-staging --remote --env staging --command "select name from d1_migrations order by id"`.
+3. **C2.** Attach `staging-cms.atlas.example` and `staging-preview.atlas.example`
+   to `atlas-website-staging` as Workers custom domains (the same entries Phase L
    step 5 put in `wrangler.jsonc`, so the deploy in step 8 keeps them). Verify from
    the far side: `dig +short` answers for both, `curl -sI https://<each>/` returns the
-   current staging code's home page, and `staging.allaboutafrica.au` is unchanged.
+   current staging code's home page, and `staging.atlas.example` is unchanged.
 4. **Export and bookmark.**
-   `npx wrangler d1 export allaboutafrica-folio-staging --remote --env staging --output <scratchpad>/aaa-staging-pre-0011.sql`
+   `npx wrangler d1 export atlas-folio-staging --remote --env staging --output <scratchpad>/atl-staging-pre-0011.sql`
    (the database may pause queries while it exports; it is staging), and
-   `npx wrangler d1 time-travel info allaboutafrica-folio-staging --env staging`, saving
+   `npx wrangler d1 time-travel info atlas-folio-staging --env staging`, saving
    the bookmark. **Rehearse on the copy**: load the export into a local sqlite3
    database, apply `node_modules/folio/migrations/0011_sites.sql` and step 7's
    statements to it, and run step 6's read-back. A failure here costs nothing.
 5. **C3.** Tell the owner: no role changes or invitations on staging until step 9
    finishes. Then, from the worktree,
-   `npx wrangler d1 migrations apply allaboutafrica-folio-staging --remote --env staging`.
-   Always `--env staging`; the top level of AAA's config is production.
-6. **Read 0011 back** with `npx wrangler d1 execute allaboutafrica-folio-staging --remote --env staging --command "…"`:
+   `npx wrangler d1 migrations apply atlas-folio-staging --remote --env staging`.
+   Always `--env staging`; the top level of Atlas's config is production.
+6. **Read 0011 back** with `npx wrangler d1 execute atlas-folio-staging --remote --env staging --command "…"`:
    `d1_migrations` lists `0011_sites.sql` and no `0012`; `sites` holds the `default`
    row; `select count(*) from site_roles` equals `select count(*) from users` and every
    row is `scope_id = '*'`; `sql` of `stories_path` leads with `site_id`;
    `pragma table_info(stories)` ends `site_id, forked_from`. Save the output.
 7. **Registry rows by SQL, still under C3**:
-   `insert into site_hosts (host, site_id) values ('staging.allaboutafrica.au', 'default')`;
-   `update sites set name = 'All About Africa', preview_origin = 'https://staging-preview.allaboutafrica.au', updated_at = unixepoch() * 1000 where id = 'default'`.
+   `insert into site_hosts (host, site_id) values ('staging.atlas.example', 'default')`;
+   `update sites set name = 'Atlas Guides', preview_origin = 'https://staging-preview.atlas.example', updated_at = unixepoch() * 1000 where id = 'default'`.
    Read both back.
 8. **C4.** Brief the editors (above). From the worktree: `npm run deploy:staging`.
    **Never `npm run deploy`**, which deploys production. Save the `workers.dev` URL the
-   deploy prints (`https://allaboutafrica-website-staging.<account subdomain>.workers.dev`)
+   deploy prints (`https://atlas-website-staging.<account subdomain>.workers.dev`)
    to the scratchpad: Phase V's cross-site pass needs it.
 9. **Right after the deploy:**
    - run the decision 18 post-deploy grant statement and read back
      `select count(*) from users where id not in (select user_id from site_roles)` = 0;
-   - sign in at `https://staging-cms.allaboutafrica.au/folio`, and mint an unbound
+   - sign in at `https://staging-cms.atlas.example/folio`, and mint an unbound
      admin token there for steps V2 and V5; keep it out of every file and commit;
    - re-write the `default` site's live host and preview origin through the registry
      (the Sites screen, or `PUT /folio/api/sites/default/hosts` and
      `PATCH /folio/api/sites/default` on the admin origin), so write-time validation
      runs and `siteChanged` and the `site:default` purge fire;
-   - read back `GET https://staging-cms.allaboutafrica.au/folio/api/v1/sites/resolve?host=staging.allaboutafrica.au`
-     (`{ site: default, surface: live }`) and `…?host=staging-preview.allaboutafrica.au`
+   - read back `GET https://staging-cms.atlas.example/folio/api/v1/sites/resolve?host=staging.atlas.example`
+     (`{ site: default, surface: live }`) and `…?host=staging-preview.atlas.example`
      (`surface: preview`);
-   - `curl -sI https://staging.allaboutafrica.au/folio` is a `302` to the admin origin,
-     and `https://staging.allaboutafrica.au/` renders the home page.
+   - `curl -sI https://staging.atlas.example/folio` is a `302` to the admin origin,
+     and `https://staging.atlas.example/` renders the home page.
 10. **Production untouched, verified from the far side:** `npx wrangler deployments status`
-    (no `--env`) shows the same version as before; `https://allaboutafrica.au` serves;
-    AAA's `origin/main` `package.json` and takeoffgo-website's still pin their Phase 0
+    (no `--env`) shows the same version as before; `https://atlas.example` serves;
+    Atlas's `origin/main` `package.json` and harbour-website's still pin their Phase 0
     SHAs.
 
 ---
@@ -742,28 +742,28 @@ working and is enrolled again from the new origin; bookmarks to
 
 1. **0011 applied**: step S6's read-back, run once more after the deploy, and saved.
 2. **Cache**:
-   `node scripts/cache-probe.mjs https://staging.allaboutafrica.au --admin https://staging-cms.allaboutafrica.au --site default --preview https://staging-preview.allaboutafrica.au --token <the step S9 token>`.
+   `node scripts/cache-probe.mjs https://staging.atlas.example --admin https://staging-cms.atlas.example --site default --preview https://staging-preview.atlas.example --token <the step S9 token>`.
    PASS lines needed: live MISS then HIT; preview MISS while live is HIT (separate
    entries, because the surface is in the props); after the probe's publish, both
    purged. With one site on the deployment this shows entries separated by surface;
    separation between two sites is covered by the workers tests and cannot be observed
    here. Quote the PASS lines in the Progress row.
 3. **Headers**: a `staging-preview` page carries
-   `content-security-policy: frame-ancestors https://staging-cms.allaboutafrica.au` and
-   `x-robots-tag: noindex, nofollow`; a `staging.allaboutafrica.au` page carries
+   `content-security-policy: frame-ancestors https://staging-cms.atlas.example` and
+   `x-robots-tag: noindex, nofollow`; a `staging.atlas.example` page carries
    `Cache-Tag` including `site:default`, carries `x-robots-tag`, and does not carry
    `frame-ancestors`.
 4. **`0012` applied nowhere**: `d1_migrations` on staging has no `0012`, and
    `migrations/` in the released head has no `0012` file.
 5. **Browser passes, owner.** Write the checklist below to
-   `~/outbox/aaa-staging-preview-browser-check.md` and give the owner
-   `hcograb aaa-staging-preview-browser-check.md`. Each pass runs in current Chrome,
+   `~/outbox/atl-staging-preview-browser-check.md` and give the owner
+   `hcograb atl-staging-preview-browser-check.md`. Each pass runs in current Chrome,
    current Firefox and Safari 26.2 or later (Safari → About Safari shows the version),
    each with its default privacy settings.
 
    **Pass 1, the end state (same-site).** Preview origin
-   `https://staging-preview.allaboutafrica.au`. In each browser:
-   - sign in at `https://staging-cms.allaboutafrica.au/folio`, open a page, type a
+   `https://staging-preview.atlas.example`. In each browser:
+   - sign in at `https://staging-cms.atlas.example/folio`, open a page, type a
      change; the pane shows the change (the draft, not the published page);
    - *Open preview in a new tab* shows the same draft top-level on `staging-preview`;
    - sign out in another tab, reload the pane: no draft;
@@ -771,7 +771,7 @@ working and is enrolled again from the new origin; bookmarks to
      page's draft renders on `staging-preview`, and another path there does not.
 
    This proves the handoff and revocation. It does **not** prove partitioning: the admin
-   and the preview origin share the registrable domain `allaboutafrica.au`, so the pane
+   and the preview origin share the registrable domain `atlas.example`, so the pane
    is a same-site iframe and would work with an ordinary cookie.
 
    **Pass 2, cross-site.** Before it, the orchestrator switches the preview origin to
@@ -779,19 +779,19 @@ working and is enrolled again from the new origin; bookmarks to
    Sites screen's preview origin for `default`, or `PATCH /folio/api/sites/default` on
    the admin origin with the platform token. Read back that
    `sites/resolve?host=<the workers.dev host>` answers `surface: preview` and
-   `sites/resolve?host=staging-preview.allaboutafrica.au` answers `404` (for the
+   `sites/resolve?host=staging-preview.atlas.example` answers `404` (for the
    duration of the pass, `staging-preview` serves no site; tell the owner). Because
    `workers.dev` is on the public suffix list, the Worker's hostname is a different
-   site from `allaboutafrica.au`, and the pane becomes a cross-site iframe. In each
+   site from `atlas.example`, and the pane becomes a cross-site iframe. In each
    browser, sign out and in again first, then open a page and type a change:
    - **Chrome**: the pane shows the draft. DevTools → Application → Cookies, selecting
      the `workers.dev` frame, lists `__Host-folio_grant` with **Partition Key Site**
-     `https://allaboutafrica.au`. Then Settings → Privacy and security → Third-party
+     `https://atlas.example`. Then Settings → Privacy and security → Third-party
      cookies → *Block third-party cookies*, reload the pane: it still shows the draft.
      Restore the setting afterwards.
    - **Firefox**: the pane shows the draft. DevTools → Storage → Cookies for the
      `workers.dev` origin lists `__Host-folio_grant` with a **Partition Key** naming
-     `allaboutafrica.au`.
+     `atlas.example`.
    - **Safari 26.2+**: the pane shows the draft with *Prevent cross-site tracking* on
      (the default). Safari refuses an unpartitioned third-party cookie outright, so this
      is the browser that proves `Partitioned` is set. Web Inspector → Storage → Cookies
@@ -802,7 +802,7 @@ working and is enrolled again from the new origin; bookmarks to
      another tab and reload the pane: no draft.
 
    **Afterwards, switch back** the same way, to
-   `https://staging-preview.allaboutafrica.au`, and read back both `sites/resolve`
+   `https://staging-preview.atlas.example`, and read back both `sites/resolve`
    answers as in step S9. The registry edit purges `site:default` twice, so nothing
    cached during the pass outlives it.
 6. Record both passes' answers in the spec's Implementation notes. A failure is a fix in
@@ -829,9 +829,9 @@ In this order, before the commit:
 - **Spec phase 10, `0012_users_role_contract.sql`.** The release after this one, once
   it is deployed everywhere. Not written in this run; `users-contract.test.ts` applies
   its two statements to its own database and that is all.
-- **Production.** `allaboutafrica.au` stays on its pin. Its switch to multi-site is a
+- **Production.** `atlas.example` stays on its pin. Its switch to multi-site is a
   separate change with its own hostnames and its own confirmations.
-- **takeoffgo-website.** Not bumped.
+- **harbour-website.** Not bumped.
 - **A second site on staging.** The end state is one site; cross-site isolation is
   proven by workers tests.
 - **A tag.** 1.0's phases 5 and 6 own `version` and tags.

@@ -1344,7 +1344,7 @@ a run on one asset from the detail panel.
 > **The public-URL path was never proven and is now gone (2026-09-07).** The first
 > real host pressed *Describe* and got `anthropic: 400 Unable to download the file`.
 > The URL was fine — 200, `image/webp`, 262kB, checked from three networks — and the
-> fetch was not: `allaboutafrica.au` blocks AI-crawler user agents zone-wide, and
+> fetch was not: `atlas.example` blocks AI-crawler user agents zone-wide, and
 > `Claude-User` is the agent the Messages API uses to download an image. Probed
 > side by side on the same URL in the same second: `curl/8.7.1` 200,
 > `python-requests` 200, `AnthropicBanana/1.0` 200, `Claude-User/1.0` 403,

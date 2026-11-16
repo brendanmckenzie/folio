@@ -509,7 +509,7 @@ is left out of the registry: it has no chain and answers `404 No site or group` 
 its own the deploy serves every `default` page as a 404:
 
 ```sql
-update sites set brand = 'allaboutafrica' where id = 'default';
+update sites set brand = 'atlas' where id = 'default';
 ```
 
 Use your own brand id, and repeat for every other site and group you already have. The
@@ -526,7 +526,7 @@ becomes `brands.<id>.settings`. Everything about people and requests stays at th
 [The configuration reference](docs/configuration.md#many-brands-in-one-deployment) has the
 shape and the construction refusals, which name the key.
 
-**4. The Vite plugin takes a record.** `folio({ blocks: { allaboutafrica: './…', takeoffgo:
+**4. The Vite plugin takes a record.** `folio({ blocks: { atlas: './…', harbour:
 './…' } })` builds `folio-preview-<brand>.js` and `.css` per brand and defines
 `__FOLIO_ASSETS__` with a `brands` map, which you pass to `createFolio`'s `assets`
 unchanged. **A record with `cssCodeSplit: false` fails the build**, at the top level or on
@@ -535,7 +535,7 @@ brand's preview. Remove the flag. A string `blocks` is unchanged, byte for byte,
 `cssCodeSplit: false`.
 
 **5. Content migration ids carry the brand.** Every id starts `<brand>/`
-(`takeoffgo/0001-fifty-fifty-to-feature`), refused at construction otherwise, because
+(`harbour/0001-fifty-fifty-to-feature`), refused at construction otherwise, because
 `schema_migrations` is keyed by id alone. **Converting an existing deployment is not
 supported.** Its documents carry the old unprefixed ids in `stories.schema_id`, and
 `schema_migrations` records them, so after the rename every document reads as behind and

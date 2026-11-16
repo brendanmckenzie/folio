@@ -12,9 +12,9 @@ import { ADMIN, mountAt, resetServed, serve } from "./fixture";
 const EDITOR: Me = { ...ADMIN, actor: { ...ADMIN.actor, role: "editor" } as Me["actor"] };
 const PUBLISHER: Me = { ...ADMIN, actor: { ...ADMIN.actor, role: "publisher" } as Me["actor"] };
 
-const JAMBO = {
-  id: "jambo",
-  label: "File in Jambo",
+const CRM = {
+  id: "crm",
+  label: "File in CRM",
   description: "Creates a lead.",
   inputs: [{ name: "email", kind: "email", label: "Email", required: true }],
   settings: { pipeline: { kind: "text", label: "Pipeline", default: "sales" } },
@@ -54,7 +54,7 @@ const form = (actions: unknown[] = []) => ({
 });
 
 const attachment = {
-  action: "jambo",
+  action: "crm",
   map: { email: "email" },
   settings: { pipeline: "sales" },
   delivers: true,
@@ -71,10 +71,10 @@ const ROW = {
   files: [],
   unasked: [],
   optionLabels: {},
-  deliveries: [{ action: "jambo", status: "failed", attempts: 8 }],
+  deliveries: [{ action: "crm", status: "failed", attempts: 8 }],
 };
 const FULL = {
-  action: "jambo",
+  action: "crm",
   status: "failed",
   attempts: 8,
   nextAt: null,
@@ -92,25 +92,25 @@ afterEach(() => {
 
 describe("the builder's Actions section", () => {
   it("offers an action not yet attached, and not one that is", async () => {
-    serve({ form: form([attachment]), registryActions: [JAMBO, MAILER] });
+    serve({ form: form([attachment]), registryActions: [CRM, MAILER] });
     await mountAt("/folio/form/frm_one", PUBLISHER);
     await waitFor(() => expect(screen.getByText("Where responses go")).not.toBeNull());
-    expect(screen.getAllByText("File in Jambo").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("File in CRM").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /Add an action/ }));
     await waitFor(() =>
       expect(screen.getByRole("menuitem", { name: "Email responses" })).not.toBeNull(),
     );
-    expect(screen.queryByRole("menuitem", { name: "File in Jambo" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "File in CRM" })).toBeNull();
   });
 
   it("shows the problem in place when the attachment no longer fits", async () => {
-    serve({ form: form([{ action: "jambo", delivers: true }]), registryActions: [JAMBO] });
+    serve({ form: form([{ action: "crm", delivers: true }]), registryActions: [CRM] });
     await mountAt("/folio/form/frm_one", PUBLISHER);
     await waitFor(() => expect(screen.getByText("Email needs a question")).not.toBeNull());
   });
 
   it("holds Save back when the draft makes an attachment worse, and not otherwise", async () => {
-    serve({ form: form([attachment]), registryActions: [JAMBO] });
+    serve({ form: form([attachment]), registryActions: [CRM] });
     await mountAt("/folio/form/frm_one", PUBLISHER);
     await waitFor(() => expect(screen.getByText("Where responses go")).not.toBeNull());
     const save = screen.getByRole("button", { name: "Save" }) as HTMLButtonElement;
@@ -119,11 +119,11 @@ describe("the builder's Actions section", () => {
       target: { value: "" },
     });
     await waitFor(() => expect(save.disabled).toBe(true));
-    expect(screen.getAllByText(/File in Jambo: Email needs a question/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/File in CRM: Email needs a question/).length).toBeGreaterThan(0);
   });
 
   it("lets an already-incomplete attachment save", async () => {
-    serve({ form: form([{ action: "jambo", delivers: true }]), registryActions: [JAMBO] });
+    serve({ form: form([{ action: "crm", delivers: true }]), registryActions: [CRM] });
     await mountAt("/folio/form/frm_one", PUBLISHER);
     await waitFor(() => expect(screen.getByText("Email needs a question")).not.toBeNull());
     expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(
@@ -132,14 +132,14 @@ describe("the builder's Actions section", () => {
   });
 
   it("is read-only below a publisher", async () => {
-    serve({ form: form([attachment]), registryActions: [JAMBO, MAILER] });
+    serve({ form: form([attachment]), registryActions: [CRM, MAILER] });
     await mountAt("/folio/form/frm_one", EDITOR);
     await waitFor(() =>
       expect(screen.getByText("Only a publisher can change where responses go.")).not.toBeNull(),
     );
     expect(screen.queryByRole("button", { name: /Add an action/ })).toBeNull();
     const remove = screen.getByRole("button", {
-      name: "Remove File in Jambo",
+      name: "Remove File in CRM",
     }) as HTMLButtonElement;
     expect(remove.disabled).toBe(true);
     expect(
@@ -149,7 +149,7 @@ describe("the builder's Actions section", () => {
   });
 
   it("refuses to remove a question an action reads, naming the action", async () => {
-    serve({ form: form([attachment]), registryActions: [JAMBO] });
+    serve({ form: form([attachment]), registryActions: [CRM] });
     await mountAt("/folio/form/frm_one", PUBLISHER);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Remove Email" })).not.toBeNull(),
@@ -160,7 +160,7 @@ describe("the builder's Actions section", () => {
   });
 
   it("locks the name of a question an action reads for an editor", async () => {
-    serve({ form: form([attachment]), registryActions: [JAMBO] });
+    serve({ form: form([attachment]), registryActions: [CRM] });
     await mountAt("/folio/form/frm_one", EDITOR);
     await waitFor(() => expect(screen.getAllByText("Email").length).toBeGreaterThan(0));
     fireEvent.click(within(screen.getByRole("list")).getByText("Email"));
@@ -182,13 +182,13 @@ describe("Responses deliveries", () => {
   it("draws the Delivery column, the failed banner and the filter", async () => {
     serve({
       form: form([attachment]),
-      registryActions: [JAMBO],
+      registryActions: [CRM],
       responses: page([ROW], { failedDeliveries: 3 }),
     });
     await mountAt("/folio/responses/frm_one", PUBLISHER);
     await waitFor(() => expect(screen.getByText("3 deliveries failed.")).not.toBeNull());
     expect(screen.getByRole("columnheader", { name: "Delivery" })).not.toBeNull();
-    expect(screen.getByTitle("File in Jambo: Failed")).not.toBeNull();
+    expect(screen.getByTitle("File in CRM: Failed")).not.toBeNull();
     expect(screen.getByRole("button", { name: "Show them" })).not.toBeNull();
     expect(screen.getByLabelText("Delivery")).not.toBeNull();
   });
@@ -196,7 +196,7 @@ describe("Responses deliveries", () => {
   it("says retries are not running when the server counts overdue ones", async () => {
     serve({
       form: form([attachment]),
-      registryActions: [JAMBO],
+      registryActions: [CRM],
       responses: page([ROW], { overdueDeliveries: 1 }),
     });
     await mountAt("/folio/responses/frm_one", PUBLISHER);
@@ -205,12 +205,12 @@ describe("Responses deliveries", () => {
 
   it("explains a form whose action needs attention, linking to the builder", async () => {
     serve({
-      form: form([{ action: "jambo", delivers: true }]),
-      registryActions: [JAMBO],
+      form: form([{ action: "crm", delivers: true }]),
+      registryActions: [CRM],
       responses: page([]),
     });
     await mountAt("/folio/responses/frm_one", PUBLISHER);
-    await waitFor(() => expect(screen.getByText(/File in Jambo needs attention/)).not.toBeNull());
+    await waitFor(() => expect(screen.getByText(/File in CRM needs attention/)).not.toBeNull());
     expect(screen.getByRole("button", { name: "Open the builder" })).not.toBeNull();
   });
 
@@ -225,7 +225,7 @@ describe("Responses deliveries", () => {
   it("opens the drawer with the category, never the thrown text, and Retry calls the route and refreshes", async () => {
     serve({
       form: form([attachment]),
-      registryActions: [JAMBO],
+      registryActions: [CRM],
       responses: page([ROW]),
       deliveries: [FULL],
       retried: {
@@ -255,7 +255,7 @@ describe("Responses deliveries", () => {
     await waitFor(() =>
       expect(
         asked.some(
-          (a) => a.startsWith("POST") && a.endsWith("/responses/res_1/deliveries/jambo/retry"),
+          (a) => a.startsWith("POST") && a.endsWith("/responses/res_1/deliveries/crm/retry"),
         ),
       ).toBe(true),
     );
@@ -272,7 +272,7 @@ describe("Responses deliveries", () => {
   it("shows the drawer's deliveries without Retry below a publisher", async () => {
     serve({
       form: form([attachment]),
-      registryActions: [JAMBO],
+      registryActions: [CRM],
       responses: page([ROW]),
       deliveries: [FULL],
     });

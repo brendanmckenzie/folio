@@ -1608,7 +1608,7 @@ export async function pathMiss(
   // resolves against the page it is already on. `/guides/safari` redirecting to
   // `guides/new` sends the visitor to `/guides/safari/guides/new`, a 404, and
   // every rename on the site is quietly broken in exactly that shape. Observed
-  // on All About Africa, whose host wrote the naive `redirect(miss.to)` that
+  // on a production site, whose host wrote the naive `redirect(miss.to)` that
   // AGENTS.md and README.md both showed.
   //
   // Rooting it here rather than telling ten hosts to remember: `new URL(to,
@@ -2821,9 +2821,9 @@ export async function updateStoryStatement(
         //
         // It did until 2026-09-06, and the handbook had already documented the
         // opposite — "a title-only patch … fires no `pathsChanged`, by design".
-        // The code fired one: renaming a page moved it. Observed on All About
-        // Africa's staging, where one `PATCH { title }` turned `guides/safari`
-        // into `guides/comparing-safari-in-east-and-southern-africa` and left a
+        // The code fired one: renaming a page moved it. Observed on a staging
+        // host, where one `PATCH { title }` turned `guides/safari` into
+        // `guides/comparing-safari-regions` and left a
         // redirect behind, with nothing in the response to say a URL had moved.
         checkedSlug(
           uniqueSlug(

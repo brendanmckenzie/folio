@@ -29,59 +29,59 @@ import type { FolioEnv } from "../../src/server/types";
  * registry routes on their own for that reason.
  *
  * The brands collide on the block names `pageRoot` and `prose` and the type `page`,
- * as allaboutafrica and takeoffgo do. The registry: brand `allaboutafrica` has group
+ * as atlas and harbour do. The registry: brand `atlas` has group
  * `east` holding `kenya`, and `default` (set by SQL, as `UPGRADING.md` says a host
- * does after `0013`); brand `takeoffgo` has `takeoffgo`, which holds a story; and
+ * does after `0013`); brand `harbour` has `harbour`, which holds a story; and
  * `orphan` is a row with no brand, `ghost` one of a brand nobody configured.
  */
 
-const aaaRoot = defineBlock({
+const atlRoot = defineBlock({
   name: "pageRoot",
   label: "Page",
   fields: { title: text(), strap: text() },
   render: () => null,
 });
-const aaaProse = defineBlock({
+const atlProse = defineBlock({
   name: "prose",
   label: "Prose",
   fields: { body: text() },
   render: () => null,
 });
-const aaaHeader = defineBlock({
+const atlHeader = defineBlock({
   name: "header",
   label: "Header",
   fields: { tagline: text({ default: "Karibu" }) },
   render: () => null,
 });
-const tgoRoot = defineBlock({
+const hbrRoot = defineBlock({
   name: "pageRoot",
   label: "Page",
   fields: { heading: text() },
   render: () => null,
 });
-const tgoProse = defineBlock({
+const hbrProse = defineBlock({
   name: "prose",
   label: "Prose",
   fields: { copy: text() },
   render: () => null,
 });
 
-const aaaTypes: DocumentType[] = [
+const atlTypes: DocumentType[] = [
   { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
   { name: "header", label: "Header", kind: "singleton", root: "header" },
 ];
-const tgoTypes: DocumentType[] = [
+const hbrTypes: DocumentType[] = [
   { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
 ];
 
 const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
-  allaboutafrica: {
-    label: "All About Africa",
-    blocks: [aaaRoot, aaaProse, aaaHeader],
-    types: aaaTypes,
+  atlas: {
+    label: "Atlas Guides",
+    blocks: [atlRoot, atlProse, atlHeader],
+    types: atlTypes,
     globals: ["header"],
   },
-  takeoffgo: { label: "Take Off Go", blocks: [tgoRoot, tgoProse], types: tgoTypes },
+  harbour: { label: "Harbour Travel", blocks: [hbrRoot, hbrProse], types: hbrTypes },
 };
 
 const bindings = (e: Cloudflare.Env): FolioBindings => ({
@@ -163,23 +163,23 @@ const errorOf = (body: Record<string, unknown>) =>
 
 beforeAll(async () => {
   await env.DB.batch([
-    env.DB.prepare("update sites set brand = 'allaboutafrica' where id = 'default'"),
+    env.DB.prepare("update sites set brand = 'atlas' where id = 'default'"),
     env.DB.prepare(
       `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-         ('east', 'group', 'East', null, null, null, 'allaboutafrica', 0, 0),
-         ('kenya', 'site', 'Kenya', 'east', 'live', null, 'allaboutafrica', 0, 0),
-         ('takeoffgo', 'site', 'Take Off Go', null, 'live', null, 'takeoffgo', 0, 0),
+         ('east', 'group', 'East', null, null, null, 'atlas', 0, 0),
+         ('kenya', 'site', 'Kenya', 'east', 'live', null, 'atlas', 0, 0),
+         ('harbour', 'site', 'Harbour Travel', null, 'live', null, 'harbour', 0, 0),
          ('orphan', 'site', 'Orphan', null, 'live', null, null, 0, 0),
          ('ghost', 'site', 'Ghost', null, 'live', null, 'retired', 0, 0)`,
     ),
     env.DB.prepare(
       `insert into site_hosts (host, site_id) values
-         ('kenya.example', 'kenya'), ('takeoffgo.example', 'takeoffgo'),
+         ('kenya.example', 'kenya'), ('harbour.example', 'harbour'),
          ('orphan.example', 'orphan')`,
     ),
     env.DB.prepare(
       `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id)
-       values ('sty_tgo_home', 'page', null, 'home', 'home', 'a0', 'Home', 1, 'takeoffgo')`,
+       values ('sty_hbr_home', 'page', null, 'home', 'home', 'a0', 'Home', 1, 'harbour')`,
     ),
   ]);
   rt.sites?.drop();
@@ -195,22 +195,22 @@ describe("construction", () => {
     const withBrand = (over: Partial<FolioBrand<Cloudflare.Env>>) =>
       createFolio({
         ...config,
-        brands: { ...brands, takeoffgo: { ...brands.takeoffgo!, ...over } },
+        brands: { ...brands, harbour: { ...brands.harbour!, ...over } },
       });
     expect(() => withBrand({ writing: { voice: "x".repeat(16_001) } })).toThrow(
-      "folio: brand 'takeoffgo': 'writing.voice' must be",
+      "folio: brand 'harbour': 'writing.voice' must be",
     );
     expect(() =>
       withBrand({ writing: { voice: "Warm.", avoid: [{ term: "Cheap" }, { term: "cheap" }] } }),
-    ).toThrow("folio: brand 'takeoffgo': 'writing.avoid[1].term' repeats 'cheap'");
+    ).toThrow("folio: brand 'harbour': 'writing.avoid[1].term' repeats 'cheap'");
     const tooLong = defineBlock({
       name: "pageRoot",
       label: "Page",
       fields: { heading: text({ length: { min: 10, max: 5 } }) },
       render: () => null,
     });
-    expect(() => withBrand({ blocks: [tooLong, tgoProse] })).toThrow(
-      "folio: brand 'takeoffgo': block 'pageRoot' field 'heading': 'length.max' (5) is below",
+    expect(() => withBrand({ blocks: [tooLong, hbrProse] })).toThrow(
+      "folio: brand 'harbour': block 'pageRoot' field 'heading': 'length.max' (5) is below",
     );
     expect(() =>
       withBrand({ writing: { voice: "Warm.", avoid: [{ term: "cheap" }] } }),
@@ -223,35 +223,35 @@ describe("construction", () => {
       /'brands' needs 'sites'/,
     );
     expect(() =>
-      createFolio({ ...config, blocks: [aaaRoot] } as unknown as FolioConfig<Cloudflare.Env>),
+      createFolio({ ...config, blocks: [atlRoot] } as unknown as FolioConfig<Cloudflare.Env>),
     ).toThrow(/'blocks' belongs to a brand beside 'brands'/);
     expect(() =>
       createFolio({
         ...config,
         brands: {
           ...brands,
-          takeoffgo: {
-            ...brands.takeoffgo!,
+          harbour: {
+            ...brands.harbour!,
             migrations: [{ id: "0001-x", description: "x", up: () => [] }],
           },
         },
       }),
-    ).toThrow(/brand 'takeoffgo': migration id '0001-x' must start with its brand/);
+    ).toThrow(/brand 'harbour': migration id '0001-x' must start with its brand/);
     expect(() =>
       createFolio({
         ...config,
-        assets: { admin: "/a.js", brands: { allaboutafrica: { preview: "/p.js" } } },
+        assets: { admin: "/a.js", brands: { atlas: { preview: "/p.js" } } },
       }),
     ).toThrow(/'assets.brands' must name exactly the brands/);
   });
 
   it("builds one brand runtime per brand, each with its own pageRoot and prose", () => {
-    expect([...rt.brands.keys()]).toEqual(["allaboutafrica", "takeoffgo"]);
-    expect(Object.keys(rt.brands.get("allaboutafrica")!.schema.pageRoot!.fields)).toEqual([
+    expect([...rt.brands.keys()]).toEqual(["atlas", "harbour"]);
+    expect(Object.keys(rt.brands.get("atlas")!.schema.pageRoot!.fields)).toEqual([
       "title",
       "strap",
     ]);
-    expect(Object.keys(rt.brands.get("takeoffgo")!.schema.pageRoot!.fields)).toEqual(["heading"]);
+    expect(Object.keys(rt.brands.get("harbour")!.schema.pageRoot!.fields)).toEqual(["heading"]);
   });
 });
 
@@ -262,7 +262,7 @@ describe("the registry routes under brands (decision 4)", () => {
     const listed = await call("/api/sites");
     const sites = listed.body.sites as SiteRef[];
     const brandOf = (id: string) => sites.find((s) => s.id === id)?.brand;
-    expect(brandOf("kenya")).toBe("allaboutafrica");
+    expect(brandOf("kenya")).toBe("atlas");
     expect(brandOf("orphan")).toBeNull();
     expect(brandOf("ghost")).toBe("retired");
     expect(listed.body.shared).toBe(false);
@@ -296,50 +296,50 @@ describe("the registry routes under brands (decision 4)", () => {
   it("creates a site and a group with a configured brand", async () => {
     const group = await call("/api/sites", {
       method: "POST",
-      body: { id: "tgo-group", kind: "group", name: "TG", brand: "takeoffgo" },
+      body: { id: "hbr-group", kind: "group", name: "TG", brand: "harbour" },
     });
     expect(group).toEqual({
       status: 201,
-      body: { id: "tgo-group", name: "TG", brand: "takeoffgo" },
+      body: { id: "hbr-group", name: "TG", brand: "harbour" },
     });
     const site = await call("/api/sites", {
       method: "POST",
-      body: { id: "tgo-au", kind: "site", name: "TG AU", group: "tgo-group", brand: "takeoffgo" },
+      body: { id: "hbr-au", kind: "site", name: "TG AU", group: "hbr-group", brand: "harbour" },
     });
     expect(site.status).toBe(201);
-    expect(site.body.brand).toBe("takeoffgo");
-    const row = await env.DB.prepare("select brand from sites where id = 'tgo-au'").first();
-    expect(row).toEqual({ brand: "takeoffgo" });
+    expect(site.body.brand).toBe("harbour");
+    const row = await env.DB.prepare("select brand from sites where id = 'hbr-au'").first();
+    expect(row).toEqual({ brand: "harbour" });
   });
 
   it("refuses a site joining a group of another brand: 400, on create and on edit", async () => {
     const created = await call("/api/sites", {
       method: "POST",
-      body: { id: "rwanda", kind: "site", name: "Rwanda", group: "east", brand: "takeoffgo" },
+      body: { id: "rwanda", kind: "site", name: "Rwanda", group: "east", brand: "harbour" },
     });
     expect(created.status).toBe(400);
-    expect(errorOf(created.body)?.message).toMatch(/Group 'east' is brand 'allaboutafrica'/);
-    const joined = await call("/api/sites/takeoffgo", { method: "PATCH", body: { group: "east" } });
+    expect(errorOf(created.body)?.message).toMatch(/Group 'east' is brand 'atlas'/);
+    const joined = await call("/api/sites/harbour", { method: "PATCH", body: { group: "east" } });
     expect(joined.status).toBe(400);
     // Nothing was written.
-    const row = await env.DB.prepare("select group_id from sites where id = 'takeoffgo'").first();
+    const row = await env.DB.prepare("select group_id from sites where id = 'harbour'").first();
     expect(row).toEqual({ group_id: null });
   });
 
   it("refuses a brand change on a scope that holds a story: 409", async () => {
-    const res = await call("/api/sites/takeoffgo", {
+    const res = await call("/api/sites/harbour", {
       method: "PATCH",
-      body: { brand: "allaboutafrica" },
+      body: { brand: "atlas" },
     });
     expect(res.status).toBe(409);
     expect(errorOf(res.body)).toMatchObject({ code: "conflict" });
     expect(errorOf(res.body)?.message).toMatch(/still owns stories/);
-    const row = await env.DB.prepare("select brand from sites where id = 'takeoffgo'").first();
-    expect(row).toEqual({ brand: "takeoffgo" });
+    const row = await env.DB.prepare("select brand from sites where id = 'harbour'").first();
+    expect(row).toEqual({ brand: "harbour" });
   });
 
   it("refuses a brand change on a group that has sites: 409", async () => {
-    const res = await call("/api/sites/east", { method: "PATCH", body: { brand: "takeoffgo" } });
+    const res = await call("/api/sites/east", { method: "PATCH", body: { brand: "harbour" } });
     expect(res.status).toBe(409);
     expect(errorOf(res.body)?.message).toMatch(/still has sites/);
   });
@@ -350,7 +350,7 @@ describe("the registry routes under brands (decision 4)", () => {
     // scope; only a check inside the update itself sees the story.
     const created = await call("/api/sites", {
       method: "POST",
-      body: { id: "zambia", kind: "site", name: "Zambia", brand: "allaboutafrica" },
+      body: { id: "zambia", kind: "site", name: "Zambia", brand: "atlas" },
     });
     expect(created.status).toBe(201);
     let pending: string[] = [];
@@ -376,7 +376,7 @@ describe("the registry routes under brands (decision 4)", () => {
         racing as unknown as Parameters<typeof updateSite>[0],
         registry,
         "zambia",
-        { brand: "takeoffgo" },
+        { brand: "harbour" },
         {
           sites: rt.sites!,
           route: rt.route,
@@ -385,24 +385,24 @@ describe("the registry routes under brands (decision 4)", () => {
       ),
     ).rejects.toMatchObject({ status: 409 });
     const row = await env.DB.prepare("select brand from sites where id = 'zambia'").first();
-    expect(row).toEqual({ brand: "allaboutafrica" });
+    expect(row).toEqual({ brand: "atlas" });
   });
 
   it("changes the brand of an empty site, which then leaves its old chain", async () => {
     const created = await call("/api/sites", {
       method: "POST",
-      body: { id: "tanzania", kind: "site", name: "Tanzania", brand: "allaboutafrica" },
+      body: { id: "tanzania", kind: "site", name: "Tanzania", brand: "atlas" },
     });
     expect(created.status).toBe(201);
     const moved = await call("/api/sites/tanzania", {
       method: "PATCH",
-      body: { brand: "takeoffgo", group: "tgo-group" },
+      body: { brand: "harbour", group: "hbr-group" },
     });
     expect(moved.status).toBe(200);
-    expect(moved.body).toMatchObject({ brand: "takeoffgo", group: "tgo-group" });
+    expect(moved.body).toMatchObject({ brand: "harbour", group: "hbr-group" });
     expect((await call("/probe", { scope: "tanzania" })).body.brand).toEqual({
-      id: "takeoffgo",
-      label: "Take Off Go",
+      id: "harbour",
+      label: "Harbour Travel",
     });
   });
 });
@@ -418,8 +418,8 @@ describe("a chain never crosses a brand, and there is no shared (decision 5)", (
 
   it("still answers ~shared on a single-brand multi-site deployment", async () => {
     const single: FolioConfig<Cloudflare.Env> = {
-      blocks: [aaaRoot, aaaProse, aaaHeader],
-      types: aaaTypes,
+      blocks: [atlRoot, atlProse, atlHeader],
+      types: atlTypes,
       sites: { admin: ADMIN },
       bindings,
       basePath: "/folio",
@@ -446,7 +446,7 @@ describe("a chain never crosses a brand, and there is no shared (decision 5)", (
   it("skips a group of another brand for a row SQL wrote", async () => {
     await env.DB.prepare(
       `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at)
-       values ('sneaky', 'site', 'Sneaky', 'east', 'live', null, 'takeoffgo', 0, 0)`,
+       values ('sneaky', 'site', 'Sneaky', 'east', 'live', null, 'harbour', 0, 0)`,
     ).run();
     rt.sites!.drop();
     const registry = await rt.sites!.registry(env);
@@ -461,17 +461,17 @@ describe("a chain never crosses a brand, and there is no shared (decision 5)", (
     expect(layerSeed(registry, "east")).toBe("full");
     expect(layerSeed(registry, "kenya")).toBe("bare");
 
-    const aaa = rt.brands.get("allaboutafrica")!;
+    const atl = rt.brands.get("atlas")!;
     const story = (scope: string) => ({ id: `sng_header:${scope}`, type: "header", title: "H" });
     const rootData = (doc: Doc) => doc.bloks[doc.root]?.data;
     // The default of the brand's declared field is what a bottom layer starts from.
-    expect(rootData(aaa.seedFor(story("default"), registry))).toEqual({ tagline: "Karibu" });
-    expect(rootData(aaa.seedFor(story("east"), registry))).toEqual({ tagline: "Karibu" });
-    expect(rootData(aaa.seedFor(story("kenya"), registry))).toEqual({});
+    expect(rootData(atl.seedFor(story("default"), registry))).toEqual({ tagline: "Karibu" });
+    expect(rootData(atl.seedFor(story("east"), registry))).toEqual({ tagline: "Karibu" });
+    expect(rootData(atl.seedFor(story("kenya"), registry))).toEqual({});
     // Without the registry a layer's seed is not guessed.
-    expect(() => aaa.seedFor(story("kenya"))).toThrow(/seeds by its chain/);
+    expect(() => atl.seedFor(story("kenya"))).toThrow(/seeds by its chain/);
     // Not a layer: the id alone answers.
-    expect(rootData(aaa.seedFor({ id: "sty_x", type: "page", title: "X" }))).toMatchObject({
+    expect(rootData(atl.seedFor({ id: "sty_x", type: "page", title: "X" }))).toMatchObject({
       title: "X",
     });
   });
@@ -484,7 +484,7 @@ describe("the fence: a row of no configured brand serves nothing", () => {
     const registry = await rt.sites!.registry(env);
     const ids = registry.sites.map((s) => s.id);
     expect(ids).toContain("kenya");
-    expect(ids).toContain("takeoffgo");
+    expect(ids).toContain("harbour");
     expect(ids).not.toContain("orphan");
     expect(ids).not.toContain("ghost");
     expect(registry.sites.every((s) => s.brand !== null)).toBe(true);
@@ -501,12 +501,12 @@ describe("the fence: a row of no configured brand serves nothing", () => {
   it("sets c.var.brand from the scope, else the gated site, and never a default", async () => {
     expect((await call("/probe", { scope: "kenya" })).body).toEqual({
       scope: "kenya",
-      brand: { id: "allaboutafrica", label: "All About Africa" },
+      brand: { id: "atlas", label: "Atlas Guides" },
       has: true,
     });
-    expect((await call("/probe", { site: "takeoffgo" })).body.brand).toEqual({
-      id: "takeoffgo",
-      label: "Take Off Go",
+    expect((await call("/probe", { site: "harbour" })).body.brand).toEqual({
+      id: "harbour",
+      label: "Harbour Travel",
     });
     // No scope and no site: no brand at all, not the first one.
     expect((await call("/probe")).body).toEqual({ scope: null, brand: null, has: false });
@@ -516,17 +516,17 @@ describe("the fence: a row of no configured brand serves nothing", () => {
 
   it("refuses a brand’s render or query for another brand’s site, or for none", async () => {
     const registry = await rt.sites!.registry(env);
-    const tango = registry.sites.find((s) => s.id === "takeoffgo")!;
-    const aaa = rt.brands.get("allaboutafrica")!;
+    const tango = registry.sites.find((s) => s.id === "harbour")!;
+    const atl = rt.brands.get("atlas")!;
     const b = { ...bindings(env), db: env.DB };
     await expect(
-      aaa.resolve(b, undefined, {
-        site: { site: tango, surface: "live", chain: chain(registry, "takeoffgo") },
+      atl.resolve(b, undefined, {
+        site: { site: tango, surface: "live", chain: chain(registry, "harbour") },
       }),
-    ).rejects.toThrow(/brand 'allaboutafrica' cannot resolve site 'takeoffgo'/);
-    await expect(aaa.resolve(b)).rejects.toThrow(/cannot resolve with no site/);
-    await expect(aaa.query(b, { type: "page" }, ["takeoffgo"], tango)).rejects.toThrow(
-      /cannot query site 'takeoffgo'/,
+    ).rejects.toThrow(/brand 'atlas' cannot resolve site 'harbour'/);
+    await expect(atl.resolve(b)).rejects.toThrow(/cannot resolve with no site/);
+    await expect(atl.query(b, { type: "page" }, ["harbour"], tango)).rejects.toThrow(
+      /cannot query site 'harbour'/,
     );
   });
 });
@@ -578,34 +578,34 @@ describe("a grant or a token binding names only a scope the snapshot serves", ()
  * type the other lacks, and the block names `pageRoot` and `prose` are shared.
  */
 describe("the routes read the scope’s brand (decision 6)", () => {
-  const aaaMigration = defineMigration({
-    id: "allaboutafrica/0001-noop",
-    description: "stamps allaboutafrica documents",
+  const atlMigration = defineMigration({
+    id: "atlas/0001-noop",
+    description: "stamps atlas documents",
     up: () => [],
   });
-  const tgoMigration = defineMigration({
-    id: "takeoffgo/0001-noop",
-    description: "stamps takeoffgo documents",
+  const hbrMigration = defineMigration({
+    id: "harbour/0001-noop",
+    description: "stamps harbour documents",
     up: () => [],
   });
   const routeBrands: Record<string, FolioBrand<Cloudflare.Env>> = {
-    allaboutafrica: {
-      ...brands.allaboutafrica!,
-      types: [...aaaTypes, { name: "article", label: "Article", kind: "page", root: "pageRoot" }],
-      migrations: [aaaMigration],
+    atlas: {
+      ...brands.atlas!,
+      types: [...atlTypes, { name: "article", label: "Article", kind: "page", root: "pageRoot" }],
+      migrations: [atlMigration],
     },
-    takeoffgo: {
-      ...brands.takeoffgo!,
-      types: [...tgoTypes, { name: "landing", label: "Landing", kind: "page", root: "pageRoot" }],
-      migrations: [tgoMigration],
+    harbour: {
+      ...brands.harbour!,
+      types: [...hbrTypes, { name: "landing", label: "Landing", kind: "page", root: "pageRoot" }],
+      migrations: [hbrMigration],
     },
   };
   const routeConfig: FolioConfig<Cloudflare.Env> = { ...config, brands: routeBrands };
   const routeRt = createRuntime(routeConfig);
   const routeApp = createApp(routeConfig, routeRt);
 
-  const AAA = "r-aaa";
-  const TGO = "r-tgo";
+  const ATL = "r-atl";
+  const HBR = "r-hbr";
 
   async function api(
     path: string,
@@ -639,13 +639,13 @@ describe("the routes read the scope’s brand (decision 6)", () => {
     await env.DB.batch([
       env.DB.prepare(
         `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-           ('${AAA}', 'site', 'Routes AAA', null, 'live', null, 'allaboutafrica', 0, 0),
-           ('${TGO}', 'site', 'Routes TGO', null, 'live', null, 'takeoffgo', 0, 0)`,
+           ('${ATL}', 'site', 'Routes ATL', null, 'live', null, 'atlas', 0, 0),
+           ('${HBR}', 'site', 'Routes HBR', null, 'live', null, 'harbour', 0, 0)`,
       ),
       env.DB.prepare(
         `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id)
-         values ('sty_r_aaa', 'page', null, 'home', 'home', 'a0', 'AAA home', 1, '${AAA}'),
-                ('sty_r_tgo', 'page', null, 'home', 'home', 'a0', 'TGO home', 1, '${TGO}')`,
+         values ('sty_r_atl', 'page', null, 'home', 'home', 'a0', 'ATL home', 1, '${ATL}'),
+                ('sty_r_hbr', 'page', null, 'home', 'home', 'a0', 'HBR home', 1, '${HBR}')`,
       ),
     ]);
     routeRt.sites?.drop();
@@ -654,30 +654,30 @@ describe("the routes read the scope’s brand (decision 6)", () => {
   it("creates a document of the scope’s own types, and refuses the other brand’s", async () => {
     const own = await api("/api/stories", {
       method: "POST",
-      scope: AAA,
+      scope: ATL,
       body: { type: "article", title: "A story" },
     });
     expect(own.status).toBe(200);
     expect(own.body.type).toBe("article");
-    expect(own.body.site).toBe(AAA);
+    expect(own.body.site).toBe(ATL);
 
     const wrong = await api("/api/stories", {
       method: "POST",
-      scope: TGO,
+      scope: HBR,
       body: { type: "article", title: "Not here" },
     });
     expect(wrong.status).toBe(501);
     expect(errorOf(wrong.body)?.message).toBe("Unknown document type: article");
 
-    const tgo = await api("/api/stories", {
+    const hbr = await api("/api/stories", {
       method: "POST",
-      scope: TGO,
+      scope: HBR,
       body: { type: "landing", title: "Landing" },
     });
-    expect(tgo.status).toBe(200);
+    expect(hbr.status).toBe(200);
     const back = await api("/api/stories", {
       method: "POST",
-      scope: AAA,
+      scope: ATL,
       body: { type: "landing", title: "Not here either" },
     });
     expect(back.status).toBe(501);
@@ -686,28 +686,28 @@ describe("the routes read the scope’s brand (decision 6)", () => {
   it("does the same through the versioned API", async () => {
     const own = await api("/api/v1/documents", {
       method: "POST",
-      scope: TGO,
+      scope: HBR,
       body: { type: "landing", title: "v1 landing" },
     });
     expect(own.status).toBe(201);
     const wrong = await api("/api/v1/documents", {
       method: "POST",
-      scope: TGO,
+      scope: HBR,
       body: { type: "article", title: "v1 wrong" },
     });
     expect(wrong.status).toBe(501);
-    // The draft is read against the brand's own schema: `heading` is takeoffgo's
-    // `pageRoot` field, and `strap` is allaboutafrica's.
+    // The draft is read against the brand's own schema: `heading` is harbour's
+    // `pageRoot` field, and `strap` is atlas's.
     const put = await api(`/api/v1/documents/${own.body.id}/content`, {
       method: "PUT",
-      scope: TGO,
+      scope: HBR,
       body: { content: { fields: { heading: "Hello" } } },
     });
     expect(put.status).toBe(200);
     const refused = await api(`/api/v1/documents/${own.body.id}/content`, {
       method: "PUT",
-      scope: TGO,
-      body: { content: { fields: { strap: "Not a takeoffgo field" } } },
+      scope: HBR,
+      body: { content: { fields: { strap: "Not a harbour field" } } },
     });
     expect(refused.status).toBe(400);
   });
@@ -717,23 +717,23 @@ describe("the routes read the scope’s brand (decision 6)", () => {
       (m.blocks as { name: string }[]).map((b) => b.name);
     const typeNames = (m: Record<string, unknown>) =>
       (m.types as { name: string }[]).map((t) => t.name);
-    const aaa = await api("/api/schema", { scope: AAA });
-    const tgo = await api("/api/schema", { scope: TGO });
-    expect(names(aaa.body).sort()).toEqual(["header", "pageRoot", "prose"]);
-    expect(names(tgo.body).sort()).toEqual(["pageRoot", "prose"]);
-    expect(typeNames(aaa.body)).toContain("article");
-    expect(typeNames(aaa.body)).not.toContain("landing");
-    expect(typeNames(tgo.body)).toContain("landing");
-    expect(typeNames(tgo.body)).not.toContain("article");
+    const atl = await api("/api/schema", { scope: ATL });
+    const hbr = await api("/api/schema", { scope: HBR });
+    expect(names(atl.body).sort()).toEqual(["header", "pageRoot", "prose"]);
+    expect(names(hbr.body).sort()).toEqual(["pageRoot", "prose"]);
+    expect(typeNames(atl.body)).toContain("article");
+    expect(typeNames(atl.body)).not.toContain("landing");
+    expect(typeNames(hbr.body)).toContain("landing");
+    expect(typeNames(hbr.body)).not.toContain("article");
     // A block name both brands declare answers each brand's own fields.
     const fieldsOf = (m: Record<string, unknown>) =>
       Object.keys(
         (m.blocks as { name: string; fields: object }[]).find((b) => b.name === "pageRoot")!.fields,
       );
-    expect(fieldsOf(aaa.body).sort()).toEqual(["strap", "title"]);
-    expect(fieldsOf(tgo.body)).toEqual(["heading"]);
+    expect(fieldsOf(atl.body).sort()).toEqual(["strap", "title"]);
+    expect(fieldsOf(hbr.body)).toEqual(["heading"]);
 
-    const v1 = await api("/api/v1/schema", { scope: TGO });
+    const v1 = await api("/api/v1/schema", { scope: HBR });
     expect(names(v1.body).sort()).toEqual(["pageRoot", "prose"]);
     // Unscoped on a branded deployment there is no brand to answer for, and none is chosen.
     const bare = await api("/api/v1/schema");
@@ -768,14 +768,14 @@ describe("the routes read the scope’s brand (decision 6)", () => {
       };
       return { status: 200, text: answer.result.tools.map((t) => t.description).join("\n") };
     };
-    const aaa = (await list(AAA)).text;
-    const tgo = (await list(TGO)).text;
-    expect(aaa).toContain("article");
-    expect(aaa).toContain("header");
-    expect(aaa).not.toContain("landing");
-    expect(tgo).toContain("landing");
-    expect(tgo).not.toContain("article");
-    expect(tgo).not.toContain("header");
+    const atl = (await list(ATL)).text;
+    const hbr = (await list(HBR)).text;
+    expect(atl).toContain("article");
+    expect(atl).toContain("header");
+    expect(atl).not.toContain("landing");
+    expect(hbr).toContain("landing");
+    expect(hbr).not.toContain("article");
+    expect(hbr).not.toContain("header");
     // MCP names the site first: no scope, no brand, and no list of anyone's types.
     expect((await list(undefined)).status).toBe(400);
   });
@@ -783,22 +783,22 @@ describe("the routes read the scope’s brand (decision 6)", () => {
   it("keeps a form of one brand out of the other’s scope", async () => {
     const made = await api("/api/forms", {
       method: "POST",
-      scope: AAA,
+      scope: ATL,
       body: { label: "Enquiry" },
     });
     expect(made.status).toBe(201);
     const id = ((made.body.form ?? made.body) as { id: string }).id;
-    expect((await api(`/api/forms/${id}`, { scope: AAA })).status).toBe(200);
-    expect((await api(`/api/forms/${id}`, { scope: TGO })).status).toBe(404);
-    const listed = await api("/api/forms", { scope: TGO });
+    expect((await api(`/api/forms/${id}`, { scope: ATL })).status).toBe(200);
+    expect((await api(`/api/forms/${id}`, { scope: HBR })).status).toBe(404);
+    const listed = await api("/api/forms", { scope: HBR });
     expect(JSON.stringify(listed.body)).not.toContain(id);
   });
 
   it("runs a migration on one brand’s scopes and leaves the other’s documents alone", async () => {
-    const status = await api("/api/migrations", { scope: AAA });
-    expect(status.body.pending).toEqual(["allaboutafrica/0001-noop"]);
+    const status = await api("/api/migrations", { scope: ATL });
+    expect(status.body.pending).toEqual(["atlas/0001-noop"]);
 
-    const run = await api("/api/migrate", { method: "POST", scope: AAA, body: {} });
+    const run = await api("/api/migrate", { method: "POST", scope: ATL, body: {} });
     expect(run.status).toBe(200);
     const stamp = async (id: string) =>
       (
@@ -806,16 +806,16 @@ describe("the routes read the scope’s brand (decision 6)", () => {
           .bind(id)
           .first<{ s: string | null }>()
       )?.s;
-    expect(await stamp("sty_r_aaa")).toBe("allaboutafrica/0001-noop");
-    expect(await stamp("sty_r_tgo")).toBeNull();
+    expect(await stamp("sty_r_atl")).toBe("atlas/0001-noop");
+    expect(await stamp("sty_r_hbr")).toBeNull();
   });
 });
 
 /* --------------------------------------- the admin and agent surfaces (phase 7) --- */
 
 describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
-  const P_AAA = "p7-aaa";
-  const P_TGO = "p7-tgo";
+  const P_ATL = "p7-atl";
+  const P_HBR = "p7-hbr";
 
   /** Every hook payload, by event, in the order fired. `await` so a route has fired them by its answer. */
   const fired: { event: string; payload: Record<string, unknown> }[] = [];
@@ -826,22 +826,22 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
     };
 
   const p7Brands: Record<string, FolioBrand<Cloudflare.Env>> = {
-    allaboutafrica: {
-      ...brands.allaboutafrica!,
+    atlas: {
+      ...brands.atlas!,
       settings: "header",
       migrations: [
         defineMigration({
-          id: "allaboutafrica/0002-p7-title",
+          id: "atlas/0002-p7-title",
           description: "title defaults",
           up: (_doc, ctx) => ctx.each("pageRoot", (b) => field.default(b, "title", "Untitled")),
         }),
       ],
     },
-    takeoffgo: {
-      ...brands.takeoffgo!,
+    harbour: {
+      ...brands.harbour!,
       migrations: [
         defineMigration({
-          id: "takeoffgo/0002-p7-heading",
+          id: "harbour/0002-p7-heading",
           description: "heading defaults",
           up: (_doc, ctx) => ctx.each("pageRoot", (b) => field.default(b, "heading", "Untitled")),
         }),
@@ -888,16 +888,16 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
     await env.DB.batch([
       env.DB.prepare(
         `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-           ('${P_AAA}', 'site', 'P7 AAA', null, 'live', null, 'allaboutafrica', 0, 0),
-           ('${P_TGO}', 'site', 'P7 TGO', null, 'live', null, 'takeoffgo', 0, 0)`,
+           ('${P_ATL}', 'site', 'P7 ATL', null, 'live', null, 'atlas', 0, 0),
+           ('${P_HBR}', 'site', 'P7 HBR', null, 'live', null, 'harbour', 0, 0)`,
       ),
       // One published document each, for the sweeps whose hooks fire only when a
       // published snapshot was rewritten or reindexed.
       env.DB.prepare(
         `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id,
                               published_doc, published_at)
-         values ('sty_p7_aaa', 'page', null, 'home', 'home', 'a0', 'Home', 1, '${P_AAA}', ?, 2),
-                ('sty_p7_tgo', 'page', null, 'home', 'home', 'a0', 'Home', 1, '${P_TGO}', ?, 2)`,
+         values ('sty_p7_atl', 'page', null, 'home', 'home', 'a0', 'Home', 1, '${P_ATL}', ?, 2),
+                ('sty_p7_hbr', 'page', null, 'home', 'home', 'a0', 'Home', 1, '${P_HBR}', ?, 2)`,
       ).bind(
         JSON.stringify({
           root: "r0",
@@ -918,13 +918,13 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
 
   describe("the manifest (decision 12)", () => {
     it("is the scope’s brand’s, with the brand and its settings type", async () => {
-      const aaa = await api("/api/schema", { scope: P_AAA });
-      const tgo = await api("/api/schema", { scope: P_TGO });
-      expect(aaa.body.brand).toEqual({ id: "allaboutafrica", label: "All About Africa" });
-      expect(aaa.body.settings).toBe("header");
-      expect(tgo.body.brand).toEqual({ id: "takeoffgo", label: "Take Off Go" });
+      const atl = await api("/api/schema", { scope: P_ATL });
+      const hbr = await api("/api/schema", { scope: P_HBR });
+      expect(atl.body.brand).toEqual({ id: "atlas", label: "Atlas Guides" });
+      expect(atl.body.settings).toBe("header");
+      expect(hbr.body.brand).toEqual({ id: "harbour", label: "Harbour Travel" });
       // A brand that declares no settings type carries no key.
-      expect("settings" in tgo.body).toBe(false);
+      expect("settings" in hbr.body).toBe(false);
     });
 
     it("is neutral with no scope: no types, blocks or globals, and the deployment’s own hooks", async () => {
@@ -934,15 +934,15 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
       expect("brand" in bare.body).toBe(false);
       expect("settings" in bare.body).toBe(false);
       // Same as every brand's: `hooks` is the deployment's, not a brand's.
-      const scoped = await api("/api/schema", { scope: P_TGO });
+      const scoped = await api("/api/schema", { scope: P_HBR });
       expect(bare.body.hooks).toEqual(scoped.body.hooks);
       expect((bare.body.hooks as { declared: string[] }).declared).toContain("created");
     });
 
     it("carries no brand or settings on a deployment without brands", async () => {
       const single: FolioConfig<Cloudflare.Env> = {
-        blocks: [aaaRoot, aaaProse, aaaHeader],
-        types: aaaTypes,
+        blocks: [atlRoot, atlProse, atlHeader],
+        types: atlTypes,
         sites: { admin: ADMIN, settings: "header" },
         bindings,
         basePath: "/folio",
@@ -960,13 +960,13 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
 
   describe("the versioned schema (decisions 12 and 19)", () => {
     it("adds the scope and its brand when scoped", async () => {
-      const res = await api("/api/v1/schema", { scope: P_TGO });
+      const res = await api("/api/v1/schema", { scope: P_HBR });
       expect(res.status).toBe(200);
       expect(res.body.scope).toEqual({
-        id: P_TGO,
-        name: "P7 TGO",
+        id: P_HBR,
+        name: "P7 HBR",
         kind: "site",
-        brand: { id: "takeoffgo", label: "Take Off Go" },
+        brand: { id: "harbour", label: "Harbour Travel" },
       });
     });
 
@@ -988,8 +988,8 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
 
     it("adds a scope with brand null on a single-brand multi-site deployment", async () => {
       const single: FolioConfig<Cloudflare.Env> = {
-        blocks: [aaaRoot, aaaProse, aaaHeader],
-        types: aaaTypes,
+        blocks: [atlRoot, atlProse, atlHeader],
+        types: atlTypes,
         sites: { admin: ADMIN },
         bindings,
         basePath: "/folio",
@@ -1019,26 +1019,26 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
     const PATHS = ["/api/v1/schema", "/api/migrations", "/api/assets/describe"];
 
     it("refuses a token bound to one brand’s site on another brand’s scope", async () => {
-      const bound = await bearer(P_AAA);
+      const bound = await bearer(P_ATL);
       for (const path of PATHS) {
-        const res = await get(path, P_TGO, bound);
+        const res = await get(path, P_HBR, bound);
         expect(res.status, path).toBe(403);
         expect(res.body.types, path).toBeUndefined();
       }
     });
 
     it("still answers that token on its own scope, and an unbound one on either", async () => {
-      const bound = await bearer(P_AAA);
-      expect((await get("/api/v1/schema", P_AAA, bound)).status).toBe(200);
+      const bound = await bearer(P_ATL);
+      expect((await get("/api/v1/schema", P_ATL, bound)).status).toBe(200);
       const unbound = await bearer(null);
-      expect((await get("/api/v1/schema", P_TGO, unbound)).status).toBe(200);
-      expect((await get("/api/v1/schema", P_AAA, unbound)).status).toBe(200);
+      expect((await get("/api/v1/schema", P_HBR, unbound)).status).toBe(200);
+      expect((await get("/api/v1/schema", P_ATL, unbound)).status).toBe(200);
     });
   });
 
   describe("/me (decision 20)", () => {
     it("carries each scope’s brand and the brand list, no shared, and no settings type", async () => {
-      const me = (await api("/api/me", { on: openApp, scope: P_TGO })).body as {
+      const me = (await api("/api/me", { on: openApp, scope: P_HBR })).body as {
         sites: {
           settings: string | null;
           brands: { id: string; label: string }[];
@@ -1047,15 +1047,15 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
       };
       expect(me.sites.settings).toBeNull();
       expect(me.sites.brands).toEqual([
-        { id: "allaboutafrica", label: "All About Africa" },
-        { id: "takeoffgo", label: "Take Off Go" },
+        { id: "atlas", label: "Atlas Guides" },
+        { id: "harbour", label: "Harbour Travel" },
       ]);
       expect(me.sites.scopes.some((s) => s.kind === "shared")).toBe(false);
-      expect(me.sites.scopes.find((s) => s.id === P_TGO)?.brand).toEqual({
-        id: "takeoffgo",
-        label: "Take Off Go",
+      expect(me.sites.scopes.find((s) => s.id === P_HBR)?.brand).toEqual({
+        id: "harbour",
+        label: "Harbour Travel",
       });
-      expect(me.sites.scopes.find((s) => s.id === P_AAA)?.brand?.id).toBe("allaboutafrica");
+      expect(me.sites.scopes.find((s) => s.id === P_ATL)?.brand?.id).toBe("atlas");
     });
 
     it("answers with no scope too", async () => {
@@ -1090,19 +1090,19 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
       ((await discover(scope)).body.result as { instructions: string }).instructions;
 
     it("names the site and the brand, and says other brands are not visible", async () => {
-      const text = await instructions(P_TGO);
+      const text = await instructions(P_HBR);
       expect(text).toContain(
-        `This session is scoped to site 'P7 TGO' (\`${P_TGO}\`) of brand 'Take Off Go'`,
+        `This session is scoped to site 'P7 HBR' (\`${P_HBR}\`) of brand 'Harbour Travel'`,
       );
       expect(text).toContain("documents, types and blocks of other brands are not visible");
       expect(text).toContain("get_schema describes this brand only");
-      expect(await instructions(P_AAA)).toContain("of brand 'All About Africa'");
+      expect(await instructions(P_ATL)).toContain("of brand 'Atlas Guides'");
     });
 
     it("names the site alone on a multi-site deployment without brands", async () => {
       const single: FolioConfig<Cloudflare.Env> = {
-        blocks: [aaaRoot, aaaProse, aaaHeader],
-        types: aaaTypes,
+        blocks: [atlRoot, atlProse, atlHeader],
+        types: atlTypes,
         sites: { admin: ADMIN },
         bindings,
         basePath: "/folio",
@@ -1119,7 +1119,7 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
             "mcp-protocol-version": MCP_PROTOCOL_VERSION,
             "mcp-method": "server/discover",
             ...(await auth()),
-            [SCOPE_HEADER]: P_TGO,
+            [SCOPE_HEADER]: P_HBR,
           },
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: {} }),
         },
@@ -1127,12 +1127,12 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
         createExecutionContext(),
       );
       const text = ((await res.json()) as { result: { instructions: string } }).result.instructions;
-      expect(text).toContain(`This session is scoped to site 'P7 TGO' (\`${P_TGO}\`).`);
+      expect(text).toContain(`This session is scoped to site 'P7 HBR' (\`${P_HBR}\`).`);
       expect(text).not.toContain("brand");
     });
 
     it("keeps the three sentences every session gets", async () => {
-      const text = await instructions(P_TGO);
+      const text = await instructions(P_HBR);
       expect(text).toContain("call get_schema first");
       expect(text).toContain("undoable");
     });
@@ -1142,50 +1142,50 @@ describe("the admin and agent surfaces (decisions 12, 16, 19, 20)", () => {
     it("created carries the brand of the scope it happened in", async () => {
       fired.length = 0;
       expect(
-        (await api("/api/stories", { method: "POST", scope: P_TGO, body: { title: "Made" } }))
+        (await api("/api/stories", { method: "POST", scope: P_HBR, body: { title: "Made" } }))
           .status,
       ).toBe(200);
       expect(
-        (await api("/api/stories", { method: "POST", scope: P_AAA, body: { title: "Made" } }))
+        (await api("/api/stories", { method: "POST", scope: P_ATL, body: { title: "Made" } }))
           .status,
       ).toBe(200);
       const created = fired.filter((f) => f.event === "created");
       expect(created.map((f) => [f.payload.site, f.payload.brand])).toEqual([
-        [P_TGO, "takeoffgo"],
-        [P_AAA, "allaboutafrica"],
+        [P_HBR, "harbour"],
+        [P_ATL, "atlas"],
       ]);
     });
 
     it("migrated and reindexed carry the brand they ran for", async () => {
       fired.length = 0;
-      expect((await api("/api/migrate", { method: "POST", scope: P_TGO, body: {} })).status).toBe(
+      expect((await api("/api/migrate", { method: "POST", scope: P_HBR, body: {} })).status).toBe(
         200,
       );
-      expect((await api("/api/reindex", { method: "POST", scope: P_AAA, body: {} })).status).toBe(
+      expect((await api("/api/reindex", { method: "POST", scope: P_ATL, body: {} })).status).toBe(
         200,
       );
       const brandsOf = (event: string) =>
         fired.filter((f) => f.event === event).map((f) => f.payload.brand);
-      expect(brandsOf("migrated")).toEqual(["takeoffgo"]);
-      expect(brandsOf("reindexed")).toEqual(["allaboutafrica"]);
+      expect(brandsOf("migrated")).toEqual(["harbour"]);
+      expect(brandsOf("reindexed")).toEqual(["atlas"]);
     });
 
     it("siteChanged carries the row’s brand, including on a delete", async () => {
       fired.length = 0;
       const made = await api("/api/sites", {
         method: "POST",
-        body: { id: "p7-new", kind: "site", name: "New", brand: "takeoffgo" },
+        body: { id: "p7-new", kind: "site", name: "New", brand: "harbour" },
       });
       expect(made.status).toBe(201);
-      expect(made.body.brand).toBe("takeoffgo");
+      expect(made.body.brand).toBe("harbour");
       expect((await api("/api/sites/p7-new", { method: "DELETE" })).status).toBe(200);
       expect(
         fired
           .filter((f) => f.event === "siteChanged")
           .map((f) => [f.payload.change, f.payload.brand]),
       ).toEqual([
-        ["created", "takeoffgo"],
-        ["deleted", "takeoffgo"],
+        ["created", "harbour"],
+        ["deleted", "harbour"],
       ]);
     });
   });

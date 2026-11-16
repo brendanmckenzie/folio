@@ -687,7 +687,7 @@ describe("compileForm: refusals (form-actions.md decision 3)", () => {
   };
   const deliverOnly: FormActionInfo = {
     ...check,
-    id: "jambo",
+    id: "crm",
     codes: [],
     check: false,
     deliver: true,
@@ -695,7 +695,7 @@ describe("compileForm: refusals (form-actions.md decision 3)", () => {
   const infos = new Map([check, deliverOnly].map((info) => [info.id, info]));
   const attached: FormActionAttachment[] = [
     { action: "trip-code", messages: { unknown_trip: "No such trip." } },
-    { action: "jambo", delivers: true },
+    { action: "crm", delivers: true },
   ];
 
   const BASE_KEYS = [
@@ -765,7 +765,7 @@ describe("compileForm: refusals (form-actions.md decision 3)", () => {
 
 describe("FormPatchBody keeps every attachment key", () => {
   const everything: Required<FormActionAttachment> = {
-    action: "jambo",
+    action: "crm",
     map: { email: "email" },
     settings: { pipeline: "sales", limit: 3, on: true },
     messages: { unknown_trip: "No." },
@@ -793,6 +793,6 @@ describe("FormPatchBody keeps every attachment key", () => {
     expect(() => patch(Array.from({ length: 9 }, () => ({ action: "a" })))).toThrow();
     expect(() => patch([{ action: "a", settings: { x: null } }])).toThrow();
     expect(() => patch([{ action: "a", delivers: false }])).toThrow();
-    expect(() => patch("jambo")).toThrow();
+    expect(() => patch("crm")).toThrow();
   });
 });

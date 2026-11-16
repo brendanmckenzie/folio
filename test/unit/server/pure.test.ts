@@ -946,7 +946,7 @@ function fakeCtx(): { ctx: HookRunnerCtx<Env>; tasks: Promise<unknown>[] } {
 }
 
 describe("createHookRunner brand", () => {
-  const STORY = { id: "sty_1", site: "tog" } as never;
+  const STORY = { id: "sty_1", site: "hbr" } as never;
 
   it("stamps every payload with the brand the runner was made for, whatever the emitter says", async () => {
     const seen: (string | null)[] = [];
@@ -956,11 +956,11 @@ describe("createHookRunner brand", () => {
       ctx,
       [],
       console,
-      "takeoffgo",
+      "harbour",
     );
     // An extra `brand` in the emitter's own object is overwritten, not trusted.
     await runner.run("created", { story: STORY, actor: null, brand: "other" } as never);
-    expect(seen).toEqual(["takeoffgo"]);
+    expect(seen).toEqual(["harbour"]);
   });
 
   it("is null for a runner made with no brand", async () => {
@@ -1481,8 +1481,8 @@ describe("assetFilterSql", () => {
  */
 describe("actionIdParam and the delivery filter", () => {
   it("anchors the retry route's action to ACTION_ID", () => {
-    expect(actionIdParam("jambo-enquiry")).toBe("jambo-enquiry");
-    for (const bad of ["Jambo", "1jambo", "jambo_x", "a".repeat(49), "", "a b", undefined]) {
+    expect(actionIdParam("crm-enquiry")).toBe("crm-enquiry");
+    for (const bad of ["CRM", "1crm", "crm_x", "a".repeat(49), "", "a b", undefined]) {
       expect(() => actionIdParam(bad)).toThrow();
     }
   });

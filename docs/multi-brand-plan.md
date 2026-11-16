@@ -3,7 +3,7 @@
 This is the execution plan for spec 34, `docs/specs/foundation/multi-brand.md`, and the
 **briefing file every subagent on that work reads first**. The spec says what to build
 and owns the design; this file says in what order, by whom, how each step is proven,
-and how the result reaches a test deployment that serves allaboutafrica and takeoffgo
+and how the result reaches a test deployment that serves atlas and harbour
 from one Worker. Where the two disagree on *design*, the spec wins and the
 disagreement is a finding to report. Where they disagree on *sequencing, gates or the
 consumer rollout*, this file wins.
@@ -25,7 +25,7 @@ written after this one is verified and run only on the owner's go-ahead.
 Paste this, unchanged, as the first message of the session that will run the build:
 
 ```
-Build Folio spec 34 (multi-brand) end to end, following docs/multi-brand-plan.md. Read CLAUDE.md, docs/multi-brand-plan.md, and the Ground truth and Architecture decisions in docs/specs/foundation/multi-brand.md before the first edit. The spec's decisions are settled by me; do not reopen them. If the code contradicts the spec's Ground truth, stop and tell me rather than building on the spec. End state: a test deployment of the new host repository serving allaboutafrica and takeoffgo from one Worker on the test hostnames the plan names, verified from the far side as its Phase V describes. Production and the existing staging deployments of both sites are not touched, and neither consumer repository is edited. Work the phases in the plan's order, parallel only where it says so; gate every phase by exit code and commit each phase on a local branch in this repo's statement-subject style; run an adversarial review where the plan says so and fix what it confirms before moving on. Confirm with me before each outward-facing step the plan lists, one line each on what changes and how to roll it back. Never name any client, brand, site or domain in this repo other than allaboutafrica and takeoffgo, and never write the admin origin's domain into this repo.
+Build Folio spec 34 (multi-brand) end to end, following docs/multi-brand-plan.md. Read CLAUDE.md, docs/multi-brand-plan.md, and the Ground truth and Architecture decisions in docs/specs/foundation/multi-brand.md before the first edit. The spec's decisions are settled by me; do not reopen them. If the code contradicts the spec's Ground truth, stop and tell me rather than building on the spec. End state: a test deployment of the new host repository serving atlas and harbour from one Worker on the test hostnames the plan names, verified from the far side as its Phase V describes. Production and the existing staging deployments of both sites are not touched, and neither consumer repository is edited. Work the phases in the plan's order, parallel only where it says so; gate every phase by exit code and commit each phase on a local branch in this repo's statement-subject style; run an adversarial review where the plan says so and fix what it confirms before moving on. Confirm with me before each outward-facing step the plan lists, one line each on what changes and how to roll it back. Never name any client, brand, site or domain in this repo other than atlas and harbour, and never write the admin origin's domain into this repo.
 ```
 
 ## Ground truth
@@ -39,30 +39,30 @@ Measured 2026-09-30 against `6b4fc19`. A later reader re-measures rather than tr
   phases 0 to 4 complete and phase 5 (#12) next; phase 6 (#20) cuts `v1.0.0`. **This
   plan's phase 1 must be on `main` before that tag**, because it narrows accepted
   config (spec decision 7). Nothing else here is tied to the tag.
-- **Consumer pins, read-only for this plan:** allaboutafrica-website `main` pins
+- **Consumer pins, read-only for this plan:** atlas-website `main` pins
   `3acc67edec8536459abe6714c3210a9b5f586aee` (production); its `folio-multi-site`
-  branch (`adbdde5`, worktree `/Users/brendan/work/takeoffgo/allaboutafrica-website-multisite`)
+  branch (`adbdde5`, worktree `/Users/brendan/work/harbour/atlas-website-multisite`)
   pins `11cfc71c9fa1097a9b5154030b7cc8a6f4fbd6f4` and runs staging with `sites` on;
-  takeoffgo-website `main` (`455707e`) pins `133bb7fb8f9e6f764a74fdc88556f9bf6da268bb`.
+  harbour-website `main` (`455707e`) pins `133bb7fb8f9e6f764a74fdc88556f9bf6da268bb`.
 - **Both consumer main checkouts are dirty with somebody else's work** (an uncommitted
-  `JAMBO` service-binding hunk in `wrangler.jsonc` and `wrangler.toml`). The host repo
+  `CRM` service-binding hunk in `wrangler.jsonc` and `wrangler.toml`). The host repo
   copies code **from committed heads with `git archive`**, never from a working tree,
   so that hunk cannot come across.
-- **takeoffgo-website's `codegen.yml` holds a literal Jambo token, committed.** The host
+- **harbour-website's `codegen.yml` holds a literal CRM token, committed.** The host
   repo's codegen config reads its token from the environment and is written fresh;
   that file is never copied. The token's rotation is the owner's, outside this plan.
 - **The two existing staging deployments are the import's sources**, read over v1:
-  allaboutafrica's at `https://staging-cms.allaboutafrica.au/folio/~default/api/v1`
+  atlas's at `https://staging-cms.atlas.example/folio/~default/api/v1`
   (multi-site, admin origin `staging-cms`), asset bytes at
-  `https://staging.allaboutafrica.au/folio/asset/<key>`; takeoffgo's at
-  `https://staging.takeoffgo.com/folio/api/v1` (single-site), asset bytes at
-  `https://staging.takeoffgo.com/folio/asset/<key>`. `GET {base}/api/forms` and
+  `https://staging.atlas.example/folio/asset/<key>`; harbour's at
+  `https://staging.harbour.example/folio/api/v1` (single-site), asset bytes at
+  `https://staging.harbour.example/folio/asset/<key>`. `GET {base}/api/forms` and
   `/api/forms/:id` answer at `READ` (`src/server/routes/forms.ts:178`, `:255`), so a
   `content:read` token reads both documents and form definitions.
 - **Both brands embed Folio forms by id** (`formSection`, `enquiryForm`), so the import
   carries form definitions; responses are not carried.
 - **`scripts/cache-probe.mjs` already takes `--admin`, `--site` and `--preview`**
-  (`scripts/cache-probe.mjs:69-83`) and passed 13/0 against allaboutafrica staging
+  (`scripts/cache-probe.mjs:69-83`) and passed 13/0 against atlas staging
   (`multi-site.md` "Staging (2026-09-30)"). It needs no change to probe each brand's
   site on the test deployment.
 - **The admin origin is a host on the brand-neutral company domain**, in the same
@@ -78,14 +78,14 @@ Chosen for the test; none exists yet.
 
 | What | Name |
 | --- | --- |
-| Host repository | `takeoffgo/sites` (private), cloned at `/Users/brendan/work/takeoffgo/sites` |
+| Host repository | `harbour/sites` (private), cloned at `/Users/brendan/work/harbour/sites` |
 | Test Worker | `sites-test` (`env.test` in the host's `wrangler.jsonc`) |
 | D1 | `sites-folio-test` |
 | R2 bucket | `sites-folio-test` |
-| allaboutafrica site | `default` (the row `0011` inserts), brand `allaboutafrica` |
-| takeoffgo site | `takeoffgo`, brand `takeoffgo` |
-| allaboutafrica live host / preview origin | `multibrand.allaboutafrica.au` / `https://multibrand-preview.allaboutafrica.au` |
-| takeoffgo live host / preview origin | `multibrand.takeoffgo.com` / `https://multibrand-preview.takeoffgo.com` |
+| atlas site | `default` (the row `0011` inserts), brand `atlas` |
+| harbour site | `harbour`, brand `harbour` |
+| atlas live host / preview origin | `multibrand.atlas.example` / `https://multibrand-preview.atlas.example` |
+| harbour live host / preview origin | `multibrand.harbour.example` / `https://multibrand-preview.harbour.example` |
 | Admin origin | `$ADMIN_ORIGIN`, a host on the brand-neutral domain |
 
 ## The decisions, and what each beat
@@ -95,13 +95,13 @@ The spec's twenty-three decisions and five owner checkpoints are settled (owner,
 
 | Decision | Beat |
 | --- | --- |
-| **A fresh test deployment** in a new host repo: new Worker, new D1, new R2, new Durable Object namespace (owner, 2026-09-30) | rebinding allaboutafrica's staging D1 and R2 and moving its Durable Objects with `transferred_classes`, which ties the test to a one-way transfer and to data nobody asked to keep |
+| **A fresh test deployment** in a new host repo: new Worker, new D1, new R2, new Durable Object namespace (owner, 2026-09-30) | rebinding atlas's staging D1 and R2 and moving its Durable Objects with `transferred_classes`, which ties the test to a one-way transfer and to data nobody asked to keep |
 | **Both brands' content by one scripted import** over v1, from the existing staging deployments, with fresh ids, published content, assets and form definitions only | reading production (a token on a production deployment for a test); seeding from each repo's `folio-seed.sql` (no real content, so the test proves nothing about real pages); a first-class `folio export`/`import` (spec decision 22) |
-| allaboutafrica is the `default` site `0011` inserts, its brand set by SQL right after `0013` | creating a new `allaboutafrica` site and leaving `default` empty: `default`'s root can never be deleted (`multi-site.md` decision 5), so an empty `default` would sit in every switcher |
+| atlas is the `default` site `0011` inserts, its brand set by SQL right after `0013` | creating a new `atlas` site and leaving `default` empty: `default`'s root can never be deleted (`multi-site.md` decision 5), so an empty `default` would sit in every switcher |
 | Test hostnames on the two brands' own zones, `multibrand.` and `multibrand-preview.`, and the admin origin on the neutral domain | reusing the existing staging hostnames, which belong to the existing staging Workers; `workers.dev`, of which a Worker has one and this test needs five hosts |
-| The host's top-level `wrangler.jsonc` is a placeholder that cannot deploy (a zero D1 id), and `env.test` is the only deployable environment in this plan | a top level that is live, which is allaboutafrica's documented trap: `wrangler deploy` with no `--env` would create a Worker nobody meant |
+| The host's top-level `wrangler.jsonc` is a placeholder that cannot deploy (a zero D1 id), and `env.test` is the only deployable environment in this plan | a top level that is live, which is atlas's documented trap: `wrangler deploy` with no `--env` would create a Worker nobody meant |
 | Deploys from the laptop, `npx wrangler deploy --env test`, from a clean tree | connecting Workers Builds now, which turns a push into a deploy before the test has passed |
-| **The test deployment's side effects are contained**: Jambo calls go to Jambo's staging, payment keys are test keys on every non-production host, the CRM forward is skipped when its token is unset and the test sets none, and the enquiry mail goes to an address the owner controls | the brands' production integrations, which would put test enquiries into real inboxes and CRMs |
+| **The test deployment's side effects are contained**: CRM calls go to CRM's staging, payment keys are test keys on every non-production host, the CRM forward is skipped when its token is unset and the test sets none, and the enquiry mail goes to an address the owner controls | the brands' production integrations, which would put test enquiries into real inboxes and CRMs |
 | Phase 1 is committed on `main` directly; every later phase on the local branch `multi-brand`, cut from `main` after phase 1 | holding phase 1 on the branch, which risks the `v1.0.0` tag landing before it and turning a free fix into a `2.0.0` item |
 | The host repo copies code from committed heads (`git archive`), with no history import | a subtree merge of both histories (owner correction, 2026-09-30) |
 
@@ -131,7 +131,7 @@ Each rule is a way the design breaks if an agent is not told.
 - **Never let a registry read fall back to a brand.** A read that is not routed
   through `c.var.brand` or `rt.forScope` must fail — a throwing getter in phases 3 and
   4, a type error from phase 5 — never answer the first brand's schema. A default
-  brand compiles, passes every single-brand test, and is wrong for every takeoffgo
+  brand compiles, passes every single-brand test, and is wrong for every harbour
   request.
 - **A chain never crosses a brand.** On a branded deployment `chain()` omits
   `shared`, and a group and its sites have one brand. Every "why is this row the
@@ -149,7 +149,7 @@ Each rule is a way the design breaks if an agent is not told.
   in phase 3 before anything else is edited.
 - **The entrypoint invariant is unchanged.** One Worker has one cached entrypoint; the
   host routes writes, the cron and form submits through `CachedPages`.
-- **Migration ids carry their brand.** `takeoffgo/0001-fifty-fifty-to-feature`, refused
+- **Migration ids carry their brand.** `harbour/0001-fifty-fifty-to-feature`, refused
   at construction otherwise, because `schema_migrations` is keyed by id alone.
 
 ## Orchestration rules
@@ -211,10 +211,10 @@ for the next.
 | --- | --- | --- | --- |
 | C1 | Phase 1: push the one phase-1 commit on `main` through `node scripts/release.mjs --push` | `origin/main` gains the duplicate-name throw; nothing installs it until a pin moves | Consumers stay on their pins; a bad head is fixed forward, never force-pushed |
 | C2 | Phase R: `node scripts/release.mjs --tag --push` | `origin/main` moves to the multi-brand head | As C1 |
-| C3 | Phase T, step 1: create the private GitHub repo `takeoffgo/sites` and push the host's `main` | A new repository in the organisation | Archive or delete the repository |
-| C4 | Phase T, step 2: mint one `content:read` token on each existing staging deployment (allaboutafrica's on `staging-cms.allaboutafrica.au`, takeoffgo's on `staging.takeoffgo.com`) | One `api_tokens` row on each staging D1 | Revoke both tokens (the Access screen on each) |
+| C3 | Phase T, step 1: create the private GitHub repo `harbour/sites` and push the host's `main` | A new repository in the organisation | Archive or delete the repository |
+| C4 | Phase T, step 2: mint one `content:read` token on each existing staging deployment (atlas's on `staging-cms.atlas.example`, harbour's on `staging.harbour.example`) | One `api_tokens` row on each staging D1 | Revoke both tokens (the Access screen on each) |
 | C5 | Phase T, steps 3–4: create D1 `sites-folio-test` and R2 bucket `sites-folio-test`, and apply `0001`–`0013` to the D1 | Two new billable resources, empty but for the schema | `npx wrangler d1 delete sites-folio-test`, `npx wrangler r2 bucket delete sites-folio-test` |
-| C6 | Phase T, step 6: five Workers custom domains on `sites-test` — the admin origin, `multibrand.allaboutafrica.au`, `multibrand-preview.allaboutafrica.au`, `multibrand.takeoffgo.com`, `multibrand-preview.takeoffgo.com` — and the sign-in sender on the admin origin's domain | Five new proxied DNS records on three production zones and their certificates; one sender address | Detach the five domains (Workers → `sites-test` → Domains & Routes), which deletes the records they created; remove the sender |
+| C6 | Phase T, step 6: five Workers custom domains on `sites-test` — the admin origin, `multibrand.atlas.example`, `multibrand-preview.atlas.example`, `multibrand.harbour.example`, `multibrand-preview.harbour.example` — and the sign-in sender on the admin origin's domain | Five new proxied DNS records on three production zones and their certificates; one sender address | Detach the five domains (Workers → `sites-test` → Domains & Routes), which deletes the records they created; remove the sender |
 | C7 | Phase T, step 7: the first `npx wrangler deploy --env test` | `sites-test` exists and answers on the five hosts | `npx wrangler delete --env test` |
 
 ## Progress
@@ -235,7 +235,7 @@ where the spec was wrong. Each phase's own entry under the spec's
 | 7 | `5d478ff` | `/me` gained a `brands` list; `hookRunner` takes the brand as a required argument. Review found five low, all fixed, the worst a caller reaching another brand's labelled schema by naming its `~scope` |
 | 8 | `c097c70` | Docs, spec Implementation notes, `CLAUDE.md`. Full e2e 22/22, 5277 tests. `bin/folio.mjs` needed no change: its note ships from `AGENTS.md`'s block |
 | R | `c097c70` | `release.mjs --tag --push`: gates, 22 e2e, consumer-install smoke. The host's pin |
-| H | host `effbb31` | The host is built and pinned. Jambo has no staging, so the shared client refuses every mutation off a brand's production host |
+| H | host `effbb31` | The host is built and pinned. CRM has no staging, so the shared client refuses every mutation off a brand's production host |
 | T | host `1ce1b74` | Staging env renamed from `test`. Content was imported from production (owner decision), and the importer strips fields the source schema no longer declares. The admin host needed an exception in its zone's catch-all redirect rule. T9 was replaced by reading the registry rows back from SQL |
 | V | — | No failures. Recorded in the spec's "Staging (2026-09-30)" notes. Both production read tokens and both staging import tokens are revoked. The owner's browser pass passed on 2026-10-01 |
 
@@ -372,7 +372,7 @@ files.
 **Break-it checks, 4a:** read `rt.schema` in `routes/stories.ts` again (the throwing
 getter turns the two-brand create test red); let MCP describe `rt.types` (the
 descriptions test red).
-**Break-it checks, 4b:** render a takeoffgo preview with the first brand's registry
+**Break-it checks, 4b:** render a harbour preview with the first brand's registry
 (the preview test red); run `migrate` over every scope rather than the brand's (the
 `feature` migration test red); call `ensureSingleton` in branded draft mode (the
 "no row created" test red).
@@ -386,9 +386,9 @@ others are live. After all three report: the four gates yourself, `pnpm build`,
 Commit 6, then 4a, then 4b.
 
 **Review:** yes, of the three together. Ask the reviewer to list every read of a
-registry-derived member left on `rt` and to try: a takeoffgo form submit verified by
-allaboutafrica's `verify`; a takeoffgo migration touching an allaboutafrica document
-that shares a block name; a takeoffgo preview linking allaboutafrica's stylesheet.
+registry-derived member left on `rt` and to try: a harbour form submit verified by
+atlas's `verify`; a harbour migration touching an atlas document
+that shares a block name; a harbour preview linking atlas's stylesheet.
 
 ---
 
@@ -419,7 +419,7 @@ exactly as today**: no brand in the switcher, no brand field on the Sites screen
 same manifest fetch path when no scope is chosen.
 
 **Break-it checks:** fetch the manifest at the bare base with a scope chosen (the
-"New menu lists takeoffgo's types only" test red); drop the brand sentence from MCP
+"New menu lists harbour's types only" test red); drop the brand sentence from MCP
 instructions (red); answer the neutral manifest on v1 unscoped (the `400` test red);
 render the Sites screen single-brand and assert no brand field.
 
@@ -469,7 +469,7 @@ full**, which is the release gate.
 
 ### Phase H · The host repository, built locally (nothing outward)
 
-| Work | Files (in `/Users/brendan/work/takeoffgo/sites`) | Agent | Size |
+| Work | Files (in `/Users/brendan/work/harbour/sites`) | Agent | Size |
 | --- | --- | --- | --- |
 | The merged host | the whole new repo | `implementer`, **opus** | L |
 | The import script | `scripts/import/` | same agent, after the host builds | M |
@@ -478,10 +478,10 @@ Opus because the merged route tree is where a brand's code reaches the other bra
 pages, and the rules that stop it are structural and easy to half-apply.
 
 1. `git init` the repo. Copy code from committed heads only:
-   `git -C /Users/brendan/work/takeoffgo/allaboutafrica-website-multisite archive adbdde5 app workers scripts public docs | tar -x -C <scratchpad>/aaa-src`
-   and `git -C /Users/brendan/work/takeoffgo/takeoffgo-website archive 455707e app workers scripts public docs | tar -x -C <scratchpad>/tgo-src`,
+   `git -C /Users/brendan/work/harbour/atlas-website-multisite archive adbdde5 app workers scripts public docs | tar -x -C <scratchpad>/atl-src`
+   and `git -C /Users/brendan/work/harbour/harbour-website archive 455707e app workers scripts public docs | tar -x -C <scratchpad>/hbr-src`,
    then move what each brand owns into place. Never copy `codegen.yml` from
-   takeoffgo-website.
+   harbour-website.
 2. **Layout** (spec decision 18):
    ```
    app/
@@ -489,36 +489,36 @@ pages, and the rules that stop it are structural and easy to half-apply.
      root.tsx                 <html data-folio-brand>, the brand's layout
      routes.ts                one tree; colliding paths are dispatch modules
      routes/                  dispatch modules and brand guards only
-     brands/allaboutafrica/   folio/ (blocks, FolioBrand), routes/, components/, styles/, graphql/, CLAUDE.md
-     brands/takeoffgo/        the same
-     shared/                  Jambo client, payment-key picker, nothing styled
+     brands/atlas/   folio/ (blocks, FolioBrand), routes/, components/, styles/, graphql/, CLAUDE.md
+     brands/harbour/        the same
+     shared/                  CRM client, payment-key picker, nothing styled
    folio.config.server.ts     createFolio({ brands, sites, auth, hooks, route, … })
    workers/app.ts             gateway, CachedPages, StoryDO, SpaceDO, crons
    scripts/check-brand-css.mjs, scripts/import/
    CLAUDE.md                  the brand map
    ```
-3. **`folio.config.server.ts`**: the spec's decision 3 example. takeoffgo's migration id
-   becomes `takeoffgo/0001-fifty-fifty-to-feature`. `hooks.submitted` branches on
+3. **`folio.config.server.ts`**: the spec's decision 3 example. harbour's migration id
+   becomes `harbour/0001-fifty-fifty-to-feature`. `hooks.submitted` branches on
    `payload.brand`. `magicLink.send` words the mail from `mail.scope?.brand?.label` and
    sends from the admin origin's domain. `passkeys({ rpName })` names the company, not
    a brand. `route(path, locale, site)` answers an absolute URL on the site's first
    live host.
-4. **`vite.config.ts`**: `folio({ blocks: { allaboutafrica: …, takeoffgo: … } })`;
+4. **`vite.config.ts`**: `folio({ blocks: { atlas: …, harbour: … } })`;
    `cssCodeSplit` left on. The define `__FOLIO_SITES_ADMIN__` is `$ADMIN_ORIGIN` when
    `CLOUDFLARE_ENV === 'test'`, `http://localhost:5173` under `FOLIO_SITES_LOCAL=1`, and
    there is no production value.
 5. **CSS scoping**: every brand stylesheet under `[data-folio-brand="<brand>"]`,
-   takeoffgo's reset included. `scripts/check-brand-css.mjs` reads the built client CSS
+   harbour's reset included. `scripts/check-brand-css.mjs` reads the built client CSS
    and fails on any rule from `app/brands/<b>/` outside `[data-folio-brand="<b>"]`
    except `@font-face` and `@keyframes`; `npm run build` runs it.
 6. **Import fence**: a lint rule (`noRestrictedImports` or the equivalent) refusing an
    import from `app/brands/<a>/` in `app/brands/<b>/`, run by `npm run lint`.
 7. **`public/`**: only brand-neutral files. `robots.txt`, favicons, `agents.txt` and
    `humans.txt` are dispatch routes; the two `_headers` files merge into one.
-8. **Jambo**: one `codegen.yml` reading the token from the environment, one generated
-   client from Jambo's current schema, each brand's query documents under its
+8. **CRM**: one `codegen.yml` reading the token from the environment, one generated
+   client from CRM's current schema, each brand's query documents under its
    `graphql/`, and the two payment call shapes reconciled at their call sites.
-9. **Side effects contained** (the rollout decision above): `JAMBO_URL` names Jambo's
+9. **Side effects contained** (the rollout decision above): `CRM_URL` names CRM's
    staging in `env.test`; the payment-key picker answers test keys for every host that
    is not a brand's production live host; the CRM forward returns early when its token
    is unset; the enquiry recipient is an env var.
@@ -545,19 +545,19 @@ pages, and the rules that stop it are structural and easy to half-apply.
     site already has a document. It writes no D1 row directly.
 13. **Local smoke**, with `FOLIO_SITES_LOCAL=1 npm run dev` after
     `npx wrangler d1 migrations apply sites-folio-test --env test --local` and the Phase T
-    step 5 SQL run with `--local`: sites `default` and `takeoffgo` with live hosts
-    `aaa.localhost` and `tgo.localhost` and preview origins
-    `http://preview-aaa.localhost:5173` and `http://preview-tgo.localhost:5173`. Pin
+    step 5 SQL run with `--local`: sites `default` and `harbour` with live hosts
+    `atl.localhost` and `hbr.localhost` and preview origins
+    `http://preview-atl.localhost:5173` and `http://preview-hbr.localhost:5173`. Pin
     Folio with `npm install --install-links file:/Users/brendan/work/personal/folio`
     (never committed). Check: each brand's home renders on its host in its own fonts; a
-    colliding path (`/invoice`) answers each brand's page; `aaa.localhost:5173/travel/destinations/x`
+    colliding path (`/invoice`) answers each brand's page; `atl.localhost:5173/travel/destinations/x`
     is a 404; the admin's New menu on each scope lists that brand's types only; each
     brand's preview links only its own `folio-preview-<brand>` files.
 
 **Gates (in the host repo):** `npm run typecheck` 0 errors; `npm run lint` exit 0;
 `npm run build` exit 0, which includes `check-brand-css.mjs`. **Break-it checks:** move
-takeoffgo's `* { margin: 0 }` outside its scope (the CSS check fails); import a
-takeoffgo component from an allaboutafrica route (lint fails).
+harbour's `* { margin: 0 }` outside its scope (the CSS check fails); import a
+harbour component from an atlas route (lint fails).
 
 **Done when:** the smoke passes and the host is committed on its local `main` with the
 Folio dependency set to `github:brendanmckenzie/folio#<Phase R SHA>` by plain
@@ -569,7 +569,7 @@ Folio dependency set to `github:brendanmckenzie/folio#<Phase R SHA>` by plain
 
 **Do it yourself.** One change at a time, verified before the next.
 
-1. **C3.** Create `takeoffgo/sites` (private) and push the host's `main`.
+1. **C3.** Create `harbour/sites` (private) and push the host's `main`.
 2. **C4.** Mint the two `content:read` tokens on the existing staging deployments. Keep
    them in the shell environment only, never in a file.
 3. **C5.** `npx wrangler d1 create sites-folio-test` and
@@ -578,8 +578,8 @@ Folio dependency set to `github:brendanmckenzie/folio#<Phase R SHA>` by plain
    `select name from d1_migrations order by id`: `0001`–`0008`, `0010`, `0011`, `0013`,
    nothing else.
 5. **Registry and first admin by SQL**, before any deploy:
-   `update sites set brand = 'allaboutafrica', name = 'All About Africa', preview_origin = 'https://multibrand-preview.allaboutafrica.au', updated_at = unixepoch() * 1000 where id = 'default'`;
-   `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values ('takeoffgo', 'site', 'Take Off Go', null, 'live', 'https://multibrand-preview.takeoffgo.com', 'takeoffgo', unixepoch() * 1000, unixepoch() * 1000)`;
+   `update sites set brand = 'atlas', name = 'Atlas Guides', preview_origin = 'https://multibrand-preview.atlas.example', updated_at = unixepoch() * 1000 where id = 'default'`;
+   `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values ('harbour', 'site', 'Harbour Travel', null, 'live', 'https://multibrand-preview.harbour.example', 'harbour', unixepoch() * 1000, unixepoch() * 1000)`;
    the two `site_hosts` rows; the owner's `users` row and its `site_roles` `('*', 'admin')`
    row, as `docs/configuration.md`'s bootstrap SQL gives them. Read all four tables back.
 6. **C6.** Attach the five custom domains to `sites-test` (they are also in
@@ -587,14 +587,14 @@ Folio dependency set to `github:brendanmckenzie/folio#<Phase R SHA>` by plain
    far side: `dig +short` answers for all five.
 7. **C7.** `npm run build` with `CLOUDFLARE_ENV=test`, then `npx wrangler deploy --env test`.
    Set the test secrets with `npx wrangler secret put <NAME> --env test` (the names each
-   brand's `env-secrets.d.ts` lists, with Jambo-staging and test-key values).
+   brand's `env-secrets.d.ts` lists, with CRM-staging and test-key values).
 8. Sign in at `$ADMIN_ORIGIN/folio` from the emailed link; mint one token per site
    bound to it (`content:read`, `content:write`, `assets:write`, `publish`), shell only.
 9. **Re-write both sites' hosts and preview origins through the registry** (`PUT
    /folio/api/sites/<id>/hosts`, `PATCH /folio/api/sites/<id>`), so write-time
    validation runs and `siteChanged` purges fire.
-10. **Import**: `node scripts/import/run.mjs` for allaboutafrica (`~default`) and then
-    takeoffgo (`~takeoffgo`). Save both count reports to the scratchpad.
+10. **Import**: `node scripts/import/run.mjs` for atlas (`~default`) and then
+    harbour (`~harbour`). Save both count reports to the scratchpad.
 
 ---
 
@@ -608,39 +608,39 @@ Folio dependency set to `github:brendanmckenzie/folio#<Phase R SHA>` by plain
    source's published count, less anything the report lists as skipped with a reason.
    Spot-read three documents per site and compare published content field by field.
 3. **Cache, per brand**:
-   `node scripts/cache-probe.mjs https://multibrand.allaboutafrica.au --admin "$ADMIN_ORIGIN" --site default --preview https://multibrand-preview.allaboutafrica.au --token "$AAA_TEST_TOKEN"` (the step T8 token, from the shell),
-   and the same for `multibrand.takeoffgo.com`, `--site takeoffgo`,
-   `https://multibrand-preview.takeoffgo.com`. PASS lines needed for each: live MISS then
+   `node scripts/cache-probe.mjs https://multibrand.atlas.example --admin "$ADMIN_ORIGIN" --site default --preview https://multibrand-preview.atlas.example --token "$AAA_TEST_TOKEN"` (the step T8 token, from the shell),
+   and the same for `multibrand.harbour.example`, `--site harbour`,
+   `https://multibrand-preview.harbour.example`. PASS lines needed for each: live MISS then
    HIT; preview a separate entry; both purged by the probe's publish. Then publish a
-   takeoffgo page and confirm an allaboutafrica page that was HIT is still HIT.
-4. **Brand separation, by reading responses**: a takeoffgo preview page links only
-   `folio-preview-takeoffgo.*` and its `<html>` carries `data-folio-brand="takeoffgo"`;
-   the same for allaboutafrica; `GET $ADMIN_ORIGIN/folio/~takeoffgo/api/schema` lists
-   takeoffgo's blocks only, and `~default` allaboutafrica's; v1 `/schema` with no scope is
+   harbour page and confirm an atlas page that was HIT is still HIT.
+4. **Brand separation, by reading responses**: a harbour preview page links only
+   `folio-preview-harbour.*` and its `<html>` carries `data-folio-brand="harbour"`;
+   the same for atlas; `GET $ADMIN_ORIGIN/folio/~harbour/api/schema` lists
+   harbour's blocks only, and `~default` atlas's; v1 `/schema` with no scope is
    `400 site_required`; `~shared` is 404.
-5. **MCP, per brand**: `initialize` on `$ADMIN_ORIGIN/folio/~takeoffgo/mcp` with the
-   takeoffgo token returns instructions naming the site and brand; `tools/list`
-   descriptions list takeoffgo's types and blocks only. The same for `~default`.
-6. **Forms, per brand**: submit allaboutafrica's contact form on
-   `multibrand.allaboutafrica.au` and takeoffgo's enquiry form on
-   `multibrand.takeoffgo.com`, each with its own captcha's test keys; each is accepted and
+5. **MCP, per brand**: `initialize` on `$ADMIN_ORIGIN/folio/~harbour/mcp` with the
+   harbour token returns instructions naming the site and brand; `tools/list`
+   descriptions list harbour's types and blocks only. The same for `~default`.
+6. **Forms, per brand**: submit atlas's contact form on
+   `multibrand.atlas.example` and harbour's enquiry form on
+   `multibrand.harbour.example`, each with its own captcha's test keys; each is accepted and
    appears in its own site's responses; the enquiry mail reaches the owner's address and
-   the takeoffgo forward reaches Jambo's staging only.
-7. **Sign-in**: a link requested from `$ADMIN_ORIGIN/folio/~takeoffgo/edit` arrives from
-   the admin origin's sender and names Take Off Go.
+   the harbour forward reaches CRM's staging only.
+7. **Sign-in**: a link requested from `$ADMIN_ORIGIN/folio/~harbour/edit` arrives from
+   the admin origin's sender and names Harbour Travel.
 8. **Browser pass, owner.** Write the checklist to
    `~/outbox/multibrand-test-browser-check.md` and give the owner
    `hcograb multibrand-test-browser-check.md`. In current Chrome, Firefox and Safari
    26.2 or later: sign in at the admin origin; open a page on each brand; type a change
-   and see it in the pane in that brand's look (takeoffgo's fonts and reset on
-   takeoffgo, none of them on allaboutafrica: DevTools shows allaboutafrica's `body`
+   and see it in the pane in that brand's look (harbour's fonts and reset on
+   harbour, none of them on atlas: DevTools shows atlas's `body`
    without `font-size: 14px`); the New menu and sidebar list only the brand's types; the
    switcher shows the brand label; the tab title names the site; *Open preview in a new
    tab* shows the draft; a share opens in a private window. The admin origin and both
    preview origins are on different registrable domains, so the pane is a cross-site
    iframe in every browser and this pass exercises the partitioned grant cookie.
 9. **The existing sites are untouched**: `npx wrangler deployments status` for
-   allaboutafrica's production and staging Workers and takeoffgo's production and
+   atlas's production and staging Workers and harbour's production and
    staging Workers show the version ids recorded in Phase 0; both repos' `package.json`
    on `origin/main` still pin their Phase 0 SHAs.
 10. Revoke the two C4 tokens and read back that each source's Access screen no longer
@@ -650,7 +650,7 @@ Folio dependency set to `github:brendanmckenzie/folio#<Phase R SHA>` by plain
 
 - **The test deployment**: `npx wrangler delete --env test`; detach the five custom
   domains; `npx wrangler d1 delete sites-folio-test`; `npx wrangler r2 bucket delete sites-folio-test`
-  (empty it first); remove the sender; archive `takeoffgo/sites` if the owner wants it
+  (empty it first); remove the sender; archive `harbour/sites` if the owner wants it
   gone. No existing site depends on any of it.
 - **The C4 tokens**: revoke on each staging deployment's Access screen.
 - **Folio**: a bad release is fixed forward with a new commit, never force-pushed. No
@@ -674,7 +674,7 @@ In this order, before the commit:
 - **Moving either real site onto the new Worker.** A separate procedure, written after
   Phase V passes and run only on the owner's go-ahead. It is where drafts, version
   history and ids would matter, and none of this plan decides them.
-- **Retiring allaboutafrica-website and takeoffgo-website.** After that cutover.
+- **Retiring atlas-website and harbour-website.** After that cutover.
 - **Workers Builds for the host repo, and a production environment in its config.**
 - **`0012_users_role_contract.sql`.** Spec 23's, released on its own schedule.
 - **A first-class `folio export` / `folio import`** (spec decision 22).

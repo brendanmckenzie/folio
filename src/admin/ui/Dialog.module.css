@@ -13,7 +13,7 @@
    * the bottom of the viewport and took the footer's *Use this file* with it. The
    * body never scrolled because the panel was never asked to fit; the only way to
    * reach the button was to zoom the browser out. Reported from
-   * `allaboutafrica.au` on 2026-09-07.
+   * `atlas.example` on 2026-09-07.
    *
    * `minmax(0, 1fr)` makes the track definite — exactly the wrapper's content box —
    * so the percentage has something real to resolve against and the flex column

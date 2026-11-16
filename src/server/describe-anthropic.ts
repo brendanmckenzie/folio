@@ -283,7 +283,7 @@ function vocabularyOf(tags: DescribeInput["tags"]): string {
  * a user-agent list, and a content site is right to be on it. The first host to
  * press *Describe* got a 403 from their own WAF, reported as `anthropic: 400
  * Unable to download the file` — a paid call refused by the site paying for it,
- * with an error naming neither party. Verified against `allaboutafrica.au` on
+ * with an error naming neither party. Verified against `atlas.example` on
  * 2026-09-07: `curl` 200 and `Claude-User/1.0` 403, same URL, same second.
  *
  * The old comment called that "a deployment that is routable but not readable"

@@ -340,23 +340,23 @@ describe("the scope a sign-in mail is told about", () => {
       env.DB.prepare("delete from sites"),
       env.DB.prepare(
         `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
-           ('tog', 'site', 'Take Off Go AU', null, 'live', null, 'takeoffgo', 0, 0),
+           ('hbr', 'site', 'Harbour Travel AU', null, 'live', null, 'harbour', 0, 0),
            ('orphan', 'site', 'Orphan', null, 'live', null, null, 0, 0)`,
       ),
     ]);
     const branded = createFolio<Cloudflare.Env>({
-      brands: { takeoffgo: { label: "Take Off Go", blocks: [page], root: "page" } },
+      brands: { harbour: { label: "Harbour Travel", blocks: [page], root: "page" } },
       bindings,
       basePath: "/folio",
       auth: magicAuth,
       route: (p) => (p ? `/${p}` : "/"),
       sites: { admin: ORIGIN },
     });
-    const mail = await mailFor(branded, "/folio/~tog/edit");
+    const mail = await mailFor(branded, "/folio/~hbr/edit");
     expect(mail.scope).toEqual({
-      id: "tog",
-      name: "Take Off Go AU",
-      brand: { id: "takeoffgo", label: "Take Off Go" },
+      id: "hbr",
+      name: "Harbour Travel AU",
+      brand: { id: "harbour", label: "Harbour Travel" },
     });
   });
 

@@ -83,7 +83,7 @@ export interface HookBase<Env> {
   site: string | null;
   /**
    * The brand of `site` (`../../docs/specs/foundation/multi-brand.md` decision 16):
-   * what lets `hooks.submitted` send one brand's enquiry email and another's Jambo
+   * what lets `hooks.submitted` send one brand's enquiry email and another's CRM
    * forward. **Null on a deployment with no `brands`**, and for an event about the
    * whole deployment. `migrated` and `reindexed` run per brand, so each carries the
    * brand it ran for.

@@ -2610,12 +2610,12 @@ than the spec's first plan:
 
 ### Staging (2026-09-30)
 
-- **What staging runs.** `staging.allaboutafrica.au` runs Folio
+- **What staging runs.** `staging.atlas.example` runs Folio
   `11cfc71c9fa1097a9b5154030b7cc8a6f4fbd6f4` with `sites` on: the admin is
-  `staging-cms.allaboutafrica.au`, `staging.allaboutafrica.au` is the `default` site's
-  live host, and `staging-preview.allaboutafrica.au` its preview origin. `0011` is
+  `staging-cms.atlas.example`, `staging.atlas.example` is the `default` site's
+  live host, and `staging-preview.atlas.example` its preview origin. `0011` is
   applied to its D1; `0012` is applied nowhere and is not written. Production
-  `allaboutafrica.au` and `takeoffgo.com` stay on their earlier pins.
+  `atlas.example` and `harbour.example` stay on their earlier pins.
 - **Verified from the far side.** The `0011` read-back (one `*` grant per user, the
   re-keyed `stories_path`, `site_id, forked_from` last); `sites/resolve` answering
   `live` and `preview` for the two hosts; `cache-probe` with `--admin --site --preview`
@@ -2644,9 +2644,9 @@ than the spec's first plan:
 ### The pane's asset URLs (2026-10-01)
 
 - **Staging found it again, in the editor pane only.** On a scoped admin mount
-  (`{base}/~takeoffgo`) `useEditor` built the `Resolution` it posts to the iframe with
+  (`{base}/~harbour`) `useEditor` built the `Resolution` it posts to the iframe with
   `assetBase` `${base}/asset`, `base` being the scoped mount, so a draft's images were
-  `{base}/~takeoffgo/asset/<key>`. The iframe is a page on a site's preview origin,
+  `{base}/~harbour/asset/<key>`. The iframe is a page on a site's preview origin,
   which serves `{base}/asset/:key` and nothing under a `~scope` (`servesOnSite`), so
   every image 404ed; the server-rendered first paint was right and the first
   `resolve` frame replaced it. The inspector looked fine because it fetches from the

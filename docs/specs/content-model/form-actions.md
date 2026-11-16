@@ -16,12 +16,12 @@ an integration. `forms.verify` runs before storing, sees the raw body and answer
 boolean (`src/server/routes/forms.ts:1066`); `hooks.submitted` runs after storing,
 its return value is ignored and its throw is swallowed (`src/server/hooks.ts:392`).
 Everything else is the host's own code, so the first real two-brand host routes
-forms with a brand-then-slug `if` chain (`takeoffgo/group-web`
+forms with a brand-then-slug `if` chain (`harbour/multi-brand-host`
 `app/folio.config.server.ts:163-177`), relies on an unwritten contract that a
 question is called `email`, `first_name` and `last_name` (`enquiry.server.ts:65-119`),
 redefines `ResponseValue` because Folio does not export it
-(`allaboutafrica/folio/enquiry.server.ts:36`), derives labels from slugs because the
-payload has none (`:16-21`, `:51`), and loses every failed Jambo or HubSpot delivery to
+(`atlas/folio/enquiry.server.ts:36`), derives labels from slugs because the
+payload has none (`:16-21`, `:51`), and loses every failed CRM or HubSpot delivery to
 a log line while the visitor is told "ok" (`enquiry.server.ts:116`).
 
 This adds **form actions**: a per-brand registry of host-defined submission actions
@@ -112,7 +112,7 @@ Read at `0d769b9` (v1.2.4) with a clean tree. Every line below was opened and re
 - `FormResponse` (`form-responses.ts:1023`) is the `submitted` payload's response;
   `ResponseValue` (`:327`), `SubmittedFile` (`:1004`), `FormMeta` (`forms.ts:111`) and
   `FolioForms` are **not exported** from `folio/server` (`index.tsx:130-224` exports
-  `SubmittedHookPayload` and nothing that names its parts). That is why group-web
+  `SubmittedHookPayload` and nothing that names its parts). That is why multi-brand-host
   redefines `ResponseValue`.
 - `Form` (`forms.ts:62-86`) is the builder's row; `COLS` (`forms.ts:162`) selects
   every column by name. `updateForm` (`forms.ts:913`) recomputes `shapeOf` for both
@@ -172,24 +172,24 @@ Read at `0d769b9` (v1.2.4) with a clean tree. Every line below was opened and re
   statement plus an optional count. `schedules-model.ts:247` is the "nothing appears
   to be running the sweep" message this spec reuses.
 
-**hosts (`~/work/takeoffgo/group-web`, read only):**
+**hosts (`~/work/harbour/multi-brand-host`, read only):**
 
 - One `createFolio` for two brands (`app/folio.config.server.ts:100`); the
-  `submitted` hook branches on `brand` then on the form's slug (`:163-178`). AAA
-  forwards only the `contact` form; TOG forwards every form.
-- TOG's production-only rule is decided by **the host that received the submission**,
-  not by an environment flag, on purpose: `app/shared/jambo/guard.ts:15-16`, "Decided
+  `submitted` hook branches on `brand` then on the form's slug (`:163-178`). Atlas
+  forwards only the `contact` form; Harbour forwards every form.
+- Harbour's production-only rule is decided by **the host that received the submission**,
+  not by an environment flag, on purpose: `app/shared/crm/guard.ts:15-16`, "Decided
   by host, like the Stripe key picker, so there is no env flag to forget." The hook has
   no request, so `formHost` (`folio.config.server.ts:187`) re-derives a host from the
   site's host list, and has to guess which one ("a production host if the site has
   one, else its first").
-- `forwardEnquiry` (`app/brands/takeoffgo/lib/enquiry.server.ts:65`) skips Jambo when
-  `email`/`first_name`/`last_name` are blank (`:119`) and swallows a Jambo failure
-  (`:116`). AAA's `handleEnquiry` sends an email and conditionally a MailerLite
+- `forwardEnquiry` (`app/brands/harbour/lib/enquiry.server.ts:65`) skips CRM when
+  `email`/`first_name`/`last_name` are blank (`:119`) and swallows a CRM failure
+  (`:116`). Atlas's `handleEnquiry` sends an email and conditionally a MailerLite
   subscribe on `data.newsletter === true`.
 - Each brand keeps its own map of `folio_status` to visitor text
-  (`takeoffgo/components/forms/EnquiryForm.tsx:211-239`,
-  `allaboutafrica/components/FolioForm.tsx`).
+  (`harbour/components/forms/EnquiryForm.tsx:211-239`,
+  `atlas/components/FolioForm.tsx`).
 - The cron loops `folio.runSchedules` on `continueFrom` from the `CachedPages`
   entrypoint (`workers/app.ts:349-372`, dispatched at `:467-473`), with a 20-batch
   guard.
@@ -243,17 +243,17 @@ architecture below is built on them, and spec 37 records 7 to 10 in the same wor
 ## User stories
 
 ### Developer registers an integration once
-**As** a host developer **I want to** register "File in Jambo" once, with the inputs
+**As** a host developer **I want to** register "File in CRM" once, with the inputs
 it needs and the settings it takes, **so that** I stop maintaining a slug chain and an
 unwritten naming contract for every form an editor builds.
 
 ### Editor wires a new form to the CRM
-**As** a publisher **I want to** attach "File in Jambo" to a new landing-page form and
+**As** a publisher **I want to** attach "File in CRM" to a new landing-page form and
 pick which question is the email, the first name and the last name **so that** the
 leads arrive without a deploy.
 
 ### Editor is stopped before breaking an integration
-**As** an editor **I want** the builder to refuse deleting the question Jambo reads
+**As** an editor **I want** the builder to refuse deleting the question CRM reads
 its email from, and to say which action needs it, **so that** a tidy-up never silently
 breaks lead capture.
 
@@ -279,7 +279,7 @@ staging never files a real enquiry.
 ```ts
 forms: {
   verify: verifyTurnstile,
-  actions: [jamboEnquiry, hubspotContact],
+  actions: [crmEnquiry, hubspotContact],
 }
 ```
 
@@ -296,8 +296,8 @@ and the array's order is the builder's picker order.
 
 **Rejected: a top-level `actions` beside `hooks`.** `hooks` are deployment-wide
 (`multi-brand.md` keeps them at the top), but forms policy was made per brand by that
-same spec (`docs/configuration.md:408`). A top-level registry would offer Take Off Go's
-Jambo action on All About Africa's forms and would need a brand filter added to fix
+same spec (`docs/configuration.md:408`). A top-level registry would offer Harbour Travel's
+CRM action on Atlas Guides's forms and would need a brand filter added to fix
 it. **Rejected: growing `hooks.submitted` with a routing table.** The slug chain *is* a
 routing table; moving it into config does not let an editor change it.
 
@@ -315,7 +315,7 @@ routing table; moving it into config does not let an editor change it.
 rather than just the raw body, and able to say *why*. It keeps `verify`'s posture for
 `verify`'s reason (forms.md decision 11): a gate that opens on error is decorative.
 `deliver` keeps the hook's posture for the hook's reason: the row is committed, and a
-Jambo outage must not become the visitor's problem.
+CRM outage must not become the visitor's problem.
 
 `verify` is not removed or deprecated. It receives the raw body *before* the rate
 limit, which is where a captcha belongs, and runs for every form of the brand with no
@@ -459,7 +459,7 @@ builder and for the server, the way `checkFormLogic` is shared:
   to a question that is not always answered; a required setting unset; a setting value
   its definition refuses.
 - In the builder, **removing a mapped question is refused** with the action named
-  ("File in Jambo reads its email from this question. Change the mapping first."),
+  ("File in CRM reads its email from this question. Change the mapping first."),
   extending `removeRefusal` (`form-model.ts:268`); **renaming one rewrites the
   mapping**, extending `renameField` (`form-model.ts:677`); retyping one to an
   incompatible kind, or making a required-input question optional or conditional, is
@@ -467,10 +467,10 @@ builder and for the server, the way `checkFormLogic` is shared:
 
 Decision 13 says which of those problems block a save.
 
-**Rejected: the slug convention, documented.** It is group-web's status quo, and its
+**Rejected: the slug convention, documented.** It is multi-brand-host's status quo, and its
 failure mode is a lead with blank names that nobody notices. **Rejected: letting a
 required input map to any question and skipping the action at runtime when it is
-blank.** That is group-web's `incomplete_not_forwarded` warning
+blank.** That is multi-brand-host's `incomplete_not_forwarded` warning
 (`enquiry.server.ts:119`) moved into Folio: the editor learns about it from nobody.
 
 ### 6. Settings are block field definitions, restricted to six scalar kinds
@@ -705,7 +705,7 @@ chase, and it makes Retry resend the broken setting it was pressed to get past.
 today and then, **only on a call whose own report comes back with `continueFrom:
 null`**, runs one delivery pass and attaches its report as `report.deliveries`. A
 host looping on `continueFrom` (the documented loop, `types.ts:1183-1190`, and
-group-web's at `workers/app.ts:349`) therefore runs deliveries once per tick, **after**
+multi-brand-host's at `workers/app.ts:349`) therefore runs deliveries once per tick, **after**
 every due schedule has been published, and needs no code change at all. On a tick with
 nothing scheduled, the first call is that call. A tick whose schedule backlog outlasts
 the host's batch guard runs no deliveries; they run on the next tick that clears it,
@@ -829,7 +829,7 @@ where today the only trace is a log line (`enquiry.server.ts:84-91`).
 Both phases also receive `site` (the submitting site id, `default` without `sites`)
 and `brand` (or null), the facts `HookBase` already carries.
 
-**Rejected: an environment flag.** group-web's guard rejects it in so many words
+**Rejected: an environment flag.** multi-brand-host's guard rejects it in so many words
 (`guard.ts:15-16`), and on a deployment where staging and production share one
 third-party account the flag is the thing somebody forgets. **Rejected: passing the
 site's host list.** It cannot say which host received the submission, which is the
@@ -986,15 +986,15 @@ purge storm.
 `folio/server` exports, as types: `FormAction`, `ActionInputDef`, `ActionInputKind`,
 `ActionSettingDef`, `ActionCodeDef`, `CheckContext`, `CheckResult`, `DeliverContext`,
 `DeliverResult`, `ActionQuestion`, `DeliveryStatus`, `DeliveryFailureCategory`,
-`DeliveryRow`, `DeliveryRunReport`, `DeliveryFailure`, and the four that group-web had
+`DeliveryRow`, `DeliveryRunReport`, `DeliveryFailure`, and the four that multi-brand-host had
 to redefine or could not name: `ResponseValue`, `FormResponse`, `FormMeta`,
 `SubmittedFile`, plus `FolioForms`. And one value: `formAction`, an identity function
 whose only job is inference.
 
 ```ts
-export const jamboEnquiry = formAction({
-  id: 'jambo-enquiry',
-  label: 'File in Jambo',
+export const crmEnquiry = formAction({
+  id: 'crm-enquiry',
+  label: 'File in CRM',
   inputs: { email: { kind: 'email', label: 'Email', required: true }, … },
   settings: { area: { kind: 'text', label: 'Area', help: 'Defaults to the form slug' } },
   async deliver(ctx, env: Env) {
@@ -1015,7 +1015,7 @@ parameters are bivariant under `strictFunctionTypes`, which is what lets a
 
 Every context carries `questions: readonly ActionQuestion[]`, the form's questions in
 order with their source-locale `label`, `kind` and, for option kinds, a value-to-label
-map. That ends group-web's slug-to-label derivation (`allaboutafrica/folio/
+map. That ends multi-brand-host's slug-to-label derivation (`atlas/folio/
 enquiry.server.ts:16-21`): an email action lists every answer under its real label
 without mapping anything.
 
@@ -1434,7 +1434,7 @@ THEN one response row and exactly two form_deliveries rows exist
 ### A rename after a failed delivery does not break the retry
 
 ```
-GIVEN a response whose delivery to "jambo-enquiry" failed, with email mapped to question "email"
+GIVEN a response whose delivery to "crm-enquiry" failed, with email mapped to question "email"
 WHEN a publisher renames "email" to "work_email" (the mapping follows) and presses Retry
 THEN deliver receives the email the visitor submitted, read through the mapping stored on the delivery row
 ```
@@ -1456,7 +1456,7 @@ THEN the cron attempt's write matches nothing and the row stays delivered
 ### Mapping protects the integration
 
 ```
-GIVEN "jambo-enquiry" with a required email input mapped to question "email"
+GIVEN "crm-enquiry" with a required email input mapped to question "email"
 WHEN an editor tries to delete "email", make it optional, put it behind a showIf, or change it to a text question
 THEN the builder refuses and names the action
 AND a crafted PATCH doing the same is 400 naming the action and the input

@@ -114,7 +114,7 @@ Read at `1ea6183` with a clean tree.
   first, then `data`, then answers `—`.
 - `cacheKeyFor` keeps every query parameter except click identifiers and `utm_*`
   (`cache-request.ts:93-107`), so a page prefilled from `?area=safari` is its own
-  cache entry, which is already true of Take Off Go's hand-rolled prefill.
+  cache entry, which is already true of Harbour Travel's hand-rolled prefill.
 
 **admin (`src/admin/`):**
 
@@ -127,11 +127,11 @@ Read at `1ea6183` with a clean tree.
 - The responses table renders `cellText` / `answerText`
   (`responses-model.ts:166-180`).
 
-**hosts (read in `~/work/takeoffgo/group-web`):**
+**hosts (read in `~/work/harbour/multi-brand-host`):**
 
-- Take Off Go calls `formLayout(form)` with no answers and already renders
+- Harbour Travel calls `formLayout(form)` with no answers and already renders
   `!cell.shown` as an empty `aria-hidden` slot
-  (`app/brands/takeoffgo/components/forms/EnquiryForm.tsx:53`, `:134-144`). It
+  (`app/brands/harbour/components/forms/EnquiryForm.tsx:53`, `:134-144`). It
   prefills **every** question from the query string by name, hidden ones included
   (`:108-115`, `:131`), which is how `?source=topnav` and `?area=safari` work today.
 - The demo renders `required={field.required}` straight onto inputs
@@ -379,7 +379,7 @@ gain `unasked: readonly string[]`, always present, `[]` for a form with no logic
 every response stored before `0014`.
 
 **Rejected: storing blanks as `''` so `—` could mean only "did not exist".** It changes
-every `submitted` payload for every host: Take Off Go forwards each response to Jambo
+every `submitted` payload for every host: Harbour Travel forwards each response to CRM
 and HubSpot, and a CRM that receives `phone: ''` may well clear the phone it already
 had. That is a separate, deliberate change if it is ever wanted.
 **Rejected: `null` values in `data` for a question not asked.** It widens
@@ -439,10 +439,10 @@ A host seeds its inputs' default values from the result. It does not pass prefil
 `formLayout` on a no-JavaScript render (decision 7); a hydrated host passes its live
 answers, which start from the prefill.
 
-**Rejected: prefill from the query on every question by default** (what Take Off Go
+**Rejected: prefill from the query on every question by default** (what Harbour Travel
 does by hand today). A link can then put any words into any text box on the site's own
 form, which is a phishing primitive with the site's name on it; an editor opting a
-question in is the boundary. Take Off Go's own code keeps working untouched.
+question in is the boundary. Harbour Travel's own code keeps working untouched.
 **Rejected: a host map through `folio.resolve`.** The `Resolution` is cache-tagged,
 shared with the preview bridge and cached at the edge, and per-visitor values in it
 put personal data in a shared cache. The host already holds the values at render.
@@ -940,7 +940,7 @@ Model first (pure, unit-tested), components after.
 - **A `hidden`-kind question with a `showIf`** is dropped from `inputs` when not asked
   and its posted value is dropped by the server; with no answers it is in `inputs`.
 - **Prefill and caching**: a prefilled page is its own cache entry per query
-  (`cacheKeyFor`), already true for Take Off Go. `utm_*` parameters are stripped from
+  (`cacheKeyFor`), already true for Harbour Travel. `utm_*` parameters are stripped from
   the cache key but not from the page URL, so a question named `utm_source` with
   `prefill: 'query'` is prefilled on the page while the edge stores one copy for all
   values on a host that keys its cache with `cacheKeyFor`. A server-rendered prefill

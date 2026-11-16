@@ -724,7 +724,7 @@ schedule cleanup.
 
 **Slice 1 built 2026-10-19** as spec 35 (`docs/specs/content-model/form-logic.md`): conditional visibility and requiredness, sections, `hold` and prefill. Content-sourced options (#54) and steps with the `folio/form` hook (#55) have since been built, as specs 37 and 38. The analysis below is the record that produced them.
 
-**Raised 2026-09-07 by the second host** (`takeoffgo/takeoffgo-website`) as the
+**Raised 2026-09-07 by the second host** (`harbour/harbour-website`) as the
 smallest possible complaint: `/contact` used to wrap first and last name in a
 `<div className="basic-columns">`, an editor rebuilt the form on the Forms screen,
 and the pair is now stacked. The complaint is true and the frame is wrong.
@@ -802,7 +802,7 @@ Ranked by value × fits-a-library:
 3. **Conditional requiredness and cross-field validation** — same vocabulary,
    different verb; `requireIf`, plus `rules: { when, message }[]`.
 4. **Prefill** — first-class `prefill: 'query' | 'none'`, plus a host-supplied map
-   through `folio.resolve`. Take Off Go has already hand-rolled the query half.
+   through `folio.resolve`. Harbour Travel has already hand-rolled the query half.
 5. **Done (spec 38, built 2026-11-04; see `docs/specs/content-model/form-steps.md`).** Steps and the `folio/form` hook.
 6. **Layout** — a `width` token stored, compiled to a span out of twelve. CSS grid
    auto-flow *is* the row algorithm, so Folio ships no row objects and no opinion
@@ -915,7 +915,7 @@ page the dialog offers a render site from `sitesUnder` of that scope
 ### 6. Multi-brand: two sites that look nothing alike, in one deployment
 
 **Raised 2026-09-30 by the owner**, at the end of the spec 23 build, as the real-world
-stress test of multi-site: allaboutafrica and takeoffgo, two brands of one company with
+stress test of multi-site: atlas and harbour, two brands of one company with
 no content or stylistic overlap, managed from one Folio. Spec 23 assumed "one design,
 per-site tokens"; this is the case where the brands differ completely, and the owner's
 direction is to make it work *nicely* for developers, AI coding agents and content

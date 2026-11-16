@@ -14,10 +14,10 @@ Spec 23 put many sites in one deployment on the assumption that they share one
 design: one block registry, one set of document types, one preview shell, and
 variation as a per-site settings document (`multi-site.md` decision 7). That
 assumption is right for a portfolio of fifty sites that differ by theme tokens, and
-wrong for two brands that share nothing but an agency: allaboutafrica and takeoffgo
+wrong for two brands that share nothing but an agency: atlas and harbour
 collide on the block names `pageRoot` and `prose` and the type name `page` with
-incompatible fields, and takeoffgo's blocks module imports a global CSS reset that
-would restyle every allaboutafrica preview. This spec adds the **brand**: a named
+incompatible fields, and harbour's blocks module imports a global CSS reset that
+would restyle every atlas preview. This spec adds the **brand**: a named
 registry — blocks, types, globals, preview shell, forms, describe, content
 migrations — that a site belongs to. One Worker, one D1, one R2, one admin origin
 and one sign-in serve both brands; everything that makes a brand look and behave
@@ -41,9 +41,9 @@ The build and rollout are `docs/multi-brand-plan.md`.
 ## Ground truth
 
 Verified against the tree at `6b4fc19` and the consumer working trees on
-2026-09-30. `A` is `/Users/brendan/work/takeoffgo/allaboutafrica-website-multisite`
+2026-09-30. `A` is `/Users/brendan/work/harbour/atlas-website-multisite`
 (branch `folio-multi-site`, the one running multi-site on staging), `B` is
-`/Users/brendan/work/takeoffgo/takeoffgo-website` (`main`).
+`/Users/brendan/work/harbour/harbour-website` (`main`).
 
 **core (`src/core/`):**
 
@@ -253,7 +253,7 @@ Verified against the tree at `6b4fc19` and the consumer working trees on
   `:251`); B at `B/app/folio/config.server.ts:40` (blocks `:41`, types `:47`, hooks
   `:88`, forms `ratePerHour: 20` and hCaptcha `verify` `:140-142`, describe `:177`,
   migrations `:180`, `draftMode: true` `:193`, previewCss `:215`, previewWrap `:224`,
-  auth with `passkeys({ rpName: "Take Off Go CMS" })` `:286`).
+  auth with `passkeys({ rpName: "Harbour Travel CMS" })` `:286`).
 - The two register 35 and 10 blocks and collide on exactly the blocks `pageRoot` and
   `prose` and the type `page`; the fields of both blocks differ
   (`pageRoot` at `A/app/folio/blocks/roots.tsx:114` and
@@ -300,15 +300,15 @@ All settled by the owner on 2026-09-30 and written below as decisions.
 
 ### An author edits one brand without seeing the other
 **As** an editor with roles on both brands' sites **I want to** switch from an
-allaboutafrica site to the takeoffgo site and see, in the "New" menu, the sidebar,
+atlas site to the harbour site and see, in the "New" menu, the sidebar,
 the pickers and the preview, only that brand's types, blocks and look **so that** I
-cannot create an allaboutafrica `guide` inside takeoffgo or preview a takeoffgo page
-in allaboutafrica's fonts.
+cannot create an atlas `guide` inside harbour or preview a harbour page
+in atlas's fonts.
 
 ### A developer adds a block to one brand
 **As** a developer of the host **I want to** add a block under
-`brands/takeoffgo/` and have it appear in takeoffgo's registry, takeoffgo's preview
-bundle and takeoffgo's MCP descriptions, and nowhere else, **so that** a block
+`brands/harbour/` and have it appear in harbour's registry, harbour's preview
+bundle and harbour's MCP descriptions, and nowhere else, **so that** a block
 change cannot reach the other brand's editor or public pages.
 
 ### Two brands keep their own names
@@ -319,8 +319,8 @@ same thing.
 ### An AI agent knows which brand it is editing
 **As** an AI coding agent working in the host repository or through MCP **I want**
 the repository, my token and the MCP server to name the site and brand I am working
-on **so that** I cannot write takeoffgo content while believing it is
-allaboutafrica's.
+on **so that** I cannot write harbour content while believing it is
+atlas's.
 
 ### A headless front end handles a miss
 **As** a front end reading pages over v1 **I want** a 404 to tell me whether the
@@ -348,12 +348,12 @@ site must render every block it holds" — still holds, and decision 5 keeps it 
 by construction: a chain never leaves a brand, so every page a site can render was
 written against that site's own registry.
 
-**Beat a union registry with renames** (design-options H1a + H2a): takeoffgo's
+**Beat a union registry with renames** (design-options H1a + H2a): harbour's
 `pageRoot`, `prose` and `page` become `tgPageRoot`, `tgProse`, `tgPage`, a content
 transform rewrites every stored `Blok.type`, and one preview bundle holds both
 brands' components. It leaves one registry with both brands' blocks in every "New"
-menu until a per-type visibility list is built, and it still puts takeoffgo's global
-reset in allaboutafrica's preview bundle. **Beat a namespacing helper**
+menu until a per-type visibility list is built, and it still puts harbour's global
+reset in atlas's preview bundle. **Beat a namespacing helper**
 (`namespaced('tg', …)`, H2b): stored JSON says `tg-pageRoot` while the code says
 `pageRoot`, so a grep for a stored name finds nothing, and every future field kind
 that references a name has to be taught to rewrite it. **Beat per-site registries**
@@ -367,16 +367,16 @@ The deployment is one Worker: one `createFolio`, one D1, one R2 bucket, one
 brands' public hosts, both preview origins and the admin origin route to it.
 
 **Beat federated brand runtimes** (design-options S1d: each brand's Worker a full
-Folio runtime over a shared D1 and bucket, allaboutafrica's Worker the hub that
-forwards takeoffgo's admin requests over a service binding). Federation keeps each
+Folio runtime over a shared D1 and bucket, atlas's Worker the hub that
+forwards harbour's admin requests over a service binding). Federation keeps each
 brand's code in its own repo and needs no per-brand registry inside Folio, and it
 pays for that with a new Folio mode that forwards HTTP and WebSocket requests between
 Workers (a socket upgrade through `Fetcher.fetch` has never been exercised here), an
 exact-build lockstep between two deploys (`federation_mismatch` whenever one lands
 before the other), two Durable Object namespaces and two cached entrypoints, and
-takeoffgo's editing depending on allaboutafrica's Worker being up. All of that is
+harbour's editing depending on atlas's Worker being up. All of that is
 permanent semver surface for a mode no other deployment needs. **Beat
-allaboutafrica as the CMS with takeoffgo headless** (S1b) and **a neutral CMS with
+atlas as the CMS with harbour headless** (S1b) and **a neutral CMS with
 both headless** (S1c): every visual of the headless brand moves into the CMS
 build, its public pages go down with the CMS Worker, and every publish needs a
 cross-Worker purge nobody has observed. **The cost accepted:** one deploy carries
@@ -402,7 +402,7 @@ export interface FolioBrand<Env> {
   gate?: FolioGate<Env>
   forms?: FolioForms<Env>
   describe?: FolioDescribe<Env>
-  /** Ids carry the brand: `takeoffgo/0001-fifty-fifty-to-feature`. */
+  /** Ids carry the brand: `harbour/0001-fifty-fifty-to-feature`. */
   migrations?: readonly Migration[]
 }
 
@@ -435,13 +435,13 @@ For the test deployment:
 ```ts
 createFolio<Env>({
   brands: {
-    allaboutafrica: { label: 'All About Africa', blocks: aaaBlocks, types: aaaTypes,
+    atlas: { label: 'Atlas Guides', blocks: aaaBlocks, types: aaaTypes,
       previewCss: aaaPreviewCss, previewWrap: AaaPreviewWrap,
       forms: { verify: verifyTurnstile, ratePerHour: 10 }, describe: aaaDescribe },
-    takeoffgo: { label: 'Take Off Go', blocks: tgoBlocks, types: tgoTypes,
-      previewCss: tgoPreviewCss, previewWrap: TgoPreviewWrap,
-      forms: { verify: verifyHCaptcha, ratePerHour: 20 }, describe: tgoDescribe,
-      migrations: [fiftyFiftyToFeature /* id 'takeoffgo/0001-fifty-fifty-to-feature' */] },
+    harbour: { label: 'Harbour Travel', blocks: hbrBlocks, types: hbrTypes,
+      previewCss: hbrPreviewCss, previewWrap: HbrPreviewWrap,
+      forms: { verify: verifyHCaptcha, ratePerHour: 20 }, describe: hbrDescribe,
+      migrations: [fiftyFiftyToFeature /* id 'harbour/0001-fifty-fifty-to-feature' */] },
   },
   sites: { admin: FOLIO_ADMIN_ORIGIN },
   assets: __FOLIO_ASSETS__,
@@ -501,8 +501,8 @@ gain `brand: string | null`, read by the registry snapshot beside the other colu
   `brands` on sets it by SQL immediately after applying `0013` and before the deploy
   (`UPGRADING.md`), exactly as spec 23's plan wrote the `default` hosts.
 
-**Beat mapping site ids to brands in config** (`brands.takeoffgo.sites:
-['takeoffgo']`): sites are rows a platform admin creates from the admin without a
+**Beat mapping site ids to brands in config** (`brands.harbour.sites:
+['harbour']`): sites are rows a platform admin creates from the admin without a
 deploy (`multi-site.md` decision 1), and a second site of a brand would need one.
 **Beat deriving the brand from a hostname pattern**: a preview origin, a
 `workers.dev` host and the admin origin all break the pattern, and the admin origin
@@ -532,7 +532,7 @@ Two consequences, both intended:
   (`multi-site.md` decision 15), so no `global:<name>` tag for a `shared` layer is
   emitted or purged.
 
-`default` stays an ordinary site (it is allaboutafrica's on the test deployment).
+`default` stays an ordinary site (it is atlas's on the test deployment).
 
 **Beat rendering `shared` content with the rendering site's brand** (design-options
 default 18 as written for federation): a shared page renders in a brand that may
@@ -581,13 +581,13 @@ test rather than an answer for the wrong brand; the last phase deletes them.
 
 **Why one request has one brand:** every row a request can reach is in its scope's
 chain (the scope fence, `CLAUDE.md` "Every id-set read takes the chain"), and a chain
-lies inside one brand (decision 5). So a story loaded by id under `~takeoffgo` is a
-takeoffgo story, and reading its type from `c.var.brand` is correct without looking
+lies inside one brand (decision 5). So a story loaded by id under `~harbour` is a
+harbour story, and reading its type from `c.var.brand` is correct without looking
 up the story's own site.
 
 **Beat a default brand behind `rt.schema`** (keep the members, answer the first
-brand): it compiles, passes every single-brand test, and answers a takeoffgo request
-with allaboutafrica's schema wherever a reader was missed. **Beat threading a
+brand): it compiles, passes every single-brand test, and answers a harbour request
+with atlas's schema wherever a reader was missed. **Beat threading a
 `brand` argument through each function without a request variable**: the same
 lookup repeated at eighty-five call sites, each one a place to pass the wrong one.
 
@@ -616,7 +616,7 @@ page that renders the wrong block with no error anywhere.
 ### 8. Indexed fields, singletons and search are per brand without new machinery
 
 `indexedFieldNames` runs per brand over that brand's schema and types, so a `where`
-on `~takeoffgo` is checked against takeoffgo's indexed names only; `content_index`
+on `~harbour` is checked against harbour's indexed names only; `content_index`
 rows are keyed by story and a query binds the chain, so a field name both brands
 index is two disjoint row sets. Search joins through `stories` and binds the chain.
 Globals and the settings type are per brand (`FolioBrand.globals`,
@@ -628,8 +628,8 @@ and the layer tags a render emits are the brand's own.
 The plugin's `blocks` option widens to a record:
 
 ```ts
-folio({ blocks: { allaboutafrica: './app/brands/allaboutafrica/folio/blocks.ts',
-                  takeoffgo: './app/brands/takeoffgo/folio/blocks.ts' } })
+folio({ blocks: { atlas: './app/brands/atlas/folio/blocks.ts',
+                  harbour: './app/brands/harbour/folio/blocks.ts' } })
 ```
 
 For each key it generates a virtual entry `virtual:folio/preview/<brand>` that calls
@@ -646,8 +646,8 @@ one set of fixed names.
 `[...brand.previewCss, ...assets.brands[brand].previewCss]`. The admin bundle is
 unchanged: it is schema-driven and ships prebuilt.
 
-**Beat one bundle holding both brands' blocks** (H1a): takeoffgo's `global.scss`
-rides every allaboutafrica preview, and a global-CSS mistake in one brand reaches the
+**Beat one bundle holding both brands' blocks** (H1a): harbour's `global.scss`
+rides every atlas preview, and a global-CSS mistake in one brand reaches the
 other's editor. **Beat delegating the preview to each front end** (H1c, a v1 preview
 read plus a `PreviewDocument` export): it exists for headless front ends, and this
 deployment renders its own pages.
@@ -703,7 +703,7 @@ agent that asked without a scope has to be told which brand it meant.
 Every type list in the admin — chips, "New" menus, sidebar groups, pickers,
 Settings — therefore shows the brand's types only, with no admin code that knows
 what a brand is. Server create and move already take `types` from the brand
-(decision 6), so an allaboutafrica type named in a takeoffgo create is
+(decision 6), so an atlas type named in a harbour create is
 `Unknown document type`.
 
 **Beat a per-type allowlist, `DocumentType.sites`** (H3a): it is the right tool the
@@ -752,7 +752,7 @@ One Worker means one cached entrypoint. Every write the admin makes arrives at t
 host's gateway, which already routes every mutating request through `CachedPages`
 (the `CLAUDE.md` rule "a purge is scoped to the entrypoint that issued it"), so
 Folio's own purge runs where both brands' pages are cached. The tags are already
-scoped by site, so a takeoffgo publish never purges an allaboutafrica page, and
+scoped by site, so a harbour publish never purges an atlas page, and
 `folio.cacheProps` already separates the two brands' entries because their sites
 differ. **The invariant is unchanged and the host must still honour it**: route
 writes, the cron and the form submit through `CachedPages`.
@@ -767,7 +767,7 @@ publish, and a missing forward is silent for a week.
   the form-salted hash (`form-responses.ts:661-671`).
 - **Describe**: the brand's `fn`, `onUpload` and `concurrency`; the tag vocabulary is
   already per scope.
-- **Content migrations**: ids carry the brand (`takeoffgo/0001-fifty-fifty-to-feature`),
+- **Content migrations**: ids carry the brand (`harbour/0001-fifty-fifty-to-feature`),
   refused at construction otherwise, because `schema_migrations` is one table keyed by
   id. `migrate` runs each brand's list over that brand's scopes only; a document's
   progress stays `stories.schema_id`. The `migrated` and `reindexed` payloads carry
@@ -776,10 +776,10 @@ publish, and a missing forward is silent for a week.
   is deployment-wide, as auth is.
 - **`HookBase` gains `brand: string | null`**: the brand of the payload's `site`, null
   on a single-brand deployment and for a deployment-wide event. `hooks.submitted`
-  branches on it (allaboutafrica's enquiry email, takeoffgo's Jambo forward).
+  branches on it (atlas's enquiry email, harbour's CRM forward).
 - **`MagicLinkMail` gains `scope?: { id: string; name: string; brand: BrandRef | null }`**,
   parsed from the sign-in's `next` when it names a `~<scope>` in the registry, so the
-  mail can say "Sign in to Take Off Go" while being sent from the admin origin's
+  mail can say "Sign in to Harbour Travel" while being sent from the admin origin's
   domain. Absent with no scope in `next`.
 
 **`DescribeInput` and the `verify` input do not gain a `site`**: the brand is implicit
@@ -797,8 +797,8 @@ origin" and never name it. The sign-in sender is an address on that domain, and
 sessions bind to it, so it is chosen once: moving it later invalidates every passkey
 (`UPGRADING.md`).
 
-**Beat allaboutafrica's admin host**: takeoffgo editors would sign in on, and receive
-mail from, another brand. **Beat a takeoffgo admin host**: the same, the other way
+**Beat atlas's admin host**: harbour editors would sign in on, and receive
+mail from, another brand. **Beat a harbour admin host**: the same, the other way
 round.
 
 ### 18. The host's merged route tree is made safe by structure, not by care
@@ -812,7 +812,7 @@ specify because `AGENTS.md` is where a host learns the pattern. The rules:
    loader context.
 2. **Brand directories.** `app/brands/<brand>/` holds that brand's Folio blocks and
    `FolioBrand`, components, styles, route modules and GraphQL documents;
-   `app/shared/` holds only code neither brand styles (the Jambo client, the payment-key
+   `app/shared/` holds only code neither brand styles (the CRM client, the payment-key
    picker, the brand resolver). A lint rule forbids an import from
    `app/brands/<a>/` into `app/brands/<b>/`.
 3. **Colliding paths are dispatch modules.** `/`, `*`, `sitemap.xml`, `robots.txt`,
@@ -824,21 +824,21 @@ specify because `AGENTS.md` is where a host learns the pattern. The rules:
 4. **Per-brand root layout and CSS scoping.** The root sets
    `<html data-folio-brand="<brand>">` (decision 10) and renders the brand's
    layout. Every brand stylesheet is authored under `[data-folio-brand="<brand>"]`
-   (resets included: `[data-folio-brand="takeoffgo"] *`), and a build check fails
+   (resets included: `[data-folio-brand="harbour"] *`), and a build check fails
    on any rule in a brand's compiled CSS outside that scope except `@font-face` and
-   `@keyframes`. So takeoffgo's reset cannot reach an allaboutafrica page, whether
+   `@keyframes`. So harbour's reset cannot reach an atlas page, whether
    the page is the host's or Folio's preview shell.
 5. **`public/` holds only brand-neutral files**, because Workers Assets serve it
    before the Worker runs. `robots.txt`, favicons, `agents.txt`, `humans.txt` and each
    brand's `_headers` rules become routes or one merged `_headers`.
-6. **One Jambo client.** One codegen config reading its token from the environment,
-   one generated client from Jambo's current schema, both brands' query documents,
+6. **One CRM client.** One codegen config reading its token from the environment,
+   one generated client from CRM's current schema, both brands' query documents,
    and the two `executePayment` call shapes reconciled at their call sites.
 
 **Beat host-dispatched brand apps** (two React Router builds behind one gateway
 branch): two client builds, two asset manifests and two `public/` directories that
 Workers Assets cannot tell apart, which is the collision moved one level down.
-**Beat extracting the Jambo routes into their own Worker first**: orthogonal to
+**Beat extracting the CRM routes into their own Worker first**: orthogonal to
 Folio, and it defers the test on the one work item the owner did not ask to defer.
 
 ### 19. An agent knows its brand from four independent signals
@@ -848,7 +848,7 @@ Folio, and it defers the test on the one work item the owner did not ask to defe
    `app/brands/<brand>/CLAUDE.md` says which brand the directory is and that nothing
    in it may import from another brand's directory.
 2. **The credential.** Tokens for scripts and MCP are minted **bound to a site**
-   (`api_tokens.site_id`), so a takeoffgo token cannot write allaboutafrica even at an
+   (`api_tokens.site_id`), so a harbour token cannot write atlas even at an
    unscoped URL.
 3. **MCP names it.** On a multi-site deployment, a scoped MCP session's
    `instructions` gain a fourth sentence: "This session is scoped to site '<name>'
@@ -1008,13 +1008,13 @@ THEN it throws `duplicate block 'prose'`, or `registry key 'hero' names block 'b
 ### Two brands, the same names
 
 ```
-GIVEN brands allaboutafrica and takeoffgo, each declaring block `pageRoot`, block `prose`
-      and type `page` with different fields, and sites `default` (allaboutafrica)
-      and `takeoffgo` (takeoffgo)
+GIVEN brands atlas and harbour, each declaring block `pageRoot`, block `prose`
+      and type `page` with different fields, and sites `default` (atlas)
+      and `harbour` (harbour)
 WHEN a page of type `page` is created, edited and published in each
 THEN each document validates against, renders with and indexes by its own brand's schema
-AND GET ~takeoffgo/api/schema lists takeoffgo's blocks only, and ~default allaboutafrica's
-AND creating type `guide` under ~takeoffgo is 400 Unknown document type
+AND GET ~harbour/api/schema lists harbour's blocks only, and ~default atlas's
+AND creating type `guide` under ~harbour is 400 Unknown document type
 ```
 
 ### The fence
@@ -1023,22 +1023,22 @@ AND creating type `guide` under ~takeoffgo is 400 Unknown document type
 GIVEN a branded deployment
 WHEN a request names ~shared, or a site whose brand is null or not configured
 THEN it is 404 No site or group
-AND a reference, collection or search on takeoffgo never returns an allaboutafrica row
-AND PATCH /api/sites/takeoffgo { brand: 'allaboutafrica' } is 409 while it holds a story
+AND a reference, collection or search on harbour never returns an atlas row
+AND PATCH /api/sites/harbour { brand: 'atlas' } is 409 while it holds a story
 ```
 
 ### Preview
 
 ```
 GIVEN the two brands with per-brand preview bundles
-WHEN a takeoffgo draft is previewed on takeoffgo's preview origin
-THEN the page links folio-preview-takeoffgo.js and folio-preview-takeoffgo.css only
-AND <html> carries data-folio-brand="takeoffgo"
-AND only takeoffgo's globals are drawn above it
+WHEN a harbour draft is previewed on harbour's preview origin
+THEN the page links folio-preview-harbour.js and folio-preview-harbour.css only
+AND <html> carries data-folio-brand="harbour"
+AND only harbour's globals are drawn above it
 ```
 
 ```
-GIVEN a preview bundle built from allaboutafrica's blocks module served for takeoffgo
+GIVEN a preview bundle built from atlas's blocks module served for harbour
 WHEN the preview mounts in edit mode
 THEN a notice names the missing and extra blocks, and the page still renders
 ```
@@ -1047,16 +1047,16 @@ THEN a notice names the missing and extra blocks, and the page still renders
 
 ```
 GIVEN an editor with roles on both sites
-WHEN they open ~takeoffgo
-THEN the New menu, chips and sidebar list takeoffgo's types only
-AND the switcher shows "<site>" grouped under its "Take Off Go" optgroup
+WHEN they open ~harbour
+THEN the New menu, chips and sidebar list harbour's types only
+AND the switcher shows "<site>" grouped under its "Harbour Travel" optgroup
 AND the tab title ends "· <site name> · Folio"
 ```
 
 ```
-GIVEN an MCP client at ~takeoffgo/mcp
+GIVEN an MCP client at ~harbour/mcp
 WHEN it initialises and lists tools
-THEN the instructions name the site and brand, and every description lists takeoffgo's
+THEN the instructions name the site and brand, and every description lists harbour's
      types and blocks only
 AND GET /api/v1/schema with no scope and an unbound token is 400 site_required
 ```
@@ -1074,16 +1074,16 @@ AND reader.miss(path).headers carry path:<site>:<path> and site:<site>
 ### Per-brand policy
 
 ```
-GIVEN allaboutafrica's verify refusing and takeoffgo's accepting
+GIVEN atlas's verify refusing and harbour's accepting
 WHEN a form is submitted on each brand's live host
-THEN allaboutafrica's is refused and takeoffgo's accepted, each by its own brand's function
+THEN atlas's is refused and harbour's accepted, each by its own brand's function
 AND the submitted hook's payload carries the right brand
 ```
 
 ```
-GIVEN takeoffgo's migration `takeoffgo/0001-…` over block `feature`
+GIVEN harbour's migration `harbour/0001-…` over block `feature`
 WHEN folio.migrate runs
-THEN it rewrites takeoffgo's documents only, and an allaboutafrica document with a block
+THEN it rewrites harbour's documents only, and an atlas document with a block
      named `feature` is untouched
 ```
 
@@ -1158,8 +1158,8 @@ file scoping, models, gates and reviews.
 - **A sign-in with no `next`** → `MagicLinkMail.scope` absent; the host's mail is
   brand-neutral.
 - **The same singleton name in both brands** → two rows (`sng_<type>` for `default`,
-  `sng_<type>:takeoffgo`), each with its own brand's schema.
-- **A migration id `takeoffgo/0001-x` declared by allaboutafrica** → refused at
+  `sng_<type>:harbour`), each with its own brand's schema.
+- **A migration id `harbour/0001-x` declared by atlas** → refused at
   construction: the prefix must be the declaring brand's.
 - **The plugin's record has a key `brands` does not** → `createFolio` refuses at
   construction when `assets.brands` and `brands` differ.
@@ -1318,7 +1318,7 @@ specified. Neither consumer, the demo nor the starter repeated a name. It went t
   brand, so a loop that reads the last report's `complete` means every brand. The route
   reports only its own brand.
 - **The out-of-order check is per brand.** `schema_migrations` holds every brand's ids,
-  so once `takeoffgo/0001` is applied every unapplied `allaboutafrica/…` id sorts before
+  so once `harbour/0001` is applied every unapplied `atlas/…` id sorts before
   it and the next run would throw "inserted into the past". `ownMigrations` filters to
   the brand's ids first.
 - **Scheduled publishes use the story's own scope.** A cron tick has no request; the due
@@ -1419,15 +1419,15 @@ what shipped.
 
 ### Staging (2026-09-30)
 
-A new host repository serves allaboutafrica and takeoffgo from one Worker on
-`next-staging.allaboutafrica.au` and `next-staging.takeoffgo.com`, each with a
+A new host repository serves atlas and harbour from one Worker on
+`next-staging.atlas.example` and `next-staging.harbour.example`, each with a
 `next-staging-preview.` origin, and the admin on a brand-neutral host. It pins `c097c70`,
 starts from a fresh D1 (`0001`–`0008`, `0010`, `0011`, `0013`), R2 bucket and Durable
 Object namespace, and holds both brands' published production content, copied by the
-host's import script over v1: 32 documents, 66 assets and 1 form for allaboutafrica, and
-12 documents, 1 asset and 2 forms for takeoffgo. All 44 documents were compared with
+host's import script over v1: 32 documents, 66 assets and 1 form for atlas, and
+12 documents, 1 asset and 2 forms for harbour. All 44 documents were compared with
 their sources field by field through the import's id maps, and none differs. The target
-carries default-valued fields a stored source document omits, and takeoffgo lost four
+carries default-valued fields a stored source document omits, and harbour lost four
 fields its own schema no longer declares (`feature.buttonLabel`, `feature.buttonTarget`
 on two pages), which production does not render either.
 
@@ -1435,7 +1435,7 @@ Verified from the far side, with nothing failing:
 
 - The registry resolves each of the four brand hosts to its site and surface.
 - `scripts/cache-probe.mjs --admin --site --preview` passes 13, skips 2 and fails none
-  per brand. A takeoffgo republish sent that page to MISS while three allaboutafrica
+  per brand. A harbour republish sent that page to MISS while three atlas
   pages stayed HIT.
 - Each brand's live and preview HTML carries its own `data-folio-brand`. `~<site>/api/schema` lists only its
   brand's blocks (35 and 10, sharing only `pageRoot` and `prose`), `~shared` is 404, and

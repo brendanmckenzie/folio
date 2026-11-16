@@ -30,7 +30,7 @@ export interface MagicLinkMail {
   expiresAt: number;
   /**
    * The scope the sign-in was for, parsed from `next` when it names a `~<scope>` the
-   * sites registry holds, so the mail can say "Sign in to Take Off Go" while being
+   * sites registry holds, so the mail can say "Sign in to Harbour Travel" while being
    * sent from the admin origin's domain. Absent with no scope in `next`, and always
    * absent on a deployment with no `sites`. `brand` is null until a deployment can
    * configure brands (`../../../docs/specs/foundation/multi-brand.md` decision 16).
