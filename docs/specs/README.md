@@ -86,11 +86,13 @@ sequence because the dependency graph is the same one.
 | 40 | [Authoring guidance and content checks](content-model/authoring-guidance.md) | content model | L | — | none | owner, 2026-11-04 |
 | 41 | [An agent-friendly CLI](foundation/agent-cli.md) | foundation | M | — | none | owner, 2026-11-04 |
 | 42 | [The command palette](editing/command-palette.md) | editing | M | — | none | owner, 2026-11-04 |
+| 43 | [Visitor access for media library assets](platform/asset-access.md) | platform | L | — | `0019` (landed) | issue #178 |
 
 **40 and 41 are done** (built 2026-11-04, shipping together in v1.4.0, sharing no source
-file). **39 and 42 are `draft`** (2026-11-04) and build in the order 39 (v1.5:
-`PROTOCOL_VERSION` 6 and `0018`), then 42, after a UI review of the core flows and after
-39, whose changes to `EditorShell.tsx` it rebases onto.
+file). **43 is done** (built 2026-11-16, v1.6.0, issue #178): it took `0019` while `0018`
+stayed spec 39's claim, and shares no source file with 39 or 42. **39 and 42 are `draft`**
+(2026-11-04) and build in the order 39 (`PROTOCOL_VERSION` 6 and `0018`), then 42, after a UI
+review of the core flows and after 39, whose changes to `EditorShell.tsx` it rebases onto.
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were
@@ -326,7 +328,9 @@ is additive and may be applied before `0012` exists. Spec 35 (form logic) took
 `0014_form_logic.sql`, two additive columns on `forms` and `form_responses`; it has
 landed and must be applied before the Worker that reads it is deployed. `0016` (spec 37,
 `0016_option_sources.sql`) and `0017` (spec 36, `0017_form_actions.sql`) have landed and ship
-together in v1.3.0. The next free number after those is `0018`.
+together in v1.3.0. `0019_asset_access.sql` (spec 43, v1.6.0) has landed beside spec 39's claim on `0018`, as
+`0013` did beside `0012`: four nullable columns on `assets` and `asset_folders` and the `asset_purges`
+queue, applied before the Worker that reads them is deployed. The next free number after those is `0020`.
 
 That is the standing rule having run its course rather than an exception to it: a
 claim is a stamp, not a landing, and every one of these restamped at least once as
@@ -337,7 +341,7 @@ make room for 32.
 staging and production databases on 2026-09-06. `0011` (23) is built and lands on `main`
 with spec 23's release; `0012` (23) is claimed for the release after that and does not
 exist yet; `0013` (34) has landed on the branch `multi-brand` and reaches `main` with
-spec 34's release; `0014` (35) has landed; `0009` is a permanent gap. `0016` (37) and `0017` (36) have landed. The next free number after those is `0018`.** Do not derive a number by counting the
+spec 34's release; `0014` (35) has landed; `0009` is a permanent gap. `0016` (37) and `0017` (36) have landed. `0018` is spec 39's claim and `0019` (43) has landed. The next free number after those is `0020`.** Do not derive a number by counting the
 landed rows above; take the one your spec's header names, and if it is already on
 disk, stop rather than picking the next one yourself.
 

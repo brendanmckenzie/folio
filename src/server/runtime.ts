@@ -33,7 +33,7 @@ import {
   type ContentQuery,
   type ResolvedCollection,
 } from "../core/query";
-import { formIds, linkedIds, referencedIdsAllLocales } from "../core/refs";
+import { assetKeys, formIds, linkedIds, referencedIdsAllLocales } from "../core/refs";
 import type { PreviewWrap } from "../core/render-wrap";
 import { buildResolution, type Resolution } from "../core/resolve";
 import {
@@ -85,7 +85,8 @@ import {
   refreshList,
 } from "./option-sources";
 import { gateValue, isUngated } from "../core/gate";
-import { type ResolvedGate, validateGate } from "./gate";
+import { decodeAccess, gatedValues, isPublicEffective, rememberGatedScopes } from "./asset-access";
+import { assetAccessManifest, type ResolvedGate, validateGate } from "./gate";
 import {
   createHookRunner,
   type FolioHooks,
@@ -112,6 +113,7 @@ import type {
   BrandRef,
   FolioBrand,
   FolioBrandedConfig,
+  FolioAssetSigning,
   FolioConfig,
   FolioLogger,
   FolioSingleConfig,
@@ -356,6 +358,12 @@ export interface FolioRuntime {
    */
   brands: ReadonlyMap<string | null, BrandRuntime>;
   /**
+   * True when any brand's gate has `allowsAsset` (`asset-access.md` decision 1).
+   * False is the whole of "this deployment does not gate files": the asset route
+   * runs its original code path and reads no D1 row.
+   */
+  assetGating: boolean;
+  /**
    * The brand of a scope or site, by the registry snapshot the caller already
    * holds. With no `brands`: always the one. With them: null for `shared`, for no
    * scope, and for a scope the snapshot does not hold — which decision 4 has
@@ -417,6 +425,17 @@ export interface FolioRuntime {
    * own default and therefore no behaviour change at all.
    */
   formPurgeCapability?: PurgeCapability;
+  /**
+   * The same seam for asset purges (`asset-access.md` decision 10): not a
+   * `FolioConfig` key, undefined for every real host (which gets `platformPurge`),
+   * and set by a workers test to observe the drain's calls.
+   */
+  assetPurgeCapability?: PurgeCapability;
+  /**
+   * `FolioConfig.assetSigning` (`asset-access.md` decision 9): deployment-level, never
+   * per brand. Absent means no signature is ever accepted.
+   */
+  assetSigning?: FolioAssetSigning<unknown>;
   /**
    * The host's raw D1 binding for `env`, not a request's session. For the one read
    * that must open a session of its own: the submit route's primary re-read after a
@@ -937,6 +956,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const formPurgeCapability = (
     config as FolioConfig<Env> & { formPurgeCapability?: PurgeCapability }
   ).formPurgeCapability;
+  const assetPurgeCapability = (
+    config as FolioConfig<Env> & { assetPurgeCapability?: PurgeCapability }
+  ).assetPurgeCapability;
   const locales = config.locales;
   const base = config.basePath ?? DEFAULT_BASE;
   const route: FolioRuntime["route"] = config.route ?? ((path: string) => `/${path}`);
@@ -1704,7 +1726,23 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           })
         : undefined;
 
-      const [answers, lists] = await Promise.all([
+      /**
+       * The library files this render reaches whose effective value is gated
+       * (`asset-access.md` decision 12): one statement over the keys of the document,
+       * the pulled-in documents and the globals, **in the same `Promise.all`** so it adds
+       * no round trip. Only on a brand whose gate has `allowsAsset` and only when there
+       * is a key to ask about: every other render issues nothing here.
+       */
+      const gatedFetch = async (): Promise<Awaited<ReturnType<typeof gatedValues>> | null> => {
+        if (!gate?.assets) return null;
+        const keys = new Set<string>();
+        for (const pulled of [doc, ...Object.values(docs), ...Object.values(globalDocs ?? {})]) {
+          if (pulled) for (const key of assetKeys(pulled, schema)) keys.add(key);
+        }
+        return keys.size > 0 ? gatedValues(db, [...keys]) : null;
+      };
+
+      const [answers, lists, gatedRows] = await Promise.all([
         Promise.all(
           [...queries].map(
             async ([key, q]) =>
@@ -1715,7 +1753,22 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           ),
         ),
         listsOf,
+        gatedFetch(),
       ]);
+      const gatedAssets: Record<string, Json> = {};
+      const gatedScopes = new Map<string, string>();
+      for (const [key, row] of gatedRows ?? []) {
+        // `isUngated` is the one comparison there is: a file whose effective value is the
+        // gate's own public value is public, whatever the stored text says.
+        if (isPublicEffective(row.value, gate!.assets!.public, logger)) continue;
+        gatedAssets[key] = decodeAccess(row.value, logger) ?? row.value;
+        gatedScopes.set(key, row.site);
+      }
+      /** The scopes ride beside the resolution for `page.signAsset`, not in it. */
+      const finish = (r: Resolution): Resolution => {
+        if (gatedScopes.size > 0) rememberGatedScopes(r, gatedScopes);
+        return r;
+      };
 
       const collate = active?.code ?? locales?.default;
       const forms = Object.fromEntries(
@@ -1745,12 +1798,14 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         ...(Object.keys(docs).length > 0 ? { docs } : {}),
         ...(globalDocs ? { globals: globalDocs } : {}),
         ...(Object.keys(forms).length > 0 ? { forms } : {}),
+        // Absent rather than `{}` for the same reason: no gated file, no key.
+        ...(gatedScopes.size > 0 ? { gatedAssets } : {}),
         // Multi-site only, and last, so a single-site resolution has neither key
         // and serialises byte for byte as it always did (decision 15).
         ...(render ? { site: siteContext(render) } : {}),
         ...(render && opts?.story?.path != null ? { path: opts.story.path } : {}),
       };
-      if (queries.size === 0) return resolution;
+      if (queries.size === 0) return finish(resolution);
 
       const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers);
 
@@ -1790,7 +1845,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         }
       }
 
-      return { ...resolution, collections };
+      return finish({ ...resolution, collections });
     };
 
     /** What `runQuery` needs, assembled from this runtime. */
@@ -2111,6 +2166,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       manifest: {
         ...toManifest(registry, types, globals, locales),
         ...manifestHooks(config.hooks),
+        ...assetAccessManifest(gate),
         ...(b.id !== null && b.label !== null ? { brand: { id: b.id, label: b.label } } : {}),
         ...(b.id !== null && b.settings ? { settings: b.settings } : {}),
       },
@@ -2189,6 +2245,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   const deployment = {
     brands,
+    assetGating: [...brands.values()].some((b) => b.gate?.assets != null),
     forScope,
     locales,
     localeOf,
@@ -2196,6 +2253,10 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     auth,
     logger,
     formPurgeCapability,
+    assetPurgeCapability,
+    ...(config.assetSigning
+      ? { assetSigning: config.assetSigning as FolioAssetSigning<unknown> }
+      : {}),
     rawDb: (env: unknown) => config.bindings(env as Env).db,
     base,
     sites,

@@ -49,7 +49,8 @@ import { idParam, safeNext } from "./validate";
  *
  * **The constraint is chosen by method, not by route.** A GET opens on whatever
  * instance is nearest, which is the whole point of `db.ts` and is what makes
- * `{base}/asset/:key` — public, high volume, one indexed read — cost a local
+ * `{base}/asset/:key` — public, high volume, and (when the deployment gates files, spec 43)
+ * one indexed read; with no asset gating it reads no row at all — cost a local
  * round trip instead of a transcontinental one. Anything else is about to write,
  * and a request that writes and then reads its own row back must not have opened
  * on a replica that is behind it.
@@ -202,6 +203,9 @@ export const UNSCOPED_API: readonly RegExp[] = [
   /^\/audit$/,
   /^\/migrations$/,
   /^\/assets\/describe$/,
+  // `ADMIN` is the platform tier (decision 10), and a flush of every scope's edge copies
+  // is exactly that: spec 43's "Clear cached files" (`asset-access.md` decision 10).
+  /^\/assets\/purge-all$/,
 ];
 
 /**
@@ -351,7 +355,11 @@ async function grantSite<Env>(
   if (site?.surface !== "preview") return undefined;
   if (c.req.method !== "GET" && c.req.method !== "HEAD") return undefined;
   const below = c.req.path.slice(rt.base.length) || "/";
-  if (!GRANT_READS.some((r) => r.test(below))) return undefined;
+  // A gated file is the one non-API read a grant is worth presenting for
+  // (`asset-access.md` decision 8), and only on a deployment that gates files: without
+  // it the asset route stays the no-credential, no-read path it was.
+  const asset = rt.assetGating && /^\/asset\//.test(below);
+  if (!asset && !GRANT_READS.some((r) => r.test(below))) return undefined;
   return {
     id: site.id,
     registry: await sites.registry(c.env),

@@ -40,7 +40,7 @@ Two things a token cannot do:
 | `content:read:draft` | Everything `content:read` does, plus `?status=draft` |
 | `content:write` | Everything both reads do, plus create, write, patch, delete |
 | `publish` | Both reads, plus publish and checkpoint. **Not** write |
-| `assets:write` | Upload. Implies nothing about content |
+| `assets:write` | Upload, and edit a file. Implies nothing about content |
 | `admin` | Everything |
 
 The implications are one-directional and deliberate: `publish` implies reading the
@@ -71,7 +71,8 @@ implies nothing at all beyond itself.
 | `GET` | `/api/v1/documents/:id/versions` | `content:read` | `{ versions: VersionMeta[] }` |
 | `GET` | `/api/v1/documents/:id/check` | `content:read` (+`:draft` by default) | `ContentCheckReport` |
 | `GET` | `/api/v1/assets` | `content:read` | `{ assets: AssetRow[] }` |
-| `POST` | `/api/v1/assets?filename=…` | `assets:write` | `{ asset, value }`, `201` |
+| `POST` | `/api/v1/assets?filename=…` | `assets:write` | `{ asset, value }`, `201`; `?access=` on a deployment that gates files |
+| `PATCH` | `/api/v1/assets/:id` | `assets:write` | The row. Body `{ access?, alt?, description? }`; `access` needs a deployment that gates files, `null` inherits the folder's value. A body naming `folderId` or `tags` is `400` |
 
 **`GET /search` is how you find a document that has never been published.** Everything else
 on this table that lists content reads published content only, because `queryFromParams`

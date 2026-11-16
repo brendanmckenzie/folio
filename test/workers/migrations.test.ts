@@ -447,6 +447,9 @@ describe("assets", () => {
       "describe_error",
       // 0011.
       "site_id",
+      // 0019: own value (null inherits) and what the route reads (null is public).
+      "access",
+      "effective_access",
     ]);
     expect(await indexesOf("assets")).toContain("assets_created");
     expect(await indexSql("assets_created")).toMatch(/\(\s*site_id\s*,\s*created_at desc\s*\)/i);
@@ -477,6 +480,9 @@ describe("asset_folders", () => {
       "created_at",
       // 0011's rebuild, which carried every column above and added this one.
       "site_id",
+      // 0019.
+      "access",
+      "effective_access",
     ]);
     // Manual sibling ordering would break `path`'s depth-first-and-alphabetical
     // property (decision 3) and nobody orders folders by hand. Asserted as an
@@ -1462,6 +1468,69 @@ describe("option_lists", () => {
 });
 
 /**
+ * `0019_asset_access.sql` (`docs/specs/platform/asset-access.md`): four nullable columns
+ * and the purge queue. **No index on `assets`**: the route reads by key on the unique
+ * index `0001` already has, and "gated only" is a scan like every asset filter but
+ * folder and tag.
+ */
+describe("asset access", () => {
+  it("adds four nullable columns with no default, so every existing row is public and inheriting", async () => {
+    for (const [table, names] of [
+      ["assets", ["access", "effective_access"]],
+      ["asset_folders", ["access", "effective_access"]],
+    ] as const) {
+      const cols = await columnsOf(table);
+      for (const name of names) {
+        const col = cols.find((c) => c.name === name);
+        expect(col?.type, `${table}.${name}`).toBe("TEXT");
+        expect(col?.notnull, `${table}.${name}`).toBe(0);
+        expect(col?.dflt_value, `${table}.${name}`).toBeNull();
+      }
+    }
+  });
+
+  it("adds no index on assets, and none that mentions access", async () => {
+    expect((await indexesOf("assets")).filter((n) => n.includes("access"))).toEqual([]);
+    expect((await indexesOf("asset_folders")).filter((n) => n.includes("access"))).toEqual([]);
+  });
+
+  it("has asset_purges with its columns, a partial index on the pending ones and no foreign key", async () => {
+    expect((await columnsOf("asset_purges")).map((c) => c.name)).toEqual([
+      "asset_id",
+      "site_id",
+      "queued_at",
+      "settle_at",
+      "purged_at",
+      "attempts",
+      "last_error",
+    ]);
+    const attempts = (await columnsOf("asset_purges")).find((c) => c.name === "attempts");
+    expect(attempts?.notnull).toBe(1);
+    expect(attempts?.dflt_value).toBe("0");
+    expect(await indexesOf("asset_purges")).toEqual(["asset_purges_pending"]);
+    const sql = await indexSql("asset_purges_pending");
+    expect(sql).toMatch(/\(\s*site_id\s*\)/i);
+    expect(sql).toMatch(/where\s+purged_at is null/i);
+    const { results } = await env.DB.prepare(
+      "select * from pragma_foreign_key_list('asset_purges')",
+    ).all();
+    expect(results).toEqual([]);
+  });
+
+  it("keys the queue by asset, so a re-queue is an upsert", async () => {
+    await env.DB.prepare(
+      "insert into asset_purges (asset_id, site_id, queued_at, settle_at) values ('ast_p', 'default', 1, 2)",
+    ).run();
+    await expect(
+      env.DB.prepare(
+        "insert into asset_purges (asset_id, site_id, queued_at, settle_at) values ('ast_p', 'default', 1, 2)",
+      ).run(),
+    ).rejects.toThrow(/UNIQUE constraint failed/i);
+    await env.DB.prepare("delete from asset_purges").run();
+  });
+});
+
+/**
  * `forms.actions` and the two tables of `0017_form_actions.sql`
  * (`docs/specs/content-model/form-actions.md`). No foreign keys and no CHECK, so a
  * delete is an explicit batch and an enum-shaped column is screened on read.
@@ -1907,6 +1976,7 @@ describe("the ledger", () => {
       "0015_draft_data.sql",
       "0016_option_sources.sql",
       "0017_form_actions.sql",
+      "0019_asset_access.sql",
     ]);
   });
 

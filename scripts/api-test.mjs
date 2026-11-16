@@ -603,6 +603,56 @@ const uploaded = await rawFetch(`${API}/assets?filename=api.png`, {
 });
 check("assets:write uploads", uploaded.status === 201, `status ${uploaded.status}`);
 
+// Spec 43: the versioned edit of one file. The demo gates files (`gate.allowsAsset`), so
+// `access` takes a value the gate field lists and refuses one it does not.
+const uploadedId = (await uploaded.json())?.asset?.id;
+const patchAsset = (body) =>
+  rawFetch(`${API}/assets/${uploadedId}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${uploader}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+const patchedAlt = await patchAsset({ alt: "Patched over the API" });
+check(
+  "PATCH /assets/:id saves alt text and answers the row",
+  patchedAlt.status === 200 && (await patchedAlt.json()).alt === "Patched over the API",
+  `status ${patchedAlt.status}`,
+);
+const gatedPatch = await patchAsset({ access: "members" });
+const gatedRow = await gatedPatch.json().catch(() => null);
+check(
+  "and sets access, answering the stored and the effective value",
+  gatedPatch.status === 200 &&
+    gatedRow?.access === "members" &&
+    gatedRow?.effectiveAccess === "members",
+  `status ${gatedPatch.status} ${JSON.stringify([gatedRow?.access, gatedRow?.effectiveAccess])}`,
+);
+check(
+  "and refuses a value the gate field does not list",
+  (await patchAsset({ access: "gold" })).status === 400,
+);
+check(
+  "and null inherits again",
+  (await (await patchAsset({ access: null })).json())?.effectiveAccess === null,
+);
+check(
+  "and refuses folderId, which has no versioned route",
+  (await patchAsset({ folderId: "fld_000000000000" })).status === 400,
+);
+check(
+  "and a content:write token may not edit assets",
+  (
+    await rawFetch(`${API}/assets/${uploadedId}`, {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${await mint("e2e writer", ["content:write"])}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ alt: "no" }),
+    })
+  ).status === 403,
+);
+
 /* --- globals are ordinary documents ------------------------------------- */
 
 const global = await api("/documents/sng_header?status=draft");

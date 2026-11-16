@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { asset, blocks, boolean, number, richtext, select, text } from "../../../src/core/fields";
 import type { DocumentType, SchemaIndex } from "../../../src/core/schema";
-import { validateGate } from "../../../src/server/gate";
+import { assetAccessManifest, validateGate } from "../../../src/server/gate";
 import type { FolioConfig, FolioGate } from "../../../src/server/types";
 
 /**
@@ -225,5 +225,162 @@ describe("validateGate", () => {
     const txt = schemaWith(text({ indexed: true }));
     const resolved = validateGate(gate({ public: "" }), TYPES, txt);
     expect(resolved?.config.public).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Asset gating (`asset-access.md` decision 1)
+// ---------------------------------------------------------------------------
+
+describe("validateGate: asset gating", () => {
+  const allowsAsset = () => true;
+
+  it("has no asset domain without allowsAsset, whatever the field", () => {
+    expect(validateGate(gate(), TYPES, schema)?.assets).toBeNull();
+  });
+
+  it("answers the select's options and the primitive with allowsAsset", () => {
+    const resolved = validateGate(gate({ allowsAsset }), TYPES, schema);
+    expect(resolved?.assets).toEqual({
+      primitive: "string",
+      public: "public",
+      options: [
+        { value: "public", label: "Everyone" },
+        { value: "members", label: "Members" },
+      ],
+    });
+  });
+
+  it("answers the primitive alone for a non-select field", () => {
+    const resolved = validateGate(
+      gate({ allowsAsset, public: 0 }),
+      TYPES,
+      schemaWith(number({ indexed: true })),
+    );
+    expect(resolved?.assets).toEqual({ primitive: "number", public: 0 });
+    const bool = validateGate(
+      gate({ allowsAsset, public: false }),
+      TYPES,
+      schemaWith(boolean({ indexed: true })),
+    );
+    expect(bool?.assets).toEqual({ primitive: "boolean", public: false });
+  });
+
+  it("offers only the options every declaring select lists, labels from the first", () => {
+    const two: SchemaIndex = {
+      aRoot: {
+        name: "aRoot",
+        label: "A",
+        fields: {
+          access: select({
+            indexed: true,
+            options: [
+              { label: "Open", value: "public" },
+              { label: "Members", value: "members" },
+              { label: "Premium", value: "premium" },
+            ],
+          }),
+        },
+      },
+      bRoot: {
+        name: "bRoot",
+        label: "B",
+        fields: {
+          access: select({
+            indexed: true,
+            options: [
+              { label: "Everyone", value: "public" },
+              { label: "Members only", value: "members" },
+            ],
+          }),
+        },
+      },
+    };
+    const types: DocumentType[] = [
+      { name: "a", label: "A", kind: "page", root: "aRoot" },
+      { name: "b", label: "B", kind: "page", root: "bRoot" },
+    ];
+    expect(validateGate(gate({ allowsAsset }), types, two)?.assets?.options).toEqual([
+      { value: "public", label: "Open" },
+      { value: "members", label: "Members" },
+    ]);
+  });
+
+  it("throws naming the roots when two selects share nothing but the public value", () => {
+    const sel = (value: string) =>
+      select({
+        indexed: true,
+        options: [
+          { label: "Open", value: "public" },
+          { label: value, value },
+        ],
+      });
+    const two: SchemaIndex = {
+      aRoot: { name: "aRoot", label: "A", fields: { access: sel("members") } },
+      bRoot: { name: "bRoot", label: "B", fields: { access: sel("premium") } },
+    };
+    const types: DocumentType[] = [
+      { name: "a", label: "A", kind: "page", root: "aRoot" },
+      { name: "b", label: "B", kind: "page", root: "bRoot" },
+    ];
+    expect(() => validateGate(gate({ allowsAsset }), types, two)).toThrow(/'aRoot' and 'bRoot'/);
+    // Without allowsAsset the same schema is fine: this is only about files.
+    expect(() => validateGate(gate(), types, two)).not.toThrow();
+  });
+
+  it("refuses an allowsAsset that is not a function", () => {
+    const bad = gate({ allowsAsset: "yes" as unknown as FolioGate<Env>["allowsAsset"] });
+    expect(() => validateGate(bad, TYPES, schema)).toThrow(/allowsAsset.*function/);
+  });
+
+  it("refuses assetDenied without allowsAsset", () => {
+    expect(() => validateGate(gate({ assetDenied: () => null }), TYPES, schema)).toThrow(
+      /assetDenied.*without `gate.allowsAsset`/,
+    );
+  });
+
+  it("refuses an assetDenied that is not a function", () => {
+    const bad = gate({
+      allowsAsset,
+      assetDenied: 302 as unknown as FolioGate<Env>["assetDenied"],
+    });
+    expect(() => validateGate(bad, TYPES, schema)).toThrow(/assetDenied.*function/);
+  });
+
+  it("accepts both together", () => {
+    expect(() =>
+      validateGate(gate({ allowsAsset, assetDenied: () => null }), TYPES, schema),
+    ).not.toThrow();
+  });
+});
+
+describe("assetAccessManifest", () => {
+  const allowsAsset = () => true;
+
+  it("is empty without allowsAsset, so a deployment that does not gate files has no key", () => {
+    expect(assetAccessManifest(validateGate(gate(), TYPES, schema))).toEqual({});
+    expect(assetAccessManifest(null)).toEqual({});
+  });
+
+  it("carries the field, the public value and the select's options with allowsAsset", () => {
+    expect(assetAccessManifest(validateGate(gate({ allowsAsset }), TYPES, schema))).toEqual({
+      assetAccess: {
+        field: "access",
+        public: "public",
+        options: [
+          { value: "public", label: "Everyone" },
+          { value: "members", label: "Members" },
+        ],
+      },
+    });
+  });
+
+  it("omits options for a primitive gate", () => {
+    const resolved = validateGate(
+      gate({ allowsAsset, public: 0 }),
+      TYPES,
+      schemaWith(number({ indexed: true })),
+    );
+    expect(assetAccessManifest(resolved)).toEqual({ assetAccess: { field: "access", public: 0 } });
   });
 });

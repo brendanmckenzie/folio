@@ -115,7 +115,7 @@ origin from `FOLIO_E2E_BASE`, which `e2e.sh` sets, and fall back to
 
 ```
 ./scripts/e2e.sh scripts/sync-test.mjs     # one script
-./scripts/e2e-all.sh                       # all 26, one fresh database each, several at a time
+./scripts/e2e-all.sh                       # all 27, one fresh database each, several at a time
 ./scripts/e2e-all.sh scripts/sync-test.mjs scripts/space-test.mjs   # a subset
 FOLIO_E2E_JOBS=2 ./scripts/e2e-all.sh      # choose how many at once
 ```
@@ -131,7 +131,7 @@ wrangler) and its own dev server, so "one fresh database each" is unchanged; onl
 waiting is gone. `scripts/lib/e2e-sweep.mjs` is the pool: it runs `build:js` once,
 migrates and seeds once into a template state directory that each script copies, hands
 out ports itself, buffers each script's output and prints it whole when the script ends,
-and on failure names the script's output file and dev-server log. Cold, 26 scripts take
+and on failure names the script's output file and dev-server log. Cold, 27 scripts take
 about 35 seconds on a 10-core laptop, against about nine minutes serially before.
 
 Knobs, all environment variables:
@@ -288,7 +288,12 @@ that carries it, so it must be applied before that Worker is deployed.
 before that Worker is deployed. `0017_form_actions.sql` (spec 36) landed 2026-11-03: `forms.actions`,
 the `form_deliveries` log and `form_refusals` (refused attempts, for the rate limit), read by the same
 release, so it must be applied before that Worker is deployed. v1.3.0 is roll-forward only
-(`UPGRADING.md`, "v1.3.0 is roll-forward only"). Next free is `0018`.
+(`UPGRADING.md`, "v1.3.0 is roll-forward only"). `0018` is spec 39's claim, not on disk.
+`0019_asset_access.sql` (spec 43) landed 2026-11-16 ahead of it, as `0013` did before `0012`: four
+nullable columns (`assets.access`, `assets.effective_access`, `asset_folders.access`,
+`asset_folders.effective_access`) and the `asset_purges` queue, all read or written by the release that
+carries them (v1.6.0), so it must be applied before that Worker is deployed. v1.6.0 is roll-forward only
+(`UPGRADING.md`, "v1.6.0 is roll-forward only"). Next free is `0020`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **A new migration
@@ -402,12 +407,37 @@ are free to go the next time that code is touched.
   admin JSON in a shared cache. `cacheVerdictFor` (`server/cache-request.ts`) is
   the gate, and its `'bypass'` rules are the load-bearing half: every non-asset
   Folio path, and any request carrying a session, draft or share cookie. Note
-  `{base}/asset/:key` is public and `{base}/api/assets` is the admin's gated
-  list — one letter apart, pinned by `cache-request.test.ts`.
+  `{base}/asset/:key` is the one cached Folio path and `{base}/api/assets` is the admin's gated
+  list — one letter apart, pinned by `cache-request.test.ts`. A file given an access value is
+  not cached (`gate.allowsAsset`, below), and an asset request carrying `sig` is `'bypass'`.
   **The Cache API is a different store.** `cache.purge()` reaches Workers
   Caching only, so anything a host puts in `caches.default` is unpurgeable by a
   publish. `caching.md` predates the split and says "Workers Cache" throughout;
   read it as Workers Caching.
+- **The asset route's gate precedes every cache read, and a gated file never answers a
+  `public` cache-control** (spec 43). With `rt.assetGating` (any brand's gate has `allowsAsset`) the
+  route reads the file's row first, and `serveAsset`'s `'private'` mode is the only way a gated
+  file's bytes leave the Worker: every `cache-control` is `private, no-store`, and a transform's copy
+  in `caches.default` lives under a separate key (`__folio_private=1`) that a public request for the
+  same file never matches. A gated file is never in Workers Caching; a public one carries
+  `Cache-Tag: asset:<id>,asset:*` (only on a gating deployment). With no `allowsAsset` the route is
+  today's code and reads no row, which is why a new branch there must stay behind `rt.assetGating`.
+  A file with no row is a `404`, never served: an orphaned object would go out `public, immutable`.
+- **Every write that changes an asset's `folder_id` or `access`, or a folder's `access`, `path` or
+  `parent_id`, goes through `asset-access.ts`, in the write's own batch** (spec 43). The route reads
+  one denormalised column, `effective_access`, which is always derived from the own values
+  (`assets.access`, then the folder chain), so a statement that sets `folder_id` directly leaves a
+  stale effective value that nothing recomputes and the file is served under the old rule. A folder
+  delete first writes the inherited value onto every file and child folder that held `null`, so
+  deleting a folder never opens a file; keep that statement ahead of the re-parent. The recompute
+  reads `assets.folder_id` live, never a pre-read id.
+- **A public-to-gated transition commits its `asset_purges` row in the same batch** (spec 43). The
+  purge itself can fail and shares Workers Caching's five-a-minute budget, so the row is what makes
+  the failure recoverable: a drain issues exactly one call (`asset:<id>` per row, `asset:*` above
+  100) and retires a row only by a purge that succeeded after its `settle_at` (ten minutes, for a
+  lagging replica). `folio.runSchedules` is the retry, so it must reach the cached entrypoint, like
+  every purge. A fourth write path that gates a file and does not queue a row ships a file that is
+  public at the edge for a year, and nothing errors. `deleteAsset` leaves its row on purpose.
 - **Every registry read goes through the scope's brand** (spec 34). `FolioRuntime`
   has no `schema`, `types`, `registry`, `globals`, `forms`, `resolve` or `page` of its
   own: a route reads `c.var.brand`, an entry point off a request reaches
@@ -648,7 +678,7 @@ Exports are deliberate: `folio/core` is the whole contract for defining blocks a
 rendering resolved pages; `folio/engine` is document tooling for bulk imports and
 migrations (`apply()` outside a transaction bypasses sync, undo and multiplayer).
 
-The MCP tools are one table, `server/mcp/tools.ts`: seventeen, sixteen of them a v1
+The MCP tools are one table, `server/mcp/tools.ts`: eighteen, seventeen of them a v1
 route dispatched internally and `preview_document` the one that is not.
 `check_document` is the route-backed `GET {base}/api/v1/documents/:id/check`, computed
 by `server/checks.ts`, and `test/unit/mcp/tools.test.ts` pins the count.
@@ -675,9 +705,17 @@ when written and stale by the time it was built.
 
 Specs 40 (authoring guidance and content checks, `content-model/authoring-guidance.md`) and 41 (the agent CLI, `foundation/agent-cli.md`) were built 2026-11-04 and ship together as v1.4.0 (ledger date 2026-11-05); neither adds a migration or touches the wire. 40 added `GET {base}/api/v1/documents/:id/check` and the seventeenth MCP tool, `check_document`; 41 added `folio doctor`, `folio upgrade`, `folio add block` and `folio preview block`, and `upgrade-ledger.json`.
 
+Spec 43 (visitor access for media-library files, `platform/asset-access.md`) was built 2026-11-16 and
+ships as v1.6.0 with `0019_asset_access.sql` (issue #178). It adds `gate.allowsAsset`, `gate.assetDenied`,
+the top-level `assetSigning`, `folio.signAsset` and `page.signAsset`, the `asset_purges` queue, the
+eighteenth MCP tool `update_asset`, the `assetAccessChanged` hook and `POST {base}/api/assets/purge-all`;
+no wire change. Its Implementation notes record where the plan was wrong, and `scripts/cache-probe.mjs
+--asset` is the only check that a purge reaches every copy, so run it on a consumer's staging before
+tagging a release that touches the asset route, the tags or the queue.
+
 Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on multi-brand-host staging; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
 
-**Specs 1–22, 24–38, 40 and 41 are done** (36–38 in v1.3.0, 40 and 41 in v1.4.0; 39 and 42 are `draft`) — 34 (`foundation/multi-brand.md`) since the owner's
+**Specs 1–22, 24–38, 40, 41 and 43 are done** (36–38 in v1.3.0, 40 and 41 in v1.4.0, 43 in v1.6.0; 39 and 42 are `draft`) — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and
 merged to `main` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33

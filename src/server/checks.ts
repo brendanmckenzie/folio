@@ -43,7 +43,10 @@ import { blokTargets, type BlokTarget } from "../core/refs";
 import { asRichtext, richtextToText } from "../core/richtext";
 import { type BlockSchema, type DocumentType, type SchemaIndex, typeByName } from "../core/schema";
 import type { StoryMeta } from "../core/story";
-import { asAsset } from "../core/values";
+import { gateValue, isUngated } from "../core/gate";
+import { asAsset, asAssets, isImageAsset } from "../core/values";
+import { decodeAccess, isPublicEffective } from "./asset-access";
+import type { ResolvedGate } from "./gate";
 import type { WritingGuide } from "./types";
 import { avoidMatchers } from "./writing";
 
@@ -98,6 +101,12 @@ export interface CheckContext {
   bare: boolean;
   /** The rows behind these story ids, within the request's chain. Called at most once. */
   targets: (ids: string[]) => Promise<StoryMeta[]>;
+  /**
+   * The stored effective value of each of these library keys that is gated, in one read
+   * (`asset-access.md` decision 14). Supplied only for a brand that gates files, and
+   * called at most once, and only for a document with an image in an asset field.
+   */
+  gatedAssets?: (keys: string[]) => Promise<Map<string, { site: string; value: string }>>;
 }
 
 /** The brand half: its schema, its types, its guide. A `BrandRuntime` is one. */
@@ -105,6 +114,8 @@ export interface CheckBrand {
   schema: SchemaIndex;
   types: readonly DocumentType[];
   writing: WritingGuide | null;
+  /** The brand's resolved gate: what `gated-asset-embedded` compares the page's own value to. */
+  gate?: Pick<ResolvedGate, "config" | "assets"> | null;
 }
 
 /** A finding before the walker places it. */
@@ -459,6 +470,70 @@ function targetFindings(
   return out;
 }
 
+/**
+ * `gated-asset-embedded` (`asset-access.md` decision 14): a gated **image** held by an
+ * `asset` or `multiasset` field on a page that is itself public renders as a broken
+ * image for most visitors. A link, a richtext link and a non-image are download offers,
+ * the legitimate case, so they are not looked at. A page whose own gate value is gated
+ * is a members page showing a members image, and is not warned about.
+ */
+async function gatedEmbedFindings(
+  doc: Doc,
+  brand: CheckBrand,
+  ctx: CheckContext,
+  declared: ReadonlySet<string>,
+): Promise<{ blok: Blok; draft: Draft }[]> {
+  const gate = brand.gate;
+  if (!gate?.assets || !ctx.gatedAssets) return [];
+  const root = doc.bloks[doc.root];
+  const rootDeclares = root !== undefined && brand.schema[root.type]?.fields[gate.config.field];
+  if (rootDeclares && !isUngated(gateValue(doc, gate.config.field), gate.config.public)) return [];
+
+  const embeds: { blok: Blok; field: string; label: string; locale?: string; key: string }[] = [];
+  for (const blok of Object.values(doc.bloks)) {
+    const def = brand.schema[blok.type];
+    if (!def) continue;
+    for (const [name, field] of Object.entries(def.fields)) {
+      if (field.kind !== "asset" && field.kind !== "multiasset") continue;
+      for (const { locale, value } of storedByLocale(blok, name, declared)) {
+        const files = field.kind === "asset" ? [asAsset(value)] : asAssets(value);
+        for (const file of files) {
+          if (file?.key && isImageAsset(file)) {
+            embeds.push({
+              blok,
+              field: name,
+              label: field.label ?? name,
+              ...(locale !== undefined ? { locale } : {}),
+              key: file.key,
+            });
+          }
+        }
+      }
+    }
+  }
+  if (embeds.length === 0) return [];
+
+  const gated = await ctx.gatedAssets([...new Set(embeds.map((e) => e.key))]);
+  const out: { blok: Blok; draft: Draft }[] = [];
+  for (const e of embeds) {
+    const row = gated.get(e.key);
+    if (!row || isPublicEffective(row.value, gate.assets.public)) continue;
+    out.push({
+      blok: e.blok,
+      draft: {
+        check: "gated-asset-embedded",
+        severity: "warning",
+        message: `${e.label} shows a file that only some visitors may open, on a page everyone can see, so most visitors will see a broken image.`,
+        field: e.field,
+        ...(e.locale !== undefined ? { locale: e.locale } : {}),
+        fix: "patch_fields",
+        detail: { key: e.key, access: decodeAccess(row.value) ?? row.value },
+      },
+    });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ walker --- */
 
 const SEVERITY_RANK: Record<ContentCheckSeverity, number> = { error: 0, warning: 1, info: 2 };
@@ -573,6 +648,7 @@ export async function checkDocument(
     const rows = await ctx.targets([...new Set(located.map((t) => t.id))]);
     placed.push(...targetFindings(located, rows, brand.types));
   }
+  placed.push(...(await gatedEmbedFindings(doc, brand, ctx, declared)));
 
   const localeRank = new Map((ctx.locales?.available ?? []).map((l, i) => [l.code, i]));
   const rank = ({ blok, draft }: { blok: Blok; draft: Draft }) => {

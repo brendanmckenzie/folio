@@ -221,3 +221,17 @@ export const ICONS: Record<IconName, ReactElement> = {
     </>,
   ),
 };
+
+/**
+ * A padlock, for a file only some visitors may open (`asset-access.md` phase 7).
+ *
+ * **Not in `ICONS`**, which is the nav's closed set keyed by `IconName`: this is a
+ * mark on a tile or a row, not a destination. The same `svg()` wrapper owns the grid
+ * and the stroke, so it weighs what the nav icons weigh.
+ */
+export const LOCK_ICON: ReactElement = svg(
+  <>
+    <rect x="5.5" y="11" width="13" height="9" rx="2" />
+    <path d="M8.5 11V8a3.5 3.5 0 0 1 7 0v3" />
+  </>,
+);

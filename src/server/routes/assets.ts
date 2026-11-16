@@ -40,7 +40,17 @@ import {
   updateAsset,
   uploadAsset,
 } from "../assets";
+import {
+  decodeAccess,
+  gatedValues,
+  isPublicEffective,
+  presentAssetRows,
+  presentFolderRows,
+} from "../asset-access";
+import type { AssetGating } from "../asset-access";
+import { decideAsset } from "../asset-gate";
 import { ADMIN, ASSETS, EDIT, READ } from "../auth/roles";
+import { pendingAssetPurges, platformPurge } from "../cache-purge";
 import {
   DEFAULT_DESCRIBE_BATCH,
   describeAsset,
@@ -59,9 +69,11 @@ import {
   requireAccess,
 } from "../middleware";
 import type { FolioRuntime } from "../runtime";
+import { accessInput, accessQuery, assetDomainOf, gatingOf, settleAssetWrite } from "./asset-write";
 import type { FolioEnv } from "../types";
 import { brandOf, sweepOf } from "./stories";
 import {
+  AssetBulkAccessBody,
   AssetBulkBody,
   AssetBulkMoveBody,
   AssetBulkTagBody,
@@ -83,6 +95,9 @@ import {
   sortDirQuery,
   tagsQuery,
 } from "../validate";
+
+/** The most keys `GET /assets/access` answers for: a document's own files, with room to spare. */
+const MAX_ACCESS_KEYS = 500;
 
 /**
  * `?folder=` and `?unfiled=1`, which are **mutually exclusive**
@@ -199,6 +214,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const { db } = c.var.bindings();
     const cursor = c.req.query("cursor");
     requireCursor(cursor);
+    const domain = assetDomainOf(c);
     const page = await listAssets(db, {
       // The scope's own library, or — for a picker, with `?chain=1` — everything the
       // scope may pick from: its own files and those of the scopes above it.
@@ -224,8 +240,15 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // narrow to nothing, which is a legitimate (empty) answer rather than one
       // the route needs to refuse the way `folder`/`unfiled` is.
       failed: c.req.query("failed") === "1",
+      // Spec 43: `?gated=1`, the files whose effective value is gated. Refused as
+      // `unsupported` by `assetFilterSql` on a scope that does not gate files.
+      ...(c.req.query("gated") === "1" ? { gated: true } : {}),
+      ...(domain ? { accessPublic: domain.public } : {}),
     });
-    return c.json({ ...page, rows: await withTags(db, page.rows) });
+    return c.json({
+      ...page,
+      rows: await presentAssetRows(db, await withTags(db, page.rows), domain),
+    });
   });
 
   /* ------------------------------------------------------------ folders --- */
@@ -247,14 +270,72 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get("/assets/folders", requireAccess<Env>(rt, READ), async (c) => {
     const cursor = c.req.query("cursor");
     requireCursor(cursor);
-    return c.json(
-      await listFolders(c.var.bindings().db, {
-        site: scopeOf(c),
-        limit: limitParam(c.req.query("limit"), 100, 500),
-        cursor,
-        count: c.req.query("count") === "1",
-      }),
-    );
+    const { db } = c.var.bindings();
+    const page = await listFolders(db, {
+      site: scopeOf(c),
+      limit: limitParam(c.req.query("limit"), 100, 500),
+      cursor,
+      count: c.req.query("count") === "1",
+    });
+    return c.json({ ...page, rows: await presentFolderRows(db, page.rows, assetDomainOf(c)) });
+  });
+
+  /**
+   * Which of these files are gated, and by what (`asset-access.md` decision 12): the
+   * editor's lock and its public-page warning, one read per open document's asset keys.
+   * `?key=` repeated; the answer is `{ [key]: value }` for the keys in the request's
+   * **chain** whose effective value is gated, and nothing for a key outside it, which
+   * answers exactly like an unknown one.
+   *
+   * `READ`, like the list it summarises: a gated file's metadata is public by design
+   * (decision 13). Registered **before** `/assets/:id`, as `folders` is.
+   */
+  app.get("/assets/access", requireAccess<Env>(rt, READ), async (c) => {
+    const domain = assetDomainOf(c);
+    if (!domain) throw new FolioError("unsupported", "This site does not gate files");
+    const keys = [...new Set((c.req.queries("key") ?? []).map((k) => assetKeyParam(k)))];
+    if (keys.length > MAX_ACCESS_KEYS) {
+      throw new FolioError("bad_request", `key must name ${MAX_ACCESS_KEYS} files or fewer`);
+    }
+    const chain = new Set(await requestChain(c, rt));
+    const gated = await gatedValues(c.var.bindings().db, keys);
+    const out: Record<string, unknown> = {};
+    for (const [key, { site, value }] of gated) {
+      if (!chain.has(site) || isPublicEffective(value, domain.public, rt.logger)) continue;
+      // Unreadable decodes as undefined: gated, and shown as the raw stored string.
+      out[key] = decodeAccess(value, rt.logger) ?? value;
+    }
+    return c.json(out);
+  });
+
+  /**
+   * How many files in this scope may still be served from the edge cache after being
+   * gated (`asset-access.md` decision 10): the Assets screen's notice reads it while it
+   * is non-zero. `READ`, because the notice is shown to anyone who can see the library.
+   */
+  app.get("/assets/purges", requireAccess<Env>(rt, READ), async (c) => {
+    if (!assetDomainOf(c)) throw new FolioError("unsupported", "This site does not gate files");
+    return c.json(await pendingAssetPurges(c.var.bindings().db, scopeOf(c)));
+  });
+
+  /**
+   * "Clear cached files": one `purgeEverything`, for an administrator whose purge queue
+   * is behind or who wants the edge flushed. `ADMIN`: it empties a shared cache, and the
+   * shared five-a-minute budget with it. Unlike every other new route here it does not
+   * need asset gating, and `{ ok: false }` says nothing was purged (no capability, or the
+   * call failed), never a thrown 500.
+   */
+  app.post("/assets/purge-all", requireAccess<Env>(rt, ADMIN), async (c) => {
+    const fn = await (rt.assetPurgeCapability ?? platformPurge)();
+    if (!fn) return c.json({ ok: false });
+    try {
+      const result = await fn({ purgeEverything: true });
+      if (!result.success) rt.logger.error("folio: clearing the asset cache failed", result.errors);
+      return c.json({ ok: result.success });
+    } catch (err) {
+      rt.logger.error("folio: clearing the asset cache failed", err);
+      return c.json({ ok: false });
+    }
   });
 
   /**
@@ -263,8 +344,18 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * slugify alike are different names and the editor should choose.
    */
   app.post("/assets/folders", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const { db } = c.var.bindings();
     const body = await parseBody(c.req, AssetFolderCreateBody);
-    return c.json(await createFolder(c.var.bindings().db, body, scopeOf(c)), 201);
+    const access = accessInput(c, body.access);
+    const gating = gatingOf(c);
+    const row = await createFolder(
+      db,
+      { ...body, ...(access === undefined || access === null ? {} : { access }) },
+      scopeOf(c),
+      gating,
+    );
+    const [presented] = await presentFolderRows(db, [row], assetDomainOf(c));
+    return c.json({ ...presented, ...(await settleAssetWrite(c, rt, scopeOf(c), gating)) }, 201);
   });
 
   /**
@@ -277,10 +368,20 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.patch("/assets/folders/:id", requireAccess<Env>(rt, ASSETS), fenceFolder, async (c) => {
     const id = idParam("id", c.req.param("id"));
+    const { db } = c.var.bindings();
     const body = await parseBody(c.req, AssetFolderPatchBody);
-    const row = await updateFolder(c.var.bindings().db, id, body, scopeOf(c));
+    const access = accessInput(c, body.access);
+    const gating = gatingOf(c);
+    const row = await updateFolder(
+      db,
+      id,
+      { ...body, ...(access === undefined ? {} : { access }) },
+      scopeOf(c),
+      gating,
+    );
     if (!row) throw new FolioError("not_found", "Unknown folder");
-    return c.json(row);
+    const [presented] = await presentFolderRows(db, [row], assetDomainOf(c));
+    return c.json({ ...presented, ...(await settleAssetWrite(c, rt, scopeOf(c), gating)) });
   });
 
   /**
@@ -296,7 +397,11 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = idParam("id", c.req.param("id"));
     const report = await deleteFolder(c.var.bindings().db, id, scopeOf(c));
     if (!report) throw new FolioError("not_found", "Unknown folder");
-    return c.json({ deleted: true, ...report });
+    return c.json({
+      deleted: true,
+      ...report,
+      ...(await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c))),
+    });
   });
 
   /* --------------------------------------------------------------- tags --- */
@@ -342,6 +447,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post("/assets/tags", requireAccess<Env>(rt, ASSETS), async (c) => {
     const body = await parseBody(c.req, AssetTagBody);
     const { tag, created } = await ensureTag(c.var.bindings().db, body.name, scopeOf(c));
+    await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
     return c.json(tag, created ? 201 : 200);
   });
 
@@ -357,6 +463,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, AssetTagBody);
     const row = await renameTag(c.var.bindings().db, id, body.name, scopeOf(c));
     if (!row) throw new FolioError("not_found", "Unknown tag");
+    await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
     return c.json(row);
   });
 
@@ -370,6 +477,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = idParam("id", c.req.param("id"));
     const report = await deleteTag(c.var.bindings().db, id, scopeOf(c));
     if (!report) throw new FolioError("not_found", "Unknown tag");
+    await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
     return c.json({ deleted: true, ...report });
   });
 
@@ -387,8 +495,9 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const answer = (
     c: Context<FolioEnv<Env>>,
     outcome: AssetBulkOutcome | DescribeRunOutcome,
+    extra: object = {},
   ): Response => {
-    if (!wasRefused(outcome)) return c.json(outcome);
+    if (!wasRefused(outcome)) return c.json({ ...outcome, ...extra });
     return c.json(
       {
         error: {
@@ -401,6 +510,24 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       },
       409,
     );
+  };
+
+  /**
+   * What a bulk call owes once its batch has committed: the follow-up of
+   * `settleAssetWrite`, with `final` taken from the report. **Only the call that completes
+   * the walk drains** (`continueFrom` null), so a long walk spends the shared purge budget
+   * twice. Nothing on a refusal or a dry run, which wrote nothing; `{}` on a scope that
+   * does not gate files, so its reports are what they were.
+   */
+  const settleBulk = async (
+    c: Context<FolioEnv<Env>>,
+    outcome: AssetBulkOutcome,
+    gating: AssetGating | null,
+  ): Promise<{ purge?: { pending: number } }> => {
+    if (wasRefused(outcome) || outcome.dryRun) return {};
+    return settleAssetWrite(c, rt, scopeOf(c), gating ?? gatingOf(c), {
+      final: outcome.continueFrom === null,
+    });
   };
 
   /** The job-control fields, off any of the three bodies. No `actor`: none of
@@ -443,13 +570,13 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     app.post(`/assets/bulk/${action}`, requireAccess<Env>(rt, ASSETS), async (c) => {
       const body = await parseBody(c.req, AssetBulkTagBody);
       await selectionInScope(c, body.selection);
-      return answer(
-        c,
-        await runAssetBulk({ db: c.var.bindings().db, logger: rt.logger }, action, body.selection, {
-          ...control(c, body),
-          tagIds: body.tagIds,
-        }),
+      const outcome = await runAssetBulk(
+        { db: c.var.bindings().db, logger: rt.logger },
+        action,
+        body.selection,
+        { ...control(c, body), tagIds: body.tagIds },
       );
+      return answer(c, outcome, await settleBulk(c, outcome, null));
     });
   }
 
@@ -459,13 +586,38 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post("/assets/bulk/move", requireAccess<Env>(rt, ASSETS), async (c) => {
     const body = await parseBody(c.req, AssetBulkMoveBody);
     await selectionInScope(c, body.selection);
-    return answer(
-      c,
-      await runAssetBulk({ db: c.var.bindings().db, logger: rt.logger }, "move", body.selection, {
-        ...control(c, body),
-        folderId: body.folderId,
-      }),
+    // A move changes effective values, so it carries the gating that records them.
+    const gating = gatingOf(c);
+    const outcome = await runAssetBulk(
+      { db: c.var.bindings().db, logger: rt.logger, gating },
+      "move",
+      body.selection,
+      { ...control(c, body), folderId: body.folderId },
     );
+    return answer(c, outcome, await settleBulk(c, outcome, gating));
+  });
+
+  /**
+   * Setting the access of a selection (`asset-access.md` decision 11): `{ selection,
+   * access }`, the other bulk routes' shape and report. `access` is required and never
+   * null. **The purge is drained on the batch that completes the walk** (`final`), so a
+   * forty-batch gating spends two purge calls rather than eighty; every batch queues its
+   * own rows in its own D1 batch regardless.
+   *
+   * Registered **before** `/assets/:id`, like the others: `bulk` is a legal `:id`.
+   */
+  app.post("/assets/bulk/access", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const body = await parseBody(c.req, AssetBulkAccessBody);
+    const gating = gatingOf(c);
+    if (!gating) throw new FolioError("unsupported", "This site does not gate files");
+    await selectionInScope(c, body.selection);
+    const outcome = await runAssetBulk(
+      { db: c.var.bindings().db, logger: rt.logger, gating },
+      "access",
+      body.selection,
+      { ...control(c, body), access: body.access },
+    );
+    return answer(c, outcome, await settleBulk(c, outcome, gating));
   });
 
   /**
@@ -486,15 +638,13 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!media) throw new FolioError("unsupported", "No media bucket is configured");
     const body = await parseBody(c.req, AssetBulkBody);
     await selectionInScope(c, body.selection);
-    return answer(
-      c,
-      await runAssetBulk(
-        { db, media, logger: rt.logger },
-        "delete",
-        body.selection,
-        control(c, body),
-      ),
+    const outcome = await runAssetBulk(
+      { db, media, logger: rt.logger },
+      "delete",
+      body.selection,
+      control(c, body),
     );
+    return answer(c, outcome, await settleBulk(c, outcome, null));
   });
 
   /**
@@ -636,6 +786,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           env: c.env,
           logger: rt.logger,
           scoped: rt.sites !== null,
+          ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
           ...(sweep ? { scopes: sweep.scopes } : {}),
         },
         body.selection,
@@ -702,11 +853,14 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           env: c.env,
           logger: rt.logger,
           scoped: rt.sites !== null,
+          ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
         },
         row,
       );
+      // A write like any other: it retries a purge an earlier write left owed.
+      await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
       return c.json({
-        asset: (await withTags(db, [outcome.row]))[0],
+        asset: (await presentAssetRows(db, await withTags(db, [outcome.row]), assetDomainOf(c)))[0],
         skipped: outcome.skipped,
         tagged: outcome.tagged,
         tagsIgnored: outcome.tagsIgnored,
@@ -739,7 +893,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const { db } = c.var.bindings();
     const row = await assetById(db, idParam("id", c.req.param("id")));
     if (!row) throw new FolioError("not_found", "Unknown asset");
-    return c.json((await withTags(db, [row]))[0]);
+    return c.json((await presentAssetRows(db, await withTags(db, [row]), assetDomainOf(c)))[0]);
   });
 
   /**
@@ -762,13 +916,25 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!media) throw new FolioError("unsupported", "No media bucket is configured");
 
     const filename = filenameQuery(c.req.query("filename"));
+    // `?access=` and `?folderId=` (decision 11), both read before a byte is: a value the
+    // brand's gate field does not accept never costs an R2 write. An absent `?access=`
+    // inherits from the folder, and is public for an unfiled file.
+    const access = accessQuery(c);
+    const folderParam = c.req.query("folderId");
+    const folderId = folderParam === undefined ? undefined : idParam("folderId", folderParam);
     // A declared length already over the cap is refused before a byte is
     // read. That is the fast path, not the guarantee: `readCappedBody` is what
     // makes the cap hold for a request with no Content-Length, or a lying one.
     contentLengthHeader(c.req.header("content-length"), MAX_UPLOAD_BYTES);
     try {
       const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES);
-      const row = await uploadAsset(db, media, { bytes, filename, site: scopeOf(c) });
+      const row = await uploadAsset(db, media, {
+        bytes,
+        filename,
+        site: scopeOf(c),
+        ...(folderId === undefined ? {} : { folderId }),
+        ...(access === undefined ? {} : { access }),
+      });
       const { describe } = brandOf(c);
       if (describe?.onUpload) {
         const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`;
@@ -783,12 +949,17 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               env: c.env,
               logger: rt.logger,
               scoped: rt.sites !== null,
+              ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
             },
             row,
           ),
         );
       }
-      return c.json({ asset: row, value: toAssetValue(row) }, 201);
+      // A new file was never public, so it queues no purge; the drain is for what an
+      // earlier failure left owed.
+      const settled = await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c));
+      const [asset] = await presentAssetRows(db, [row], assetDomainOf(c));
+      return c.json({ asset, value: toAssetValue(row), ...settled }, 201);
     } catch (e) {
       // An empty upload is a bad request; one over either size ceiling is
       // `too_large`; a failed R2 put or D1 insert is internal.
@@ -811,9 +982,21 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const { db } = c.var.bindings();
     const id = idParam("id", c.req.param("id"));
     const body = await parseOptionalBody(c.req, AssetPatchBody);
-    const row = await updateAsset(db, id, body, scopeOf(c));
+    const access = accessInput(c, body.access);
+    const gating = gatingOf(c);
+    const row = await updateAsset(
+      db,
+      id,
+      { ...body, ...(access === undefined ? {} : { access }) },
+      scopeOf(c),
+      gating,
+    );
     if (!row) throw new FolioError("not_found", "Unknown asset");
-    return c.json((await withTags(db, [row]))[0]);
+    // Moving a file (`folderId`) changes its effective value as surely as `access` does,
+    // so every patch settles, and the drain also retries what an earlier write left owed.
+    const settled = await settleAssetWrite(c, rt, scopeOf(c), gating);
+    const [presented] = await presentAssetRows(db, await withTags(db, [row]), assetDomainOf(c));
+    return c.json({ ...presented, ...settled });
   });
 
   app.delete("/assets/:id", requireAccess<Env>(rt, ASSETS), fenceAsset("write"), async (c) => {
@@ -821,7 +1004,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!media) throw new FolioError("unsupported", "No media bucket is configured");
     const gone = await deleteAsset(db, media, idParam("id", c.req.param("id")), scopeOf(c));
     if (!gone) throw new FolioError("not_found", "Unknown asset");
-    return c.json({ deleted: true });
+    return c.json({ deleted: true, ...(await settleAssetWrite(c, rt, scopeOf(c), gatingOf(c))) });
   });
 
   return app;
@@ -849,14 +1032,36 @@ export function assetFileRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get("/asset/:key", async (c) => {
     const { media, images } = c.var.bindings();
     if (!media) throw new FolioError("unsupported", "No media bucket is configured");
-    return serveAsset(
-      media,
-      images,
-      assetKeyParam(c.req.param("key")),
-      parseTransform(new URL(c.req.url).searchParams),
-      c.req.raw,
-      rt.logger,
-    );
+    const key = assetKeyParam(c.req.param("key"));
+    const transform = parseTransform(new URL(c.req.url).searchParams);
+    // No asset gating on the deployment: today's call, verbatim, and no D1 read.
+    if (!rt.assetGating) {
+      return serveAsset(media, images, key, transform, c.req.raw, rt.logger);
+    }
+    const decision = await decideAsset(c, rt, key);
+    if (decision.kind === "respond") return decision.response;
+    if (decision.kind === "granted") {
+      const served = await serveAsset(
+        media,
+        images,
+        key,
+        transform,
+        c.req.raw,
+        rt.logger,
+        "private",
+      );
+      if (!decision.signed) return served;
+      // A PDF that links out must not hand the signature on in a Referer.
+      const headers = new Headers(served.headers);
+      headers.set("referrer-policy", "no-referrer");
+      return new Response(served.body, { status: served.status, headers });
+    }
+    // Public file on a gated deployment: today's bytes and headers, plus the tag a purge
+    // can reach (decision 10). A 404 for a missing object stays today's thrown error.
+    const res = await serveAsset(media, images, key, transform, c.req.raw, rt.logger);
+    const headers = new Headers(res.headers);
+    headers.set("cache-tag", decision.tags);
+    return new Response(res.body, { status: res.status, headers });
   });
 
   return app;

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ANY_TYPE_TAG,
+  assetTag,
   cacheControl,
   cacheHeaders,
   cacheTags,
@@ -566,5 +567,24 @@ describe("cacheTags: option sources (spec 37 decision 5)", () => {
         t.startsWith("source:"),
       ),
     ).toBe(false);
+  });
+});
+
+describe("cacheTags and gated files (asset-access.md decision 12)", () => {
+  it("adds an asset tag per gated key, read off the key's id prefix", () => {
+    const { tags } = cacheTags(
+      { ...pageResolution(), gatedAssets: { "ast_00000000abcd-report.pdf": "members" } },
+      { story: "sty_page" },
+    );
+    expect(tags).toContain(assetTag("ast_00000000abcd"));
+    expect(tags).toContain("asset:ast_00000000abcd");
+  });
+
+  it("produces the identical tag string for a resolution with no gated files", () => {
+    const before = cacheTags(pageResolution(), { story: "sty_page" });
+    // Absent is the only spelling the runtime produces; an empty map is the same page.
+    const empty = cacheTags({ ...pageResolution(), gatedAssets: {} }, { story: "sty_page" });
+    expect(empty.tags.join(",")).toBe(before.tags.join(","));
+    expect(before.tags.some((t) => t.startsWith("asset:"))).toBe(false);
   });
 });

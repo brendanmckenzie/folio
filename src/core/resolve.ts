@@ -63,6 +63,16 @@ export interface StoryRef {
 export interface Resolution {
   stories: Record<string, StoryRef>;
   /**
+   * The stored access value of every media-library file this resolution's documents
+   * reach whose effective value is gated, keyed by R2 key
+   * (`../../docs/specs/platform/asset-access.md` decision 12). The same for every
+   * visitor, so a public page's HTML stays cacheable; **whether this visitor may open
+   * the file is never rendered by Folio**. Absent rather than `{}` when nothing is
+   * gated (or the deployment does not gate files), so such a resolution serialises
+   * byte for byte as it did before.
+   */
+  gatedAssets?: Record<string, Json>;
+  /**
    * Where the asset route is mounted. Held here rather than baked into stored
    * values so remounting Folio under a different base path does not invalidate
    * every asset reference in the database.
@@ -220,6 +230,8 @@ export interface ResolvedLink {
   broken?: boolean;
   /** Title of the linked story, handy as a default label. */
   title?: string;
+  /** An `asset` link to a gated file: the file's stored access value (`Resolution.gatedAssets`). */
+  access?: Json;
 }
 
 /**
@@ -267,8 +279,15 @@ export function resolveLink(
     case "anchor":
       return { kind: "anchor", href: hash(link.anchor) };
     case "asset": {
-      const href = decorateAsset(link.asset, resolution).src;
-      return isSafeHref(href) ? { kind: "asset", href, ...windowing(link) } : null;
+      const file = decorateAsset(link.asset, resolution);
+      return isSafeHref(file.src)
+        ? {
+            kind: "asset",
+            href: file.src,
+            ...(file.access !== undefined ? { access: file.access } : {}),
+            ...windowing(link),
+          }
+        : null;
     }
   }
 }
@@ -289,6 +308,13 @@ export interface ResolvedAsset extends AssetValue {
   /** `object-position` for the focal point, or `50% 50%` when none is set. */
   objectPosition: string;
   isImage: boolean;
+  /**
+   * The file's stored access value, present exactly when it is a gated library file
+   * (`Resolution.gatedAssets`): what a host renders a lock or a "Members only" label
+   * from. The same for every visitor; whether this one may open it is the route's
+   * decision, never rendered here.
+   */
+  access?: Json;
   /**
    * URL for a resized variant. Assets we do not host come back untouched — Folio
    * will not proxy a third party's image.
@@ -318,10 +344,14 @@ const encodeKey = (key: string) => key.split("/").map(encodeURIComponent).join("
 function decorateAsset(asset: AssetValue, resolution: Resolution): ResolvedAsset {
   const src = asset.key ? `${resolution.assetBase}/${encodeKey(asset.key)}` : asset.url!;
   const focal = asset.focal;
+  const gated = resolution.gatedAssets;
+  const access =
+    asset.key && gated && Object.hasOwn(gated, asset.key) ? gated[asset.key] : undefined;
 
   return {
     ...asset,
     src,
+    ...(access !== undefined ? { access } : {}),
     isImage: isImageAsset(asset),
     objectPosition: focal ? `${pct(focal.x)} ${pct(focal.y)}` : "50% 50%",
     srcFor: (t) => {

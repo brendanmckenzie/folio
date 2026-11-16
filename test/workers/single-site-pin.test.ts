@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { collection, defineBlock, multilink, reference, richtext, text } from "../../src/core";
 import type { Doc, Json } from "../../src/core/doc";
@@ -292,5 +292,37 @@ describe("a published page on a single-site deployment", () => {
         },
       }
     `);
+  });
+});
+
+describe("a deployment with no asset gating answers a file as it always did", () => {
+  it("pins the status and every header, and reads no row", async () => {
+    const key = "ast_00000000a1b2-pin.png";
+    await env.MEDIA.put(key, new Uint8Array([1, 2, 3]), {
+      httpMetadata: { contentType: "image/png" },
+    });
+    const pinned = createFolio<Cloudflare.Env>({
+      blocks: [pinPage, pinPost, pinHeader],
+      types,
+      bindings: (e): FolioBindings => ({ db: e.DB, story: e.STORY, media: e.MEDIA }),
+      basePath: "/folio",
+      assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
+      auth: "open",
+      route: (p) => (p ? `/${p}` : "/"),
+    });
+    const res = await pinned.handle(
+      new Request(`https://example.com/folio/asset/${key}`),
+      env,
+      createExecutionContext(),
+    );
+    expect(res?.status).toBe(200);
+    expect([...(res?.headers.entries() ?? [])].sort()).toEqual([
+      ["cache-control", "public, max-age=31536000, immutable"],
+      ["content-disposition", "inline"],
+      ["content-security-policy", "default-src 'none'; sandbox"],
+      ["content-type", "image/png"],
+      ["etag", expect.any(String)],
+      ["x-content-type-options", "nosniff"],
+    ]);
   });
 });

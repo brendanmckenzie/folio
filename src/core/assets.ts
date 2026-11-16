@@ -16,6 +16,8 @@
  * off its query string — a snapshot of intent, never a query result.
  */
 
+import type { Json } from "./doc";
+
 /**
  * A folder in the tree. `path` is the slash-joined chain of slugified ancestor
  * names, this folder last — `stories.path`'s shape (`core/story.ts`'s
@@ -34,6 +36,10 @@ export interface AssetFolder {
   name: string;
   path: string;
   createdAt: number;
+  /** Own access value, decoded; null inherits. Present only where the scope's brand gates files. */
+  access?: Json | null;
+  /** The nearest own value on this folder or an ancestor; null is public. Same condition. */
+  effectiveAccess?: Json | null;
 }
 
 /**
@@ -73,11 +79,13 @@ export interface AssetFilter {
   /** `describe_error is not null`. A recorded failure, retried on purpose
    * rather than swept up again by the default backlog run. */
   failed?: boolean;
+  /** Files whose effective access is a gated value (`asset-access.md` decision 11). */
+  gated?: boolean;
 }
 
 /** The four operations a selection of assets can be run through (phase 5's
  * `runAssetBulk`), mirroring `core/story.ts`'s `BulkAction` for stories. */
-export type AssetBulkAction = "tag" | "untag" | "move" | "delete";
+export type AssetBulkAction = "tag" | "untag" | "move" | "delete" | "access";
 
 /**
  * The tag identity: lowercased, trimmed, with every run of inner whitespace

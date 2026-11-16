@@ -20,7 +20,7 @@ import type { LocaleConfig } from "../core/locales";
 import type { Migration } from "../core/migrate";
 import type { Mutation } from "../core/mutations";
 import type { ContentPage, ContentQuery } from "../core/query";
-import type { Resolution } from "../core/resolve";
+import type { ResolvedAsset, Resolution } from "../core/resolve";
 import type { NestedValue } from "../core/nested";
 import type { DocumentType } from "../core/schema";
 import type { Registry as SiteRegistry, SiteRef, Surface } from "../core/sites";
@@ -258,6 +258,76 @@ export interface FolioGate<Env, V = unknown> {
     value: Json | undefined,
     ctx: FolioGateContext,
   ): boolean | Promise<boolean>;
+  /**
+   * May this visitor read a media-library file whose effective access value is
+   * `value` (`../../docs/specs/platform/asset-access.md` decision 1). **Its
+   * presence is the whole of "this deployment gates files"**: absent, the asset
+   * route runs exactly as it did before and reads no D1 row.
+   *
+   * A second method rather than a widened `allows` because the context differs in
+   * kind: a page check is handed a document and a story, a file check is handed a
+   * library row and has neither. `visitor` is shared. `value` is `undefined` when
+   * the stored value is unreadable JSON (the file is treated as gated).
+   *
+   * Never called for a public file, for a Folio credential that may read the
+   * file's scope, or for a request carrying a valid signature. Either `visitor`
+   * or this throwing is logged and is a denial.
+   */
+  allowsAsset?(
+    visitor: V | null,
+    value: Json | undefined,
+    ctx: FolioAssetGateContext,
+  ): boolean | Promise<boolean>;
+  /**
+   * What a denied visitor receives instead of the bare `403`
+   * (`asset-access.md` decision 7): typically a redirect to a sign-in or
+   * purchase page. Folio forces `cache-control: private, no-store` on whatever
+   * comes back. `null`, `undefined` or a throw is the bare `403`. Requires
+   * `allowsAsset`; `validateGate` refuses it alone.
+   */
+  assetDenied?(
+    req: Request,
+    env: Env,
+    ctx: FolioAssetDeniedContext,
+  ): Response | null | undefined | Promise<Response | null | undefined>;
+}
+
+/** What `allowsAsset` is told about the file it is asked to admit somebody to. */
+export interface FolioAssetGateContext {
+  asset: {
+    id: string;
+    key: string;
+    filename: string;
+    contentType: string;
+    size: number;
+    folderId: string | null;
+  };
+  /** The scope that owns the file: `assets.site_id`, `'default'` with no `sites`. */
+  scope: string;
+  /** The site whose host served this request, or null (no `sites`, or the admin origin). */
+  site: SiteRef | null;
+  /** True when the value came from a folder rather than from the file itself. */
+  inherited: boolean;
+}
+
+/** `assetDenied`'s context: the same, plus the value that refused this visitor. */
+export interface FolioAssetDeniedContext extends FolioAssetGateContext {
+  value: Json;
+}
+
+/**
+ * Signed asset URLs (`asset-access.md` decision 9). Deployment-level, never per
+ * brand: verification must not depend on a brand before the row is read. The
+ * first key signs and all verify, which is rotation.
+ */
+export interface FolioAssetSigning<Env> {
+  keys(env: Env): readonly string[];
+}
+
+/** Options for `Folio.signAsset` and `FolioPage.signAsset`. */
+export interface AssetSignOptions {
+  /** Seconds the URL stays valid. Default 300, capped at 86 400. */
+  expiresIn?: number;
 }
 
 /**
@@ -432,6 +502,14 @@ export interface FolioPage {
    * drop this one.
    */
   headers: Record<string, string>;
+  /**
+   * A URL for a media-library file this render's visitor may open
+   * (`asset-access.md` decision 9). Answers the plain `src` unless
+   * `assetSigning` is configured, the file is gated, and this page has itself
+   * admitted the visitor to the file's value. Never signs on a `public` or
+   * `denied` page.
+   */
+  signAsset(asset: Pick<ResolvedAsset, "src">, opts?: AssetSignOptions): Promise<string>;
 }
 
 /** What `reader.page()` needs beyond the path. */
@@ -885,6 +963,11 @@ export interface FolioSingleConfig<Env> {
    */
   gate?: FolioGate<Env>;
   /**
+   * Signed URLs for gated media-library files (`asset-access.md` decision 9).
+   * Absent, nothing can be signed and `signAsset` answers the plain URL.
+   */
+  assetSigning?: FolioAssetSigning<Env>;
+  /**
    * Machine-written alt text, descriptions and tags for the media library
    * (`../../docs/specs/content-model/media-library.md` decision 8). One host function; Folio
    * holds no API key and chooses no model.
@@ -1069,6 +1152,13 @@ export interface Folio<Env> {
    * ```
    */
   cacheProps: (req: Request, env: Env) => Promise<{ site?: string; surface?: Surface }>;
+  /**
+   * Signs a media-library file's URL for a visitor the host has itself admitted
+   * (`asset-access.md` decision 9), unconditionally: the host owns the
+   * entitlement decision. Answers `src` unchanged when `assetSigning` is not
+   * configured.
+   */
+  signAsset: (env: Env, src: string, opts?: AssetSignOptions) => Promise<string>;
   /**
    * The rendering site's settings (`multi-site.md` decision 2): the settings
    * type's root block as a plain nested value — each field by name, a `max: 1`

@@ -531,6 +531,7 @@ hook and no way to veto or rewrite a publish.
 | `redirectsChanged` | A manual redirect was added or removed |
 | `formChanged` | A form's shape changed |
 | `submitted` | Somebody filled in a form. **This is the entire programmatic surface for responses** — no API route, no MCP tool. Forward to a CRM here. |
+| `assetAccessChanged` | A write changed a file's or a folder's access value, on a deployment whose `gate` has `allowsAsset`. The payload carries `assets` (`id`, `key`, `scope`, and the effective `from` and `to`, `null` being public; at most 500, with `truncated` when there are more) and `pending`, the files in the scope whose cache purge is still owed. |
 | `siteChanged` | A site or group was created, edited or deleted. Fires only on a deployment with [`sites`](#sites-sitesconfig); the payload carries the changed row (`null` once deleted). |
 | `await` | `readonly HookEvent[]` — the subset a write waits for before responding. Everything else rides `waitUntil`. |
 
@@ -624,6 +625,62 @@ a document created before the field existed fails closed rather than open.
 `field` must be one of the five scalar kinds, `indexed: true`, never
 `translatable`, and declared on a `page` root. Each is checked at construction,
 because a gate the editor believes in and nothing enforces is worse than none.
+
+##### `gate.allowsAsset` and `gate.assetDenied`: files
+
+```ts
+gate: {
+  // field, public, visitor and allows as above
+  allowsAsset: (visitor, value, ctx) => visitor?.plan === value,
+  assetDenied: (req, env, ctx) => redirectToSignIn(req, ctx.value),
+},
+```
+
+**`allowsAsset` being present is the whole of "this deployment gates media-library
+files".** Absent, `{base}/asset/:key` runs the code it always ran, reads no row, and
+every file is public. With it, an asset and a folder carry an access value in this gate
+field's vocabulary, and the route asks `allowsAsset` for a file whose effective value is
+not `public`. It is a second method rather than a wider `allows` because its context is a
+library row, not a document: `ctx` is `{ asset: { id, key, filename, contentType, size,
+folderId }, scope, site, inherited }`. `value` is `undefined` when the stored value is
+unreadable (the file is treated as gated). It shares `visitor` with `allows`.
+
+It is **never called** for a public file, for a Folio credential that may read the file's
+scope (an editor, a token holding `content:read`, a preview grant, a share link to a page
+that uses the file), or for a request carrying a valid signature. `visitor` or
+`allowsAsset` throwing is logged and is a denial. A brand with no `allowsAsset` serves its
+files as it always did, which is the sanctioned way to switch the feature off for one
+brand; a gated file whose scope has no brand is a bare `403`.
+
+**`assetDenied(req, env, ctx)`** answers a denied visitor instead of the bare `403`:
+`ctx` is the context above plus `value`, the value that refused them. Return a
+`Response` (typically a `302` to a sign-in or purchase page) or `null` for the `403`.
+Folio rebuilds what it returns with `Cache-Control: private, no-store`, because the
+answer varies by visitor. A throw is logged and is the `403`. Branch on `Sec-Fetch-Dest`
+so an `<img>` is not redirected to an HTML page it cannot draw (see the handbook,
+"Visitor access", "Gating files"). It requires `allowsAsset`: `createFolio` throws when
+`assetDenied` is set without it, and when either is not a function.
+
+Both are per brand, so on a branded deployment they sit inside a brand's `gate`.
+
+#### `assetSigning: { keys(env): readonly string[] }`
+
+Signed URLs for gated files, which are what `folio.signAsset(env, src, { expiresIn })` and
+`page.signAsset(asset, { expiresIn })` mint.
+
+```ts
+assetSigning: { keys: (env) => [env.ASSET_KEY_2026_11, env.ASSET_KEY_2026_05] },
+```
+
+**Absent, nothing can be signed**: both methods answer the plain URL, and a `sig`
+parameter on a request is ignored. The first key signs and every key verifies, which is
+rotation. Each key must be at least 32 characters, **and distinct per deployment**
+(staging and production sharing one lets a staging link open a production file).
+`keys` runs per request, with `env`, so a key can be a Workers secret; a list that is
+empty or holds a short key is logged and every signature is then treated as invalid.
+`expiresIn` is seconds, default 300, capped at 86 400. It is a top-level key beside
+`brands`, never inside one: verification must not depend on a brand before the file's
+row has been read.
 
 #### `forms: FolioForms<Env>`
 
@@ -1078,6 +1135,7 @@ you can recognise one:
 | A `globals` entry that is not a declared `singleton` | It would resolve to nothing, per request, in silence |
 | `locales`: a default that is not available, a duplicate code, a fallback that does not exist, a fallback cycle | Each produces an unterminated read at render time |
 | `gate.field` translatable, unindexed, the wrong kind, or on no `page` root | A gate the editor believes in and nothing enforces |
+| `gate.allowsAsset` or `gate.assetDenied` not a function, or `assetDenied` without `allowsAsset` | A key that reads as a constraint and enforces nothing |
 | `describe.fn` not a function, or `concurrency` outside 1–8 | Would 500 on whichever request reached it first |
 | `forms.verify` not a function, `ratePerHour` outside 0–100 | The discovering request is an anonymous POST from the internet |
 | `forms.sources`: an id that is not `[a-z][a-z0-9-]*` or is `content`, a `load` that is not a function, `ttl` outside 60–604800, `localised` not a boolean, a setting of another kind | A form naming the source would fail on an anonymous POST |

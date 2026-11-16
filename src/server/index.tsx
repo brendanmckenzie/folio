@@ -41,6 +41,9 @@ import type { ResolvedGate } from "./gate";
 import { appliedMigrations, type MigrateReport, ownMigrations, runMigrations } from "./migrate";
 import { previewPage } from "./pages";
 import { lookupRedirect } from "./redirects";
+import type { AssetSignOptions } from "./types";
+import { assetAccessByKey, gatedScopeOf } from "./asset-access";
+import { assetKeyOfSrc, signAssetUrl } from "./asset-signing";
 import { reindex } from "./reindex";
 import {
   alarmHookCtx,
@@ -51,7 +54,8 @@ import {
 } from "./runtime";
 import { refreshOptionSources } from "./option-sources";
 import { runDeliveries } from "./deliveries";
-import { runSchedules, scheduleDeps } from "./scheduler";
+import { drainAssetPurges, pendingAssetPurges, platformPurge } from "./cache-purge";
+import { runSchedules, type ScheduleRunReport, scheduleDeps } from "./scheduler";
 import {
   candidateFor,
   INTERNAL_HEADERS,
@@ -385,7 +389,14 @@ export type { CacheVerdict } from "./cache-request";
  * back off `FolioPage.access`. `PageAccess` also ships from `folio/core`, with
  * the pure half — `redactDoc` and friends — a host never needs to call itself.
  */
-export type { FolioGate, FolioGateContext } from "./types";
+export type {
+  AssetSignOptions,
+  FolioAssetDeniedContext,
+  FolioAssetGateContext,
+  FolioAssetSigning,
+  FolioGate,
+  FolioGateContext,
+} from "./types";
 export type { PageAccess } from "../core/gate";
 /**
  * The describe seam (`../../docs/specs/content-model/media-library.md`
@@ -1286,6 +1297,77 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     };
 
     /**
+     * `page.signAsset` (`asset-access.md` decision 9): signs **only for a visitor this page
+     * has itself admitted to this file's value**, and answers the plain `src` in every
+     * other case, so it never fails open. Either the page is a draft (an editor or a share
+     * `draftFor` admitted) and the file's scope is in the render's chain, or the page is
+     * `granted` and `allowsAsset` answers true for the visitor the reader already asked.
+     * A `public` or `denied` page never signs, whatever its headers say: `no-store` means
+     * "this response varied", not "this visitor was admitted". A throw is a refusal.
+     */
+    const assetVerdicts = new Map<string, Promise<boolean>>();
+    const signForPage = async (
+      within: Scoped,
+      brand: BrandRuntime,
+      resolution: Resolution,
+      drafted: boolean,
+      access: PageAccess,
+      src: string,
+      signOpts: AssetSignOptions | undefined,
+    ): Promise<string> => {
+      const keys = rt.assetSigning;
+      const gate = brand.gate;
+      const file = assetKeyOfSrc(src);
+      if (!keys || !gate?.assets || file === null) return src;
+      const gated = resolution.gatedAssets;
+      if (!gated || !Object.hasOwn(gated, file)) return src;
+      const scope = gatedScopeOf(resolution, file);
+      if (scope === undefined) return src;
+
+      let admitted = false;
+      if (drafted) {
+        admitted = within.chain.includes(scope);
+      } else if (access === "granted") {
+        // The signature binds only the key, and the route admits it without asking the
+        // file's own brand, so a file this page's chain does not reach is never signed:
+        // the rendering brand's `allowsAsset` is not the question its owner would ask.
+        if (!within.chain.includes(scope)) return src;
+        let verdict = assetVerdicts.get(file);
+        if (!verdict) {
+          verdict = (async () => {
+            try {
+              const row = await assetAccessByKey(db, file);
+              if (!row) return false;
+              const who = await visitorOnce(gate);
+              return Boolean(
+                await gate.config.allowsAsset?.(who, gated[file], {
+                  asset: {
+                    id: row.id,
+                    key: file,
+                    filename: row.filename,
+                    contentType: row.contentType,
+                    size: row.size,
+                    folderId: row.folderId,
+                  },
+                  scope: row.siteId,
+                  site: within.render?.site ?? null,
+                  inherited: row.access === null,
+                }),
+              );
+            } catch (err) {
+              rt.logger.error("folio: page.signAsset could not ask allowsAsset; not signing", err);
+              return false;
+            }
+          })();
+          assetVerdicts.set(file, verdict);
+        }
+        admitted = await verdict;
+      }
+      if (!admitted) return src;
+      return signAssetUrl(keys.keys(env), src, signOpts?.expiresIn, Date.now());
+    };
+
+    /**
      * What this visitor may see of `doc` (`visitor-access.md` decisions 1, 6, 7).
      *
      * The order of the three questions is the design, and each answer is cheaper
@@ -1431,6 +1513,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             ? { "content-security-policy": `frame-ancestors ${rt.sites.admin}` }
             : {}),
         },
+        signAsset: (asset, signOpts) =>
+          signForPage(within, brand, resolution, drafted, access, asset.src, signOpts),
       };
     };
 
@@ -1820,6 +1904,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     handle,
     reader,
     cacheProps,
+    // Unconditional: the host has made its own entitlement decision (decision 9).
+    signAsset: async (env, src, signOpts) =>
+      rt.assetSigning
+        ? signAssetUrl(rt.assetSigning.keys(env), src, signOpts?.expiresIn, Date.now())
+        : src,
     settings,
     /**
      * The locale does not select a document — there is one per story, holding
@@ -1959,16 +2048,37 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       if (report.continueFrom !== null) return report;
       // The schedules are published and cleared by now, so a pass that throws (a D1
       // error) is logged and flagged, not allowed to reject the call and hide the report.
+      let out: ScheduleRunReport = report;
       try {
         const deliveries = await runDeliveries(rt, env, bindings.db, {
           ...(opts?.now === undefined ? {} : { now: opts.now }),
           ...(opts?.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
         });
-        return { ...report, deliveries };
+        out = { ...out, deliveries };
       } catch (err) {
         rt.logger.error("folio: the form delivery pass failed", err);
-        return { ...report, deliveriesFailed: true };
+        out = { ...out, deliveriesFailed: true };
       }
+      // The asset purge queue (decision 10), after deliveries and in its own `try`: a
+      // failure is `assetPurgesFailed` in the report, never a thrown run. Only on a
+      // deployment that gates files, so every other one reads nothing more.
+      if (rt.assetGating && opts?.dryRun !== true) {
+        try {
+          const drained = await drainAssetPurges(
+            bindings.db,
+            rt.assetPurgeCapability ?? platformPurge,
+            opts?.now ?? Date.now(),
+            rt.logger,
+          );
+          const { pending } = await pendingAssetPurges(bindings.db, null);
+          out = { ...out, assetPurges: { issued: drained.purge, pending } };
+          if (!drained.ok) out = { ...out, assetPurgesFailed: true };
+        } catch (err) {
+          rt.logger.error("folio: the asset purge pass failed", err);
+          out = { ...out, assetPurgesFailed: true };
+        }
+      }
+      return out;
     },
     /**
      * The auth housekeeping sweep (`../../docs/specs/foundation/

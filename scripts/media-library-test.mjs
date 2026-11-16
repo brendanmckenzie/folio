@@ -289,6 +289,86 @@ check(
     treeAfter.body.rows.some((f) => f.id === parent.id),
 );
 
+/* --- visitor access (spec 43 phase 7): the routes the screen calls ------- */
+
+// What the Assets screen asks of the server for visitor access. It draws none of it
+// unless the manifest carries `assetAccess`, so the section reads the manifest first and
+// asserts whichever half this deployment is: refusals where files are not gated, the
+// answers the screen decodes where they are.
+const manifest = (await get("/schema")).body;
+const gating = manifest?.assetAccess !== undefined;
+
+const probe = await upload(`ml-${run}-access.png`);
+const probeAsset = probe.asset;
+
+// The screen files an upload in the folder it has open, and only where files are gated.
+// The route itself takes `?folderId=` either way, so this half is checked on every run.
+const intoFolder = await fetch(
+  `${API}/assets?filename=${encodeURIComponent(`ml-${run}-filed.png`)}&folderId=${sibling.id}`,
+  {
+    method: "POST",
+    headers: { "content-type": "image/png" },
+    body: new Uint8Array([...PNG, 250, Date.now() % 251]),
+  },
+);
+const filedUpload = (await intoFolder.json()).asset;
+check(
+  "an upload with ?folderId= is filed in that folder",
+  intoFolder.status === 201 && filedUpload?.folderId === sibling.id,
+  `${intoFolder.status}`,
+);
+
+const purgeAll = await post("/assets/purge-all");
+check(
+  "purge-all answers { ok } and never throws, with or without a purge capability",
+  purgeAll.status === 200 && typeof purgeAll.body?.ok === "boolean",
+  JSON.stringify(purgeAll.body),
+);
+
+if (gating) {
+  const purges = await get("/assets/purges");
+  check(
+    "the pending-purge notice's read answers { pending, oldest }",
+    purges.status === 200 && typeof purges.body.pending === "number",
+    JSON.stringify(purges.body),
+  );
+  const access = await get(`/assets/access?key=${encodeURIComponent(probeAsset.key)}`);
+  check(
+    "the inspector's lookup answers an object, with nothing for a public file",
+    access.status === 200 && access.body[probeAsset.key] === undefined,
+    JSON.stringify(access.body),
+  );
+  const gatedList = await get("/assets?gated=1&count=1&limit=5");
+  check("the Gated filter lists", gatedList.status === 200, `${gatedList.status}`);
+  check(
+    "rows and folders carry access and effectiveAccess",
+    "access" in (await get(`/assets/${probeAsset.id}`)).body &&
+      (await get("/assets/folders?limit=500")).body.rows.every((f) => "effectiveAccess" in f),
+  );
+} else {
+  check(
+    "the manifest has no assetAccess, so the screen draws no access UI",
+    manifest !== null && !("assetAccess" in manifest),
+  );
+  const refusals = [
+    ["the purge notice's read", await get("/assets/purges")],
+    ["the inspector's lookup", await get("/assets/access?key=x.png")],
+    ["the Gated filter", await get("/assets?gated=1")],
+    [
+      "bulk Set access",
+      await post("/assets/bulk/access", { selection: { ids: [probeAsset.id] }, access: "x" }),
+    ],
+    ["a folder's access", await call("PATCH", `/assets/folders/${sibling.id}`, { access: "x" })],
+  ];
+  for (const [label, res] of refusals) {
+    check(`${label} is refused where files are not gated`, res.status === 501, `${res.status}`);
+  }
+}
+
+await post("/assets/bulk/delete", {
+  selection: { ids: [probeAsset.id, filedUpload?.id].filter(Boolean) },
+});
+
 /* --- cleanup ------------------------------------------------------------ */
 
 await call("DELETE", `/assets/folders/${parent.id}`);

@@ -36,6 +36,13 @@ export const SITE_TAG = "site";
 export const ANY_TYPE_TAG = "type:*";
 
 /**
+ * Every asset response carries `asset:*` when the deployment gates files
+ * (`../../docs/specs/platform/asset-access.md` decision 10), so one purge can clear
+ * every cached file without flushing pages.
+ */
+export const ANY_ASSET_TAG = "asset:*";
+
+/**
  * Workers Cache's own limits: 1000 tags per response and a 16 KB `Cache-Tag`
  * header. A page over either is coarsened rather than truncated (decision 8).
  */
@@ -68,6 +75,9 @@ export const typeTag = (name: string) => `type:${encode(name)}`;
  * save purges this one tag with no lookup at all
  * (`../../docs/specs/content-model/forms.md` architecture decision 8). */
 export const formTag = (id: string) => `form:${encode(id)}`;
+/** One library file, by its `assets.id` (the key's `ast_<12 hex>` prefix): what gating a
+ * file purges, and what a page that draws its lock carries. */
+export const assetTag = (id: string) => `asset:${encode(id)}`;
 /** A host option source's list (spec 37). Branded when the deployment is, because
  *  two brands may register one source id and keep separate lists. */
 export const sourceTag = (id: string, brand?: string | null) =>
@@ -175,6 +185,7 @@ function collectionTypes(keys: readonly string[]): { types: string[]; any: boole
  * story:<id>      every id in resolution.stories, plus opts.story
  * global:<name>   every key in resolution.globals
  * form:<id>       every key in resolution.forms
+ * asset:<id>      every gated file in resolution.gatedAssets (its drawn lock)
  * type:<name>     the document type of every distinct collection query
  * type:*          a collection query that filters no type at all
  * site            always
@@ -227,6 +238,10 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
     for (const name of Object.keys(resolution.globals ?? {})) tags.add(globalTag(name));
   }
   for (const id of Object.keys(resolution.forms ?? {})) tags.add(formTag(id));
+  // A gated file the page drew a lock for (`asset-access.md` decision 12): the drain that
+  // clears the file's copies refreshes the page. Only gated keys, so a page with no gated
+  // file carries exactly the tags it did before; the id is the key's `ast_<12 hex>` prefix.
+  for (const key of Object.keys(resolution.gatedAssets ?? {})) tags.add(assetTag(key.slice(0, 16)));
 
   const collections = collectionTypes(Object.keys(resolution.collections ?? {}));
   // A sourced question tags like an index over its type (spec 37 decision 5): the

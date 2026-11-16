@@ -1,21 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { canAdmin, canManageAssets, type Me } from "../../me";
+import type { ManifestAssetAccess } from "../../../core/schema";
 import { Button } from "../Button";
+import { Dialog } from "../Dialog";
 import { EmptyState } from "../EmptyState";
 import {
   type AssetRow,
   type AssetsUrl,
   type AssetView,
   assetsQuery,
+  folderIdForPath,
   panelSubject,
   parseAssetsUrl,
+  purgeNotice,
 } from "./assets-model";
 import { AssetBrowser } from "./AssetBrowser";
 import { AssetDeleteDialog } from "./AssetDeleteDialog";
 import { AssetDetail } from "./AssetDetail";
 import css from "./Assets.module.css";
 import { useFittedPage } from "../fit";
+import { useAssetPurges } from "./useAssetAccess";
 import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from "./useAssets";
+import { useFolders } from "./useFolders";
 import { messageOf } from "./useContent";
 
 interface Props {
@@ -32,6 +38,12 @@ interface Props {
    * `AssetBrowser`'s `mayWrite` and `mayDescribe`.
    */
   me: Me;
+  /**
+   * The manifest's `assetAccess`: present only where the deployment gates files, and the
+   * one switch for every access control on this screen. Absent, the screen is what it
+   * was before visitor access to files existed.
+   */
+  assetAccess?: ManifestAssetAccess;
   query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
   onQuery: (next: Record<string, string | undefined>) => void;
@@ -89,7 +101,11 @@ export function Assets(props: Props) {
    */
   const mayWrite = canManageAssets(props.me);
   const mayDescribe = canAdmin(props.me);
-  const url = parseAssetsUrl(props.query, props.remembered);
+  const { assetAccess } = props;
+  const parsed = parseAssetsUrl(props.query, props.remembered);
+  // `?gated=1` means nothing where files are not gated, and the route would answer
+  // `unsupported` to it: a hand-written link is read as the unfiltered list instead.
+  const url = assetAccess || !parsed.gated ? parsed : { ...parsed, gated: false };
   /**
    * The page size, fitted to the viewport rather than fixed.
    *
@@ -103,6 +119,21 @@ export function Assets(props: Props) {
   const data = useAssets(apiBase, url, pageSize);
 
   const [deleting, setDeleting] = useState<AssetRow | null>(null);
+
+  /**
+   * The pending-purge count and the *Clear cached files* action
+   * (`asset-access.md` decision 10). Neither exists, and no request is made, without
+   * `assetAccess`. `reload` is what every access change calls.
+   */
+  const purges = useAssetPurges(apiBase, Boolean(assetAccess));
+  const [clearing, setClearing] = useState(false);
+  const [clearBusy, setClearBusy] = useState(false);
+  const notice = assetAccess ? purgeNotice(purges.state) : null;
+
+  /** Uploads are filed in the folder the editor has open, where files are gated
+   * (decision 4); without it the request is exactly what it was. */
+  const folders = useFolders(apiBase, Boolean(assetAccess));
+  const uploadFolder = assetAccess ? folderIdForPath(folders.folders, url.folder) : undefined;
 
   const go = useCallback(
     (next: AssetsUrl) => {
@@ -165,7 +196,7 @@ export function Assets(props: Props) {
     },
     [data, go, onNotice, url],
   );
-  const upload = useUploads(apiBase, onUploaded);
+  const upload = useUploads(apiBase, onUploaded, uploadFolder);
 
   const onFiles = useCallback((files: FileList | null) => upload.add(files), [upload]);
   const drop = useDropTarget(onFiles, mayWrite);
@@ -218,6 +249,16 @@ export function Assets(props: Props) {
     // discard whatever was open. The hook swallows the event and offers nothing.
     <div className={css.screen} {...drop.handlers}>
       {/*
+        The edge-cache notice, above the browser and only while files are owed a purge.
+        A strip and not a toast: it stays for as long as the number is non-zero, and
+        `role="status"` so a change to it is announced without moving focus.
+      */}
+      {notice ? (
+        <div className={css.purgeNotice} role="status">
+          <span className={css.purgeText}>{notice}</span>
+        </div>
+      ) : null}
+      {/*
         `data-open` follows `url.asset` rather than the resolved row: the cold-link
         message below is also a panel and wants the same second column, or it stretches
         to the screen's width to say two sentences.
@@ -251,6 +292,16 @@ export function Assets(props: Props) {
           mayWrite={mayWrite}
           mayDescribe={mayDescribe}
           onNotice={onNotice}
+          {...(assetAccess ? { assetAccess, onAccessChanged: purges.reload } : {})}
+          {...(assetAccess && mayDescribe
+            ? {
+                extraActions: (
+                  <Button size="sm" variant="subtle" onClick={() => setClearing(true)}>
+                    Clear cached files
+                  </Button>
+                ),
+              }
+            : {})}
         />
 
         {/*
@@ -278,6 +329,7 @@ export function Assets(props: Props) {
             // and all live in there, so a viewer opening `?asset=…` reached five
             // controls the grid had already stopped offering.
             mayWrite={mayWrite}
+            {...(assetAccess ? { assetAccess, onAccessChanged: purges.reload } : {})}
           />
         ) : subject.state === "loading" ? (
           // A skeleton panel, not a spinner: the panel's shape is known before its
@@ -328,6 +380,48 @@ export function Assets(props: Props) {
         <div className={css.dropVeil} aria-hidden="true">
           Drop to upload
         </div>
+      ) : null}
+
+      {clearing ? (
+        <Dialog
+          title="Clear cached files?"
+          description="Asks the edge cache to drop every copy it holds. Public files and pages are fetched again on their next request."
+          onClose={() => setClearing(false)}
+          actions={
+            <>
+              <Button onClick={() => setClearing(false)}>Cancel</Button>
+              <Button
+                variant="primary"
+                disabled={clearBusy}
+                reason="Clearing…"
+                onClick={() => {
+                  setClearBusy(true);
+                  void purges
+                    .clear()
+                    .then((cleared) =>
+                      onNotice(
+                        cleared
+                          ? "Cleared the cached files"
+                          : "Nothing was cleared: this deployment has no way to purge its cache, or the purge failed",
+                      ),
+                    )
+                    .catch((e: Error) => onNotice(e.message))
+                    .finally(() => {
+                      setClearBusy(false);
+                      setClearing(false);
+                    });
+                }}
+              >
+                Clear cached files
+              </Button>
+            </>
+          }
+        >
+          <p className={css.note}>
+            This uses the shared purge allowance, so it is for a queue that is behind or a cache
+            that must be emptied, not routine use.
+          </p>
+        </Dialog>
       ) : null}
 
       {deleting ? (

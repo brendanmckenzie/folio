@@ -307,10 +307,18 @@ export interface Uploads {
 export function useUploads(
   apiBase: string,
   onFinished: (done: readonly AssetRow[], failed: number) => void,
+  /**
+   * The folder an upload is filed in: the one the editor has open, only where files are
+   * gated (`asset-access.md` decision 4). Read at the moment of upload through a ref, so
+   * a drop made after opening a folder is filed in it. Absent files nothing, as before.
+   */
+  folderId?: string,
 ): Uploads {
   const [entries, setEntries] = useState<readonly UploadEntry[]>([]);
   const finished = useRef(onFinished);
   finished.current = onFinished;
+  const into = useRef(folderId);
+  into.current = folderId;
   const live = useRef(true);
   useEffect(
     () => () => {
@@ -342,7 +350,7 @@ export function useUploads(
         for (const [i, file] of list.entries()) {
           const id = batch[i]!.id;
           try {
-            done.push(await uploadOne(apiBase, file));
+            done.push(await uploadOne(apiBase, file, into.current));
             if (live.current) mark(setEntries, id, "done");
           } catch (e) {
             failed += 1;
@@ -390,8 +398,9 @@ function mark(
  * anyway because the declared length beside it is what makes the cap refuse an
  * oversized file before reading it.
  */
-async function uploadOne(apiBase: string, file: File): Promise<AssetRow> {
-  const res = await fetch(`${apiBase}/assets?filename=${encodeURIComponent(file.name)}`, {
+async function uploadOne(apiBase: string, file: File, folderId?: string): Promise<AssetRow> {
+  const folder = folderId ? `&folderId=${encodeURIComponent(folderId)}` : "";
+  const res = await fetch(`${apiBase}/assets?filename=${encodeURIComponent(file.name)}${folder}`, {
     method: "POST",
     headers: { "content-type": file.type || "application/octet-stream" },
     body: file,

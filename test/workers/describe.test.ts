@@ -800,6 +800,60 @@ describe("POST {base}/api/assets/:id/describe", () => {
     expect(body.error).toBeNull();
   });
 
+  it("answers a row with no access keys when the deployment does not gate files", async () => {
+    const id = await seedAsset();
+    // A value left in the column (a host that removed `allowsAsset`) must not leak out.
+    await env.DB.prepare("update assets set access = ?, effective_access = ? where id = ?")
+      .bind('"members"', '"members"', id)
+      .run();
+    const folio = makeFolio({ fn: async () => ({ alt: "A portrait" }) });
+    const res = await post(folio, `/folio/api/assets/${id}/describe`);
+    expect(res?.status).toBe(200);
+    const { asset } = (await res!.json()) as { asset: Record<string, unknown> };
+    expect(asset.altAuto).toBe("A portrait");
+    expect(Object.keys(asset)).not.toContain("access");
+    expect(Object.keys(asset)).not.toContain("effectiveAccess");
+  });
+
+  it("hands a provider a signed URL for a gated file only when assetSigning is configured", async () => {
+    const gatedId = await seedAsset();
+    const openId = await seedAsset();
+    await env.DB.prepare("update assets set effective_access = ? where id = ?")
+      .bind('"members"', gatedId)
+      .run();
+    const urls: string[] = [];
+    const config = {
+      blocks: [pageRoot],
+      types,
+      bindings,
+      basePath: "/folio",
+      assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
+      auth: "open" as const,
+      route: (p: string) => (p ? `/${p}` : "/"),
+      describe: {
+        fn: async (input: { url: string }) => {
+          urls.push(input.url);
+          return { alt: "x" };
+        },
+      },
+    };
+    const signing = createFolio<Cloudflare.Env>({
+      ...config,
+      assetSigning: { keys: () => ["describe-key-0123456789abcdef0123456"] },
+    } as never);
+    await post(signing, `/folio/api/assets/${gatedId}/describe`);
+    await post(signing, `/folio/api/assets/${openId}/describe`);
+    expect(urls[0]).toMatch(/[?&]exp=\d+&sig=|[?&]sig=[\w-]+&exp=|exp=\d+.*sig=/);
+    expect(urls[1]).not.toContain("sig=");
+
+    urls.length = 0;
+    await post(
+      createFolio<Cloudflare.Env>(config as never),
+      `/folio/api/assets/${gatedId}/describe`,
+    );
+    expect(urls[0]).not.toContain("sig=");
+  });
+
   it("answers 200 with the recorded failure rather than 500", async () => {
     const id = await seedAsset();
     const folio = makeFolio({

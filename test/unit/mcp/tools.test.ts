@@ -110,19 +110,37 @@ const NOT_TOOLS: readonly string[] = [
 ];
 
 describe("the tool table", () => {
-  it("names seventeen tools, each once — sixteen route-backed and preview_document with none", () => {
-    // Sixteen are a `{method, path}` over the v1 app; `preview_document` is
+  it("names eighteen tools, each once — seventeen route-backed and preview_document with none", () => {
+    // Seventeen are a `{method, path}` over the v1 app; `preview_document` is
     // `?_folio=draft` plus a `browser` binding (decisions 5, 5a) and has
     // neither — `routes/mcp.ts`'s `tools/call` branches to it before the
-    // internal dispatch the other sixteen share.
-    expect(MCP_TOOLS).toHaveLength(17);
-    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(17);
+    // internal dispatch the other seventeen share.
+    expect(MCP_TOOLS).toHaveLength(18);
+    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(18);
     const preview = toolByName("preview_document");
     expect(preview?.method).toBeUndefined();
     expect(preview?.path).toBeUndefined();
     expect(MCP_TOOLS.filter((tool) => !routed(tool)).map((tool) => tool.name)).toEqual([
       "preview_document",
     ]);
+  });
+
+  it("gives update_asset the access, alt and description the v1 route takes, and nothing admin-only", () => {
+    const tool = toolByName("update_asset");
+    expect([tool?.method, tool?.path, tool?.body]).toEqual(["PATCH", "/assets/:id", "json"]);
+    expect(Object.keys(tool?.inputSchema.properties ?? {}).sort()).toEqual([
+      "access",
+      "alt",
+      "description",
+      "id",
+    ]);
+    // `folderId` and `tags` have no versioned routes, so a script cannot name them.
+    expect(tool?.inputSchema.properties).not.toHaveProperty("folderId");
+    expect(tool?.inputSchema.required).toEqual(["id"]);
+    // `null` is "inherit" on a patch and is not an upload's value.
+    expect(tool?.inputSchema.properties?.access?.type).toContain("null");
+    expect(toolByName("upload_asset")?.inputSchema.properties?.access?.type).not.toContain("null");
+    expect(toolByName("upload_asset")?.query).toEqual(["filename", "access"]);
   });
 
   it("resolves every route-backed tool to a route the v1 app declares", () => {
@@ -378,6 +396,7 @@ describe("the tool table", () => {
       unpublish_document: "publish",
       delete_document: "admin",
       upload_asset: "assets:write",
+      update_asset: "assets:write",
     });
   });
 });

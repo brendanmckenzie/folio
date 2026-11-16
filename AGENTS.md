@@ -528,6 +528,17 @@ bindings and the D1 migrations, and names the fix for each finding.
   that with `folio.cacheVerdict(req)`. Use Workers Caching and not the Cache API:
   they are separate stores and `cache.purge()` — what a publish calls — only
   reaches the former.
+- **Files are public unless `gate.allowsAsset` is set, and an agent loading protected
+  material must set the access value on the upload.** `POST {base}/api/v1/assets?access=…`
+  and the MCP `upload_asset` take `access`, from the gate field's vocabulary
+  (`get_schema` answers it as `assetAccess`); a file uploaded without it is public until
+  somebody gates it, and a public file that is gated afterwards leaves copies at the edge
+  that a queued purge then chases. `update_asset` and `PATCH {base}/api/v1/assets/:id`
+  change it later (`null` inherits the folder's). A gated file's name, alt text and tags
+  stay public, and one embedded as an image on a public page is a broken image for
+  most visitors: `check_document` warns (`gated-asset-embedded`). Route the cron's
+  `folio.runSchedules` through the cached entrypoint too, because that is what retries a
+  failed purge. See "Visitor access" in `docs/handbook.md`.
 - **Many sites in one deployment is opt-in and one-way.** Without `sites` a deployment
   is one site, as it always was. With it, see "A multi-site host" above; there is no
   turning it off again once a second site exists.

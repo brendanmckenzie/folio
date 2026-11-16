@@ -38,7 +38,9 @@
  * `scripts/cache-probe.mjs` is what exercises the rest against a deployment.
  */
 import {
+  ANY_ASSET_TAG,
   ANY_TYPE_TAG,
+  assetTag,
   formTag,
   globalTag,
   pathTag,
@@ -52,6 +54,7 @@ import {
 } from "../core/cache-tags";
 import { DEFAULT_SITE, type Registry, singletonTypeOf, sitesUnder } from "../core/sites";
 import type { StoryMeta } from "../core/story";
+import type { FolioDb } from "./db";
 import type { FolioHooks } from "./hooks";
 import type { FolioLogger } from "./types";
 
@@ -91,7 +94,7 @@ export type PurgeCapability = () => Promise<Purge | null>;
  * `cloudflare:workers` does not resolve under Node, where the unit suite imports
  * `runtime.ts` for `alarmHookCtx`.
  */
-const platformPurge: PurgeCapability = async () => {
+export const platformPurge: PurgeCapability = async () => {
   try {
     const { cache } = await import("cloudflare:workers");
     return typeof cache?.purge === "function" ? (options) => cache.purge(options) : null;
@@ -380,6 +383,147 @@ export async function purgeOptionSource(
   if (!opts.waitUntil || (await capability()) === null) return first;
   opts.waitUntil(sleep(delay).then(() => purge("option source change (second)", tag)));
   return first;
+}
+
+/** The most `asset_purges` rows one drain reads: 100 name their tags, a 101st says "too many". */
+const ASSET_DRAIN_READ = MAX_TAGS_PER_PURGE + 1;
+
+/** What a drain did: the purge it issued (null when it issued none) and whether it succeeded. */
+export interface AssetPurgeDrain {
+  purge: PurgeIssued | null;
+  /** False when a call was issued and failed; the rows are then left, with `attempts` recorded. */
+  ok: boolean;
+}
+
+interface QueuedPurge {
+  asset_id: string;
+  queued_at: number;
+  settle_at: number;
+}
+
+/**
+ * Drains the edge purges owed for files that went public to gated
+ * (`asset-access.md` decision 10). Reads at most 101 queued rows and issues
+ * **exactly one** purge call: `asset:<id>` per row when there are at most 100, else
+ * `asset:*`. On success every row it read is stamped `purged_at` and the ones whose
+ * `settle_at` has passed are deleted, so a row is only retired by a purge that
+ * succeeded after the window in which a lagging replica could still have let a copy
+ * in. On failure (a thrown error or `success: false`, the shared five-a-minute
+ * budget included) every row is left and `attempts` and `last_error` are recorded.
+ *
+ * **Due rows only**: never purged, or past `settle_at`. A row purged inside its own
+ * window waits for the cron or a later write to purge it once more after `settle_at`
+ * rather than spending the budget on every asset write meanwhile. `opts.all` reads
+ * every row regardless, for the repeat 25 seconds after a write.
+ *
+ * A stamp or delete is keyed on the `queued_at` the drain read, so a row re-queued
+ * while the purge was in flight keeps its new window and stays unpurged.
+ *
+ * **Never throws**: it runs after the write that queued the rows has committed.
+ * An absent capability issues nothing and keeps every row (`wrangler dev`, a host
+ * that has not turned caching on).
+ */
+export async function drainAssetPurges(
+  db: FolioDb,
+  capability: PurgeCapability,
+  now: number,
+  logger: FolioLogger = console,
+  opts: { all?: boolean } = {},
+): Promise<AssetPurgeDrain> {
+  try {
+    const { results: rows } = await db
+      .prepare(
+        `select asset_id, queued_at, settle_at from asset_purges
+          ${opts.all ? "" : "where purged_at is null or settle_at <= ?"}
+          order by queued_at, asset_id limit ${ASSET_DRAIN_READ}`,
+      )
+      .bind(...(opts.all ? [] : [now]))
+      .all<QueuedPurge>();
+    if (rows.length === 0) return { purge: null, ok: true };
+
+    const fn = await capability();
+    if (!fn) return { purge: null, ok: true };
+
+    const tags =
+      rows.length > MAX_TAGS_PER_PURGE ? [ANY_ASSET_TAG] : rows.map((r) => assetTag(r.asset_id));
+    const issued: PurgeIssued = { tags };
+    let failure: string | null = null;
+    try {
+      const result = await fn({ tags });
+      if (!result.success) failure = JSON.stringify(result.errors ?? "purge refused");
+    } catch (err) {
+      failure = err instanceof Error ? err.message : String(err);
+    }
+
+    if (failure !== null) {
+      const reason = failure.slice(0, 500);
+      logger.error("folio: asset purge failed; the rows stay queued", reason);
+      await db.batch(
+        rows.map((r) =>
+          db
+            .prepare(
+              `update asset_purges set attempts = attempts + 1, last_error = ?
+                where asset_id = ? and queued_at = ?`,
+            )
+            .bind(reason, r.asset_id, r.queued_at),
+        ),
+      );
+      return { purge: issued, ok: false };
+    }
+
+    await db.batch(
+      rows.flatMap((r) => [
+        db
+          .prepare("update asset_purges set purged_at = ? where asset_id = ? and queued_at = ?")
+          .bind(now, r.asset_id, r.queued_at),
+        // Retired only when this purge came after the settling window.
+        db
+          .prepare(
+            "delete from asset_purges where asset_id = ? and queued_at = ? and settle_at <= ?",
+          )
+          .bind(r.asset_id, r.queued_at, now),
+      ]),
+    );
+    return { purge: issued, ok: true };
+  } catch (err) {
+    logger.error("folio: the asset purge drain failed", err);
+    return { purge: null, ok: false };
+  }
+}
+
+/**
+ * The scope's owed purges, and the oldest one's `queued_at`. **A row is owed until the
+ * purge that retires it has succeeded after `settle_at`**, which is when the drain
+ * deletes it: so a row purged once inside its window (`purged_at` set, `settle_at`
+ * still ahead of it) is still counted. Counting only `purged_at is null` reported a
+ * clean edge while the post-settle purge, the one that clears a lagging replica's
+ * copies, had not yet run, and a host with no cron would never run it.
+ */
+export async function pendingAssetPurges(
+  db: FolioDb,
+  site: string | null,
+): Promise<{ pending: number; oldest: number | null }> {
+  const row = await db
+    .prepare(
+      `select count(*) as pending, min(queued_at) as oldest from asset_purges
+        where (purged_at is null or purged_at < settle_at) ${site === null ? "" : "and site_id = ?"}`,
+    )
+    .bind(...(site === null ? [] : [site]))
+    .first<{ pending: number; oldest: number | null }>();
+  return { pending: row?.pending ?? 0, oldest: row?.oldest ?? null };
+}
+
+/**
+ * Best-effort purge of tags that are not owed durably (`story:<id>` for pages that
+ * link a file that has just been gated, `asset:<id>` for a gated-to-public change),
+ * decision 10. Awaited, logs a failure, never throws, and answers what it asked for.
+ */
+export async function purgeAssetsNow(
+  capability: PurgeCapability,
+  tags: readonly string[],
+  logger: FolioLogger = console,
+): Promise<PurgeIssued | null> {
+  return createPurger(capability, logger)("asset access change", tags);
 }
 
 /**

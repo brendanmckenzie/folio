@@ -16,25 +16,38 @@
 import { Hono } from "hono";
 import type { AssetFilter } from "../../../core/assets";
 import { DEFAULT_SITE, SHARED_SCOPE } from "../../../core/sites";
+import { presentAssetRows } from "../../asset-access";
 import {
+  assetSiteOf,
   listAssetsByPage,
   MAX_UPLOAD_BYTES,
   readCappedBody,
   toAssetValue,
+  updateAsset,
   uploadAsset,
 } from "../../assets";
 import { ASSETS, READ } from "../../auth/roles";
 import { describeOnUpload } from "../../describe";
 import { FolioError, rethrow } from "../../errors";
-import { requestScope, requireAccess } from "../../middleware";
+import { fenceRow, requestScope, requireAccess } from "../../middleware";
+import {
+  accessInput,
+  accessQuery,
+  assetDomainOf,
+  gatingOf,
+  settleAssetWrite,
+} from "../asset-write";
 import { brandOf } from "../stories";
 import type { FolioRuntime } from "../../runtime";
 import type { FolioEnv, GatedReaderFactory } from "../../types";
 import {
+  ApiAssetPatchBody,
   contentLengthHeader,
   filenameQuery,
   folderQuery,
+  idParam,
   limitParam,
+  parseOptionalBody,
   tagsQuery,
 } from "../../validate";
 import { documentRoutes } from "./documents";
@@ -134,7 +147,9 @@ export function apiRoutes<Env>(
       // as today, scoped"), and `default` with no `sites`.
       chain: [requestScope(c, rt) ?? DEFAULT_SITE],
     });
-    return c.json({ assets: listed.assets, page, perPage, total: listed.total });
+    // Spec 43 decision 13: `access` and `effectiveAccess` ride on a gated scope's rows only.
+    const assets = await presentAssetRows(c.var.bindings().db, listed.assets, assetDomainOf(c));
+    return c.json({ assets, page, perPage, total: listed.total });
   });
 
   /**
@@ -161,6 +176,9 @@ export function apiRoutes<Env>(
     if (!media) throw new FolioError("unsupported", "No media bucket is configured");
 
     const filename = filenameQuery(c.req.query("filename"));
+    // `?access=` (spec 43 decision 11), typed by the gate field and checked before a byte
+    // is read. `folderId` stays admin-only: folder ids have no versioned routes.
+    const access = accessQuery(c);
     contentLengthHeader(c.req.header("content-length"), MAX_UPLOAD_BYTES);
     try {
       const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES);
@@ -168,6 +186,7 @@ export function apiRoutes<Env>(
         bytes,
         filename,
         site: requestScope(c, rt) ?? DEFAULT_SITE,
+        ...(access === undefined ? {} : { access }),
       });
       const { describe } = brandOf(c);
       if (describe?.onUpload) {
@@ -183,16 +202,61 @@ export function apiRoutes<Env>(
               env: c.env,
               logger: rt.logger,
               scoped: rt.sites !== null,
+              ...(rt.assetSigning ? { signing: rt.assetSigning } : {}),
             },
             row,
           ),
         );
       }
-      return c.json({ asset: row, value: toAssetValue(row) }, 201);
+      const settled = await settleAssetWrite(
+        c,
+        rt,
+        requestScope(c, rt) ?? DEFAULT_SITE,
+        gatingOf(c),
+      );
+      const [asset] = await presentAssetRows(db, [row], assetDomainOf(c));
+      return c.json({ asset, value: toAssetValue(row), ...settled }, 201);
     } catch (e) {
       rethrow(e);
     }
   });
+
+  /**
+   * Edit one file's `access`, `alt` and `description` (spec 43 decision 11), at
+   * `assets:write`. **New, and additive to the contract**: nothing existing changes shape.
+   *
+   * `access: null` inherits from the folder; absent leaves it alone. Fenced to the
+   * request's own scope like a write: a file outside it answers exactly as an unknown one
+   * (`404`). The answer is the row, with `access` and `effectiveAccess` on a gated scope,
+   * and `purge: { pending }` there too.
+   *
+   * `folderId` and `tags` are refused rather than ignored (`ApiAssetPatchBody`): folder
+   * and tag ids have no versioned routes, so a script cannot know them.
+   */
+  app.patch(
+    "/assets/:id",
+    requireAccess<Env>(rt, ASSETS),
+    fenceRow<Env>(rt, "write", assetSiteOf, "asset"),
+    async (c) => {
+      const { db } = c.var.bindings();
+      const id = idParam("id", c.req.param("id"));
+      const body = await parseOptionalBody(c.req, ApiAssetPatchBody);
+      const site = requestScope(c, rt) ?? DEFAULT_SITE;
+      const access = accessInput(c, body.access);
+      const gating = gatingOf(c);
+      const row = await updateAsset(
+        db,
+        id,
+        { ...body, ...(access === undefined ? {} : { access }) },
+        site,
+        gating,
+      );
+      if (!row) throw new FolioError("not_found", "Unknown asset");
+      const settled = await settleAssetWrite(c, rt, site, gating);
+      const [presented] = await presentAssetRows(db, [row], assetDomainOf(c));
+      return c.json({ ...presented, ...settled });
+    },
+  );
 
   return app;
 }

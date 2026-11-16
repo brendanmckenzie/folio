@@ -435,3 +435,40 @@ describe("a missing asset answers with the envelope, like every other failure", 
     expect(body.error.code).toBe("not_found");
   });
 });
+
+describe("a deployment that does not gate files answers rows exactly as before", () => {
+  it("carries no access key on any route that answers a row", async () => {
+    const created = await upload("plain.png", "image/png", PNG_1X1);
+    const { asset } = await created.json<{ asset: AssetRow }>();
+    const patched = await SELF.fetch(`${API}/assets/${asset.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ alt: "x" }),
+    });
+    const one = await SELF.fetch(`${API}/assets/${asset.id}`);
+    const list = await SELF.fetch(`${API}/assets`);
+    const v1 = await SELF.fetch(`${API}/v1/assets`);
+    const bodies = [
+      asset,
+      await patched.json(),
+      await one.json(),
+      ...(await list.json<{ rows: unknown[] }>()).rows,
+      ...((await v1.json<{ rows?: unknown[]; assets?: unknown[] }>()).rows ?? []),
+    ];
+    expect(bodies.length).toBeGreaterThan(3);
+    for (const row of bodies) {
+      expect(Object.keys(row as object).filter((k) => /access/i.test(k))).toEqual([]);
+    }
+  });
+
+  it("refuses an access value on a patch until the routes are wired", async () => {
+    const created = await upload("plain2.png", "image/png", PNG_1X1);
+    const { asset } = await created.json<{ asset: AssetRow }>();
+    const res = await SELF.fetch(`${API}/assets/${asset.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ access: "members" }),
+    });
+    expect(res.status).toBe(501);
+  });
+});

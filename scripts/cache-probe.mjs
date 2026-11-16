@@ -17,6 +17,31 @@
 // `cacheProps`), and, with a token, checks that one publish purges both.
 // Without any of the three this behaves exactly as it always has.
 //
+// **`--asset <key>` probes a media-library file instead of a page**
+// (`docs/specs/platform/asset-access.md` decision 10): that gating a public file drops
+// every cached copy of it, on every surface, and keeps them dropped.
+//
+//   node scripts/cache-probe.mjs https://alpha.example --asset ast_0123456789ab-report.pdf \
+//     --admin https://cms.example --site alpha --host https://beta.example \
+//     --preview https://preview.alpha.example --token folio_xxx --member-cookie demo_member=1
+//
+// The file must be **public**, in a scope that gates files, and the token needs
+// `content:read` and `assets:write`. The run warms the original and a `?w=320` variant on
+// every surface it was given (the first site host, each `--host`, the admin origin, the
+// preview origin), gates the file through `PATCH {api}/assets/:id`, and asserts that every
+// warmed copy stops being a HIT and is denied within `--timeout`. It then waits out the
+// settling window (`--settle` seconds, default 630: `PURGE_SETTLE_MS` is ten minutes) and
+// asserts the same again, which is what catches a copy a lagging read replica let in after
+// the first purge. Last it fires a member and several strangers at one cold URL together,
+// to see that request collapsing on a `private` response never hands a stranger the
+// member's bytes. **The file is restored to its original access whatever happened.**
+//
+// This is the check that makes the purge design believable: the tag purge reaches every
+// host, surface and `cf.cacheKey` variant only if Cloudflare says so, and nothing in
+// this repository can observe that. **Run it against a consumer's staging deployment
+// before tagging a release that touches the asset route, the tags or the purge queue. A
+// copy that survives blocks the release.**
+//
 // **This is a tool, not a test, and it can never gate CI.** Workers Cache is not
 // simulated by miniflare — `wrangler dev`, @cloudflare/vitest-plugin and every
 // `scripts/*-test.mjs` see no cache at all — so a hit, a purge and the time
@@ -62,6 +87,11 @@ const { values, positionals } = parseArgs({
     admin: { type: "string" },
     site: { type: "string" },
     preview: { type: "string" },
+    asset: { type: "string" },
+    host: { type: "string", multiple: true },
+    "member-cookie": { type: "string" },
+    "gate-value": { type: "string", default: "members" },
+    settle: { type: "string", default: "630" },
     timeout: { type: "string", default: "15000" },
     help: { type: "boolean", short: "h" },
   },
@@ -69,6 +99,8 @@ const { values, positionals } = parseArgs({
 
 const USAGE = `usage: node scripts/cache-probe.mjs <deployment-url> [--path /] [--token <api token>] [--timeout ms]
                                      [--admin <origin> --site <id>] [--preview <origin>]
+                                     [--asset <key> [--host <origin>]... [--member-cookie <name=value>]
+                                      [--gate-value <value>] [--settle <seconds>]]
 
   <deployment-url>   the host serving the page (on a multi-site deployment, one of the site's live hosts)
   --path             the page to probe (default /)
@@ -80,7 +112,16 @@ Multi-site (docs/specs/foundation/multi-site.md):
   --site <id>        the site the writes are made under; required with --admin, and the other way round
   --preview <origin> the site's preview origin: the same path is probed there, must be a separate
                      cache entry from the live host's, and (with --admin) is checked to be purged by
-                     the same publish`;
+                     the same publish
+
+Files (docs/specs/platform/asset-access.md):
+  --asset <key>      probe this public library file instead of a page (see the header); needs --token
+  --host <origin>    another site host to warm the file on; repeat for more
+  --member-cookie    a cookie the host's gate admits, for the concurrent member request; absent,
+                     the token's own bearer credential stands in (a Folio credential is admitted)
+  --gate-value       the access value to gate the file with (default members); must be one the gate
+                     field accepts and the host's allowsAsset refuses a stranger
+  --settle <seconds> how long to wait before the second check (default 630); 0 skips it`;
 
 const base = positionals[0]?.replace(/\/+$/, "");
 if (!base || values.help) {
@@ -208,6 +249,11 @@ function tagsOf(header) {
     byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), tag]);
   }
   return { tags, byPrefix };
+}
+
+if (values.asset) {
+  await probeAsset(values.asset);
+  summarise();
 }
 
 console.log(`\ncache-probe → ${TARGET}`);
@@ -528,6 +574,196 @@ if (meta?.id && owned) {
       }
     } else {
       record("type: purge lands", null, "the response carries no type: tag");
+    }
+  }
+}
+
+/* ------------------------------------------------- the file mode (--asset) --- */
+
+/**
+ * `--asset <key>`: gate a public file and watch every copy of it go.
+ *
+ * What counts as gone is stricter than "not a HIT": a stranger's request for a gated file
+ * must be **denied** (not a 200), because a MISS that returns 200 is the Worker serving
+ * gated bytes to a stranger, which is the failure this exists to catch.
+ */
+async function probeAsset(key) {
+  const id = key.slice(0, 16);
+  const strangerHeaders = { "sec-fetch-dest": "image" };
+  const surfaces = [
+    ["site host", base],
+    ...(values.host ?? []).map((h, i) => [`site host ${i + 2}`, originOf("--host", h)]),
+    ...(values.admin ? [["admin origin", originOf("--admin", values.admin)]] : []),
+    ...(values.preview ? [["preview origin", originOf("--preview", values.preview)]] : []),
+  ];
+  const urls = surfaces.flatMap(([name, origin]) => [
+    [`${name} original`, `${origin}/folio/asset/${key}`],
+    [`${name} ?w=320`, `${origin}/folio/asset/${key}?w=320`],
+  ]);
+
+  console.log(`\ncache-probe --asset → ${key}`);
+  for (const [name, url] of urls) console.log(`  ${name.padEnd(28)} ${url}`);
+  console.log("");
+
+  if (!auth) {
+    record("gate the file through the API", null, "no --token, so the file cannot be gated");
+    return;
+  }
+
+  // Find the row: its own access is what the run restores.
+  let row = null;
+  for (let page = 1; page <= 50 && !row; page++) {
+    const listed = await api(`/assets?perPage=200&page=${page}`).catch((err) => {
+      record("find the file", false, String(err));
+      return null;
+    });
+    if (!listed) return;
+    row = listed.assets.find((a) => a.id === id) ?? null;
+    if (listed.assets.length < 200) break;
+  }
+  if (!row) {
+    record("find the file", false, `no file ${id} in the scope's library`);
+    return;
+  }
+  if (!("effectiveAccess" in row)) {
+    record(
+      "find the file",
+      false,
+      "the row carries no access: this scope does not gate files (allowsAsset is not configured)",
+    );
+    return;
+  }
+  if (row.effectiveAccess !== null && row.effectiveAccess !== undefined) {
+    record(
+      "find the file",
+      false,
+      `the file is already gated (${JSON.stringify(row.effectiveAccess)}); pick a public one`,
+    );
+    return;
+  }
+  record("find the file", true, `${row.id}, own access ${JSON.stringify(row.access ?? null)}`);
+  const original = row.access ?? null;
+
+  // The tag the purge keys on, read off a request that bypasses the cache (Cloudflare strips
+  // the header from a cached response).
+  const bypassed = await probe({ cookie: "folio_draft=1" }, urls[0][1]);
+  const tags = tagsOf(bypassed.cacheTag).tags;
+  record(
+    "the public response carries asset:<id> and asset:*",
+    tags.includes(`asset:${id}`) && tags.includes("asset:*"),
+    bypassed.cacheTag ??
+      "no Cache-Tag: allowsAsset is not live on this deployment, or the file is gated",
+  );
+
+  // Warm every copy. Only copies that reached HIT can say anything afterwards.
+  const warmed = [];
+  for (const [name, url] of urls) {
+    const hit = await warm(url);
+    record(
+      `warm ${name}`,
+      hit ? true : null,
+      hit ? "HIT" : "never reached HIT (no cache, or no Images binding for the variant)",
+    );
+    if (hit) warmed.push([name, url]);
+  }
+  if (warmed.length === 0) {
+    record("any copy to purge", false, "nothing was cached, so nothing can be checked");
+    return;
+  }
+
+  /** Strangers only: no cookie, an `<img>` fetch, so a host's assetDenied answers the 403. */
+  const stranger = (url) => probe(strangerHeaders, url);
+  const denied = (seen) => seen.status !== 200;
+  const settledOnce = async (label) => {
+    for (const [name, url] of warmed) {
+      const started = Date.now();
+      let seen = await stranger(url);
+      while (Date.now() - started < TIMEOUT && (seen.cacheStatus === "HIT" || !denied(seen))) {
+        await wait(POLL_MS);
+        seen = await stranger(url);
+      }
+      const ok = seen.cacheStatus !== "HIT" && denied(seen);
+      record(
+        `${label}: ${name} is gone and denied`,
+        ok,
+        `${seen.status} ${seen.cacheStatus ?? "no cf-cache-status"} after ${Date.now() - started}ms${
+          ok ? "" : seen.status === 200 ? " (a stranger was served the file)" : ""
+        }`,
+      );
+    }
+  };
+
+  let gated = false;
+  try {
+    const result = await api(`/assets/${row.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ access: values["gate-value"] }),
+    });
+    gated = true;
+    record(
+      "gate the file through the API",
+      true,
+      `purge pending: ${JSON.stringify(result.purge?.pending ?? "not reported")}`,
+    );
+
+    await settledOnce("after gating");
+
+    const settle = Number(values.settle);
+    if (settle > 0) {
+      console.log(
+        `\nwaiting ${settle}s for the settling window (a lagging replica can still let a copy in) ...\n`,
+      );
+      await wait(settle * 1000);
+      await settledOnce("after settling");
+    } else {
+      record("after settling", null, "--settle 0");
+    }
+
+    // Request collapsing: strangers and a member arriving together at one cold URL. A
+    // private response must not be shared between them.
+    const memberHeaders = values["member-cookie"]
+      ? { cookie: values["member-cookie"] }
+      : { ...auth };
+    let leaked = 0;
+    let memberOk = 0;
+    for (let round = 0; round < 5; round++) {
+      const cold = `${urls[0][1].split("?")[0]}?_probe=${Date.now()}-${round}`;
+      const seen = await Promise.all([
+        probe(memberHeaders, cold),
+        ...Array.from({ length: 4 }, () => probe(strangerHeaders, cold)),
+      ]);
+      if (seen[0].status === 200) memberOk++;
+      leaked += seen.slice(1).filter((s) => s.status === 200).length;
+    }
+    record(
+      "concurrent member and stranger: no stranger is served the file",
+      leaked === 0,
+      `${leaked} of 20 stranger requests got a 200; the member got a 200 in ${memberOk} of 5 rounds`,
+    );
+    if (memberOk === 0) {
+      record(
+        "the member credential was admitted",
+        null,
+        "pass --member-cookie with a value the host's gate admits",
+      );
+    }
+  } catch (err) {
+    record("gate the file through the API", false, String(err));
+  } finally {
+    if (gated) {
+      try {
+        await api(`/assets/${row.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ access: original }),
+        });
+        record("the file is restored", true, `access ${JSON.stringify(original)}`);
+      } catch (err) {
+        record(
+          "the file is restored",
+          false,
+          `${err} (restore access ${JSON.stringify(original)} by hand)`,
+        );
+      }
     }
   }
 }

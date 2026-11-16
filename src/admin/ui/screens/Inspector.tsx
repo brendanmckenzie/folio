@@ -1,16 +1,19 @@
 import { useId, useState } from "react";
 import type { Blok, Doc } from "../../../core/doc";
+import { assetKeys } from "../../../core/refs";
 import type { LocaleConfig } from "../../../core/locales";
 import type { Resolution } from "../../../core/resolve";
-import type { DocumentType, SchemaIndex } from "../../../core/schema";
+import type { DocumentType, ManifestAssetAccess, SchemaIndex } from "../../../core/schema";
 import type { StoryMeta } from "../../../core/story";
 import type { Blocks } from "../../hooks/useBlocks";
 import { type StoryStore, useStoreState } from "../../store";
 import { Button } from "../Button";
 import { EmptyState } from "../EmptyState";
+import { type AssetLocks, isPublicPage } from "./assets-model";
 import { FieldRow } from "./fields/FieldRow";
 import { PageAddress } from "./fields/PageAddress";
 import css from "./Inspector.module.css";
+import { useAssetLocks } from "./useAssetAccess";
 import {
   belowBlok,
   canFocus,
@@ -91,6 +94,13 @@ export interface InspectorProps {
    */
   doc?: Doc | null;
   layers?: LayerInfo;
+  /**
+   * The manifest's `assetAccess`, present only where the deployment gates files. It is
+   * what switches on the lookup for the open document's gated files and the lock and
+   * warning on an asset card (`asset-access.md` decision 14); without it nothing here
+   * makes the request.
+   */
+  assetAccess?: ManifestAssetAccess;
 }
 
 /**
@@ -122,6 +132,20 @@ export interface InspectorProps {
 export function Inspector(props: InspectorProps) {
   const { store, schema, blok, readOnly, blocks, locale, isSourceLocale, locales } = props;
   const state = useStoreState(store);
+
+  /**
+   * One lookup per open document: the gated files among its keys, refetched when the
+   * set of keys changes. The doc on the stage, so a past version shows its own locks.
+   */
+  const accessKeys = props.assetAccess && props.doc ? assetKeys(props.doc, schema) : [];
+  const gatedAssets = useAssetLocks(props.apiBase, accessKeys, Boolean(props.assetAccess));
+  const assetLocks: AssetLocks | undefined = props.assetAccess
+    ? {
+        gated: gatedAssets,
+        config: props.assetAccess,
+        publicPage: isPublicPage(props.doc ?? null, schema, props.assetAccess),
+      }
+    : undefined;
 
   /**
    * Which field focus mode holds. Uncontrolled by default and controlled when the
@@ -286,6 +310,7 @@ export function Inspector(props: InspectorProps) {
                 schema,
                 types: props.types,
                 resolution: props.resolution,
+                ...(assetLocks ? { assetLocks } : {}),
               }}
               expanded={expandedField === name}
               onExpand={(open) => setExpandedField(open ? name : null)}

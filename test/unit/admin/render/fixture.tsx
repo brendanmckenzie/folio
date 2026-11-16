@@ -344,6 +344,18 @@ function bodyFor(url: string): unknown {
   const path = withoutOrigin.split("?")[0] ?? "";
   const query = withoutOrigin.slice(path.length);
 
+  // The media library's list, folders, purge queue and access lookup, when a test serves
+  // them (`asset-access.test.tsx`). Unserved, every one falls through to the empty page
+  // as it always did.
+  if (path === `${API}/assets` && served.assetRows) {
+    return { ...EMPTY_PAGE, rows: served.assetRows, total: served.assetRows.length };
+  }
+  if (path === `${API}/assets/folders` && served.assetFolders) {
+    return { ...EMPTY_PAGE, rows: served.assetFolders };
+  }
+  if (path === `${API}/assets/purges` && served.purges) return served.purges;
+  if (path === `${API}/assets/access` && served.access) return served.access;
+
   // `/stories?ids=` is `useStory`'s by-id read, not the tree's page, and the two
   // share a path. Answering the row is what puts the editor in its *loaded*
   // state — without it every `edit` route mounts "no such document", which passes
@@ -590,6 +602,12 @@ const served: {
   deliveries?: unknown[];
   /** What a Retry answers as `delivery`. */
   retried?: unknown;
+  /** The library rows `GET /assets` answers, and the folders `GET /assets/folders` does. */
+  assetRows?: unknown[];
+  assetFolders?: unknown[];
+  /** What `GET /assets/purges` and `GET /assets/access` answer. */
+  purges?: unknown;
+  access?: unknown;
 } = {};
 
 export function serve(over: typeof served): void {
@@ -607,6 +625,10 @@ export function resetServed(): void {
   delete served.responses;
   delete served.deliveries;
   delete served.retried;
+  delete served.assetRows;
+  delete served.assetFolders;
+  delete served.purges;
+  delete served.access;
 }
 
 /**

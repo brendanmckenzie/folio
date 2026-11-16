@@ -5,7 +5,8 @@ import { useUpload } from "../../../hooks/useUpload";
 import { Button } from "../../Button";
 import { Field, Input } from "../../Field";
 import { AssetPicker } from "../AssetPicker";
-import { humanSize, keyAssets, type KeyedAsset } from "../assets-model";
+import { LOCK_ICON } from "../../icons";
+import { type AssetLocks, assetLock, humanSize, keyAssets, type KeyedAsset } from "../assets-model";
 import css from "./fields.module.css";
 
 interface Props {
@@ -20,6 +21,9 @@ interface Props {
   mount: string;
   editable: boolean;
   onChange: (value: Json) => void;
+  /** Present only where the deployment gates files: which of this document's files are
+   * gated, for the card's lock and warning (`asset-access.md` decision 14). */
+  locks?: AssetLocks;
 }
 
 /**
@@ -37,7 +41,16 @@ function thumbFor(mount: string, asset: AssetValue, width = 320): string {
 
 /* ------------------------------------------------------------------ single --- */
 
-export function AssetField({ id, value, accept, apiBase, mount, editable, onChange }: Props) {
+export function AssetField({
+  id,
+  value,
+  accept,
+  apiBase,
+  mount,
+  editable,
+  onChange,
+  locks,
+}: Props) {
   const asset = asAsset(value);
   const upload = useUpload(apiBase);
   const [picking, setPicking] = useState(false);
@@ -68,6 +81,7 @@ export function AssetField({ id, value, accept, apiBase, mount, editable, onChan
           mount={mount}
           asset={asset}
           editable={editable}
+          {...(locks ? { locks } : {})}
           onChange={(next) => onChange(next as unknown as Json)}
           onRemove={() => onChange(null)}
         />
@@ -94,6 +108,7 @@ export function AssetField({ id, value, accept, apiBase, mount, editable, onChan
           apiBase={apiBase}
           mount={mount}
           {...(accept ? { accept } : {})}
+          {...(locks ? { assetAccess: locks.config } : {})}
           onPick={(picked) => {
             onChange(picked as unknown as Json);
             setPicking(false);
@@ -141,6 +156,7 @@ export function MultiAssetField({
   editable,
   max,
   onChange,
+  locks,
 }: Props & { max?: number }) {
   const assets = asAssets(value);
   const cards = useAssetKeys(assets);
@@ -186,6 +202,7 @@ export function MultiAssetField({
           mount={mount}
           asset={asset}
           editable={editable}
+          {...(locks ? { locks } : {})}
           position={{ index: i, total: assets.length }}
           onMove={(to) => swap(i, to)}
           onChange={(next) => write(assets.map((a, j) => (i === j ? next : a)))}
@@ -220,6 +237,7 @@ export function MultiAssetField({
           apiBase={apiBase}
           mount={mount}
           {...(accept ? { accept } : {})}
+          {...(locks ? { assetAccess: locks.config } : {})}
           onPick={(picked) => {
             write([...assets, picked]);
             setPicking(false);
@@ -237,6 +255,7 @@ function AssetCard({
   mount,
   asset,
   editable,
+  locks,
   position,
   onChange,
   onRemove,
@@ -245,6 +264,7 @@ function AssetCard({
   mount: string;
   asset: AssetValue;
   editable: boolean;
+  locks?: AssetLocks;
   position?: { index: number; total: number };
   onChange: (next: AssetValue) => void;
   onRemove: () => void;
@@ -252,6 +272,7 @@ function AssetCard({
 }) {
   const image = isImageAsset(asset);
   const focal = asset.focal;
+  const lock = locks ? assetLock(asset, locks.gated, locks.config, locks.publicPage) : null;
 
   // Clicking the image is the whole focal-point UI: pick the spot that must stay in
   // frame when this gets cropped to some other aspect ratio.
@@ -301,6 +322,13 @@ function AssetCard({
           {asset.width && asset.height ? `${asset.width}×${asset.height} · ` : ""}
           {asset.size ? humanSize(asset.size) : "external"}
         </span>
+        {lock ? (
+          <span className={css.lock} title={`Gated: ${lock.label}`}>
+            {LOCK_ICON}
+            {lock.label}
+          </span>
+        ) : null}
+        {lock?.warning ? <p className={css.lockWarn}>{lock.warning}</p> : null}
 
         {/* A real `<label>`, where the old card had a `placeholder="Alt text"` and
             nothing else. Alt text is the one field on this card that a

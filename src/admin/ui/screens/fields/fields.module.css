@@ -624,3 +624,23 @@
   flex-wrap: wrap;
   gap: var(--space-1);
 }
+
+/* ------------------------------------------------------------------- access --- */
+
+/* A gated file's lock and the name of its access, on the card's size line
+   (`asset-access.md` decision 14). In flow beside the dimensions, not over the
+   thumbnail, so it never covers the focal-point button. */
+.lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+}
+
+/* The one-line warning under an embedded gated image on a public page. */
+.lockWarn {
+  margin: 0;
+  color: var(--state-warn-fg);
+  font-size: var(--text-xs);
+}
