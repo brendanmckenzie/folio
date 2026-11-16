@@ -1135,6 +1135,7 @@ const PAST_TENSE: Record<AssetBulkAction, string> = {
   untag: "Untagged",
   move: "Filed",
   delete: "Deleted",
+  access: "Changed access on",
 };
 
 /** One sentence for a finished run. **Never atomic and never implied to be**:

@@ -48,6 +48,13 @@ import {
   writeBulkCursor,
 } from "../core/bulk";
 import { DEFAULT_SITE } from "../core/sites";
+import {
+  type AssetGating,
+  assetRecomputeStatements,
+  encodeAccess,
+  trackTransitions,
+  validateAccessValue,
+} from "./asset-access";
 import { folderSiteOf } from "./asset-folders";
 import { tagsByIds } from "./asset-tags";
 import { filterBatch, idBatch, readCursor, reasonOf } from "./bulk-walk";
@@ -88,6 +95,11 @@ export interface AssetBulkDeps {
   db: FolioDb;
   media?: R2Bucket | undefined;
   logger?: FolioLogger;
+  /**
+   * Present when the scope's brand gates files (`asset-access.md`): `access` needs its
+   * domain, and `move` and `access` queue purges and record transitions on it.
+   */
+  gating?: AssetGating | null;
 }
 
 export interface AssetBulkOptions {
@@ -114,6 +126,12 @@ export interface AssetBulkOptions {
    * truthiness, and a `move` that omits it entirely is refused.
    */
   folderId?: string | null;
+  /**
+   * `access`'s value: validated once before the walk against the brand's gate field
+   * (`validateAccessValue`), like `move`'s folder. Required for the action, and never
+   * null: inheriting is a per-file and per-folder edit, not a bulk one.
+   */
+  access?: unknown;
 }
 
 /**
@@ -171,6 +189,13 @@ export async function runAssetBulk(
       throw new FolioError("bad_request", "Unknown folder");
     }
   }
+  // Validated once, against the brand's gate field, before any row is touched. A scope that
+  // does not gate files refuses outright (`400 unsupported`, the shape `describe` uses).
+  let access: string | null = null;
+  if (action === "access") {
+    if (!deps.gating) throw new FolioError("unsupported", "This site does not gate files");
+    access = encodeAccess(validateAccessValue(deps.gating.domain, opts.access));
+  }
   if (action === "delete" && !deps.media) {
     throw new FolioError("unsupported", "No media bucket is configured");
   }
@@ -195,7 +220,7 @@ export async function runAssetBulk(
   // job on a site with live editors would become un-completable, and the guard
   // confirms *intent* rather than freezing the table.
   if (selection.all && resume === null) {
-    const actual = await countAssets(db, selection.filter, [scope]);
+    const actual = await countAssets(db, selection.filter, [scope], deps.gating?.domain.public);
     if (actual !== selection.expected) {
       return { refused: "count", expected: selection.expected, actual };
     }
@@ -229,7 +254,15 @@ export async function runAssetBulk(
   // needs forty of them. It reads a full batch and acts on at most `allowance` of
   // what survives.
   const { rows, consumed, exhausted, last } = selection.all
-    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance, [scope])
+    ? await filterBatch(
+        db,
+        selection,
+        resume?.after ?? null,
+        batch,
+        allowance,
+        [scope],
+        deps.gating?.domain.public,
+      )
     : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), [scope]);
 
   for (const [at, row] of rows.entries()) {
@@ -248,7 +281,7 @@ export async function runAssetBulk(
       continue;
     }
     try {
-      await one(deps, action, row, tags, opts, scope);
+      await one(deps, action, row, tags, opts, scope, access);
       report.done++;
     } catch (err) {
       report.failed.push({
@@ -284,8 +317,12 @@ async function one(
   tags: readonly AssetTag[],
   opts: AssetBulkOptions,
   scope: string,
+  access: string | null,
 ): Promise<void> {
   const { db } = deps;
+  const { gating } = deps;
+  const gate = gating ? { public: gating.domain.public, now: Date.now() } : null;
+  const only = { where: "id = ? and site_id = ?", binds: [row.id, scope] };
   switch (action) {
     case "tag":
       // **Add, never replace** — the difference between this and
@@ -320,10 +357,31 @@ async function one(
       // One column on one row, and **no R2 operation of any kind** — decision 1:
       // a folder is metadata, never part of the key, so filing a file that is
       // used on a published page cannot change a byte of that page.
-      await db
-        .prepare("update assets set folder_id = ? where id = ? and site_id = ?")
-        .bind(opts.folderId ?? null, row.id, scope)
-        .run();
+      //
+      // The one thing a move does change is what the route reads (`asset-access.md`
+      // decision 4): the destination is bound explicitly in the recompute that follows,
+      // never read off the row the `update` is still rewriting.
+      await trackTransitions(db, gating, only, () =>
+        db.batch([
+          db
+            .prepare("update assets set folder_id = ? where id = ? and site_id = ?")
+            .bind(opts.folderId ?? null, row.id, scope),
+          ...assetRecomputeStatements(db, row.id, scope, opts.folderId ?? null, gate),
+        ]),
+      );
+      return;
+    case "access":
+      // Own value set, then the recompute against the file's current folder, which a bulk
+      // access does not change. Each row queues its own purge in its own batch; the drain
+      // is the caller's, once, on the batch that completes the walk.
+      await trackTransitions(db, gating, only, () =>
+        db.batch([
+          db
+            .prepare("update assets set access = ? where id = ? and site_id = ?")
+            .bind(access, row.id, scope),
+          ...assetRecomputeStatements(db, row.id, scope, row.folderId, gate),
+        ]),
+      );
       return;
     case "delete":
       // The identical call `DELETE {base}/api/assets/:id` makes: the row and its

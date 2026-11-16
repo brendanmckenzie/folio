@@ -243,6 +243,7 @@ describe("validateGate: asset gating", () => {
     const resolved = validateGate(gate({ allowsAsset }), TYPES, schema);
     expect(resolved?.assets).toEqual({
       primitive: "string",
+      public: "public",
       options: [
         { value: "public", label: "Everyone" },
         { value: "members", label: "Members" },
@@ -256,13 +257,13 @@ describe("validateGate: asset gating", () => {
       TYPES,
       schemaWith(number({ indexed: true })),
     );
-    expect(resolved?.assets).toEqual({ primitive: "number" });
+    expect(resolved?.assets).toEqual({ primitive: "number", public: 0 });
     const bool = validateGate(
       gate({ allowsAsset, public: false }),
       TYPES,
       schemaWith(boolean({ indexed: true })),
     );
-    expect(bool?.assets).toEqual({ primitive: "boolean" });
+    expect(bool?.assets).toEqual({ primitive: "boolean", public: false });
   });
 
   it("offers only the options every declaring select lists, labels from the first", () => {

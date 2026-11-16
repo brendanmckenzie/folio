@@ -11,6 +11,8 @@
  * resizing strategy — a document written on a `workers.dev` preview renders
  * identically on a zone.
  */
+import { NO_STORE } from "../core/cache-tags";
+import type { Json } from "../core/doc";
 import type { AssetValue } from "../core/values";
 import type { AssetTransform } from "../core/resolve";
 import { FolioError } from "./errors";
@@ -25,6 +27,12 @@ import type { StoryMeta } from "../core/story";
 import { assetReferences, clearInboundRefStatements } from "./content-index";
 import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from "./keyset";
 import { chainClause, storiesFor } from "./stories";
+import {
+  type AssetGating,
+  assetRecomputeStatements,
+  encodeAccess,
+  trackTransitions,
+} from "./asset-access";
 import { bindChunks, type FolioDb } from "./db";
 import type { FolioLogger } from "./types";
 
@@ -148,6 +156,12 @@ export function assetFilterSql(
    * statements the pure tests pin.
    */
   scope?: readonly string[] | null,
+  /**
+   * `gate.public`, for the `gated` clause only: a file is gated when its effective value
+   * is set and is not the public one. Absent means the deployment does not gate files,
+   * and `gated` is then refused rather than silently ignored.
+   */
+  accessPublic?: string | number | boolean,
 ): { clauses: string[]; binds: unknown[] } {
   const clauses: string[] = [];
   const binds: unknown[] = [];
@@ -224,6 +238,16 @@ export function assetFilterSql(
   // asset a retry fixes leaves this set on its own — nobody has to untick it.
   // Binds nothing.
   if (filter.failed) clauses.push("describe_error is not null");
+  // Spec 43. A scan, like every asset filter but folder and tag (`0019` adds no index on
+  // `assets`). Refused when the scope does not gate files, so a captured *select all* of
+  // "gated" files can never compose as the whole library.
+  if (filter.gated) {
+    if (accessPublic === undefined) {
+      throw new FolioError("unsupported", "This site does not gate files");
+    }
+    clauses.push("(effective_access is not null and effective_access <> ?)");
+    binds.push(encodeAccess(accessPublic));
+  }
 
   return { clauses, binds };
 }
@@ -250,8 +274,9 @@ export type AssetScope = readonly string[] | null;
 export function scopedAssetFilter(
   filter: AssetFilter,
   scope: AssetScope = SINGLE_SITE_CHAIN,
+  accessPublic?: string | number | boolean,
 ): { clauses: string[]; binds: unknown[] } {
-  const composed = assetFilterSql(filter, scope);
+  const composed = assetFilterSql(filter, scope, accessPublic);
   if (scope === null) return composed;
   const within = chainClause(scope);
   return {
@@ -276,6 +301,8 @@ export interface ListAssetsOptions extends AssetFilter {
   chain?: AssetScope;
   /** One of `core/assets.ts`'s `AssetSort` values. Absent is `created`. */
   sort?: AssetSort;
+  /** `gate.public`, present when the scope's brand gates files; what `gated` compares against. */
+  accessPublic?: string | number | boolean;
   /**
    * Reverses the ordering. Absent means the sort's own natural direction, which is
    * what a column header shows on its first click.
@@ -308,7 +335,7 @@ export async function listAssets(
   const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort];
   const resume = keysetWhere(keyset, cursor);
 
-  const filter = scopedAssetFilter(opts, opts.chain);
+  const filter = scopedAssetFilter(opts, opts.chain, opts.accessPublic);
   const where = whereOf(...filter.clauses, resume.sql);
 
   const [rows, total] = await Promise.all([
@@ -350,8 +377,9 @@ export async function countAssets(
   db: FolioDb,
   filter: AssetFilter = {},
   scope: AssetScope = SINGLE_SITE_CHAIN,
+  accessPublic?: string | number | boolean,
 ): Promise<number> {
-  const { clauses, binds } = scopedAssetFilter(filter, scope);
+  const { clauses, binds } = scopedAssetFilter(filter, scope, accessPublic);
   const row = await db
     .prepare(`select count(*) as n from assets ${whereOf(...clauses)}`)
     .bind(...binds)
@@ -444,9 +472,11 @@ export async function assetsMatching(
     /** The scopes walked: a captured filter is read against the request's, never a
      * scope of its own. `null` is every scope (the platform tier's describe run). */
     scope?: AssetScope;
+    /** `gate.public`, for a captured `gated` filter. */
+    accessPublic?: string | number | boolean;
   },
 ): Promise<AssetRow[]> {
-  const { clauses, binds } = scopedAssetFilter(filter, opts.scope);
+  const { clauses, binds } = scopedAssetFilter(filter, opts.scope, opts.accessPublic);
   const sql = [...clauses];
   if (opts.after) {
     sql.push("id > ?");
@@ -626,11 +656,25 @@ export async function uploadAsset(
     /** The scope that owns the file (`multi-site.md` decision 3): the request's.
      * Default `default`, the one scope of a deployment with no `sites`. */
     site?: string;
+    /**
+     * The folder the file is filed in, **in the one insert** (`asset-access.md` decision 4):
+     * a file uploaded while browsing a gated folder is gated from its first byte served.
+     * An unknown folder, or one in another scope, is a `bad_request`.
+     */
+    folderId?: string | null;
+    /** An own access value, already validated against the brand's gate field. Absent inherits. */
+    access?: Json;
   },
 ): Promise<AssetRow> {
   if (input.bytes.byteLength === 0) throw new Error("Empty upload");
   if (input.bytes.byteLength > MAX_UPLOAD_BYTES) {
     throw new Error(`File is larger than ${Math.floor(MAX_UPLOAD_BYTES / 1024 / 1024)}MB`);
+  }
+
+  const site = input.site ?? DEFAULT_SITE;
+  const folderId = input.folderId ?? null;
+  if (folderId !== null && (await folderSiteOf(db, folderId)) !== site) {
+    throw new FolioError("bad_request", "Unknown folder");
   }
 
   const id = `ast_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -667,9 +711,10 @@ export async function uploadAsset(
     height: dims?.height ?? null,
     alt: "",
     createdAt: Date.now(),
-    // Every new upload starts unfiled, untagged and undescribed — the defaults
-    // the insert below leaves unspecified columns to (`migrations/0008_asset_organisation.sql`).
-    folderId: null,
+    // Every new upload starts unfiled (unless a folder was named), untagged and
+    // undescribed — the defaults the insert below leaves unspecified columns to
+    // (`migrations/0008_asset_organisation.sql`).
+    folderId,
     description: "",
     altAuto: "",
     descriptionAuto: "",
@@ -678,24 +723,56 @@ export async function uploadAsset(
   };
 
   try {
-    await db
-      .prepare(
-        `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at,
-                             site_id)
-         values (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
-      )
-      .bind(
-        row.id,
-        row.key,
-        row.filename,
-        row.contentType,
-        row.size,
-        row.width,
-        row.height,
-        row.createdAt,
-        input.site ?? DEFAULT_SITE,
-      )
-      .run();
+    // Today's insert, verbatim, when the upload names neither a folder nor an access value:
+    // a deployment that does not gate files issues exactly the statement it always did.
+    if (folderId === null && input.access === undefined) {
+      await db
+        .prepare(
+          `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at,
+                               site_id)
+           values (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+        )
+        .bind(
+          row.id,
+          row.key,
+          row.filename,
+          row.contentType,
+          row.size,
+          row.width,
+          row.height,
+          row.createdAt,
+          site,
+        )
+        .run();
+    } else {
+      // `effective_access` in the same insert, derived from own values only
+      // (`asset-access.md` decisions 3 and 4): the file is never served ungated.
+      const own = input.access === undefined ? null : encodeAccess(input.access);
+      await db
+        .prepare(
+          `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at,
+                               site_id, folder_id, access, effective_access)
+           values (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?,
+                   coalesce(?, (select effective_access from asset_folders where id = ? and site_id = ?)))`,
+        )
+        .bind(
+          row.id,
+          row.key,
+          row.filename,
+          row.contentType,
+          row.size,
+          row.width,
+          row.height,
+          row.createdAt,
+          site,
+          folderId,
+          own,
+          own,
+          folderId,
+          site,
+        )
+        .run();
+    }
   } catch (e) {
     // Compensate: the object must not outlive the row that was supposed to
     // describe it. The compensating delete gets its own try/catch so a
@@ -728,6 +805,11 @@ export interface AssetPatch {
   folderId?: string | null;
   /** The **whole** set of tag ids, replacing whatever is there. */
   tags?: readonly string[];
+  /**
+   * The file's own access value, already validated against the brand's gate field
+   * (`asset-access.md` decision 11); `null` inherits from the folder. Absent leaves it alone.
+   */
+  access?: Json | null;
 }
 
 /**
@@ -756,6 +838,8 @@ export async function updateAsset(
    * tag from another scope is an unknown one — filing and tagging across scopes are
    * refused (`multi-site.md`'s table). */
   site: string = DEFAULT_SITE,
+  /** Present when the scope's brand gates files: queues the purge and records transitions. */
+  gating?: AssetGating | null,
 ): Promise<AssetRow | null> {
   const row = await assetById(db, id);
   if (!row || (await assetSiteOf(db, id)) !== site) return null;
@@ -781,11 +865,39 @@ export async function updateAsset(
     binds.push(patch.folderId);
   }
 
+  if (patch.access !== undefined) {
+    sets.push("access = ?");
+    binds.push(patch.access === null ? null : encodeAccess(patch.access));
+  }
+
   if (sets.length > 0) {
-    await db
+    const update = db
       .prepare(`update assets set ${sets.join(", ")} where id = ? and site_id = ?`)
-      .bind(...binds, id, site)
-      .run();
+      .bind(...binds, id, site);
+    if (patch.folderId === undefined && patch.access === undefined) {
+      await update.run();
+    } else {
+      // A new folder or a new own value changes what the route reads. The recompute is a
+      // statement of its own, **after** the one that sets `folder_id`, binding the
+      // destination (`asset-access.md` decision 3).
+      const destination = patch.folderId !== undefined ? patch.folderId : row.folderId;
+      await trackTransitions(
+        db,
+        gating,
+        { where: "id = ? and site_id = ?", binds: [id, site] },
+        () =>
+          db.batch([
+            update,
+            ...assetRecomputeStatements(
+              db,
+              id,
+              site,
+              destination,
+              gating ? { public: gating.domain.public, now: Date.now() } : null,
+            ),
+          ]),
+      );
+    }
   }
   if (patch.tags !== undefined) await setAssetTags(db, id, patch.tags, site);
 
@@ -829,6 +941,8 @@ export async function deleteAsset(
   await db.batch([
     db.prepare("delete from assets where id = ? and site_id = ?").bind(id, site),
     ...clearInboundRefStatements(db, [row.key]),
+    // No foreign key (`0019`): the queued purge of a deleted file has nothing left to purge.
+    db.prepare("delete from asset_purges where asset_id = ?").bind(id),
   ]);
   try {
     await bucket.delete(row.key);
@@ -964,6 +1078,7 @@ function serveHeaders(cacheControl: string, contentType: string): Record<string,
 function canonicalTransformRequest(
   url: string,
   transform: AssetTransform & { focal?: { x: number; y: number } },
+  mode: ServeMode = "public",
 ): Request {
   const { origin, pathname } = new URL(url);
   const params = new URLSearchParams();
@@ -973,8 +1088,36 @@ function canonicalTransformRequest(
   if (transform.fit) params.set("fit", transform.fit);
   if (transform.format) params.set("f", transform.format);
   if (transform.focal) params.set("fp", `${transform.focal.x},${transform.focal.y}`);
+  // A gated variant lives under a key no public request can form
+  // (`asset-access.md` decision 6), so it is never found by a request that has not
+  // passed the gate and a public variant stored before the file was gated is never
+  // read for one that has.
+  if (mode === "private") params.set(PRIVATE_KEY_PARAM, "1");
   const query = params.toString();
   return new Request(`${origin}${pathname}${query ? `?${query}` : ""}`);
+}
+
+/** The query parameter that separates a gated variant's Cache API key from a public one's. */
+const PRIVATE_KEY_PARAM = "__folio_private";
+
+/**
+ * `'public'` is every asset response before spec 43 and is still what an ungated file
+ * gets. `'private'` is a **granted** response for a gated file (`asset-access.md`
+ * decision 6): every `cache-control` the client receives is `private, no-store`, so
+ * Workers Caching stores neither original nor variant. Only the caller that has passed
+ * the gate (`asset-gate.ts`) may ask for it.
+ */
+export type ServeMode = "public" | "private";
+
+/**
+ * The same response with `cache-control` forced to `private, no-store`: rebuilt, so the
+ * response that was **stored** in the Cache API keeps `IMMUTABLE` (the Cache API will not
+ * store a `private` one) and only what the client receives is mapped.
+ */
+function privately(response: Response): Response {
+  const headers = new Headers(response.headers);
+  headers.set("cache-control", NO_STORE);
+  return new Response(response.body, { status: response.status, headers });
 }
 
 export async function serveAsset(
@@ -984,6 +1127,7 @@ export async function serveAsset(
   transform: AssetTransform & { focal?: { x: number; y: number } },
   request: Request,
   logger: FolioLogger = console,
+  mode: ServeMode = "public",
 ): Promise<Response> {
   const object = await bucket.get(key);
   if (!object) throw new FolioError("not_found", "No such asset");
@@ -1024,7 +1168,7 @@ export async function serveAsset(
     const stable = !wantsTransform || !SERVED_CONTENT_TYPES.has(contentType);
     return new Response(object.body, {
       headers: {
-        ...serveHeaders(stable ? IMMUTABLE : DEGRADED, contentType),
+        ...serveHeaders(mode === "private" ? NO_STORE : stable ? IMMUTABLE : DEGRADED, contentType),
         etag: object.httpEtag,
       },
     });
@@ -1041,9 +1185,9 @@ export async function serveAsset(
   // shadows the Workers one and has no `default` property, though the runtime
   // object underneath is the same either way.
   const cache = (caches as unknown as { default: Cache }).default;
-  const canonical = canonicalTransformRequest(request.url, transform);
+  const canonical = canonicalTransformRequest(request.url, transform, mode);
   const cached = await cache.match(canonical);
-  if (cached) return cached;
+  if (cached) return mode === "private" ? privately(cached) : cached;
 
   let bytes: ArrayBuffer;
   let outContentType: string;
@@ -1087,7 +1231,9 @@ export async function serveAsset(
     // failed, not the variant itself, and the failure may well be transient.
     const original = await bucket.get(key);
     if (!original) throw new FolioError("not_found", "No such asset");
-    return new Response(original.body, { headers: serveHeaders(DEGRADED, contentType) });
+    return new Response(original.body, {
+      headers: serveHeaders(mode === "private" ? NO_STORE : DEGRADED, contentType),
+    });
   }
 
   const response = new Response(bytes, { headers: serveHeaders(IMMUTABLE, outContentType) });
@@ -1100,7 +1246,7 @@ export async function serveAsset(
   } catch (e) {
     logger.error(`folio: asset cache write failed for ${key}`, e);
   }
-  return response;
+  return mode === "private" ? privately(response) : response;
 }
 
 /**

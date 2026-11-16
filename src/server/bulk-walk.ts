@@ -60,8 +60,10 @@ export async function filterBatch(
   limit: number,
   allowance: number,
   scope: readonly string[] | null,
+  /** `gate.public` when the scope gates files: what a captured `gated` filter compares against. */
+  accessPublic?: string | number | boolean,
 ): Promise<Batch> {
-  const rows = await assetsMatching(db, selection.filter, { limit, after, scope });
+  const rows = await assetsMatching(db, selection.filter, { limit, after, scope, accessPublic });
   const excluded = new Set(selection.exclude ?? []);
   const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id));
   // Trimmed to the ceiling *after* the exclusions, which is the only order that

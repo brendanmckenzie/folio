@@ -232,6 +232,17 @@ export const StoryDuplicateBody = v.object(
 export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJECT);
 
 /**
+ * An asset or folder access value off a body (`asset-access.md` decision 11): the gate
+ * field's vocabulary is a scalar, and **which** scalar, and which options, is the brand's
+ * (`validateAccessValue`), so this checks only the shape. `null` is added where it means
+ * "inherit".
+ */
+const ACCESS_SCALAR = v.union(
+  [v.string("must be a string, number or boolean"), v.number(), v.boolean()],
+  "must be a string, number or boolean",
+);
+
+/**
  * What an editor can change about one library row
  * (`../../docs/specs/content-model/media-library.md` decision 4 and phase 3).
  *
@@ -254,6 +265,7 @@ export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJE
  */
 export const AssetPatchBody = v.object(
   {
+    access: v.optional(v.nullable(ACCESS_SCALAR)),
     alt: v.optional(bounded(500)),
     description: v.optional(bounded(2000)),
     folderId: v.optional(v.nullable(ID)),
@@ -297,14 +309,18 @@ export const AssetTagBody = v.object({ name: required(60) }, OBJECT);
  * whole of what makes `PATCH { name }` a rename rather than a move to the root.
  */
 export const AssetFolderCreateBody = v.object(
-  { name: required(120), parentId: v.optional(v.nullable(ID)) },
+  { name: required(120), parentId: v.optional(v.nullable(ID)), access: v.optional(ACCESS_SCALAR) },
   OBJECT,
 );
 
 /** The same fields, both optional: `{ name }` renames, `{ parentId }` moves, and
  * both together is one subtree rewrite rather than two. */
 export const AssetFolderPatchBody = v.object(
-  { name: v.optional(required(120)), parentId: v.optional(v.nullable(ID)) },
+  {
+    name: v.optional(required(120)),
+    parentId: v.optional(v.nullable(ID)),
+    access: v.optional(v.nullable(ACCESS_SCALAR)),
+  },
   OBJECT,
 );
 
@@ -1571,6 +1587,9 @@ const CAPTURED_ASSET_FILTER = v.object(
     untagged: v.optional(v.boolean("must be true or false")),
     undescribed: v.optional(v.boolean("must be true or false")),
     failed: v.optional(v.boolean("must be true or false")),
+    // Spec 43. Declared here or this strict-less object strips it in silence, and a
+    // select-all of "the gated files" becomes the whole library.
+    gated: v.optional(v.boolean("must be true or false")),
   },
   OBJECT,
 );

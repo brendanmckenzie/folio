@@ -20,7 +20,9 @@ export type { FieldCondition } from "./conditions";
 // `Response` and sets these two headers on it, and Folio — which never
 // constructs one — computes what they should say.
 export {
+  ANY_ASSET_TAG,
   ANY_TYPE_TAG,
+  assetTag,
   cacheControl,
   cacheHeaders,
   cacheTags,

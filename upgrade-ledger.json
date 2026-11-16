@@ -83,6 +83,10 @@
     "0017_form_actions.sql": {
       "release": "1.3.0",
       "apply": "before-deploy"
+    },
+    "0019_asset_access.sql": {
+      "release": "1.6.0",
+      "apply": "before-deploy"
     }
   },
   "claimed": [
@@ -265,6 +269,16 @@
       "rollback": "safe",
       "migrations": [],
       "headings": []
+    },
+    {
+      "version": "1.6.0",
+      "rollback": "safe",
+      "migrations": [
+        "0019_asset_access.sql"
+      ],
+      "headings": [
+        "Visitor access for files (v1.6.0)"
+      ]
     }
   ]
 }

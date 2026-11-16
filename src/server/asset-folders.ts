@@ -39,9 +39,18 @@
  * forty photographs must not be able to delete them by tidying up.
  */
 import type { AssetFolder } from "../core/assets";
+import type { Json } from "../core/doc";
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
 import { DEFAULT_SITE } from "../core/sites";
 import { slugify } from "../core/story";
+import {
+  type AssetGating,
+  encodeAccess,
+  folderRecomputeStatements,
+  materialiseBeforeDeleteStatements,
+  subtreeSelector,
+  trackTransitions,
+} from "./asset-access";
 import type { FolioDb } from "./db";
 import { FolioError } from "./errors";
 import { type Keyset, keysetWhere, orderBy, whereOf } from "./keyset";
@@ -227,6 +236,8 @@ async function refuseCollision(
 export interface CreateFolderInput {
   name: string;
   parentId?: string | null;
+  /** An own access value, already validated (`asset-access.md` decision 11). Absent inherits. */
+  access?: Json;
 }
 
 export async function createFolder(
@@ -234,6 +245,8 @@ export async function createFolder(
   input: CreateFolderInput,
   /** The scope the folder is created in. A parent in another scope is an unknown one. */
   site: string = DEFAULT_SITE,
+  /** Present when the scope's brand gates files; a new folder holds no files, so it only supplies the public value. */
+  _gating?: AssetGating | null,
 ): Promise<AssetFolder> {
   const parentId = input.parentId ?? null;
   const parent = parentId === null ? null : await ownFolder(db, parentId, site);
@@ -249,13 +262,26 @@ export async function createFolder(
     path,
     createdAt: Date.now(),
   };
-  await db
-    .prepare(
-      `insert into asset_folders (id, parent_id, name, path, created_at, site_id)
-       values (?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(row.id, row.parentId, row.name, row.path, row.createdAt, site)
-    .run();
+  // The new folder's own value goes in the insert; its effective value is then derived from
+  // **own** values along its path (decision 3), which is what a new folder under a gated
+  // ancestor inherits. It holds no files yet, so there is nothing to queue.
+  await db.batch([
+    db
+      .prepare(
+        `insert into asset_folders (id, parent_id, name, path, created_at, site_id, access)
+         values (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        row.id,
+        row.parentId,
+        row.name,
+        row.path,
+        row.createdAt,
+        site,
+        input.access === undefined ? null : encodeAccess(input.access),
+      ),
+    ...folderRecomputeStatements(db, site, path),
+  ]);
   return row;
 }
 
@@ -264,6 +290,8 @@ export interface FolderPatch {
   /** `null` is the top level. Absent means "leave the parent alone", which is
    * why this is checked with `!== undefined` and never for truthiness. */
   parentId?: string | null;
+  /** Own access value, already validated; `null` inherits. Absent leaves it alone. */
+  access?: Json | null;
 }
 
 /**
@@ -305,6 +333,8 @@ export async function updateFolder(
   patch: FolderPatch,
   /** The scope the folder must be in: another scope's is absent (null). */
   site: string = DEFAULT_SITE,
+  /** Present when the scope's brand gates files: queues purges and records transitions. */
+  gating?: AssetGating | null,
 ): Promise<AssetFolder | null> {
   const row = await ownFolder(db, id, site);
   if (!row) return null;
@@ -328,25 +358,50 @@ export async function updateFolder(
   }
 
   const path = childPath(parentPath, name);
-  if (path === row.path && name === row.name && parentId === row.parentId) return row;
+  if (
+    path === row.path &&
+    name === row.name &&
+    parentId === row.parentId &&
+    patch.access === undefined
+  ) {
+    return row;
+  }
   if (path !== row.path) await refuseCollision(db, site, path, id);
 
   const range = subtreeWhere("path", row.path);
-  await db.batch([
-    // Within the scope: another site's `press/…` is not this subtree, whatever its
-    // path says.
-    db
-      .prepare(
-        `update asset_folders set path = ? || substr(path, length(?) + 1)
+  // The files filed under the subtree, which a move or a new own value may gate or open.
+  await trackTransitions(db, gating, subtreeSelector(site, row.path), () =>
+    db.batch([
+      // Within the scope: another site's `press/…` is not this subtree, whatever its
+      // path says.
+      db
+        .prepare(
+          `update asset_folders set path = ? || substr(path, length(?) + 1)
          where site_id = ? and ${range.sql}`,
-      )
-      .bind(path, row.path, site, ...range.binds),
-    // By id, and after the rewrite, which matched on the old path. `name` and
-    // `parent_id` are the structure; `path` is the query key derived from it.
-    db
-      .prepare("update asset_folders set parent_id = ?, name = ? where id = ?")
-      .bind(parentId, name, id),
-  ]);
+        )
+        .bind(path, row.path, site, ...range.binds),
+      // By id, and after the rewrite, which matched on the old path. `name` and
+      // `parent_id` are the structure; `path` is the query key derived from it.
+      db
+        .prepare("update asset_folders set parent_id = ?, name = ? where id = ?")
+        .bind(parentId, name, id),
+      ...(patch.access !== undefined
+        ? [
+            db
+              .prepare("update asset_folders set access = ? where id = ?")
+              .bind(patch.access === null ? null : encodeAccess(patch.access), id),
+          ]
+        : []),
+      // The folder's and its subtree's effective values, then the files'. Over the **new**
+      // path: the rewrite above has already moved it, and the derivation reads paths.
+      ...folderRecomputeStatements(
+        db,
+        site,
+        path,
+        gating ? { public: gating.domain.public, now: Date.now() } : null,
+      ),
+    ]),
+  );
   return { ...row, name, parentId, path };
 }
 
@@ -450,6 +505,9 @@ export async function deleteFolder(
   ]);
 
   await db.batch([
+    // Decision 4: before the re-parent and the unfile, what is inherited becomes own, so no
+    // effective value changes by the delete and nothing needs purging.
+    ...materialiseBeforeDeleteStatements(db, id, site),
     // `+ 2` rather than `+ 1`: this drops the separator too, because the segment
     // being removed is mine and the descendants are moving up a level.
     db

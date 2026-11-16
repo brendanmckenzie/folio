@@ -195,6 +195,15 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
   };
 
+  /**
+   * `access` is accepted by the body schemas and the services (`asset-access.md` phase 2),
+   * and the routes are wired to validate and apply it in phase 6. Until then a body that
+   * carries it is refused, so no unvalidated value can reach a row.
+   */
+  const refuseUnwiredAccess = (access: unknown): void => {
+    if (access !== undefined) throw new FolioError("unsupported", "This site does not gate files");
+  };
+
   app.get("/assets", requireAccess<Env>(rt, READ), async (c) => {
     const { db } = c.var.bindings();
     const cursor = c.req.query("cursor");
@@ -264,6 +273,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post("/assets/folders", requireAccess<Env>(rt, ASSETS), async (c) => {
     const body = await parseBody(c.req, AssetFolderCreateBody);
+    refuseUnwiredAccess(body.access);
     return c.json(await createFolder(c.var.bindings().db, body, scopeOf(c)), 201);
   });
 
@@ -278,6 +288,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.patch("/assets/folders/:id", requireAccess<Env>(rt, ASSETS), fenceFolder, async (c) => {
     const id = idParam("id", c.req.param("id"));
     const body = await parseBody(c.req, AssetFolderPatchBody);
+    refuseUnwiredAccess(body.access);
     const row = await updateFolder(c.var.bindings().db, id, body, scopeOf(c));
     if (!row) throw new FolioError("not_found", "Unknown folder");
     return c.json(row);
@@ -811,6 +822,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const { db } = c.var.bindings();
     const id = idParam("id", c.req.param("id"));
     const body = await parseOptionalBody(c.req, AssetPatchBody);
+    refuseUnwiredAccess(body.access);
     const row = await updateAsset(db, id, body, scopeOf(c));
     if (!row) throw new FolioError("not_found", "Unknown asset");
     return c.json((await withTags(db, [row]))[0]);

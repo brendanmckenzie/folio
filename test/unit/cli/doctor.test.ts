@@ -148,6 +148,7 @@ describe("doctor on a fresh scaffold", () => {
     expect(by["d1.local"].data?.pending).toEqual([
       "0016_option_sources.sql",
       "0017_form_actions.sql",
+      "0019_asset_access.sql",
     ]);
     expect(by["d1.local"].detail).toContain("v130-is-roll-forward-only");
   });
@@ -190,7 +191,9 @@ describe("doctor reports a database migrated by a newer Folio", () => {
   it("fails d1.local with data.unknown, naming v1.3.0 as roll-forward only", async () => {
     const old = SHIPPED.filter((f) => f < "0016");
     const root = host({ localState: true, installed: { version: "1.2.3", migrations: old } });
-    const rec = recorder((argv) => (argv.includes("execute") ? executeAnswer(SHIPPED) : undefined));
+    const rec = recorder((argv) =>
+      argv.includes("execute") ? executeAnswer(SHIPPED.filter((f) => f < "0019")) : undefined,
+    );
     const { by } = await check(root, { run: rec.run, only: ["d1.local"] });
     const d1 = by["d1.local"];
     expect(d1.status).toBe("fail");

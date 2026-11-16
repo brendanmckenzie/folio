@@ -121,8 +121,9 @@ and whether it needs anything from you beyond applying it.
 | `0015_draft_data.sql` | One nullable column, `stories.draft_data` (a JSON mirror of the draft's root scalars, for the Data table) | **Apply it before you deploy**: the Data list selects it for anyone who may read drafts, so a Worker deployed first answers `500` to every editor. Additive and nullable, so safe ahead of the deploy. Then run `POST {base}/api/reindex?drafts=1` once. Read [draft values](#draft-values-in-the-data-table-v120) first. |
 | `0016_option_sources.sql` | `option_lists` (the last good list per host option source) and `form_responses.option_labels` | **Apply it before you deploy**: v1.3.0 reads `option_lists` when it renders a form and selects `option_labels` in every response read, so a Worker deployed first fails both with `no such table` / `no such column`. Additive and safe ahead of the deploy. v1.3.0 is **roll-forward only**: read [that section](#v130-is-roll-forward-only) first. |
 | `0017_form_actions.sql` | `forms.actions` (a form's attached actions), the `form_deliveries` log, and `form_refusals` (refused attempts, for the rate limit) | **Apply it before you deploy**: this release's form reads select `forms.actions` and every submission's rate check reads `form_refusals`, so a Worker deployed first fails both with `no such column` / `no such table`. Additive, safe ahead of the deploy, and independent of `0016`. v1.3.0 is **roll-forward only**: read [that section](#v130-is-roll-forward-only) first. |
+| `0019_asset_access.sql` | `assets.access` and `assets.effective_access`, `asset_folders.access` and `asset_folders.effective_access` (visitor access for media-library files), and the `asset_purges` queue of edge purges owed for files that went from public to gated | **Apply it before you deploy**: this release selects the four columns and writes the queue, so a Worker deployed first fails every asset write with `no such column` / `no such table`. Additive, nullable and safe ahead of the deploy; every existing file reads null (public, inheriting), so nothing is gated until you configure `gate.allowsAsset` and an editor sets a value. Read [visitor access for files](#visitor-access-for-files-v160) first: it changes what a rollback can do. |
 
-`0011`, `0013`, `0014`, `0015`, `0016` and `0017` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0018`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
+`0011`, `0013`, `0014`, `0015`, `0016`, `0017` and `0019` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0018`, which spec 39 has claimed; `0019` landed first, as `0013` did before `0012`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -1242,6 +1243,32 @@ some Folio subpaths to source while its production build used `dist/`. Both now 
 `dist/`, which is what a consumer wants, and a host needs no change. Only a host that deliberately builds
 against Folio's source needs to add `folio-source`, and the source is no longer in the
 package to resolve to, so in practice that means working from a clone of the repository.
+
+### Visitor access for files (v1.6.0)
+
+`{base}/asset/:key` used to serve every file in the library to anyone holding its URL.
+This release lets a deployment gate files with the same vocabulary as pages. It is
+opt-in: a host that does not configure `gate.allowsAsset` runs the asset route exactly
+as before, and nothing below applies to it.
+
+1. **Apply `0019_asset_access.sql` before you deploy.** The Worker selects the four new
+   columns and writes `asset_purges`.
+2. **Let the deploy that enables `allowsAsset` reach 100% of traffic before gating any
+   file.** Until then the previous version answers some requests from its own untagged
+   copies and ignores the columns, so a file gated in that window can still be served.
+3. **On a deployment that shares the Workers cache across versions, run
+   `POST {base}/api/assets/purge-all` once** after the deploy that enables `allowsAsset`,
+   and after any re-enable. It is an administrator action routed through the cached
+   entrypoint like any write.
+4. **Route the cron's `folio.runSchedules` through the cached entrypoint** if it is not
+   already. A purge that failed waits in `asset_purges`, and the cron is what retries it.
+
+**Rollback is not free.** A pre-v1.6.0 Worker ignores the columns, serves every gated
+file publicly with `immutable`, and, because the Worker version is in the cache key,
+answers from the entries that version stored before any file was gated. Rolling back
+therefore re-opens gated files at the edge for a year. Roll forward. A host that must
+roll back first moves protected files out of the library (or deletes them), then rolls
+back.
 
 ## Rolling back
 

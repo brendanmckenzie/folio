@@ -62,6 +62,8 @@ export interface ResolvedGate {
  */
 export interface AssetAccessDomain {
   primitive: "string" | "number" | "boolean";
+  /** `gate.public`: the value that means ungated, which a purge queue and a `gated` filter compare against. */
+  public: string | number | boolean;
   options?: readonly { value: string; label: string }[];
 }
 
@@ -172,7 +174,7 @@ function assetDomain(
 ): AssetAccessDomain | null {
   if (gate.allowsAsset === undefined) return null;
   const primitive = typeof gate.public as AssetAccessDomain["primitive"];
-  if (selects.size === 0) return { primitive };
+  if (selects.size === 0) return { primitive, public: gate.public };
 
   const declared = [...selects.entries()];
   const [, first] = declared[0]!;
@@ -191,7 +193,7 @@ function assetDomain(
         )} with no option in common but ${JSON.stringify(gate.public)}; a gated file's value must mean the same on every page type that links it`,
     );
   }
-  return { primitive, options };
+  return { primitive, public: gate.public, options };
 }
 
 /**

@@ -68,6 +68,8 @@ describe("workers harness: D1", () => {
       // object. Shapes are asserted in migrations.test.ts; this list only says
       // they exist.
       "asset_folders",
+      // 0019: edge purges owed for files that went from public to gated (asset-access.md).
+      "asset_purges",
       "asset_taggings",
       "asset_tags",
       "assets",
