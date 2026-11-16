@@ -51,7 +51,8 @@ import {
 } from "./runtime";
 import { refreshOptionSources } from "./option-sources";
 import { runDeliveries } from "./deliveries";
-import { runSchedules, scheduleDeps } from "./scheduler";
+import { drainAssetPurges, pendingAssetPurges, platformPurge } from "./cache-purge";
+import { runSchedules, type ScheduleRunReport, scheduleDeps } from "./scheduler";
 import {
   candidateFor,
   INTERNAL_HEADERS,
@@ -1971,16 +1972,37 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       if (report.continueFrom !== null) return report;
       // The schedules are published and cleared by now, so a pass that throws (a D1
       // error) is logged and flagged, not allowed to reject the call and hide the report.
+      let out: ScheduleRunReport = report;
       try {
         const deliveries = await runDeliveries(rt, env, bindings.db, {
           ...(opts?.now === undefined ? {} : { now: opts.now }),
           ...(opts?.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
         });
-        return { ...report, deliveries };
+        out = { ...out, deliveries };
       } catch (err) {
         rt.logger.error("folio: the form delivery pass failed", err);
-        return { ...report, deliveriesFailed: true };
+        out = { ...out, deliveriesFailed: true };
       }
+      // The asset purge queue (decision 10), after deliveries and in its own `try`: a
+      // failure is `assetPurgesFailed` in the report, never a thrown run. Only on a
+      // deployment that gates files, so every other one reads nothing more.
+      if (rt.assetGating && opts?.dryRun !== true) {
+        try {
+          const drained = await drainAssetPurges(
+            bindings.db,
+            rt.assetPurgeCapability ?? platformPurge,
+            opts?.now ?? Date.now(),
+            rt.logger,
+          );
+          const { pending } = await pendingAssetPurges(bindings.db, null);
+          out = { ...out, assetPurges: { issued: drained.purge, pending } };
+          if (!drained.ok) out = { ...out, assetPurgesFailed: true };
+        } catch (err) {
+          rt.logger.error("folio: the asset purge pass failed", err);
+          out = { ...out, assetPurgesFailed: true };
+        }
+      }
+      return out;
     },
     /**
      * The auth housekeeping sweep (`../../docs/specs/foundation/

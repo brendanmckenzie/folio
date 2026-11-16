@@ -20,10 +20,24 @@
  * is. Null *stored* is "inherit"; null *effective* is public.
  */
 import type { Json } from "../core/doc";
+import { assetTag, storyTag } from "../core/cache-tags";
 import { isUngated } from "../core/gate";
 import { bindChunks, type FolioDb } from "./db";
 import { FolioError } from "./errors";
 import { subtreeWhere } from "./asset-folders";
+import {
+  drainAssetPurges,
+  MAX_PURGE_CALLS,
+  MAX_TAGS_PER_PURGE,
+  type PurgeCapability,
+  type PurgeIssued,
+  pendingAssetPurges,
+  platformPurge,
+  purgeAssetsNow,
+  SITE_PURGE_DELAY_MS,
+} from "./cache-purge";
+import { assetReferences } from "./content-index";
+import type { HookRunner } from "./hooks";
 import type { AssetAccessDomain } from "./gate";
 import type { FolioLogger } from "./types";
 
@@ -509,4 +523,125 @@ function present(stored: string | null): Json | null {
   } catch {
     return stored;
   }
+}
+
+/* ----------------------------------------------------------- after a write --- */
+
+/** What `afterAccessChange` needs of the request that made the write. */
+export interface AccessChangeContext<Env = unknown> {
+  db: FolioDb;
+  /** Absent resolves to the platform's; a test injects one (`FolioRuntime.assetPurgeCapability`). */
+  capability?: PurgeCapability;
+  logger: FolioLogger;
+  hooks: HookRunner<Env>;
+  waitUntil: (p: Promise<unknown>) => void;
+  /** The scope the write was made in: whose pending count the response reports. */
+  site: string;
+  actor: string | null;
+}
+
+export interface AfterAccessChange {
+  /** The purge the drain issued, or null when it issued none. */
+  purge: PurgeIssued | null;
+  /** Files in this scope whose purge is still owed. */
+  pending: number;
+}
+
+/** The most `story:` tags a gating spends; above it the lock on those pages heals at its next purge. */
+const MAX_STORY_TAGS = MAX_TAGS_PER_PURGE * MAX_PURGE_CALLS;
+
+/**
+ * Everything an access-changing write owes **after its batch has committed**
+ * (decision 10): the drain of the purge queue (awaited, so the response reports the
+ * outcome, and never throwing into the write), the same drain again
+ * `SITE_PURGE_DELAY_MS` later under `waitUntil`, the best-effort `story:<id>` tags
+ * for pages that link a newly gated file and `asset:<id>` for a file whose lock
+ * changed without becoming gated, and the `assetAccessChanged` hook.
+ *
+ * `opts.final` false is a non-final bulk batch: no drain, so a forty-batch walk
+ * spends the purge budget twice rather than eighty times.
+ */
+export async function afterAccessChange<Env>(
+  ctx: AccessChangeContext<Env>,
+  gating: AssetGating,
+  opts: {
+    final?: boolean;
+    now?: number;
+    /** Injectable so a test does not wait 25 real seconds. */
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
+): Promise<AfterAccessChange> {
+  const capability = ctx.capability ?? platformPurge;
+  const now = opts.now ?? Date.now();
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let purge: PurgeIssued | null = null;
+  try {
+    if (opts.final !== false) {
+      const drained = await drainAssetPurges(ctx.db, capability, now, ctx.logger);
+      purge = drained.purge;
+      // Nothing issued means nothing to repeat: no capability, or an empty queue.
+      if (drained.purge !== null) {
+        ctx.waitUntil(
+          sleep(SITE_PURGE_DELAY_MS).then(() =>
+            drainAssetPurges(ctx.db, capability, Date.now(), ctx.logger, { all: true }),
+          ),
+        );
+      }
+    }
+    await purgeLockTags(ctx, gating, capability);
+  } catch (err) {
+    ctx.logger.error("folio: asset access follow-up failed", err);
+  }
+  let pending = 0;
+  try {
+    pending = (await pendingAssetPurges(ctx.db, ctx.site)).pending;
+  } catch (err) {
+    ctx.logger.error("folio: could not count owed asset purges", err);
+  }
+  if (gating.transitions.length > 0) {
+    await ctx.hooks.run("assetAccessChanged", {
+      assets: gating.transitions,
+      truncated: gating.truncated,
+      pending,
+      actor: ctx.actor,
+      site: ctx.site,
+      ...(purge ? { purge } : {}),
+    });
+  }
+  return { purge, pending };
+}
+
+async function purgeLockTags<Env>(
+  ctx: AccessChangeContext<Env>,
+  gating: AssetGating,
+  capability: PurgeCapability,
+): Promise<void> {
+  // Over the cap the transitions are a prefix, and walking references for each is the
+  // unbounded read decision 10 declines to make; the drain's own tags still cover the files.
+  if (gating.truncated || gating.transitions.length === 0) return;
+  const publicValue = gating.domain.public;
+  const toGated = (t: AccessTransition) => !isPublicEffective(encodeOrNull(t.to), publicValue);
+  const wasPublic = (t: AccessTransition) => isPublicEffective(encodeOrNull(t.from), publicValue);
+
+  // A gated-to-public or gated-to-gated change: no gated response was ever stored,
+  // only the cosmetic lock is at stake, so one best-effort purge of the file's tag.
+  const lockOnly = gating.transitions.filter((t) => !(wasPublic(t) && toGated(t)));
+  // Public to gated: pages that link the file and so far drew no lock.
+  const newlyGated = gating.transitions.filter((t) => wasPublic(t) && toGated(t));
+
+  const stories = new Set<string>();
+  for (const t of newlyGated) {
+    for (const id of await assetReferences(ctx.db, t.key)) stories.add(id);
+    if (stories.size > MAX_STORY_TAGS)
+      return void ctx.logger.warn(
+        "folio: too many pages link the newly gated files; their locks refresh at their next purge",
+      );
+  }
+  const tags = [...lockOnly.map((t) => assetTag(t.id)), ...[...stories].map((id) => storyTag(id))];
+  if (tags.length > MAX_STORY_TAGS) return;
+  await purgeAssetsNow(capability, tags, ctx.logger);
+}
+
+function encodeOrNull(value: Json | null): string | null {
+  return value === null ? null : encodeAccess(value);
 }

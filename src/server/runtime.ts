@@ -424,6 +424,12 @@ export interface FolioRuntime {
    */
   formPurgeCapability?: PurgeCapability;
   /**
+   * The same seam for asset purges (`asset-access.md` decision 10): not a
+   * `FolioConfig` key, undefined for every real host (which gets `platformPurge`),
+   * and set by a workers test to observe the drain's calls.
+   */
+  assetPurgeCapability?: PurgeCapability;
+  /**
    * The host's raw D1 binding for `env`, not a request's session. For the one read
    * that must open a session of its own: the submit route's primary re-read after a
    * lost option-list lease (`form-option-sources.md` decision 7).
@@ -943,6 +949,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const formPurgeCapability = (
     config as FolioConfig<Env> & { formPurgeCapability?: PurgeCapability }
   ).formPurgeCapability;
+  const assetPurgeCapability = (
+    config as FolioConfig<Env> & { assetPurgeCapability?: PurgeCapability }
+  ).assetPurgeCapability;
   const locales = config.locales;
   const base = config.basePath ?? DEFAULT_BASE;
   const route: FolioRuntime["route"] = config.route ?? ((path: string) => `/${path}`);
@@ -2203,6 +2212,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     auth,
     logger,
     formPurgeCapability,
+    assetPurgeCapability,
     rawDb: (env: unknown) => config.bindings(env as Env).db,
     base,
     sites,

@@ -41,6 +41,7 @@
  */
 import { DEFAULT_SITE, type Registry } from "../core/sites";
 import type { Schedule, ScheduleAction, ScheduleStatus, StoryMeta } from "../core/story";
+import type { PurgeIssued } from "./cache-purge";
 import type { HookRunnerCtx } from "./hooks";
 import type { FolioRuntime } from "./runtime";
 import { FolioError } from "./errors";
@@ -164,6 +165,16 @@ export interface ScheduleRunReport {
   deliveries?: DeliveryRunReport;
   /** The delivery pass threw after the schedules were swept; the error is in the log. */
   deliveriesFailed?: true;
+  /**
+   * The asset purge pass (`asset-access.md` decision 10): the drain of the queued edge
+   * purges, after deliveries, on the same terms (the call that finishes the sweep, and
+   * only on a deployment whose gate has `allowsAsset`). `issued` is what was asked of
+   * Workers Cache, null when nothing was due or there was no capability; `pending` is
+   * every scope's rows not yet purged.
+   */
+  assetPurges?: { issued: PurgeIssued | null; pending: number };
+  /** The drain's call failed (or the pass threw); the rows stay queued and the next tick retries. */
+  assetPurgesFailed?: true;
   /**
    * How many schedules are still pending and due, asked directly after the run.
    *
