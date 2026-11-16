@@ -281,6 +281,13 @@
         "Visitor access for files (v1.6.0)",
         "v1.6.0 is roll-forward only"
       ]
+    },
+    {
+      "version": "1.6.1",
+      "date": "2026-11-17",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
     }
   ]
 }
