@@ -1263,12 +1263,23 @@ as before, and nothing below applies to it.
 4. **Route the cron's `folio.runSchedules` through the cached entrypoint** if it is not
    already. A purge that failed waits in `asset_purges`, and the cron is what retries it.
 
-**Rollback is not free.** A pre-v1.6.0 Worker ignores the columns, serves every gated
-file publicly with `immutable`, and, because the Worker version is in the cache key,
-answers from the entries that version stored before any file was gated. Rolling back
-therefore re-opens gated files at the edge for a year. Roll forward. A host that must
-roll back first moves protected files out of the library (or deletes them), then rolls
-back.
+Rolling back is covered under "v1.6.0 is roll-forward only" below.
+
+### v1.6.0 is roll-forward only
+
+**v1.6.0 cannot be rolled back to v1.5.x once any file is gated.** If something is wrong
+after the upgrade, deploy a v1.6.x fix. Do not redeploy a v1.5.x pin. A v1.5.x Worker
+reading a v1.6.0 database does the following, and none of it is undone by redeploying
+v1.6.0:
+
+- **Gated files become public.** A pre-v1.6.0 Worker ignores the access columns and
+  serves every file in the library to anyone holding its URL, with `immutable`.
+- **They stay public at the edge for a year.** Because the Worker version is in the
+  cache key, the older version answers from entries it stored before any file was gated,
+  and what it serves now is stored under the same rule.
+
+A host that must roll back first moves protected files out of the library (or deletes
+them), then rolls back.
 
 ## Rolling back
 

@@ -272,12 +272,13 @@
     },
     {
       "version": "1.6.0",
-      "rollback": "safe",
+      "rollback": "none",
       "migrations": [
         "0019_asset_access.sql"
       ],
       "headings": [
-        "Visitor access for files (v1.6.0)"
+        "Visitor access for files (v1.6.0)",
+        "v1.6.0 is roll-forward only"
       ]
     }
   ]
