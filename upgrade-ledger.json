@@ -291,6 +291,7 @@
     },
     {
       "version": "1.7.0",
+      "date": "2026-11-17",
       "rollback": "safe",
       "migrations": [],
       "headings": [

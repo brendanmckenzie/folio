@@ -3,7 +3,7 @@
 > **Group:** platform
 > **Build order:** 44
 > **Size:** L
-> **Status:** in-progress (branch `feat/admin-extensions`)
+> **Status:** done (built 2026-11-17, ships in `v1.7.0`; the owner's browser pass on the demo is outstanding)
 > **Wire version:** none. `PROTOCOL_VERSION` stays at 5; the host-page frames are a separate, versioned public protocol (decision 9)
 > **Migration:** none
 > **Release:** v1.7.0 (minor; every change is additive, decision 22)
@@ -1857,3 +1857,49 @@ Reverting step 10 after step 11 requires reverting 11 to 15 too (they read
   (decision 4).
 - **An admin-to-host-page message** (theme, scope push). The scope is in the URL and the
   theme follows `prefers-color-scheme` on both sides, as the admin itself does today.
+
+## Implementation notes
+
+Built 2026-11-17 on `feat/admin-extensions` in the sequence's order, one commit per step (a `docs(spec)` commit
+first, one `fix(admin)` commit for a content-list column overflow that was asked for beside it). No migration, no
+wire change, no new binding; `PROTOCOL_VERSION` stays at 5. Ships as `v1.7.0`. **The iframe's joint history, the
+`replaceState` mirror, the 15 s overlay, the login promotion and the look of `folio-host.css` need a browser and are
+not yet checked**; their decisions are pure functions with unit tests, and the owner's pass on the demo is what
+remains before tagging.
+
+**Where the spec was wrong or ambiguous, and what was done.**
+
+1. **`connectHostPage` needs the page's path for `frame: true`.** The spec's `page: { id, scope }` gives the helper no way
+   to turn the location into the admin URL's remainder. `page` gains an optional `path` (`HostPage.path`); without it
+   the redirect lands on the page root. `frameRedirectTarget` lives in `core/host-page.ts` (pure, shared) and is tested
+   in `core/host-page.test.ts`.
+2. **`requireEditor({ page })` precedence.** An explicit `scope` option wins over `folio_scope`, then `x-folio-scope`, and
+   the stricter of `opts.role` and the page's `role` applies. A scope the registry does not serve answers the "Open
+   this page from the admin, inside a site." `403`, found by asking the registry, because the role of an unserved scope
+   is `null` and would otherwise read as a plain role refusal.
+3. **Eight host page icons are new, not seven.** `window` was not in the nav's closed set of eleven.
+4. **Switching scope on a `deployment` host page is a full page load** (a new mount is a navigation in this router), so
+   the frame reloads. The spec's "reloads nothing in the frame" needs client-side scope switching, which the router
+   does not have.
+5. **The mirror uses the router's `replace`**, not a bare `history.replaceState`, so route state, the sidebar and `same()`
+   stay in step. Comparing the computed `src` with the frame's location (`folio_scope` removed, paths canonicalised)
+   is what stops it reloading the frame, and it runs on every `src` change rather than only on `popstate`. A repeated
+   query key collapses to its last value in the admin URL, the router's own rule; the frame keeps its own.
+6. **A group crumb with no link renders as plain text**, so the page keeps its one `h1`.
+7. **The demo's Orders page speaks the protocol by hand** (an inline script): the demo Worker serves plain HTML and has no
+   client bundle to import `folio/host` from. `connectHostPage` (scope carrying, `frame: true`) is covered by happy-dom
+   tests and cannot be exercised on the demo.
+8. **The write check also covers `insert`s.** `diff` turns a new blok into an `insert`, so a PUT or create that added a blok
+   would bypass a check on `set`s alone. A create is checked as `diff(blank seed, seeded)` before the row is written. The
+   refusal names `<block>.<field>`, not the payload path, because it runs on mutations.
+9. **The options routes answer the source's `label`** (additive), because the admin names it in "No longer offered by
+   Products" and the manifest carries ids only. The Model screen therefore says "from <source id>". The filterable list past
+   20 options is a filter box above the native `<select>`, not a custom combobox. `lookup` runs under a fixed 3 s deadline.
+10. **The field-options route's story fence is tested** with a sited Folio in `field-sources.test.ts`, and the panel route's in
+    `panels.test.ts`, not as `scope-partition.test.ts` rows (that walk finds id routes by `:param` in the path and its
+    config declares no panel). The panel route is in `FENCED_ELSEWHERE`; `GET /api/v1/options/:block/:field` is in
+    `UNSCOPED_IDS` (it names a block and a field, not a row).
+11. **`isPanelHref` restates `safeNext`'s rule in core**, because core cannot import `server/validate.ts`. A `panels` key
+    naming a type nobody declared throws.
+12. **`dist/admin/folio-host.css`** is built by `build-admin.mjs` beside the admin's files and emitted by the Vite plugin for
+    the client environment whether or not the admin is built from source.

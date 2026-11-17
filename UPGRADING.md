@@ -1315,6 +1315,11 @@ that answers a small structured summary the inspector draws on the document's ro
 open with a timeout and nothing is cached on the server. `Manifest.panels` appears only when a brand declares
 one. See "Linked-data panels" in `docs/handbook.md`.
 
+**Rolling back from v1.7.0** is safe once `admin`, `optionSources`, `panels` and every `optionsFrom` are removed:
+there is no migration and no wire change. Do not move field-only sources under `forms.sources` to keep them,
+because that exposes them to the form builder and to published forms. A field that held a sourced id becomes
+`text({ indexed: true })` for the rollback, so the stored strings stay valid and indexed.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

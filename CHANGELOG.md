@@ -8,6 +8,57 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.7.0
+
+A minor release with no migration, no wire change (`PROTOCOL_VERSION` stays at 5) and no new binding. **Every
+change adds**: a host that declares none of the new keys gets byte-identical `{base}/api/schema`,
+`{base}/api/v1/schema` and `/api/me` answers. Spec 44 ([`platform/admin-extensions.md`](docs/specs/platform/admin-extensions.md))
+gives a host four narrow extension points; read the four `UPGRADING.md` entries named
+[Host access to the editor session](UPGRADING.md#host-access-to-the-editor-session-v170),
+[Host pages in the admin](UPGRADING.md#host-pages-in-the-admin-v170),
+[Option sources on document fields](UPGRADING.md#option-sources-on-document-fields-v170) and
+[Linked-data panels](UPGRADING.md#linked-data-panels-v170) before you use one.
+
+### Added
+
+- **`folio.editor(req, env, opts)` and `folio.requireEditor(req, env, opts)`.** A host route asks Folio, in
+  process, who the signed-in editor is and their role on a scope, through whichever sign-in door the site
+  uses. A redacted projection (no session hash), memoised per `Request`, no read for a request with no
+  credential, `null` under `auth: 'open'`, off `sites.admin`, and for a refused `Origin` on an unsafe
+  method; a scope is checked against the registry before a role is computed. `folio.signInUrl`,
+  `folio.originAllowed` and `HOST_PAGE_HEADERS` (`frame-ancestors 'self'`, `no-store`) come with it.
+- **Host pages in the admin.** `admin.pages` lists screens your Worker serves in Folio's sidebar and shows each
+  in a same-origin iframe inside the chrome, with deep links (`{base}/host/<id>/…`), Back that mirrors and never
+  pushes, a site chooser and `folio_scope` for a `site` page on a deployment with `sites`, and a versioned
+  `postMessage` protocol for the title, breadcrumbs and a toast. `requireEditor({ page })` enforces the
+  page's role, scope and brands. New exports `folio/host` (`framed`, `announce`, `notice`,
+  `connectHostPage`, `scope`, `scoped`) and `folio/host.css`, served at `/folio-host.css`: Folio's semantic
+  tokens as `--folio-*` and an opt-in element layer under `body.folio-host`. `/api/me` gains `hostPages`.
+- **Sourced selects.** `select({ optionsFrom })` takes its choices from a host option source, registered under
+  the new per-brand `optionSources` (separate from `forms.sources`, so no form can list, preview or render it;
+  an id in both throws). The stored value is the host's id. The inspector offers the list, keeps a retired
+  value shown (labelled by the source's new `lookup`) and says so. `GET /api/v1/options/:block/:field` and the
+  nineteenth MCP tool `list_field_options` answer what a field offers; v1 writes to a sourced select are
+  checked against its list (`400`, or `503 unavailable` for a list that never loaded). `check_document` gains
+  `option-not-offered` and `option-list-unavailable`.
+- **Linked-data panels.** `panels` registers, per document type, a host function whose small structured
+  summary the inspector draws read-only on the root block, through `GET {base}/api/stories/:id/panel`.
+  Nothing is cached on the server.
+- **A new error code**, `unavailable` (`503`).
+- **The demo** gains an Orders host page, a Product record with a catalogue source and a Shop panel, and a
+  long-labelled page type.
+
+### Changed
+
+- **The admin's content list** keeps a long type label inside its column, with the full label as its title.
+- `FolioErrorCode` gains `unavailable`: a TypeScript `switch` that is exhaustive over it must add the case.
+
+### Breaking changes
+
+None to the `exports` surface or to `createFolio()` keys; every key above is new and optional. The one
+compile-time consequence is the new `FolioErrorCode` member (see
+[Option sources on document fields](UPGRADING.md#option-sources-on-document-fields-v170)).
+
 ## 1.6.1
 
 A patch with no migration and no change to the package's code. **Pin `v1.6.1`, not `v1.6.0`.**

@@ -89,7 +89,7 @@ sequence because the dependency graph is the same one.
 | 43 | [Visitor access for media library assets](platform/asset-access.md) | platform | L | — | `0019` (landed) | issue #178 |
 | 44 | [Admin extensions: the editor session, host pages, sourced selects and linked-data panels](platform/admin-extensions.md) | platform | L | — | none | owner, 2026-11-17 |
 
-**44 is built** (2026-11-17, v1.7.0, branch `feat/admin-extensions`): four additive extension points
+**44 is done** (built 2026-11-17, v1.7.0, branch `feat/admin-extensions`; the owner's browser pass is outstanding): four additive extension points
 (`folio.editor` and `requireEditor`, `admin.pages`, `select({ optionsFrom })` with an `optionSources`
 registry, and `panels`), no migration and no wire change. It shares no source file with 39 or 42.
 **40 and 41 are done** (built 2026-11-04, shipping together in v1.4.0, sharing no source
