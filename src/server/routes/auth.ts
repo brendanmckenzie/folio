@@ -39,6 +39,7 @@ import {
   readWebauthnCookie,
   serialiseCookie,
 } from "../auth/cookie";
+import { meHostPages } from "../admin-config";
 import { listEvents, recordEventStatement } from "../auth/events";
 import { base64url } from "../auth/jwt";
 import { passkeyForAssertion, usePasskeyStatement } from "../auth/passkeys";
@@ -871,12 +872,16 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ),
       };
     }
+    const hostPages = meHostPages(rt.hostPages, actor, Boolean(rt.sites));
     return c.json({
       mode: rt.auth.mode,
       actor: safe,
       loginUrl: `${rt.base}/login`,
       space,
       ...multi,
+      // Present only when `admin.pages` declares some (`platform/admin-extensions.md`
+      // decision 13): authenticated here, never on the unauthenticated schema.
+      ...(hostPages ? { hostPages } : {}),
       ...session,
       ...passkeys,
       ...(policy ? { policy } : {}),

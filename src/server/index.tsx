@@ -332,6 +332,9 @@ export type { Access, Actor, Role, Scope, TokenActor, UserActor } from "./auth/r
  * `folio.editor()` / `folio.requireEditor()`, and the headers a gated host page sends.
  */
 export { HOST_PAGE_HEADERS } from "./editor";
+export type { FolioAdminConfig, HostPage } from "./admin-config";
+export { HOST_PAGE_ICONS } from "../core/host-page";
+export type { HostPageIcon } from "../core/host-page";
 export type {
   FolioEditor,
   FolioEditorOptions,

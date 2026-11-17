@@ -71,6 +71,7 @@ import { type ContentProjection, contentProjection } from "./content-index";
 import { type ResolvedDescribe, validateDescribe } from "./describe";
 import { validateWriting } from "./writing";
 import { logActionWarnings } from "./form-actions";
+import { type ResolvedHostPage, validateAdmin } from "./admin-config";
 import { type ResolvedForms, validateForms } from "./form-responses";
 import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
 import {
@@ -446,6 +447,8 @@ export interface FolioRuntime {
   base: string;
   /** `FolioConfig.sites`, validated, or null for a deployment with no `sites`. */
   sites: SitesRuntime | null;
+  /** `FolioConfig.admin.pages`, validated, with defaults applied; empty when none. */
+  hostPages: readonly ResolvedHostPage[];
   /** The host's `route`, or the single-site default. */
   route: (path: string, locale?: string, site?: SiteRef) => string;
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
@@ -2260,6 +2263,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     rawDb: (env: unknown) => config.bindings(env as Env).db,
     base,
     sites,
+    hostPages: validateAdmin(config.admin, {
+      base,
+      sites: Boolean(config.sites),
+      brandIds,
+      mode: auth.mode,
+    }),
     route,
     dev: Boolean(config.assets?.devClient),
     draftMode: config.draftMode === true,

@@ -342,3 +342,156 @@ describe("the plain cookie name", () => {
     expect(got).toMatchObject({ kind: "user" });
   });
 });
+
+describe("requireEditor({ page })", () => {
+  const pages = [
+    { id: "orders", label: "Orders", path: "/admin/orders", scope: "site", role: "editor" },
+    { id: "stock", label: "Stock", path: "/admin/stock", role: "publisher" },
+  ];
+  const sited = folioWith({
+    sites: { admin: ADMIN },
+    route: (p) => `/${p}`,
+    admin: { pages },
+  } as Partial<FolioConfig<Cloudflare.Env>>);
+  const plainPages = folioWith({ admin: { pages: [pages[1]!] } } as Partial<
+    FolioConfig<Cloudflare.Env>
+  >);
+  const status = async (p: Promise<unknown>) => ((await p) as Response).status;
+
+  beforeAll(async () => {
+    await env.DB.prepare(
+      `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at)
+       values ('pgalpha', 'site', 'Alpha', null, 'live', null, 0, 0)`,
+    ).run();
+  });
+
+  it("throws for an unknown page id", async () => {
+    await expect(sited.requireEditor(req(`${ADMIN}/x`), env, { page: "nope" })).rejects.toThrow(
+      /names no page/,
+    );
+  });
+
+  it("admits a site page by folio_scope and by x-folio-scope, with the headers", async () => {
+    const { cookie } = await sessionFor("he-pg1@example.com", { pgalpha: "editor" });
+    for (const r of [
+      req(`${ADMIN}/admin/orders?folio_scope=pgalpha`, { cookie }),
+      req(`${ADMIN}/admin/orders`, { cookie, "x-folio-scope": "pgalpha" }),
+    ]) {
+      const got = await sited.requireEditor(r, env, { page: "orders" });
+      expect(got).not.toBeInstanceOf(Response);
+      const ok = got as Exclude<typeof got, Response>;
+      expect(ok.editor).toMatchObject({ role: "editor", scope: "pgalpha" });
+      expect(ok.headers["content-security-policy"]).toBe("frame-ancestors 'self'");
+    }
+  });
+
+  it("refuses a site page with no scope, and with an unserved one, even for a * admin", async () => {
+    const { cookie } = await sessionFor("he-pg2@example.com", { "*": "admin" });
+    for (const url of [`${ADMIN}/admin/orders`, `${ADMIN}/admin/orders?folio_scope=ghost`]) {
+      const res = (await sited.requireEditor(req(url, { cookie }), env, {
+        page: "orders",
+      })) as Response;
+      expect(res.status).toBe(403);
+      expect(await res.text()).toBe("Open this page from the admin, inside a site.");
+    }
+  });
+
+  it("refuses a role below the page's, and takes the stricter of page and option", async () => {
+    const { cookie } = await sessionFor("he-pg3@example.com", { pgalpha: "viewer" });
+    const r = req(`${ADMIN}/admin/orders?folio_scope=pgalpha`, { cookie });
+    expect(await status(sited.requireEditor(r, env, { page: "orders" }))).toBe(403);
+    const ed = await sessionFor("he-pg4@example.com", { pgalpha: "editor" });
+    const r2 = req(`${ADMIN}/admin/orders?folio_scope=pgalpha`, { cookie: ed.cookie });
+    expect(await status(sited.requireEditor(r2, env, { page: "orders", role: "admin" }))).toBe(403);
+  });
+
+  it("checks a deployment page against the * grant, not a site role", async () => {
+    const { cookie } = await sessionFor("he-pg5@example.com", { pgalpha: "admin" });
+    expect(
+      await status(
+        sited.requireEditor(req(`${ADMIN}/admin/stock`, { cookie }), env, { page: "stock" }),
+      ),
+    ).toBe(403);
+    const star = await sessionFor("he-pg6@example.com", { "*": "publisher" });
+    const got = await sited.requireEditor(
+      req(`${ADMIN}/admin/stock`, { cookie: star.cookie }),
+      env,
+      {
+        page: "stock",
+      },
+    );
+    expect(got).not.toBeInstanceOf(Response);
+  });
+
+  it("works with no sites, on the * grant", async () => {
+    const low = await sessionFor("he-pg7@example.com", { role: "editor" });
+    expect(
+      await status(
+        plainPages.requireEditor(req(`${ORIGIN}/admin/stock`, { cookie: low.cookie }), env, {
+          page: "stock",
+        }),
+      ),
+    ).toBe(403);
+    const high = await sessionFor("he-pg8@example.com", { role: "admin" });
+    expect(
+      await plainPages.requireEditor(req(`${ORIGIN}/admin/stock`, { cookie: high.cookie }), env, {
+        page: "stock",
+      }),
+    ).not.toBeInstanceOf(Response);
+  });
+});
+
+describe("requireEditor({ page }) with brands", () => {
+  const blockFor = (name: string) =>
+    defineBlock({ name, label: "Page", fields: { title: text() }, render: () => null });
+  const brandOf = (label: string) => ({
+    label,
+    blocks: [blockFor("pageRoot")],
+    types: [
+      { name: "page", label: "Page", kind: "page" as const, root: "pageRoot", default: true },
+    ],
+  });
+  const branded = createFolio<Cloudflare.Env>({
+    brands: { a: brandOf("Brand A"), b: brandOf("Brand B") },
+    sites: { admin: ADMIN },
+    bindings: plain,
+    basePath: "/folio",
+    auth: { providers: [magicLink<Cloudflare.Env>({ send: () => {} })] },
+    assets: {
+      admin: "/folio-admin.js",
+      brands: { a: { preview: "/a.js" }, b: { preview: "/b.js" } },
+    },
+    route: (p: string) => `/${p}`,
+    admin: {
+      pages: [
+        { id: "orders", label: "Orders", path: "/admin/orders", scope: "site", brands: ["a"] },
+      ],
+    },
+  } as unknown as FolioConfig<Cloudflare.Env>);
+
+  beforeAll(async () => {
+    await env.DB.prepare(
+      `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
+         ('brsa', 'site', 'A site', null, 'live', null, 'a', 0, 0),
+         ('brsb', 'site', 'B site', null, 'live', null, 'b', 0, 0)`,
+    ).run();
+  });
+
+  it("admits a brand-a site and refuses a brand-b site naming its brand", async () => {
+    const { cookie } = await sessionFor("he-br1@example.com", { "*": "admin" });
+    const ok = await branded.requireEditor(
+      req(`${ADMIN}/admin/orders?folio_scope=brsa`, { cookie }),
+      env,
+      { page: "orders" },
+    );
+    expect(ok).not.toBeInstanceOf(Response);
+    expect((ok as { editor: { brand: { id: string } } }).editor.brand.id).toBe("a");
+    const res = (await branded.requireEditor(
+      req(`${ADMIN}/admin/orders?folio_scope=brsb`, { cookie }),
+      env,
+      { page: "orders" },
+    )) as Response;
+    expect(res.status).toBe(403);
+    expect(await res.text()).toBe("This page is not part of Brand B.");
+  });
+});

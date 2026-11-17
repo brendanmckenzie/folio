@@ -28,6 +28,7 @@ import type { StoryMeta, StoryNode } from "../core/story";
 import type { RenderMode } from "../preview/Render";
 import type { AuthConfig, OpenAuth } from "./auth/config";
 import type { Actor, Role } from "./auth/roles";
+import type { FolioAdminConfig } from "./admin-config";
 import type { FolioEditor, FolioEditorOptions } from "./editor";
 import type { FolioHooks } from "./hooks";
 import type { AuditOptions, AuditReport } from "./audit";
@@ -816,6 +817,13 @@ export interface FolioBrandedConfig<Env>
 
 /** One brand's config, which is every deployment's before `brands` existed. */
 export interface FolioSingleConfig<Env> {
+  /**
+   * Host-served pages listed in the admin's sidebar and shown inside its chrome
+   * (`platform/admin-extensions.md`, feature 2). Deployment-wide, and refused under
+   * `auth: 'open'`. The host route is the authority: it calls
+   * `folio.requireEditor(req, env, { page })` on every request.
+   */
+  admin?: FolioAdminConfig;
   blocks: readonly AnyBlockDef[] | Registry;
   /**
    * Sugar for a single routable page type, and the only shape that existed
@@ -1129,7 +1137,7 @@ export interface Folio<Env> {
   requireEditor: (
     req: Request,
     env: Env,
-    opts?: FolioEditorOptions & { role?: Role },
+    opts?: FolioEditorOptions & { role?: Role; page?: string },
   ) => Promise<{ editor: FolioEditor; headers: Record<string, string> } | Response>;
   /** `{base}/login?next=<path+query>`, on `sites.admin` with `sites`. */
   signInUrl: (req: Request, next?: string) => string;

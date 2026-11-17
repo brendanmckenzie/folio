@@ -338,3 +338,5 @@ export type {
 // alongside the sync wire in `protocol.ts`.
 export type { ActivityEntry } from "./protocol";
 export type { PreviewWrap } from "./render-wrap";
+export { HOST_PAGE_ICONS, HOST_PAGE_ID, MAX_HOST_PAGES } from "./host-page";
+export type { HostPageIcon } from "./host-page";

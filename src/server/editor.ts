@@ -168,7 +168,17 @@ function text(status: number, body: string, headers: Record<string, string> = {}
 export interface RequireEditorOptions extends FolioEditorOptions {
   /** The minimum effective role. Absent admits any role, including none on a token. */
   role?: Role;
+  /**
+   * A declared `admin.pages` id. Enforces what the page declares (decision 12): the
+   * scope of a `site` page (from `folio_scope`, else `x-folio-scope`), its `brands`
+   * and its `role`. An unknown id throws: a programming error the first request finds.
+   */
+  page?: string;
 }
+
+/** The query parameter and header a `site` page carries its scope in (decision 8). */
+export const HOST_SCOPE_PARAM = "folio_scope";
+export const HOST_SCOPE_HEADER = "x-folio-scope";
 
 export interface EditorGate<Env> {
   editor: (req: Request, env: Env, opts?: FolioEditorOptions) => Promise<FolioEditor | null>;
@@ -237,7 +247,25 @@ export function createEditorGate<Env>(
   const signInUrl: EditorGate<Env>["signInUrl"] = (req, next) => signInUrlFor(rt, req, next);
 
   const requireEditor: EditorGate<Env>["requireEditor"] = async (req, env, opts = {}) => {
-    const found = await editor(req, env, opts);
+    const page =
+      opts.page === undefined ? null : (rt.hostPages.find((p) => p.id === opts.page) ?? null);
+    if (opts.page !== undefined && !page) {
+      throw new Error(
+        `folio: requireEditor({ page: '${opts.page}' }) names no page in admin.pages (declared: ${rt.hostPages.map((p) => p.id).join(", ") || "none"})`,
+      );
+    }
+    // A `site` page's scope is the request's (decision 8); the host may also name it.
+    const perSite = page?.scope === "site" && rt.sites !== null;
+    const named = perSite
+      ? (opts.scope ??
+        new URL(req.url).searchParams.get(HOST_SCOPE_PARAM) ??
+        req.headers.get(HOST_SCOPE_HEADER) ??
+        undefined)
+      : opts.scope;
+    const found = await editor(req, env, {
+      ...opts,
+      scope: perSite ? (named ?? undefined) : named,
+    });
     if (!found) {
       const method = req.method.toUpperCase();
       if (method === "GET" || method === "HEAD") {
@@ -248,10 +276,28 @@ export function createEditorGate<Env>(
       }
       return text(401, "Sign in to Folio first.");
     }
-    if (opts.role !== undefined && (found.role === null || !atLeast(found.role, opts.role))) {
+    if (page && perSite) {
+      // None, or one Folio does not serve (checked against the registry, because the
+      // role of an unserved scope is null and would otherwise read as a plain refusal).
+      const registry = named ? await rt.sites!.registry(env) : null;
+      const served =
+        named !== undefined &&
+        registry !== null &&
+        chain(registry, named).length > 0 &&
+        rt.forScope(registry, named) !== null;
+      if (!served) return text(403, "Open this page from the admin, inside a site.");
+      if (page.brands && (!found.brand || !page.brands.includes(found.brand.id))) {
+        return text(403, `This page is not part of ${found.brand?.label ?? "this site"}.`);
+      }
+    }
+    const needed = [opts.role, page?.role].reduce<Role | undefined>(
+      (a, b) => (a === undefined || (b !== undefined && atLeast(b, a)) ? (b ?? a) : a),
+      undefined,
+    );
+    if (needed !== undefined && (found.role === null || !atLeast(found.role, needed))) {
       return text(
         403,
-        `Your role (${found.role ?? "none"}) may not do that; ${opts.role} is required.`,
+        `Your role (${found.role ?? "none"}) may not do that; ${needed} is required.`,
       );
     }
     return { editor: found, headers: { ...HOST_PAGE_HEADERS } };
