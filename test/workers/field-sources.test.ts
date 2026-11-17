@@ -487,3 +487,64 @@ describe("GET /api/v1/options/:block/:field", () => {
     expect((await v1("/options/productPage/product", { auth: wrong })).status).toBe(403);
   });
 });
+
+/* ----------------------------------------------------- GET .../check (spec 44) --- */
+
+describe("check_document over a sourced select", () => {
+  let id: string;
+  beforeAll(async () => {
+    write = await writer();
+  });
+  beforeEach(async () => {
+    const res = await create();
+    id = ((await res.json()) as { id: string }).id;
+  });
+  const check = async () => {
+    const res = await v1(`/documents/${id}/check?status=draft`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as {
+      findings: {
+        check: string;
+        severity: string;
+        fix: string;
+        detail?: Record<string, unknown>;
+      }[];
+    };
+  };
+  const named = (report: Awaited<ReturnType<typeof check>>, name: string) =>
+    report.findings.filter((f) => f.check === name);
+
+  it("reports an id the list no longer offers as option-not-offered, and fixes through patch_fields", async () => {
+    await putList(["prod_1"]);
+    await patchFields(id, { product: "prod_1" });
+    expect(named(await check(), "option-not-offered")).toEqual([]);
+
+    // The shop retired prod_1 after the page was written.
+    await putList(["prod_2"]);
+    const [finding] = named(await check(), "option-not-offered");
+    expect(finding).toMatchObject({
+      severity: "warning",
+      fix: "patch_fields",
+      detail: { source: "products", value: "prod_1" },
+    });
+    expect(named(await check(), "field-shape")).toEqual([]);
+  });
+
+  it("reports a list that never loaded as option-list-unavailable (info, fix schema)", async () => {
+    await putList(["prod_1"]);
+    await patchFields(id, { product: "prod_1" });
+    await env.DB.prepare("delete from option_lists").run();
+    const [finding] = named(await check(), "option-list-unavailable");
+    expect(finding).toMatchObject({
+      severity: "info",
+      fix: "schema",
+      detail: { source: "products" },
+    });
+  });
+
+  it("makes no list read for a document that stores no sourced value", async () => {
+    expect(named(await check(), "option-not-offered")).toEqual([]);
+    expect(named(await check(), "option-list-unavailable")).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+});

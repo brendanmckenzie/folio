@@ -90,7 +90,7 @@ import {
   storyPathParam,
 } from "../../validate";
 import { listVersions } from "../../versions";
-import { checkSourcedSets } from "../../option-sources";
+import { brandKey, checkSourcedSets, readLists } from "../../option-sources";
 import { commitAll, restoreVersion, writeDocument, type WriteActor } from "../../write";
 import { queryFromParams } from "../content";
 import { brandOf, draftOf } from "../stories";
@@ -503,6 +503,9 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         bare: (await layerOption(c, rt, story)).layer === "bare",
         targets: (ids) => storiesFor(db, ids, [], chain),
         ...(brand.gate?.assets ? { gatedAssets: (keys) => gatedValues(db, keys) } : {}),
+        ...(brand.fieldSources.size > 0
+          ? { optionLists: (refs) => readLists(db, brandKey(brand.brand), refs) }
+          : {}),
       }),
     );
   });
