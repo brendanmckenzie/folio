@@ -25,3 +25,10 @@ export const PRODUCTS: readonly DemoProduct[] = [
 export const RETIRED: readonly { id: string; name: string }[] = [
   { id: "prod_7001", name: "Summer cap (retired)" },
 ];
+
+/**
+ * What `/dev/catalogue` (`src/index.tsx`) flips, so a browser check can see a product retire
+ * and a list go down without editing code: ids in `retired` leave the list `load` answers
+ * (`lookup` still names them), and `down` makes `load` throw.
+ */
+export const shelf = { retired: new Set<string>(), down: false };

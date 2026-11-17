@@ -122,6 +122,40 @@ check(
   `status=${cross.status}`,
 );
 
+const refused = await get("/admin/orders/refused", admin);
+check(
+  "the demo's refusing page sends X-Frame-Options: DENY (what the admin's notice is for)",
+  refused.status === 200 &&
+    refused.headers.get("x-frame-options") === "DENY" &&
+    refused.headers.get("content-security-policy") === "frame-ancestors 'none'",
+  `status=${refused.status}`,
+);
+
+/* --- the demo's sourced select and panel ------------------------------------- */
+
+const json = (path, cookie) => get(path, cookie).then((r) => r.json());
+const listed = await json("/folio/api/field-options?block=productRecord&field=product", admin);
+check(
+  "the Product record's field offers the catalogue, through the internal route",
+  listed.source === "products" || listed.source === "catalogue",
+  JSON.stringify(listed).slice(0, 160),
+);
+check(
+  "...with the three products, labelled",
+  listed.options?.map((o) => o.value).join() === "prod_8812,prod_8813,prod_8814" &&
+    listed.options[0].label === "Classic tee",
+);
+const v1 = await json("/folio/api/v1/options/productRecord/product", admin);
+check("the same list through the v1 route", v1.options?.length === 3 && v1.status === "fresh");
+const schema = await json("/folio/api/schema", null);
+check(
+  "the manifest names the panel for the product type, and nothing of the sources",
+  schema.panels?.product?.label === "Shop" &&
+    !JSON.stringify(schema).includes("lookup") &&
+    !JSON.stringify(schema).includes("optionSources"),
+  JSON.stringify(schema.panels),
+);
+
 /* --- the stylesheet --------------------------------------------------------- */
 
 const css = await get("/folio-host.css");

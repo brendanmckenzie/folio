@@ -125,7 +125,10 @@ export function orderDetail(id: string): string | null {
 ${lines}
 </tbody>
 </table>
-<p><a class="folio-button" data-variant="subtle" href="/admin/orders?state=${order.state}">Back to ${order.state} orders</a></p>`,
+<p><a class="folio-button" data-variant="subtle" href="/admin/orders?state=${order.state}">Back to ${order.state} orders</a></p>
+<p class="folio-muted">Browser checks: <a href="/folio/content">a Folio screen</a> (promoted to the top window) ·
+<a href="https://example.com/">another site</a> (the frame leaves the admin) ·
+<a href="/admin/orders/refused">a page that refuses framing</a> · <a href="/admin/orders/slow">a slow page</a>.</p>`,
     {
       title: `Order #${order.id}`,
       crumbs: [

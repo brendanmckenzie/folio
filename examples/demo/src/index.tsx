@@ -17,7 +17,7 @@ import { renderToReadableStream } from "react-dom/server.edge";
 import { blocks } from "./blocks";
 import { SubmissionStatus, type SubmissionState } from "./blocks/contact";
 import { migrations } from "./migrations";
-import { PRODUCTS, RETIRED } from "./catalogue";
+import { PRODUCTS, RETIRED, shelf } from "./catalogue";
 import { orderDetail, ordersList } from "./orders";
 
 // Two Durable Object classes now. SpaceDO is the space channel
@@ -375,7 +375,14 @@ const folio = createFolio<Env>({
     catalogue: {
       label: "Catalogue",
       ttl: 60,
-      load: () => PRODUCTS.map((p) => ({ value: p.id, label: p.name })),
+      load: () => {
+        // `/dev/catalogue?down=1` (below) takes the shop down, to see a list that never loaded.
+        if (shelf.down) throw new Error("the demo's shop is down");
+        return PRODUCTS.filter((p) => !shelf.retired.has(p.id)).map((p) => ({
+          value: p.id,
+          label: p.name,
+        }));
+      },
       // Names a stored id the list no longer offers, for the admin only.
       lookup: (ids) =>
         [...PRODUCTS.map((p) => ({ id: p.id, name: p.name })), ...RETIRED]
@@ -564,6 +571,26 @@ export default {
       }
       return Response.json({ fail: countriesDown });
     }
+    // Local development only, like the route above: retires a product from the catalogue the
+    // `product` field picks from (`?retire=prod_8814`), brings them all back (`?restore=1`), takes
+    // the shop down (`?down=1` or `0`), and `?stale=1` ages every stored option list past its ttl
+    // and its lease so the next open refreshes. For the browser checks in
+    // `docs/specs/platform/admin-extensions.md`; not a pattern to copy.
+    if (url.pathname === "/dev/catalogue") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
+      }
+      const retire = url.searchParams.get("retire");
+      if (retire) shelf.retired.add(retire);
+      if (url.searchParams.get("restore") === "1") shelf.retired.clear();
+      if (url.searchParams.has("down")) shelf.down = url.searchParams.get("down") === "1";
+      if (url.searchParams.get("stale") === "1") {
+        await env.DB.prepare(
+          "update option_lists set loaded_at = loaded_at - 604800000, attempted_at = attempted_at - 604800000 where source = 'catalogue' and loaded_at is not null",
+        ).run();
+      }
+      return Response.json({ retired: [...shelf.retired], down: shelf.down });
+    }
     // Where `gate.assetDenied` sends a stranger who opens a gated file. A host's own page,
     // not a Folio route; the real one would be the host's sign-in or purchase flow.
     if (url.pathname === "/sign-in") {
@@ -593,6 +620,28 @@ export default {
       const gate = await folio.requireEditor(req, env, { page: "orders" });
       if (gate instanceof Response) return gate;
       const id = url.pathname.slice("/admin/orders".length).replace(/^\//, "");
+      // Two pages that exist only for the browser checks: one the browser refuses to frame
+      // (`X-Frame-Options: DENY`, which is also a `frame-ancestors` that excludes the admin), and
+      // one slower than the admin's 15 second "taking a while" overlay.
+      if (id === "refused") {
+        return new Response(
+          "<!doctype html><title>Refused</title><p>You should not see this framed.</p>",
+          {
+            headers: {
+              ...gate.headers,
+              "content-security-policy": "frame-ancestors 'none'",
+              "x-frame-options": "DENY",
+              "content-type": "text/html; charset=utf-8",
+            },
+          },
+        );
+      }
+      if (id === "slow") {
+        await new Promise((resolve) => setTimeout(resolve, 17_000));
+        return new Response(ordersList(null), {
+          headers: { ...gate.headers, "content-type": "text/html; charset=utf-8" },
+        });
+      }
       const html = id ? orderDetail(id) : ordersList(url.searchParams.get("state"));
       if (html === null) {
         return new Response("No such order", {
