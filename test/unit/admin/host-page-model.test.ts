@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  announcedFor,
   canonicalPath,
   chooserScopes,
   classifyUnreadable,
   framedSrc,
   hostScreenOf,
+  loadedAnnounce,
   mirror,
   needsScopeHeal,
   sameFrameLocation,
@@ -233,5 +235,46 @@ describe("chooserScopes", () => {
       "alpha",
       "bravo",
     ]);
+  });
+});
+
+describe("an announce and the load of the same document (found in the browser pass)", () => {
+  const docA = {};
+  const docB = {};
+  const crumb = { text: "Open orders" };
+
+  it("keeps crumbs and title announced BEFORE load, which is how an inline script posts", () => {
+    // 1. the page's script announces during parse; 2. then the iframe fires `load`.
+    const announced = { title: "Order #1042", crumbs: [crumb] };
+    const after = loadedAnnounce(announced, docA, docA, "Order 1042 (document title)");
+    expect(after).toEqual({ title: "Order #1042", crumbs: [crumb] });
+  });
+
+  it("falls back to the document title when the page announced crumbs but no title", () => {
+    expect(loadedAnnounce({ crumbs: [crumb] }, docA, docA, "From <title>")).toEqual({
+      title: "From <title>",
+      crumbs: [crumb],
+    });
+  });
+
+  it("an announce AFTER load keeps what load read, and replaces what it carries", () => {
+    const loaded = loadedAnnounce({ crumbs: [] }, undefined, docA, "From <title>");
+    expect(loaded).toEqual({ title: "From <title>", crumbs: [] });
+    // The announce handler starts from the same document's state.
+    expect(announcedFor(loaded, docA, docA)).toBe(loaded);
+  });
+
+  it("starts clean for a different document, so one page's crumbs never label the next", () => {
+    const announced = { title: "Order #1042", crumbs: [crumb] };
+    expect(loadedAnnounce(announced, docA, docB, "Orders")).toEqual({
+      title: "Orders",
+      crumbs: [],
+    });
+    expect(announcedFor(announced, docA, docB)).toEqual({ crumbs: [] });
+    expect(announcedFor(announced, undefined, docA)).toEqual({ crumbs: [] });
+  });
+
+  it("is no title at all for a blank document title and nothing announced", () => {
+    expect(loadedAnnounce({ crumbs: [] }, undefined, docA, "  ")).toEqual({ crumbs: [] });
   });
 });

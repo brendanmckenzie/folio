@@ -240,3 +240,36 @@ export function chooserScopes(
 
 /** A frame whose first load is this late shows the overlay (decision 10). */
 export const SLOW_FRAME_MS = 15_000;
+
+/** What a framed document has said about itself so far. */
+export interface Announced<C> {
+  title?: string;
+  crumbs: C[];
+}
+
+/**
+ * **An announce belongs to the document that posted it, not to the load event.** A page's inline
+ * script posts during parse, before the iframe's `load` fires, so a `load` handler that starts
+ * from a clean slate throws the page's crumbs away (found in the browser pass). `doc` is the
+ * frame's `document` object: the same object across the announce and the `load` of one page, a
+ * new one for the next navigation. The announce keeps what that document already said, and starts
+ * clean for a document it has not heard from.
+ */
+export function announcedFor<C>(prev: Announced<C>, prevDoc: unknown, doc: unknown): Announced<C> {
+  return prevDoc !== undefined && prevDoc === doc ? prev : { crumbs: [] };
+}
+
+/**
+ * The state after a `load`: the document's own title unless the page already announced one, and
+ * crumbs it already announced kept. A different document starts over with its `<title>`.
+ */
+export function loadedAnnounce<C>(
+  prev: Announced<C>,
+  prevDoc: unknown,
+  doc: unknown,
+  documentTitle: string,
+): Announced<C> {
+  const kept = announcedFor(prev, prevDoc, doc);
+  const title = kept.title ?? (documentTitle.trim() || undefined);
+  return { ...(title !== undefined ? { title } : {}), crumbs: kept.crumbs };
+}

@@ -7,9 +7,11 @@ import type { Router } from "../useRouter";
 import css from "./HostPage.module.css";
 import {
   chooserScopes,
+  announcedFor,
   classifyUnreadable,
   framedSrc,
   hostScreenOf,
+  loadedAnnounce,
   mirror,
   needsScopeHeal,
   SLOW_FRAME_MS,
@@ -99,6 +101,8 @@ function Frame({ page, pages, rest, query, scope, base, replace, notify, onAnnou
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const mounted = useRef(false);
   const announced = useRef<HostAnnounce>({ id: page.id, crumbs: [] });
+  /** The frame document `announced` is about, so a `load` does not discard its announce. */
+  const announcedDoc = useRef<unknown>(undefined);
   const adminOrigin = window.location.origin;
 
   const wait = useCallback(() => {
@@ -160,11 +164,12 @@ function Frame({ page, pages, rest, query, scope, base, replace, notify, onAnnou
       return;
     }
     last.current = location;
+    // An announce may have arrived already (the page's inline script posts during parse).
     announced.current = {
       id: page.id,
-      ...(title.trim() ? { title: title.trim() } : {}),
-      crumbs: [],
+      ...loadedAnnounce(announced.current, announcedDoc.current, win.document, title),
     };
+    announcedDoc.current = win.document;
     onAnnounce(announced.current);
     follow(location);
   };
@@ -191,12 +196,15 @@ function Frame({ page, pages, rest, query, scope, base, replace, notify, onAnnou
         notify(f.message);
         return;
       }
+      const doc = frame.current?.contentWindow?.document;
+      const base = announcedFor(announced.current, announcedDoc.current, doc);
+      announcedDoc.current = doc;
       announced.current = {
         id: page.id,
         ...(f.title !== undefined
           ? { title: f.title }
-          : announced.current.title !== undefined
-            ? { title: announced.current.title }
+          : base.title !== undefined
+            ? { title: base.title }
             : {}),
         crumbs: f.crumbs
           ? f.crumbs.map((crumb) => {
@@ -209,7 +217,7 @@ function Frame({ page, pages, rest, query, scope, base, replace, notify, onAnnou
                   }
                 : { text: crumb.text };
             })
-          : announced.current.crumbs,
+          : base.crumbs,
       };
       onAnnounce(announced.current);
       if (f.path) follow(new URL(f.path, adminOrigin).href);
