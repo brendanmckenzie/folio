@@ -411,6 +411,7 @@ function smokeTest(sha) {
       "dist/form.js": ["useFolioForm"],
       "dist/render.js": ["FolioDoc", "RenderBlok", "RenderRichtext"],
       "dist/preview.js": ["mountPreview"],
+      "dist/host.js": ["connectHostPage", "announce", "scoped"],
     };
     const absent = [];
     for (const [file, names] of Object.entries(anchors)) {

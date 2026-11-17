@@ -338,5 +338,18 @@ export type {
 // alongside the sync wire in `protocol.ts`.
 export type { ActivityEntry } from "./protocol";
 export type { PreviewWrap } from "./render-wrap";
-export { HOST_PAGE_ICONS, HOST_PAGE_ID, MAX_HOST_PAGES } from "./host-page";
-export type { HostPageIcon } from "./host-page";
+export {
+  frameRedirectTarget,
+  HOST_PAGE_ICONS,
+  HOST_PAGE_ID,
+  HOST_PAGE_PROTOCOL,
+  MAX_HOST_PAGES,
+  screenHostFrame,
+} from "./host-page";
+export type {
+  HostCrumb,
+  HostFrameResult,
+  HostPageFrame,
+  HostPageIcon,
+  ScreenedHostFrame,
+} from "./host-page";
