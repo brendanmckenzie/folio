@@ -802,6 +802,58 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     if (asked !== null && !isKnownLocale(rt.locales, asked)) return null;
     const locale = asked ?? undefined;
 
+    /**
+     * `record` previews a record (`?record=`), and is read **before** the page at the
+     * path is, because a record type that declares `previewRoot` has no host page: it
+     * is drawn inside a block Folio synthesises (`record-preview-root.md` decision 7).
+     * It is refused for the reasons `as` is, and before the record is looked up, so
+     * the refusal cannot depend on which records exist and a share cookie never
+     * reaches `claimShare` for a record request: **a share grant may not use it** (it
+     * covers one page, and a record is another document), **nor may a `draft`
+     * request**, which has no editing surface for it to name, and **naming `as` as
+     * well** is a request with two editable documents, which is no request. It is an
+     * editor's parameter and the editor is the only way to be here: a share link for a
+     * record is refused where it is minted (`routes/preview.ts`).
+     *
+     * The id is looked up like the page's own `_folio_id`: it has to exist, be a
+     * `record` of **this brand** (`brand.typeOf`, so another brand's type is unknown),
+     * and sit in this render's chain, and anything else is handed back exactly like a
+     * deleted one.
+     */
+    const as = url.searchParams.get("as");
+    const record = url.searchParams.get("record");
+    // The registry only on a deployment with `brands`, where a layer's seed needs it.
+    const branded = { brand, ...(!one && on ? { registry: on.registry } : {}) };
+    let target: StoryMeta | undefined;
+    if (record !== null) {
+      if (shared.length > 0 || mode === "draft" || as !== null) return null;
+      const found = await storyById(bindings.db, record);
+      const type = found ? brand.typeOf(found.type) : undefined;
+      if (
+        !found ||
+        type?.kind !== "record" ||
+        !(on ? on.render.chain : SINGLE_SITE_CHAIN).includes(found.site ?? DEFAULT_SITE)
+      ) {
+        return null;
+      }
+      if (type.previewRoot !== undefined) {
+        // `_folio_id` names a page to draw and there is none, so it is a request with
+        // two documents. The path is never read: `/`, a stale tab's `/authors`, and a
+        // host whose root route is not `/` all render the same thing, and no
+        // `overriddenBy` because there is no shadowed page.
+        if (url.searchParams.has("_folio_id")) return null;
+        return previewPage(rt, bindings, null, {
+          root: type.previewRoot,
+          record: found,
+          locale,
+          mode,
+          ...(on ? { site: on.render, admin: on.admin } : {}),
+          ...branded,
+        });
+      }
+      target = found;
+    }
+
     // The path with the host's own locale decoration removed. Derived by
     // asking `config.route` rather than by assuming a prefix convention: the
     // admin built this URL from `previewUrls`, which `route` produced, so the
@@ -850,14 +902,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             : {}),
         }
       : {};
-    // The registry only on a deployment with `brands`, where a layer's seed needs it.
-    const branded = { brand, ...(!one && on ? { registry: on.registry } : {}) };
-
     // `as` previews a singleton in the context of this page (`globals.md`
     // decision 4). Naming anything that is not a configured global is the
     // same refusal shape as a path with no story: null, so the host's own
     // routes win rather than Folio guessing at what was meant.
-    const as = url.searchParams.get("as");
     /**
      * **A share grant may not use it.** `?as=` swaps the editable document for a
      * *global's* draft — the site header, site settings — and the grant covers one
@@ -874,41 +922,16 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * this branch.
      */
     if (as !== null && (shared.length > 0 || mode === "draft")) return null;
-    const record = url.searchParams.get("record");
     if (as !== null) {
-      // Two editable documents is no request (see `record` below).
-      if (record !== null) return null;
       const type = brand.typeOf(as);
       if (type?.kind !== "singleton" || !brand.globals.includes(as)) return null;
       return previewPage(rt, bindings, story, { as, locale, mode, ...site, ...branded });
     }
 
-    /**
-     * `record` previews a record in the context of this page (`previewPath` on a
-     * record type), the sibling of `as` and refused for the same two reasons: **a
-     * share grant may not use it** (it covers one page, and a record is another
-     * document), and **nor may a `draft` request**, which has no editing surface for
-     * it to name. Both are refused before the record is looked up, so the refusal
-     * cannot depend on which records exist. It is an editor's parameter and the
-     * editor is the only way to be here: a share link for a record is refused where
-     * it is minted (`routes/preview.ts`).
-     *
-     * The id is looked up like the page's own `_folio_id`: it has to exist, be a
-     * `record` of **this brand** (`brand.typeOf`, so another brand's type is
-     * unknown), and sit in this render's chain, and anything else is handed back
-     * exactly like a deleted one. Naming `as` as well is a request with two
-     * editable documents, which is no request.
-     */
-    if (record !== null) {
-      if (shared.length > 0 || mode === "draft") return null;
-      const target = await storyById(bindings.db, record);
-      if (
-        !target ||
-        brand.typeOf(target.type)?.kind !== "record" ||
-        !chain.includes(target.site ?? DEFAULT_SITE)
-      ) {
-        return null;
-      }
+    // A record in the context of this page (`previewPath` on a record type), read and
+    // checked above, before the page was looked up. Reaching here means its type
+    // declares no `previewRoot`.
+    if (target) {
       return previewPage(rt, bindings, story, {
         record: target,
         locale,

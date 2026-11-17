@@ -1,7 +1,7 @@
 import { createExecutionContext, env } from "cloudflare:test";
 import { Hono } from "hono";
 import { beforeAll, describe, expect, it } from "vitest";
-import { defineBlock, text } from "../../src/core";
+import { defineBlock, defineRecord, text } from "../../src/core";
 import { defineMigration, field } from "../../src/core/migrate";
 import type { Doc } from "../../src/core/doc";
 import type { DocumentType } from "../../src/core/schema";
@@ -243,6 +243,39 @@ describe("construction", () => {
         assets: { admin: "/a.js", brands: { atlas: { preview: "/p.js" } } },
       }),
     ).toThrow(/'assets.brands' must name exactly the brands/);
+  });
+
+  it("checks a record type's previewRoot against its own brand's registry (spec 45)", () => {
+    const person = defineBlock({
+      name: "person",
+      label: "Person",
+      fields: { name: text() },
+      render: () => null,
+    });
+    const withRoot = (previewRoot: string, extra: (typeof hbrRoot)[] = []) =>
+      createFolio({
+        ...config,
+        brands: {
+          ...brands,
+          harbour: {
+            ...brands.harbour!,
+            blocks: [hbrRoot, hbrProse, person, ...extra],
+            types: [
+              ...hbrTypes,
+              { name: "person", label: "Person", kind: "record", root: "person", previewRoot },
+            ],
+          },
+        },
+      });
+    // `header` exists, but only atlas declares it.
+    expect(() => withRoot("header")).toThrow(
+      /document type 'person' names previewRoot 'header', which is not in the registry/,
+    );
+    const bare = defineRecord({ name: "bareFrame", label: "Bare", fields: { x: text() } });
+    expect(() => withRoot("bareFrame", [bare as unknown as typeof hbrRoot])).toThrow(
+      /document type 'person' names previewRoot 'bareFrame', which has no render/,
+    );
+    expect(() => withRoot("prose")).not.toThrow();
   });
 
   it("builds one brand runtime per brand, each with its own pageRoot and prose", () => {

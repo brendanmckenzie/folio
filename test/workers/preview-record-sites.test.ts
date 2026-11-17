@@ -37,21 +37,35 @@ const page = (brand: string) =>
 const named = (name: string) =>
   defineBlock({ name, label: name, fields: { name: text() }, render: () => null });
 
+/** A `previewRoot` frame both brands declare under one name, each drawing its own tag. */
+const frame = (brand: string) =>
+  defineBlock({
+    name: "frame",
+    label: "Frame",
+    fields: { caption: text() },
+    render: (_data, resolution) => {
+      const rec = resolveReference(resolution.record, resolution);
+      return h("section", null, `frame-${brand}:${rec ? String(rec.data.name) : "none"}`);
+    },
+  });
+
 const brands: Record<string, FolioBrand<Cloudflare.Env>> = {
   atlas: {
     label: "Atlas Guides",
-    blocks: [page("atl"), named("personRoot")],
+    blocks: [page("atl"), named("personRoot"), frame("atl")],
     types: [
       { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
       { name: "person", label: "Person", kind: "record", root: "personRoot", previewPath: "home" },
+      { name: "fellow", label: "Fellow", kind: "record", root: "personRoot", previewRoot: "frame" },
     ] satisfies DocumentType[],
   },
   harbour: {
     label: "Harbour Travel",
-    blocks: [page("hbr"), named("guideRoot")],
+    blocks: [page("hbr"), named("guideRoot"), frame("hbr")],
     types: [
       { name: "page", label: "Page", kind: "page", root: "pageRoot", default: true },
       { name: "guide", label: "Guide", kind: "record", root: "guideRoot", previewPath: "home" },
+      { name: "note", label: "Note", kind: "record", root: "guideRoot", previewRoot: "frame" },
     ] satisfies DocumentType[],
   },
 };
@@ -122,6 +136,10 @@ beforeAll(async () => {
   await row("sty_group", "east", "person", null, doc("personRoot", { name: "Group" }));
   await row("sty_uganda", "uganda", "person", null, doc("personRoot", { name: "Uganda" }));
   await row("sty_hbr_guide", "harbour", "guide", null, doc("guideRoot", { name: "Guide" }));
+  await row("sty_fel_own", "kenya", "fellow", null, doc("personRoot", { name: "FelOwn" }));
+  await row("sty_fel_group", "east", "fellow", null, doc("personRoot", { name: "FelGroup" }));
+  await row("sty_fel_uganda", "uganda", "fellow", null, doc("personRoot", { name: "FelUg" }));
+  await row("sty_hbr_note", "harbour", "note", null, doc("guideRoot", { name: "Note" }));
   // A row in kenya's own site whose type is the *other* brand's: in the chain, not a
   // record of this brand.
   await row("sty_wrongtype", "kenya", "guide", null, doc("guideRoot", { name: "Wrong" }));
@@ -154,5 +172,43 @@ describe("?_folio=preview&record= on a deployment with sites and brands", () => 
   it("hands back another brand's record, and a row of the other brand's type in the chain", async () => {
     expect(await preview("sty_hbr_guide")).toBeNull();
     expect(await preview("sty_wrongtype")).toBeNull();
+  });
+});
+
+describe("?_folio=preview&record= with previewRoot on sites and brands", () => {
+  // The path is never read, and there is no host page: `/` on a preview origin that has
+  // no story at all still renders.
+  const root = (id: string, origin = "https://preview.kenya.example", extra = "") =>
+    folio.handle(
+      new Request(`${origin}/?_folio=preview&record=${id}${extra}`),
+      env,
+      createExecutionContext(),
+    );
+
+  it("renders in the site's own scope and in a group it reads, in the brand's own frame", async () => {
+    for (const [id, name] of [
+      ["sty_fel_own", "FelOwn"],
+      ["sty_fel_group", "FelGroup"],
+    ] as const) {
+      const res = await root(id);
+      expect(res?.status).toBe(200);
+      expect(await res?.text()).toContain(`frame-atl:${name}`);
+    }
+  });
+
+  it("draws the gated site's brand's block, not another's of the same name", async () => {
+    const res = await root("sty_hbr_note", "https://preview.harbour.example");
+    expect(res?.status).toBe(200);
+    const html = await res!.text();
+    expect(html).toContain("frame-hbr:Note");
+    expect(html).not.toContain("frame-atl");
+  });
+
+  it("hands back a record outside the chain, another brand's record, and _folio_id", async () => {
+    expect(await root("sty_fel_uganda")).toBeNull();
+    // Another brand's record type is unknown here, whichever way round.
+    expect(await root("sty_hbr_note")).toBeNull();
+    expect(await root("sty_fel_own", "https://preview.harbour.example")).toBeNull();
+    expect(await root("sty_fel_own", undefined, "&_folio_id=sty_home")).toBeNull();
   });
 });

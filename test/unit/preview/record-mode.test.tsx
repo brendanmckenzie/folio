@@ -102,6 +102,63 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+/**
+ * `previewRoot`: the page is a blank instance of a block, minted by the server per
+ * request (hex uids, every field at its default) and carried in `editing.page`, so
+ * the client hydrates it without ever building it.
+ */
+describe("a record previewed in a synthetic root", () => {
+  it("hydrates a one-blok synthetic page without a mismatch", async () => {
+    const recordFrame = defineBlock({
+      name: "recordFrame",
+      label: "Frame",
+      fields: { caption: text({ default: "Caption" }) },
+      render: ({ caption }, resolution) => {
+        const rec = resolveReference(resolution.record, resolution);
+        return (
+          <main>
+            <h1>{caption}</h1>
+            <p data-testid="record">{rec ? String(rec.data.name ?? "") : "no record"}</p>
+          </main>
+        );
+      },
+    });
+    const syntheticPage = blok("96cf6e93227e7bb5", "recordFrame", { caption: "Caption" });
+    const merged = recordResolution(
+      { assetBase: "/folio/asset", stories: {} },
+      recordOwn,
+      "rec",
+      recordDoc,
+    );
+    const html = renderToString(
+      <FolioDoc
+        doc={syntheticPage}
+        registry={toRegistry([recordFrame, person])}
+        mode="off"
+        resolution={merged}
+      />,
+    );
+    document.body.innerHTML = `<div id="folio-root">${html}</div>`;
+    window.__FOLIO__ = {
+      doc: recordDoc,
+      resolution: merged,
+      editing: { record: "rec", page: syntheticPage },
+    };
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const before = document.getElementById("folio-root")?.innerHTML;
+    expect(before).toContain("Caption");
+    await act(async () => mountPreview([recordFrame, person]));
+    expect(errors).not.toHaveBeenCalled();
+    expect(document.getElementById("folio-root")?.innerHTML).toBe(before);
+
+    frame({
+      type: "apply",
+      mutations: [{ t: "set", uid: "r0000001", field: "name", value: "Grace" }],
+    });
+    expect(text$("record")).toBe("Grace");
+  });
+});
+
 describe("a record previewed in context", () => {
   it("hydrates the server's markup without a mismatch", async () => {
     const merged = recordResolution(pageResolution, recordOwn, "rec", recordDoc);
