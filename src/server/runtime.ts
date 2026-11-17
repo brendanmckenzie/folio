@@ -71,7 +71,15 @@ import { type ContentProjection, contentProjection } from "./content-index";
 import { type ResolvedDescribe, validateDescribe } from "./describe";
 import { validateWriting } from "./writing";
 import { logActionWarnings } from "./form-actions";
-import { type ResolvedForms, validateForms } from "./form-responses";
+import { type ResolvedHostPage, validateAdmin } from "./admin-config";
+import { mergeFieldSources, validateFieldSources } from "./field-sources";
+import { type ResolvedPanel, validatePanels } from "./panels-config";
+import {
+  type ResolvedForms,
+  type ResolvedOptionSource,
+  validateForms,
+  validateSources,
+} from "./form-responses";
 import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
 import {
   effectiveSettings,
@@ -296,6 +304,19 @@ export interface BrandRuntime {
   indexedFields: ReadonlySet<string>;
   gate: ResolvedGate | null;
   forms: ResolvedForms | null;
+  /**
+   * `optionSources`, validated: the sources registered for document fields only, which no
+   * forms surface lists, previews or renders (`platform/admin-extensions.md` decision 16).
+   */
+  optionSources: ReadonlyMap<string, ResolvedOptionSource>;
+  /**
+   * What a field's `optionsFrom` may name: `optionSources` and `forms.sources` together.
+   * Read by field code only; `forms.sources` is untouched, so the registry route, the
+   * builder preview and `checkOptionSources` still see form sources alone.
+   */
+  fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
+  /** `panels`, validated, by document type name (`platform/admin-extensions.md` decision 21). */
+  panels: ReadonlyMap<string, ResolvedPanel>;
   describe: ResolvedDescribe | null;
   /**
    * This brand's writing guide (`authoring-guidance.md` decision 6), or null. Read
@@ -446,6 +467,8 @@ export interface FolioRuntime {
   base: string;
   /** `FolioConfig.sites`, validated, or null for a deployment with no `sites`. */
   sites: SitesRuntime | null;
+  /** `FolioConfig.admin.pages`, validated, with defaults applied; empty when none. */
+  hostPages: readonly ResolvedHostPage[];
   /** The host's `route`, or the single-site default. */
   route: (path: string, locale?: string, site?: SiteRef) => string;
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
@@ -712,6 +735,8 @@ const BRAND_KEYS = [
   "previewWrap",
   "gate",
   "forms",
+  "optionSources",
+  "panels",
   "describe",
   "writing",
   "migrations",
@@ -804,6 +829,9 @@ interface PreparedBrand {
   describe: ResolvedDescribe | null;
   writing: WritingGuide | null;
   forms: ResolvedForms | null;
+  optionSources: ReadonlyMap<string, ResolvedOptionSource>;
+  fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
+  panels: ReadonlyMap<string, ResolvedPanel>;
   previewCss: readonly string[];
   previewWrap: PreviewWrap | undefined;
 }
@@ -854,6 +882,19 @@ function prepareBrand<Env>(
     // symptom is a contact form that silently collects nothing, on the one route in
     // this library a stranger can reach (`../../docs/specs/content-model/forms.md` decision 11).
     const forms = validateForms(brand.forms);
+    // Same timing, same reason: a field naming a source nobody registered, with a setting
+    // the source does not declare, or beside `translatable` is found by an editor opening
+    // the inspector. `optionSources` is its own registry, and an id also in `forms.sources`
+    // throws (`platform/admin-extensions.md` decisions 16 and 17).
+    const optionSources = validateSources(brand.optionSources, "optionSources");
+    const fieldSources = mergeFieldSources(optionSources, forms?.sources);
+    validateFieldSources(schema, fieldSources);
+    // Same timing, same reason: a `load` that is not a function, a `timeoutMs` out of range or
+    // a panel for a type nobody declared is found by an editor opening a document.
+    const panels = validatePanels(
+      brand.panels,
+      types.map((t) => t.name),
+    );
     // Same timing, same reason: `globals` naming an unknown type or a non-
     // singleton one is a config mistake, not a runtime surprise the first page
     // render discovers (`../../docs/specs/content-model/globals.md`).
@@ -897,6 +938,9 @@ function prepareBrand<Env>(
       describe,
       writing,
       forms,
+      optionSources,
+      fieldSources,
+      panels,
       previewCss: brand.previewCss ?? [],
       previewWrap: brand.previewWrap,
     };
@@ -2166,6 +2210,14 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       manifest: {
         ...toManifest(registry, types, globals, locales),
         ...manifestHooks(config.hooks),
+        // Absent with none declared, so a host without panels gets the manifest it always did.
+        ...(b.panels.size > 0
+          ? {
+              panels: Object.fromEntries(
+                [...b.panels.values()].map((p) => [p.type, { label: p.label, role: p.role }]),
+              ),
+            }
+          : {}),
         ...assetAccessManifest(gate),
         ...(b.id !== null && b.label !== null ? { brand: { id: b.id, label: b.label } } : {}),
         ...(b.id !== null && b.settings ? { settings: b.settings } : {}),
@@ -2178,6 +2230,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       indexedFields: indexed,
       gate,
       forms,
+      optionSources: b.optionSources,
+      fieldSources: b.fieldSources,
+      panels: b.panels,
       describe,
       writing,
       previewWrap: b.previewWrap,
@@ -2260,6 +2315,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     rawDb: (env: unknown) => config.bindings(env as Env).db,
     base,
     sites,
+    hostPages: validateAdmin(config.admin, {
+      base,
+      sites: Boolean(config.sites),
+      brandIds,
+      mode: auth.mode,
+    }),
     route,
     dev: Boolean(config.assets?.devClient),
     draftMode: config.draftMode === true,

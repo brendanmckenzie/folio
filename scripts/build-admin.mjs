@@ -11,6 +11,7 @@
  *   folio-admin.js     the entry (ESM)
  *   folio-admin.css    `ui/tokens.css` plus every `*.module.css`, in one file
  *   folio-admin-*.js   split chunks (a dynamic `import()` in the admin)
+ *   folio-host.css     a host page's tokens and element layer (`folio/host.css`)
  *
  * Three things here are not what a plain esbuild call gives, and each is guarded:
  *
@@ -32,6 +33,7 @@ import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build, transform } from "esbuild";
+import { buildHostCss } from "./lib/host-css.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const outdir = join(root, "dist", "admin");
@@ -91,6 +93,17 @@ const renamed = names.length
 const prefix = (text) => (renamed ? text.replace(renamed, (n) => `${PREFIX}${n}`) : text);
 // In JS a class name is only ever a string value, so only string literals are touched.
 const prefixStrings = (js) => js.replace(/"(?:[^"\\\n]|\\.)*"/g, prefix);
+
+// `folio-host.css` (decision 11): the tokens as `--folio-*` and an opt-in element layer.
+// Written after the admin's files are final and before the minify pass below, which
+// touches every file in `outdir`. It has no module class, so the prefix pass leaves it be.
+writeFileSync(
+  join(outdir, "folio-host.css"),
+  buildHostCss(
+    readFileSync(join(root, "src/admin/ui/tokens.css"), "utf8"),
+    readFileSync(join(root, "src/admin/host/host.css"), "utf8"),
+  ),
+);
 
 for (const name of readdirSync(outdir)) {
   const text = name.endsWith(".css") ? prefix(read(name)) : prefixStrings(read(name));

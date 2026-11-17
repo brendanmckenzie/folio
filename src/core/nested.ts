@@ -40,6 +40,7 @@
 import { type Blok, type Doc, type Json, keysBetween, newUid, subtree } from "./doc";
 import { defaultValue, type Field } from "./fields";
 import { dataOf } from "./locales";
+import { isOptionValue, MAX_OPTION_VALUE } from "./option-sources";
 import type { LocaleContext } from "./locales";
 import { type BlockSchema, type SchemaIndex, slotsOf } from "./schema";
 
@@ -967,6 +968,14 @@ export function fieldShapeError(field: Field, value: unknown): string | null {
     case "select":
       if (typeof value !== "string") return "must be a string";
       if (value === "" || field.options.some((o) => o.value === value)) return null;
+      // A sourced select cannot see its list here (this function is pure and synchronous):
+      // the shape is any value a source could have offered, and the membership check is
+      // the content API route's (`platform/admin-extensions.md` decision 20).
+      if (field.optionsFrom) {
+        return isOptionValue(value)
+          ? null
+          : `must be 1 to ${MAX_OPTION_VALUE} printable characters from the option source`;
+      }
       return `must be one of: ${field.options.map((o) => o.value).join(", ")}`;
     case "number":
       return typeof value === "number" ? null : "must be a number";

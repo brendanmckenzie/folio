@@ -70,6 +70,7 @@ implies nothing at all beyond itself.
 | `POST` | `/api/v1/documents/:id/versions` | `publish` | `VersionMeta`, `201` |
 | `GET` | `/api/v1/documents/:id/versions` | `content:read` | `{ versions: VersionMeta[] }` |
 | `GET` | `/api/v1/documents/:id/check` | `content:read` (+`:draft` by default) | `ContentCheckReport` |
+| `GET` | `/api/v1/options/:block/:field` | `content:read` | `{ source, label, status, loadedAt, failure?, options }`: what a sourced `select` offers. `?locale=` for a localised source. `404` for an unknown block or field, `400` for a field with no `optionsFrom`. Refreshes a missing or stale list (up to 10 s) |
 | `GET` | `/api/v1/assets` | `content:read` | `{ assets: AssetRow[] }` |
 | `POST` | `/api/v1/assets?filename=…` | `assets:write` | `{ asset, value }`, `201`; `?access=` on a deployment that gates files |
 | `PATCH` | `/api/v1/assets/:id` | `assets:write` | The row. Body `{ access?, alt?, description? }`; `access` needs a deployment that gates files, `null` inherits the folder's value. A body naming `folderId` or `tags` is `400` |
@@ -379,6 +380,14 @@ Two things are dropped rather than refused, and reported as `changed: 0`:
 
 A `blocks`-kind field is refused: structure is `PUT /content`'s job.
 
+**A sourced select is checked against its list.** A field declared with `select({ optionsFrom })`
+takes the host's own ids. `PATCH /fields`, `PUT /content` and `POST /documents` accept a value the
+last good list offers (fresh or stale), a typed extra, or `""`/`null`, and answer `400 bad_request`
+for any other, naming the field and the source and pointing at `GET /options/:block/:field`. A list
+that has never loaded is refreshed under a lease for up to ten seconds and then answers `503` with
+the code `unavailable`. Only values the write *changes* are checked, so a merge payload returning a
+stored value is never refused.
+
 ### `POST /documents`
 
 ```jsonc
@@ -530,6 +539,7 @@ rather than being a database error that escaped:
 | `too_large` | 413 | Over a document or upload cap. The message carries the numbers |
 | `unsupported` | 501 | Well-formed, but this server has no such type, locale, or capability |
 | `incomplete` | 502 | Half of a two-store write landed. The message names what exists |
+| `unavailable` | 503 | A host dependency Folio needs to answer has never answered: a write to a sourced select whose option list has never loaded. Retrying later can succeed |
 | `internal` | 500 | A bug or a platform failure. Deliberately says nothing else |
 
 **Schema refusals name the path that failed** and never drop it silently:

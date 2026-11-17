@@ -288,6 +288,18 @@
       "rollback": "safe",
       "migrations": [],
       "headings": []
+    },
+    {
+      "version": "1.7.0",
+      "date": "2026-11-17",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": [
+        "Host access to the editor session (v1.7.0)",
+        "Host pages in the admin (v1.7.0)",
+        "Option sources on document fields (v1.7.0)",
+        "Linked-data panels (v1.7.0)"
+      ]
     }
   ]
 }

@@ -52,6 +52,9 @@ describe("the /api partition", () => {
     // and deliberately *not* `{base}/api/v1/schedules`, which would be a promise to
     // somebody's script about a surface nothing outside the admin reads yet.
     "/folio/api/schedules",
+    // `platform/admin-extensions.md` decision 19: the inspector's sourced-select picker. Internal,
+    // and deliberately not a v1 route (a version segment is a promise to a script).
+    "/folio/api/field-options",
     "/folio/api/content",
     "/folio/api/migrations",
     "/folio/api/audit",
@@ -99,7 +102,7 @@ describe("the /api partition", () => {
    * exactly this list**. A new internal route cannot leak into it, because anything
    * not named here has to 404 under `/api/v1`.
    */
-  const V1_SEGMENTS = ["schema", "documents", "assets", "search"];
+  const V1_SEGMENTS = ["schema", "documents", "assets", "search", "options"];
 
   it("keeps the v1 surface to exactly its documented segments", async () => {
     for (const path of INTERNAL) {
@@ -340,6 +343,7 @@ describe("the v1 route list", () => {
     "GET /documents/:id/versions",
     "GET /documents/by-path",
     "GET /documents/by-path/:path{.*}",
+    "GET /options/:block/:field",
     "GET /schema",
     "GET /search",
     "PATCH /assets/:id",

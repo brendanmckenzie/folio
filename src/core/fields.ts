@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { FieldCondition } from "./conditions";
 import type { Json } from "./doc";
 import type { ResolvedForm } from "./forms";
+import type { OptionsFrom } from "./option-sources";
 import type { ResolvedCollection } from "./query";
 import type { ResolvedAsset, ResolvedLink, ResolvedReference } from "./resolve";
 import {
@@ -214,7 +215,19 @@ export type Field =
    * exact form or not a real calendar date (`dateError`).
    */
   | ({ kind: "date"; time?: boolean } & Common & Indexable)
-  | ({ kind: "select"; options: readonly SelectOption[] } & Common & Indexable)
+  | ({
+      kind: "select";
+      options: readonly SelectOption[];
+      /**
+       * Choices from a host option source (`optionSources`, `platform/admin-extensions.md`
+       * decision 14), materialised before `options`. `options` are then typed extras, kept
+       * after the sourced list, and win a collision. The stored value is the source's
+       * `value` (the host's id), exactly what a static select stores, so the index, the
+       * v1 shape, migrations and the Durable Object need no change.
+       */
+      optionsFrom?: OptionsFrom;
+    } & Common &
+      Indexable)
   /** `accept` is passed to the file picker, e.g. `'image/*'` or `'.pdf'`. */
   | ({ kind: "asset"; accept?: string } & Common & Decorative)
   | ({ kind: "multiasset"; accept?: string; max?: number } & Common & Decorative)
@@ -381,9 +394,38 @@ export const references = (o: Defaulted<"references", string[]> = {}) => ({
   ...o,
 });
 
-export const select = <const T extends readonly SelectOption[]>(
-  o: Omit<Opts<"select">, "options" | "default"> & { options: T; default?: T[number]["value"] },
-) => ({ kind: "select" as const, ...o });
+export function select<const T extends readonly SelectOption[]>(
+  o: Omit<Opts<"select">, "options" | "default" | "optionsFrom"> & {
+    options: T;
+    default?: T[number]["value"];
+  },
+): { kind: "select" } & Omit<Opts<"select">, "options" | "default" | "optionsFrom"> & {
+    options: T;
+    default?: T[number]["value"];
+  };
+/**
+ * A select whose choices come from a host option source. `options` is optional here and
+ * is the typed extras kept after the sourced list; the field's type is `string` (the
+ * host's ids are not known to the type system). `translatable` is refused: the stored id
+ * is the same in every locale.
+ */
+export function select(
+  o: Omit<Opts<"select">, "options" | "default" | "optionsFrom" | "translatable"> & {
+    optionsFrom: OptionsFrom;
+    options?: readonly SelectOption[];
+    default?: string;
+  },
+): { kind: "select"; options: readonly SelectOption[]; optionsFrom: OptionsFrom } & Omit<
+  Opts<"select">,
+  "options" | "default" | "optionsFrom" | "translatable"
+> & { default?: string };
+export function select(o: Record<string, unknown>) {
+  // A static select is `{ kind, ...o }` exactly as it always was; only a sourced one
+  // gets `options` defaulted, so a manifest with no `optionsFrom` is byte-identical.
+  return o.optionsFrom
+    ? { kind: "select" as const, ...o, options: o.options ?? [] }
+    : { kind: "select" as const, ...o };
+}
 
 export const blocks = <const T extends readonly string[]>(
   o: Omit<Opts<"blocks">, "allow"> & { allow: T },
@@ -427,11 +469,14 @@ export type ValueOf<F extends Field> = F extends { kind: "blocks" | "richtext" }
                   ? ResolvedCollection
                   : F extends { kind: "form" }
                     ? ResolvedForm | null
-                    : F extends { kind: "select"; options: readonly (infer O)[] }
-                      ? O extends SelectOption
-                        ? O["value"]
-                        : string
-                      : string;
+                    : // A sourced select's ids are the host's, not known to the type system.
+                      F extends { kind: "select"; optionsFrom: object }
+                      ? string
+                      : F extends { kind: "select"; options: readonly (infer O)[] }
+                        ? O extends SelectOption
+                          ? O["value"]
+                          : string
+                        : string;
 
 export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf<F[K]> };
 
@@ -465,7 +510,10 @@ export function defaultValue(f: Field): Json {
     case "boolean":
       return false;
     case "select":
-      return f.options[0]?.value ?? "";
+      // A sourced select starts empty, never on its first typed extra: the extras are
+      // fallbacks an editor chooses deliberately. A declared `default` is written by
+      // `blankBlok` as for every field.
+      return f.optionsFrom ? "" : (f.options[0]?.value ?? "");
     case "blocks":
       // Children are separate bloks, not a value on the parent.
       return null;

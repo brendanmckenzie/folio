@@ -9,12 +9,16 @@ import {
   reference,
   references,
   richtext,
+  select,
   text,
 } from "../../../src/core/fields";
 import type { LocaleConfig } from "../../../src/core/locales";
 import type { DocumentType, SchemaIndex } from "../../../src/core/schema";
 import type { StoryMeta, StoryState } from "../../../src/core/story";
 import { DOCUMENT_CHECKS } from "../../../src/server/audit";
+import { validateSources } from "../../../src/server/form-responses";
+import { type ListRef, listId, type OptionListRow } from "../../../src/server/option-sources";
+import { optionListKey } from "../../../src/core/option-sources";
 import {
   type CheckBrand,
   type CheckContext,
@@ -558,5 +562,150 @@ describe("checkDocument", () => {
     expect(report.counts.info).toBe(600 * 6);
     expect(report.counts.error).toBe(1);
     expect(report.findings[0]).toMatchObject({ check: "link-broken", uid: "zb" });
+  });
+});
+
+/* --------------------------------------------- sourced selects (spec 44) --- */
+
+describe("checkDocument, a sourced select", () => {
+  const sources = validateSources(
+    { products: { label: "Products", load: () => [{ value: "a" }] } },
+    "optionSources",
+  );
+  const sourcedSchema: SchemaIndex = {
+    page: {
+      name: "page",
+      label: "Page",
+      fields: {
+        title: text({ label: "Title" }),
+        product: select({
+          label: "Product",
+          optionsFrom: { source: "products" },
+          options: [{ value: "none", label: "None" }],
+          translatable: false,
+        } as never),
+      },
+    },
+  };
+  const withSources = (): CheckBrand => ({
+    schema: sourcedSchema,
+    types,
+    writing: null,
+    fieldSources: sources,
+  });
+  const page = (data: Record<string, Json>, i18n?: Blok["i18n"]): Doc => ({
+    root: "root",
+    bloks: {
+      root: {
+        uid: "root",
+        type: "page",
+        parent: null,
+        slot: null,
+        order: "a0",
+        data: { title: "T", ...data },
+        ...(i18n ? { i18n } : {}),
+      },
+    },
+  });
+  const KEY = optionListKey(undefined, "");
+  const row = (values: string[] | null): OptionListRow => ({
+    brand: "",
+    source: "products",
+    key: KEY,
+    options: values && values.map((value) => ({ value, label: value })),
+    digest: null,
+    loadedAt: values ? 1 : null,
+    attemptedAt: 1,
+    failures: 0,
+    failure: null,
+  });
+  const lists = (values: string[] | null | "absent") => {
+    const asked: ListRef[][] = [];
+    const optionLists: CheckContext["optionLists"] = async (refs) => {
+      asked.push(refs);
+      return values === "absent" ? new Map() : new Map([[listId(refs[0]!), row(values)]]);
+    };
+    return { asked, optionLists };
+  };
+  const run = (doc: Doc, l: ReturnType<typeof lists>, b: CheckBrand = withSources()) =>
+    checkDocument(doc, b, ctx({ optionLists: l.optionLists, locales: undefined }).c);
+
+  it("is silent for a value the list offers, and for a well-formed one (field-shape passes)", async () => {
+    const l = lists(["prod_1"]);
+    const { findings } = await run(page({ product: "prod_1" }), l);
+    expect(findings).toEqual([]);
+    expect(l.asked).toHaveLength(1);
+  });
+
+  it("reports a stored id the list no longer offers, as a warning patch_fields repairs", async () => {
+    const { findings } = await run(page({ product: "prod_9" }), lists(["prod_1"]));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      check: "option-not-offered",
+      severity: "warning",
+      field: "product",
+      fix: "patch_fields",
+      detail: { source: "products", value: "prod_9" },
+    });
+    expect(findings[0]?.message).toContain("Product");
+  });
+
+  it("locates a per-locale value by its locale", async () => {
+    const { findings } = await checkDocument(
+      page({ product: "prod_1" }, { fr: { product: "prod_9" } }),
+      withSources(),
+      ctx({ optionLists: lists(["prod_1"]).optionLists }).c,
+    );
+    expect(only(findings, "option-not-offered")).toMatchObject([{ locale: "fr" }]);
+  });
+
+  it("reports a list that never loaded as info, once per field, with fix schema", async () => {
+    const doc = page({ product: "prod_1" }, { fr: { product: "prod_2" } });
+    const { findings } = await checkDocument(
+      doc,
+      withSources(),
+      ctx({ optionLists: lists(null).optionLists }).c,
+    );
+    const unavailable = only(findings, "option-list-unavailable");
+    expect(unavailable).toHaveLength(1);
+    expect(unavailable[0]).toMatchObject({
+      severity: "info",
+      fix: "schema",
+      detail: { source: "products" },
+    });
+    expect(only(findings, "option-not-offered")).toEqual([]);
+    const absent = await run(page({ product: "prod_1" }), lists("absent"));
+    expect(only(absent.findings, "option-list-unavailable")).toHaveLength(1);
+  });
+
+  it("accepts a typed extra and the empty value without reading a list at all", async () => {
+    const l = lists(["prod_1"]);
+    expect((await run(page({ product: "none" }), l)).findings).toEqual([]);
+    expect((await run(page({ product: "" }), l)).findings).toEqual([]);
+    // An absent value is the audit's `missing-field`, never a list read.
+    const absent = (await run(page({}), l)).findings;
+    expect(absent.map((f) => f.check)).toEqual(["missing-field"]);
+    expect(l.asked).toEqual([]);
+  });
+
+  it("reads the lists once for the whole document", async () => {
+    const doc = page({ product: "prod_9" }, { fr: { product: "prod_8" } });
+    const l = lists(["prod_1"]);
+    await checkDocument(doc, withSources(), ctx({ optionLists: l.optionLists }).c);
+    expect(l.asked).toHaveLength(1);
+  });
+
+  it("does nothing for a brand with no field sources, or a context that supplies no reader", async () => {
+    const l = lists(["prod_1"]);
+    const plain: CheckBrand = { schema: sourcedSchema, types, writing: null };
+    expect((await run(page({ product: "prod_9" }), l, plain)).findings).toEqual([]);
+    expect(l.asked).toEqual([]);
+    const none = await checkDocument(page({ product: "prod_9" }), withSources(), ctx().c);
+    expect(none.findings).toEqual([]);
+  });
+
+  it("still reports a malformed value as field-shape", async () => {
+    const { findings } = await run(page({ product: "  padded " }), lists(["prod_1"]));
+    expect(only(findings, "field-shape")).toHaveLength(1);
   });
 });

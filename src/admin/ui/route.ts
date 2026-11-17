@@ -55,6 +55,15 @@ export type Screen =
    * (`docs/specs/foundation/multi-site.md` decision 1). Only a deployment with
    * `sites` has it, and `nav()` offers it only to the platform. */
   | { name: "sites" }
+  /**
+   * A host page, framed in the shell (`platform/admin-extensions.md` decision 8):
+   * `{mount}/host/<id>/<rest>`. `rest` is the remaining path **kept percent-encoded
+   * segment by segment** (`parse` decodes each segment, so it is re-encoded here and
+   * `pathOf` writes it back as it is): a host id holding `%2F`, `%3F` or `%23` round-trips
+   * to the same host path, never to a deeper one, a query or a fragment. `''` is the
+   * page root.
+   */
+  | { name: "host"; id: string; rest: string }
   | { name: "missing"; path: string };
 
 export type ScreenName = Screen["name"];
@@ -167,6 +176,9 @@ const SCOPE_STABLE: ReadonlySet<Screen["name"]> = new Set([
   "settings",
   "access",
   "accessUser",
+  // A `deployment` page keeps its place across scopes; a `site` page whose brands
+  // exclude the target scope renders `missing` there (decision 13).
+  "host",
 ]);
 
 /**
@@ -225,6 +237,16 @@ function screenOf(segments: string[], path: string): Screen {
     if (head === "edit") return { name: "edit", id: second };
     if (head === "form") return { name: "form", id: second };
     if (head === "responses") return { name: "responses", id: second };
+  }
+
+  // `host/<id>` and any depth below it. Each segment is re-encoded, because `parse`
+  // decoded it and `rest` stays the host's own encoded path.
+  if (head === "host" && second && segments.length >= 2) {
+    return {
+      name: "host",
+      id: second,
+      rest: segments.slice(2).map(encodeURIComponent).join("/"),
+    };
   }
 
   if (segments.length === 3 && head === "access" && second === "users" && segments[2]) {
@@ -287,6 +309,8 @@ function pathOf(screen: Screen): string {
       return `/responses/${encodeURIComponent(screen.id)}`;
     case "accessUser":
       return `/access/users/${encodeURIComponent(screen.id)}`;
+    case "host":
+      return `/host/${encodeURIComponent(screen.id)}${screen.rest ? `/${screen.rest}` : ""}`;
     case "missing":
       return screen.path;
     default:
@@ -331,6 +355,8 @@ export interface Crumb {
   text: string;
   /** Absent for the last crumb, which is where you already are. */
   screen?: Screen;
+  /** The query of `screen`'s URL: a host page's own (`?state=open`). */
+  query?: Readonly<Record<string, string>>;
 }
 
 export interface CrumbContext {
@@ -373,10 +399,27 @@ export interface CrumbContext {
   formLabel?: (id: string) => string | undefined;
   /** The open editor's name on the Access user page, for the same reason. */
   userLabel?: (id: string) => string | undefined;
+  /**
+   * The open host page (`platform/admin-extensions.md` decision 9): its sidebar label
+   * and group, and what the frame announced or its document title said. The page
+   * cannot be looked up from this module, which holds no config, so the shell hands the
+   * one it is showing; absent while `/me` has not landed.
+   */
+  host?: {
+    label: string;
+    group?: string;
+    /** The last crumb and the tab title: an announced title, else the frame's own. */
+    title?: string;
+    /** Crumbs between the page's label and the title, with `href`s already mapped. */
+    crumbs?: readonly { text: string; screen?: Screen; query?: Readonly<Record<string, string>> }[];
+  };
 }
 
 const TITLES: Record<
-  Exclude<ScreenName, "documents" | "edit" | "form" | "responses" | "accessUser" | "missing">,
+  Exclude<
+    ScreenName,
+    "documents" | "edit" | "form" | "responses" | "accessUser" | "host" | "missing"
+  >,
   string
 > = {
   home: "Home",
@@ -425,6 +468,16 @@ export function crumbs(route: Route, ctx: CrumbContext = {}): Crumb[] {
       { text: ctx.formLabel?.(s.id) ?? "Form", screen: { name: "form", id: s.id } },
       { text: "Responses" },
     ];
+  }
+
+  if (s.name === "host") {
+    const host = ctx.host;
+    const label = host?.label ?? s.id;
+    const root: Crumb = { text: label, screen: { name: "host", id: s.id, rest: "" } };
+    const lead: Crumb[] = host?.group ? [{ text: host.group }] : [];
+    // No title yet (or none at all): the page's own label is where you are.
+    if (!host?.title) return [...lead, { text: label }];
+    return [...lead, root, ...(host.crumbs ?? []), { text: host.title }];
   }
 
   if (s.name === "edit") {

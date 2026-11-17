@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defineBlock, text } from "../../../src/core";
+import { defineBlock, select, text } from "../../../src/core";
 import type { Migration } from "../../../src/core/migrate";
 import type { DocumentType } from "../../../src/core/schema";
 import type { Registry as SiteRegistry, SiteRef } from "../../../src/core/sites";
@@ -141,6 +141,7 @@ describe("construction refuses each misuse of brands (decision 3)", () => {
     ["previewWrap", () => null],
     ["gate", { field: "x", public: true, allow: () => true }],
     ["forms", { ratePerHour: 5 }],
+    ["optionSources", { products: { label: "Products", load: () => [{ value: "a" }] } }],
     ["describe", { fn: async () => ({}) }],
     ["migrations", [migration("0001-x")]],
   ])("refuses a top-level %s beside brands, naming the key", (key, value) => {
@@ -373,5 +374,58 @@ describe("the old rt.* members", () => {
       logger: { warn: () => {}, error: () => {} },
     });
     expect(rt.sites?.settings).toBe("atlSettings");
+  });
+});
+
+describe("optionSources per brand (platform/admin-extensions.md decision 16)", () => {
+  const source = { label: "Products", load: () => [{ value: "a" }] };
+  const sourcedRoot = (name: string, from: string) =>
+    defineBlock({
+      name,
+      label: "Page",
+      fields: { title: text(), product: select({ optionsFrom: { source: from } }) },
+      render: () => null,
+    });
+
+  it("gives each brand its own registry, so another brand's source is unknown to it", () => {
+    const atlas = {
+      ...atl(),
+      blocks: [sourcedRoot("pageRoot", "products"), atlProse, atlSettings],
+      optionSources: { products: source },
+    };
+    const harbour = {
+      ...hbr(),
+      // Harbour never registered `products`: atlas's source is invisible to it.
+      blocks: [sourcedRoot("pageRoot", "products"), hbrProse],
+    };
+    expect(build({ brands: { atlas, harbour: hbr() } })).not.toThrow();
+    expect(build({ brands: { atlas, harbour } })).toThrow(
+      /brand 'harbour'.*option source 'products'/,
+    );
+  });
+
+  it("holds a brand's field sources as the union with its forms sources", () => {
+    const atlas = {
+      ...atl(),
+      optionSources: { products: source },
+      forms: { sources: { countries: source } },
+    };
+    const rt = createRuntime(brandedConfig({ brands: { atlas, harbour: hbr() } }));
+    const brand = rt.brands.get("atlas")!;
+    expect([...brand.fieldSources.keys()].sort()).toEqual(["countries", "products"]);
+    expect([...brand.forms!.sources.keys()]).toEqual(["countries"]);
+    expect([...brand.optionSources.keys()]).toEqual(["products"]);
+    expect(rt.brands.get("harbour")!.fieldSources.size).toBe(0);
+  });
+
+  it("refuses an id in both registries, naming the brand", () => {
+    const atlas = {
+      ...atl(),
+      optionSources: { products: source },
+      forms: { sources: { products: source } },
+    };
+    expect(build({ brands: { atlas, harbour: hbr() } })).toThrow(
+      /brand 'atlas'.*'products'.*both `optionSources` and `forms.sources`/,
+    );
   });
 });

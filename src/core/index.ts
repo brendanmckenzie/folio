@@ -338,3 +338,20 @@ export type {
 // alongside the sync wire in `protocol.ts`.
 export type { ActivityEntry } from "./protocol";
 export type { PreviewWrap } from "./render-wrap";
+export {
+  frameRedirectTarget,
+  HOST_PAGE_ICONS,
+  HOST_PAGE_ID,
+  HOST_PAGE_PROTOCOL,
+  MAX_HOST_PAGES,
+  screenHostFrame,
+} from "./host-page";
+export type {
+  HostCrumb,
+  HostFrameResult,
+  HostPageFrame,
+  HostPageIcon,
+  ScreenedHostFrame,
+} from "./host-page";
+export { screenPanel } from "./panels";
+export type { FolioPanelSummary, PanelAnswer, PanelTone } from "./panels";

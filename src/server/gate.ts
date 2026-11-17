@@ -129,6 +129,13 @@ export function validateGate<Env>(
         `folio: ${where} as translatable; a gate must not vary by locale, so the field cannot be translatable`,
       );
     }
+    // A sourced select's public value cannot be checked against a list that loads later
+    // (`platform/admin-extensions.md` decision 17).
+    if (declared.kind === "select" && declared.optionsFrom) {
+      throw new Error(
+        `folio: ${where} as a select with \`optionsFrom\`; a gate field's public value cannot be checked against a list that loads later`,
+      );
+    }
     // Checkpoint 4. Lists are untouched by decision, so a host's ability to
     // filter them on this field is the whole remedy for a gated title showing up
     // in a public archive — and `full-text-search.md` decision 11 can only keep

@@ -16,6 +16,7 @@ import { dateInputValue, dateStoredValue } from "../inspector-model";
 import css from "./fields.module.css";
 import { FormField } from "./FormField";
 import { LinkField } from "./LinkField";
+import { SourcedSelect } from "./SourcedSelect";
 import { ReferenceField, ReferencesField } from "./ReferenceField";
 import { LazyRichText } from "./LazyRichText";
 import type { FieldChrome } from "./RichTextField";
@@ -39,6 +40,9 @@ export interface FieldEnv {
   /** Where the deployment gates files: the open document's gated keys, for the asset
    * cards' lock and warning. Absent draws neither. */
   assetLocks?: AssetLocks;
+  /** The open document's id: a sourced select asks which of its stored values the list
+   * no longer offers. Absent where there is no document (the form builder's preview). */
+  story?: string;
 }
 
 export interface ControlProps {
@@ -58,6 +62,10 @@ export interface ControlProps {
   /** The field's declared name. Never read from the selection — an input can issue
    * its write long after it rendered (an upload finishing is the case). */
   name: string;
+  /** The block type that declares `name`, for a sourced select's list. */
+  block?: string;
+  /** The editor's non-source locale, if one: a localised source labels in it. */
+  locale?: string;
   field: FieldDef;
   value: Json;
   onChange: (value: Json) => void;
@@ -112,6 +120,21 @@ export function Control(props: ControlProps) {
       );
 
     case "select":
+      if (field.optionsFrom && props.block) {
+        return (
+          <SourcedSelect
+            id={id}
+            apiBase={env.apiBase}
+            block={props.block}
+            name={props.name}
+            locale={props.locale}
+            {...(env.story ? { story: env.story } : {})}
+            value={value}
+            editable={editable}
+            onChange={onChange}
+          />
+        );
+      }
       return (
         <Select
           id={id}
@@ -233,6 +256,7 @@ export function Control(props: ControlProps) {
           })()}
           schema={env.schema}
           types={env.types}
+          apiBase={env.apiBase}
           editable={editable}
           onChange={onChange}
         />

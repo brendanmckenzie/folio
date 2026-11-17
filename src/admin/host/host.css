@@ -1,0 +1,201 @@
+/*
+ * The element layer of `folio-host.css` (`platform/admin-extensions.md` decision 11).
+ *
+ * Opt-in under `body.folio-host`, the way `tokens.css` opts in under `.folio-ui`: a host
+ * page that wants Folio's look adds the class to its body, and a host that wants its own
+ * look ignores this layer and reads the `--folio-*` tokens, or ignores both. Nothing in
+ * this file is outside `body.folio-host`; the tokens it reads are declared above it by
+ * `scripts/build-admin.mjs` from `tokens.css`.
+ *
+ * No inset `box-shadow` for an edge: an inset shadow is clipped by the radius.
+ */
+
+body.folio-host {
+  margin: 0;
+  padding: var(--folio-space-5);
+  background: var(--folio-bg-app);
+  color: var(--folio-fg);
+  font-family: var(--folio-font-ui);
+  font-size: var(--folio-text-base);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+body.folio-host *,
+body.folio-host *::before,
+body.folio-host *::after {
+  box-sizing: border-box;
+}
+
+body.folio-host h1,
+body.folio-host h2,
+body.folio-host h3 {
+  margin: 0 0 var(--folio-space-3);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+body.folio-host h1 {
+  font-size: var(--folio-text-xl);
+}
+
+body.folio-host h2 {
+  font-size: var(--folio-text-lg);
+}
+
+body.folio-host h3 {
+  font-size: var(--folio-text-base);
+}
+
+body.folio-host p {
+  margin: 0 0 var(--folio-space-3);
+}
+
+body.folio-host a {
+  color: var(--folio-fg-accent);
+  text-decoration: none;
+}
+
+body.folio-host a:hover {
+  text-decoration: underline;
+}
+
+body.folio-host a:focus-visible,
+body.folio-host button:focus-visible,
+body.folio-host input:focus-visible,
+body.folio-host select:focus-visible,
+body.folio-host textarea:focus-visible {
+  outline: 2px solid var(--folio-ring);
+  outline-offset: 1px;
+}
+
+body.folio-host table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--folio-bg-panel);
+  border: 1px solid var(--folio-border);
+}
+
+body.folio-host th,
+body.folio-host td {
+  padding: var(--folio-space-2) var(--folio-space-3);
+  border-bottom: 1px solid var(--folio-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+body.folio-host th {
+  background: var(--folio-bg-inset);
+  color: var(--folio-fg-muted);
+  font-size: var(--folio-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+body.folio-host tbody tr:hover td {
+  background: var(--folio-bg-hover);
+}
+
+body.folio-host button,
+body.folio-host .folio-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--folio-space-2);
+  height: 28px;
+  padding: 0 var(--folio-space-3);
+  border: 1px solid var(--folio-border-strong);
+  border-radius: var(--folio-radius-md);
+  background: var(--folio-bg-panel);
+  color: var(--folio-fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+body.folio-host button:hover,
+body.folio-host .folio-button:hover {
+  background: var(--folio-bg-hover);
+  text-decoration: none;
+}
+
+body.folio-host button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+body.folio-host .folio-button[data-variant="primary"] {
+  border-color: var(--folio-state-accent-border);
+  background: var(--folio-state-accent-bg);
+  color: var(--folio-state-accent-fg);
+}
+
+body.folio-host .folio-button[data-variant="subtle"] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--folio-fg-muted);
+}
+
+body.folio-host .folio-button[data-variant="danger"] {
+  border-color: var(--folio-state-danger-border);
+  background: var(--folio-state-danger-bg);
+  color: var(--folio-state-danger-fg);
+}
+
+body.folio-host input,
+body.folio-host select,
+body.folio-host textarea {
+  height: 28px;
+  padding: 0 var(--folio-space-2);
+  border: 1px solid var(--folio-border-strong);
+  border-radius: var(--folio-radius-md);
+  background: var(--folio-bg-panel);
+  color: var(--folio-fg);
+  font: inherit;
+}
+
+body.folio-host textarea {
+  height: auto;
+  min-height: 72px;
+  padding: var(--folio-space-2);
+}
+
+body.folio-host .folio-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 var(--folio-space-2);
+  border: 1px solid var(--folio-border);
+  border-radius: var(--folio-radius-full);
+  background: var(--folio-bg-hover);
+  color: var(--folio-fg-muted);
+  font-size: var(--folio-text-xs);
+  white-space: nowrap;
+}
+
+body.folio-host .folio-badge[data-tone="ok"] {
+  border-color: var(--folio-state-ok-border);
+  background: var(--folio-state-ok-bg);
+  color: var(--folio-state-ok-fg);
+}
+
+body.folio-host .folio-badge[data-tone="warn"] {
+  border-color: var(--folio-state-warn-border);
+  background: var(--folio-state-warn-bg);
+  color: var(--folio-state-warn-fg);
+}
+
+body.folio-host .folio-badge[data-tone="danger"] {
+  border-color: var(--folio-state-danger-border);
+  background: var(--folio-state-danger-bg);
+  color: var(--folio-state-danger-fg);
+}
+
+body.folio-host .folio-badge[data-tone="accent"] {
+  border-color: var(--folio-state-accent-border);
+  background: var(--folio-state-accent-bg);
+  color: var(--folio-state-accent-fg);
+}
+
+body.folio-host .folio-muted {
+  color: var(--folio-fg-muted);
+}

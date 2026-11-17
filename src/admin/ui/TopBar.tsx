@@ -43,16 +43,23 @@ export function TopBar({ crumbs, mount, presence, onSearch, actor, user }: Props
           // content. Nothing renders differently — `.crumb` sets `display` itself —
           // and React does not warn about this pair, so the invalid nesting would
           // have been invisible in every test and every browser.
-          <div className={css.crumb} key={crumb.screen ? href(crumb.screen, mount) : crumb.text}>
+          <div
+            className={css.crumb}
+            key={crumb.screen ? href(crumb.screen, mount, crumb.query) : crumb.text}
+          >
             {i > 0 ? (
               <span className={css.sep} aria-hidden="true">
                 /
               </span>
             ) : null}
             {crumb.screen ? (
-              <a className={css.link} href={href(crumb.screen, mount)}>
+              <a className={css.link} href={href(crumb.screen, mount, crumb.query)}>
                 {crumb.text}
               </a>
+            ) : i < crumbs.length - 1 ? (
+              // A heading with no link that is not where you are: a host page's group.
+              // Plain text, so the page keeps its one `h1`.
+              <span className={css.link}>{crumb.text}</span>
             ) : (
               <h1 className={css.here} aria-current="page">
                 {crumb.text}

@@ -399,11 +399,19 @@ function smokeTest(sha) {
         "asAsset",
       ],
       "dist/engine.js": ["newUid", "apply", "defineMigration", "fieldValue"],
-      "dist/server.js": ["createFolio", "StoryDO", "SITE_TAG", "ANY_TYPE_TAG", "typeTag"],
+      "dist/server.js": [
+        "createFolio",
+        "StoryDO",
+        "SITE_TAG",
+        "ANY_TYPE_TAG",
+        "typeTag",
+        "HOST_PAGE_HEADERS",
+      ],
       "dist/vite.js": ["folio"],
       "dist/form.js": ["useFolioForm"],
       "dist/render.js": ["FolioDoc", "RenderBlok", "RenderRichtext"],
       "dist/preview.js": ["mountPreview"],
+      "dist/host.js": ["connectHostPage", "announce", "scoped"],
     };
     const absent = [];
     for (const [file, names] of Object.entries(anchors)) {

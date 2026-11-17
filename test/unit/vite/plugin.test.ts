@@ -561,3 +561,64 @@ describe("the Vite plugin, the prebuilt admin (the default)", () => {
     expect(assets.previewCss).toEqual(["/folio-client.css"]);
   });
 });
+
+/* ------------------------------------------------------- folio-host.css --- */
+
+describe("the Vite plugin, folio-host.css", () => {
+  const distHost = new URL("../../../dist/admin/folio-host.css", import.meta.url);
+  const built = existsSync(distHost);
+
+  it.skipIf(!built)(
+    "emits it at the build root for the client environment, whatever the admin source",
+    () => {
+      const plugin = folio({ blocks: "./src/blocks/index.ts", adminFromSource: true })[0] as Plugin;
+      (plugin.config as unknown as ConfigHook).call(
+        plugin,
+        {},
+        { command: "build", mode: "production" },
+      );
+      const emitted: { fileName: string; source: string }[] = [];
+      const ctx = {
+        environment: { name: "client" },
+        emitFile: (f: { fileName: string; source: string }) => void emitted.push(f),
+      };
+      (plugin.generateBundle as { handler: (o: unknown, b: unknown) => void }).handler.call(
+        ctx as never,
+        {},
+        {},
+      );
+      expect(emitted.map((f) => f.fileName)).toEqual(["folio-host.css"]);
+      expect(emitted[0]?.source).toContain("--folio-fg");
+    },
+  );
+
+  it.skipIf(!built)("answers /folio-host.css from the dev server as CSS", () => {
+    const plugin = folio({ blocks: "./src/blocks/index.ts", adminFromSource: true })[0] as Plugin;
+    let handler: ((req: unknown, res: unknown, next: () => void) => void) | undefined;
+    (plugin.configureServer as unknown as (s: unknown) => void).call(plugin, {
+      middlewares: {
+        use: (fn: typeof handler) => {
+          handler = fn;
+        },
+      },
+    });
+    const headers: Record<string, string> = {};
+    let body = "";
+    handler?.(
+      { url: "/folio-host.css?x=1" },
+      {
+        setHeader: (k: string, v: string) => {
+          headers[k] = v;
+        },
+        end: (b: string) => {
+          body = b;
+        },
+      },
+      () => {
+        throw new Error("fell through");
+      },
+    );
+    expect(headers["Content-Type"]).toBe("text/css");
+    expect(body).toContain("body.folio-host");
+  });
+});

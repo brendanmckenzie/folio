@@ -1281,6 +1281,45 @@ v1.6.0:
 A host that must roll back first moves protected files out of the library (or deletes
 them), then rolls back.
 
+### Host access to the editor session (v1.7.0)
+
+Nothing to do. `folio.editor`, `folio.requireEditor`, `folio.signInUrl` and `folio.originAllowed`
+are new, and `folio/server` exports `HOST_PAGE_HEADERS` and the `FolioEditor` types. A host that
+calls none of them runs exactly as before. Two behaviours to know before you rely on them: under
+`auth: 'open'` `editor()` answers `null`, and on a deployment with `sites` it answers only on
+`sites.admin`. See "Your own routes behind Folio's sign-in" in `docs/handbook.md`.
+
+### Host pages in the admin (v1.7.0)
+
+Nothing to do until `admin.pages` is set. A host that sets it serves each page on the admin origin,
+sends `HOST_PAGE_HEADERS` (returned by `requireEditor`), and gates the route with
+`folio.requireEditor(req, env, { page })`. `admin.pages` is refused under `auth: 'open'`. New exports:
+`folio/host` (the browser helper), `folio/host.css` and `/folio-host.css`. See "Extending the admin" in
+`docs/handbook.md`.
+
+### Option sources on document fields (v1.7.0)
+
+`optionSources` (per brand with `brands`) registers sources for document fields only; no form can list,
+preview or render them. A field may also name a `forms.sources` source. `forms.sources` is unchanged,
+and an id in both throws at construction. `select({ optionsFrom })` is new. v1 writes to a sourced select
+are checked against its list and may answer `503` with the new error code `unavailable`: a TypeScript
+`switch` that is exhaustive over `FolioErrorCode` must add it. `check_document` gains
+`option-not-offered` and `option-list-unavailable`, and MCP gains `list_field_options`. If you register a
+source used only by fields, keep `folio.refreshOptionSources` in `scheduled()`, or its list refreshes only
+when an editor or a write asks.
+
+### Linked-data panels (v1.7.0)
+
+Nothing to do until `panels` is set (per brand with `brands`). A panel is a host function per document type
+that answers a small structured summary the inspector draws on the document's root block; it is called per
+open with a timeout and nothing is cached on the server. `Manifest.panels` appears only when a brand declares
+one. See "Linked-data panels" in `docs/handbook.md`.
+
+**Rolling back from v1.7.0** is safe once `admin`, `optionSources`, `panels` and every `optionsFrom` are removed:
+there is no migration and no wire change. Do not move field-only sources under `forms.sources` to keep them,
+because that exposes them to the form builder and to published forms. A field that held a sourced id becomes
+`text({ indexed: true })` for the rollback, so the stored strings stay valid and indexed.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

@@ -8,7 +8,14 @@ import { hero } from "./hero";
 import { insightList, insightPage } from "./insight";
 import { gallery, image } from "./media";
 import { page } from "./page";
-import { leadership, officeCard, officeRecord, personCard, personRecord } from "./person";
+import {
+  leadership,
+  officeCard,
+  officeRecord,
+  personCard,
+  personRecord,
+  productRecord,
+} from "./person";
 import { prose, pullquote } from "./prose";
 import { searchResults } from "./search";
 import { settingsRoot } from "./settings";
@@ -29,6 +36,9 @@ export const blocks = [
   // checkpoint 1): an office is pure data, and `officeCard` below is what draws
   // it. Nothing about the registry treats it differently.
   officeRecord,
+  // A record whose `product` field is a select over the shop's catalogue, a host option
+  // source (`platform/admin-extensions.md`, feature 3).
+  productRecord,
   settingsRoot,
   headerRoot,
   // Content blocks.

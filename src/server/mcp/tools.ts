@@ -274,6 +274,28 @@ export const MCP_TOOLS: readonly McpTool[] = [
     query: ["perPage"],
     need: READ,
   },
+  {
+    name: "list_field_options",
+    description:
+      "The choices a field offers when it takes them from a host's data (a `select` whose schema entry carries `optionsFrom`): `value` is what to write, `label` is for people. Call this before writing such a field with patch_fields or write_content, which refuse a value the list does not offer. `status` says how fresh the list is.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        block: { type: "string", description: "The block type that declares the field." },
+        field: { type: "string", description: "The field's name." },
+        locale: {
+          type: "string",
+          description: "A locale code, for a source with localised labels.",
+        },
+      },
+      required: ["block", "field"],
+      additionalProperties: false,
+    },
+    method: "GET",
+    path: "/options/:block/:field",
+    query: ["locale"],
+    need: READ,
+  },
   /**
    * **The one row with no `method`/`path`.** `?_folio=draft` plus a `browser`
    * binding (decisions 5, 5a), dispatched by `routes/mcp.ts` straight to

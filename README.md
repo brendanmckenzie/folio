@@ -93,6 +93,7 @@ Setup is a token and one command: [`docs/mcp.md`](docs/mcp.md).
 - **Caching that invalidates:** cache tags come from what a render loaded, and a publish purges by tag. D1 read replication runs through a per-request session.
 - **Auth with no default:** magic links, OIDC, Cloudflare Access, passkeys, or `auth: 'open'` said out loud. Members-only pages against your own membership system.
 - **Content migrations**, redirects, publish hooks and a drift audit.
+- **Your own admin screens.** `folio.requireEditor()` gates a host route with Folio's sign-in; `admin.pages` frames it in the sidebar and chrome; `select({ optionsFrom })` picks from your data; `panels` shows your facts about a record beside its fields. See "Extending the admin" in the handbook.
 - **Many sites, and many brands, in one deployment.** Opt-in; the handbook has the design.
 
 The host owns its Worker, routing and public pages. Folio owns the editor, the sync engine and the block render, and returns `null` for every path it does not own.

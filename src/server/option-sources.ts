@@ -11,14 +11,17 @@
  * threaded through it. The one exception is `readListOnPrimary`, which has to open a
  * session of its own and says so.
  */
-import type { Json } from "../core/doc";
+import type { Doc, Json } from "../core/doc";
+import type { Mutation } from "../core/mutations";
 import { indexedFields } from "../core/index-projection";
 import { type FormField, type FormFieldOption, validateFormFields } from "../core/forms";
 import type { LocaleConfig } from "../core/locales";
 import {
   CONTENT_SOURCE,
   contentOptionSettings,
+  MAX_OPTION_VALUE,
   MAX_SOURCED_OPTIONS,
+  type OptionsFrom,
   optionListKey,
   screenOptionLabel,
 } from "../core/option-sources";
@@ -34,8 +37,7 @@ import type { BrandRef, FolioLogger } from "./types";
 /** One load per key per this long, across every isolate (decision 7). */
 export const LEASE_MS = 30_000;
 
-/** The longest a stored value may be, and what `FORM_FIELD` allows an option. */
-export const MAX_OPTION_VALUE = 120;
+export { MAX_OPTION_VALUE };
 
 /** Why a load failed: a category and never the thrown message (decision 16). */
 export type OptionFailure = "timeout" | "threw" | "malformed" | "empty";
@@ -568,15 +570,20 @@ export function hostLocales(
  * its locales, deduplicated. `content` and an unregistered source name no row.
  */
 export function hostListsOf(
-  fields: readonly FormField[],
+  fields: readonly Pick<FormField, "optionsFrom">[],
   brand: BrandRuntime,
   locales: LocaleConfig | undefined,
+  /**
+   * Which registry `fields` name their sources in. A form's questions read
+   * `brand.forms?.sources` exactly as they always did; a document field reads
+   * `brand.fieldSources`, the union with `optionSources`.
+   */
+  sources: ReadonlyMap<string, ResolvedOptionSource> | undefined = brand.forms?.sources,
 ): HostList[] {
   const out = new Map<string, HostList>();
   for (const field of fields) {
     const from = field.optionsFrom;
-    const source =
-      from && from.source !== CONTENT_SOURCE ? brand.forms?.sources.get(from.source) : undefined;
+    const source = from && from.source !== CONTENT_SOURCE ? sources?.get(from.source) : undefined;
     if (!from || !source) continue;
     const settings = effectiveSettings(source, from.settings);
     for (const locale of hostLocales(source, locales)) {
@@ -601,15 +608,23 @@ export async function referencedLists(
   env: unknown,
   db: FolioDb,
 ): Promise<HostList[]> {
+  const out = new Map<string, HostList>();
+  // **The schema half needs no D1 read**: every brand's block fields that name a source,
+  // each in its locales (`platform/admin-extensions.md` decision 18). It comes first, and
+  // the forms read's early return below must not skip it, or a deployment with sourced
+  // fields and no sourced form would never refresh a field's list and the cron would prune it.
+  for (const brand of rt.brands.values()) {
+    for (const list of hostListsOf(schemaFieldsOf(brand), brand, rt.locales, brand.fieldSources)) {
+      out.set(list.canonical, list);
+    }
+  }
   const { results } = await retryRead(() =>
     db
       .prepare(`select id, fields, site_id from forms where fields like '%"optionsFrom"%'`)
       .all<{ id: string; fields: string; site_id: string }>(),
   );
-  if (results.length === 0) return [];
   const only = rt.brands.get(null);
-  const registry = only ? undefined : await rt.sites?.registry(env);
-  const out = new Map<string, HostList>();
+  const registry = results.length === 0 || only ? undefined : await rt.sites?.registry(env);
   for (const row of results) {
     const brand = only ?? (registry ? rt.forScope(registry, row.site_id) : null);
     if (!brand) continue;
@@ -622,6 +637,18 @@ export async function referencedLists(
     for (const list of hostListsOf(fields, brand, rt.locales)) out.set(list.canonical, list);
   }
   return [...out.values()].sort((a, b) => (a.canonical < b.canonical ? -1 : 1));
+}
+
+/** Every `optionsFrom` a brand's document fields declare, in schema order. */
+export function schemaFieldsOf(brand: BrandRuntime): { optionsFrom: OptionsFrom }[] {
+  const out: { optionsFrom: OptionsFrom }[] = [];
+  for (const block of Object.values(brand.schema)) {
+    for (const field of Object.values(block.fields)) {
+      if (field.kind === "select" && field.optionsFrom)
+        out.push({ optionsFrom: field.optionsFrom });
+    }
+  }
+  return out;
 }
 
 /** The lists of `lists` whose row is missing, never loaded or past its ttl. */
@@ -872,4 +899,200 @@ export async function previewHostList(
     ...(loaded.thrown === undefined ? [] : [loaded.thrown]),
   );
   return { ...stored(), failure: loaded.failure };
+}
+
+/* ------------------------------------------------- document field writes --- */
+
+/** How long a v1 write waits for a never-loaded list's refresh (decision 20). */
+export const WRITE_REFRESH_MS = 10_000;
+
+interface SourcedValue {
+  block: string;
+  field: string;
+  source: string;
+  settings: Readonly<Record<string, Json>> | undefined;
+  extras: readonly { value: string }[];
+  value: string;
+}
+
+/**
+ * **The membership check a v1 write makes for a sourced select**
+ * (`platform/admin-extensions.md` decision 20). `fieldShapeError` is pure and cannot see the
+ * list, so the content API routes call this between computing the mutations and committing
+ * them, and it throws a `FolioError` to refuse (nothing is then committed).
+ *
+ * 1. Keeps the values the mutations write to a field with `optionsFrom`: a `set` (the
+ *    blok's type read from `draft`, or from an `insert` in the same batch), and the data and
+ *    translations of an inserted blok. A per-locale write checks the source-locale list,
+ *    because the stored value is an id and not a label.
+ * 2. Reads the lists on the request's session, one `readLists` per brand.
+ * 3. A value in the last good list, or a typed extra, or `""`: accepted, fresh or **stale**
+ *    (spec 37 owner decision 1: an outage does not become the writer's problem).
+ * 4. A value not in a list that holds options: `400 bad_request`.
+ * 5. A list that never loaded is refreshed under the lease, 10 seconds; still never loaded
+ *    is `503 unavailable`, because failing open would let a token store any string.
+ *
+ * Checking the mutations rather than the payload is "changed values only": a merge payload
+ * that hands back a stored retired id produces no `set` and is not refused.
+ */
+export async function checkSourcedSets(
+  ctx: { rt: FolioRuntime; env: unknown; db: FolioDb; brand: BrandRuntime },
+  mutations: readonly Mutation[],
+  draft: Doc,
+): Promise<void> {
+  const { brand } = ctx;
+  if (brand.fieldSources.size === 0) return;
+
+  const typeOf = new Map<string, string>();
+  for (const [uid, blok] of Object.entries(draft.bloks)) typeOf.set(uid, blok.type);
+  for (const m of mutations) {
+    if (m.t === "insert") typeOf.set(m.blok.uid, m.blok.type);
+  }
+
+  const found: SourcedValue[] = [];
+  const consider = (block: string, name: string, value: unknown) => {
+    const field = brand.schema[block]?.fields[name];
+    if (field?.kind !== "select" || !field.optionsFrom) return;
+    if (typeof value !== "string" || value === "") return;
+    if (field.options.some((o) => o.value === value)) return;
+    const source = brand.fieldSources.get(field.optionsFrom.source);
+    if (!source) return;
+    found.push({
+      block,
+      field: name,
+      source: source.id,
+      settings: effectiveSettings(source, field.optionsFrom.settings),
+      extras: field.options,
+      value,
+    });
+  };
+  for (const m of mutations) {
+    if (m.t === "set") {
+      const block = typeOf.get(m.uid);
+      if (block) consider(block, m.field, m.value);
+    } else if (m.t === "insert") {
+      const block = m.blok.type;
+      for (const [name, value] of Object.entries(m.blok.data)) consider(block, name, value);
+      for (const translated of Object.values(m.blok.i18n ?? {})) {
+        for (const [name, value] of Object.entries(translated)) consider(block, name, value);
+      }
+    }
+  }
+  if (found.length === 0) return;
+
+  const brandId = brandKey(brand.brand);
+  const refs = found.map((f) => ({ source: f.source, key: optionListKey(f.settings, "") }));
+  const rows = await readLists(ctx.db, brandId, refs);
+  const refreshed = new Map<string, Promise<FormFieldOption[] | null>>();
+  const optionsOf = async (f: SourcedValue, ref: ListRef): Promise<FormFieldOption[] | null> => {
+    const row = rows.get(listId(ref));
+    if (row?.options) return row.options;
+    const id = listId(ref);
+    let pending = refreshed.get(id);
+    if (!pending) {
+      const source = brand.fieldSources.get(f.source)!;
+      pending = previewHostList(
+        {
+          db: ctx.db,
+          env: ctx.env,
+          brand: brand.brand,
+          source,
+          logger: ctx.rt.logger,
+          ...(ctx.rt.formPurgeCapability ? { purgeCapability: ctx.rt.formPurgeCapability } : {}),
+        },
+        { settings: f.settings, locale: "" },
+        true,
+        WRITE_REFRESH_MS,
+      ).then((preview) => preview.options);
+      refreshed.set(id, pending);
+    }
+    return pending;
+  };
+
+  for (const f of found) {
+    const ref = { source: f.source, key: optionListKey(f.settings, "") };
+    const options = await optionsOf(f, ref);
+    const where = `${f.block}.${f.field}`;
+    const source = brand.fieldSources.get(f.source)!;
+    if (options === null) {
+      throw new FolioError(
+        "unavailable",
+        `The \`${f.source}\` option source (${source.label}) has not loaded, so ${where} cannot be checked. Try again later.`,
+      );
+    }
+    if (!options.some((o) => o.value === f.value)) {
+      throw new FolioError(
+        "bad_request",
+        `${where} is not a value the \`${f.source}\` source offers (see GET ${ctx.rt.base}/api/v1/options/${f.block}/${f.field} or list_field_options)`,
+      );
+    }
+  }
+}
+
+/** How long `lookup` may take, per inspector open (decision 19). */
+export const LOOKUP_MS = 3_000;
+/** The most values a `lookup` call is asked about. */
+export const MAX_LOOKUP_VALUES = 20;
+
+/**
+ * Labels for stored values a list no longer offers, **for the admin only** (decision 19).
+ * Calls the source's `lookup` with at most `MAX_LOOKUP_VALUES` values, raced against
+ * `LOOKUP_MS` like `load`, and stores nothing. A source with no `lookup`, a timeout, a throw
+ * or a malformed answer gives no label for any value (the caller then draws the raw value);
+ * it is a cosmetic call, so it logs a `warn` and never an error, and never the message.
+ */
+export async function lookupLabels(
+  deps: Pick<RefreshDeps, "env" | "brand" | "source" | "logger">,
+  settings: Readonly<Record<string, Json>> | undefined,
+  locale: string,
+  values: readonly string[],
+  timeoutMs: number = LOOKUP_MS,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const { source } = deps;
+  if (!source.lookup || values.length === 0) return out;
+  const asked = values.slice(0, MAX_LOOKUP_VALUES);
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timedOut = new Promise<typeof TIMED_OUT>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve(TIMED_OUT);
+      }, timeoutMs);
+    });
+    const looking = Promise.resolve().then(() =>
+      source.lookup!(
+        asked,
+        {
+          settings: (effectiveSettings(source, settings) ?? {}) as Readonly<
+            Record<string, string | number | boolean>
+          >,
+          locale: locale === "" ? null : locale,
+          brand: deps.brand,
+          signal: controller.signal,
+        },
+        deps.env,
+      ),
+    );
+    looking.catch(() => {});
+    const raced = await Promise.race([looking, timedOut]);
+    if (raced === TIMED_OUT) {
+      deps.logger.warn(`folio: option source "${source.id}" lookup timed out`);
+      return out;
+    }
+    if (!Array.isArray(raced)) return out;
+    for (const item of raced as unknown[]) {
+      if (!item || typeof item !== "object") continue;
+      const { value, label } = item as { value?: unknown; label?: unknown };
+      if (typeof value !== "string" || !asked.includes(value)) continue;
+      const screened = screenOptionLabel(label);
+      if (screened !== null) out.set(value, screened);
+    }
+  } catch {
+    deps.logger.warn(`folio: option source "${source.id}" lookup failed`);
+  } finally {
+    clearTimeout(timer);
+  }
+  return out;
 }

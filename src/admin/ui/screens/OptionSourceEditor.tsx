@@ -311,6 +311,7 @@ function ContentSettings({
             aria-label="Filter and order"
           >
             <QueryControls
+              {...(apiBase ? { apiBase } : {})}
               schema={schema}
               value={stored}
               order={order}

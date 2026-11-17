@@ -2548,6 +2548,17 @@ export interface FolioOptionSource<Env> {
     input: OptionSourceInput,
     env: Env,
   ): readonly OptionSourceItem[] | Promise<readonly OptionSourceItem[]>;
+  /**
+   * Labels for stored values no longer in the list, **for the admin only**
+   * (`platform/admin-extensions.md` decision 19): called with at most 20 values a readable
+   * document stores, under the source's load timeout, and never stored. Answer only what a
+   * viewer may see. Used by field sources; a form never calls it.
+   */
+  lookup?(
+    values: readonly string[],
+    input: OptionSourceInput,
+    env: Env,
+  ): readonly OptionSourceItem[] | Promise<readonly OptionSourceItem[]>;
 }
 
 export interface OptionSourceInput {
@@ -2644,16 +2655,17 @@ export function validateForms<Env>(forms: FolioForms<Env> | undefined): Resolved
  * source that cannot load would otherwise be discovered by the first editor to
  * save a question that names it (decision 1).
  */
-function validateSources<Env>(
+export function validateSources<Env>(
   sources: FolioForms<Env>["sources"],
+  key = "forms.sources",
 ): ReadonlyMap<string, ResolvedOptionSource> {
   const out = new Map<string, ResolvedOptionSource>();
   if (sources === undefined) return out;
   if (!sources || typeof sources !== "object" || Array.isArray(sources)) {
-    throw new Error("folio: `forms.sources` must be an object keyed by source id");
+    throw new Error(`folio: \`${key}\` must be an object keyed by source id`);
   }
   for (const [id, source] of Object.entries(sources)) {
-    const where = `\`forms.sources.${id}\``;
+    const where = `\`${key}.${id}\``;
     if (!SOURCE_ID.test(id)) {
       throw new Error(`folio: ${where} is not a valid source id (${SOURCE_ID})`);
     }
@@ -2665,6 +2677,9 @@ function validateSources<Env>(
     }
     if (typeof source.load !== "function") {
       throw new Error(`folio: ${where}.load must be a function`);
+    }
+    if (source.lookup !== undefined && typeof source.lookup !== "function") {
+      throw new Error(`folio: ${where}.lookup must be a function`);
     }
     if (typeof source.label !== "string" || source.label.trim() === "") {
       throw new Error(`folio: ${where}.label must be a non-empty string`);
@@ -2689,6 +2704,7 @@ function validateSources<Env>(
       ...source,
       id,
       load: source.load.bind(source),
+      ...(source.lookup ? { lookup: source.lookup.bind(source) } : {}),
       ttl,
       localised: source.localised ?? false,
     } as ResolvedOptionSource);

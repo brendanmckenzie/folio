@@ -27,11 +27,14 @@ import type { Registry as SiteRegistry, SiteRef, Surface } from "../core/sites";
 import type { StoryMeta, StoryNode } from "../core/story";
 import type { RenderMode } from "../preview/Render";
 import type { AuthConfig, OpenAuth } from "./auth/config";
-import type { Actor } from "./auth/roles";
+import type { Actor, Role } from "./auth/roles";
+import type { FolioAdminConfig } from "./admin-config";
+import type { FolioPanel } from "./panels-config";
+import type { FolioEditor, FolioEditorOptions } from "./editor";
 import type { FolioHooks } from "./hooks";
 import type { AuditOptions, AuditReport } from "./audit";
 import type { CacheVerdict } from "./cache-request";
-import type { FolioForms } from "./form-responses";
+import type { FolioForms, FolioOptionSource } from "./form-responses";
 import type { FolioDb } from "./db";
 import type { MigrateOptions, MigrateReport } from "./migrate";
 import type { ReindexOptions, ReindexReport } from "./reindex";
@@ -756,6 +759,10 @@ export interface FolioBrand<Env> {
   previewWrap?: PreviewWrap;
   gate?: FolioGate<Env>;
   forms?: FolioForms<Env>;
+  /** As `FolioSingleConfig.optionSources`, for this brand. */
+  optionSources?: Readonly<Record<string, FolioOptionSource<Env>>>;
+  /** As `FolioSingleConfig.panels`, for this brand's document types. */
+  panels?: Readonly<Record<string, FolioPanel<Env>>>;
   describe?: FolioDescribe<Env>;
   /** This brand's voice and avoided terms, served to agents on the gated v1 `/schema` only. */
   writing?: WritingGuide;
@@ -780,6 +787,8 @@ export interface FolioBrandedConfig<Env>
     | "previewWrap"
     | "gate"
     | "forms"
+    | "optionSources"
+    | "panels"
     | "describe"
     | "writing"
     | "migrations"
@@ -808,6 +817,8 @@ export interface FolioBrandedConfig<Env>
   previewWrap?: never;
   gate?: never;
   forms?: never;
+  optionSources?: never;
+  panels?: never;
   describe?: never;
   writing?: never;
   migrations?: never;
@@ -815,6 +826,13 @@ export interface FolioBrandedConfig<Env>
 
 /** One brand's config, which is every deployment's before `brands` existed. */
 export interface FolioSingleConfig<Env> {
+  /**
+   * Host-served pages listed in the admin's sidebar and shown inside its chrome
+   * (`platform/admin-extensions.md`, feature 2). Deployment-wide, and refused under
+   * `auth: 'open'`. The host route is the authority: it calls
+   * `folio.requireEditor(req, env, { page })` on every request.
+   */
+  admin?: FolioAdminConfig;
   blocks: readonly AnyBlockDef[] | Registry;
   /**
    * Sugar for a single routable page type, and the only shape that existed
@@ -1007,6 +1025,26 @@ export interface FolioSingleConfig<Env> {
    */
   forms?: FolioForms<Env>;
   /**
+   * Option sources for **document fields** (`select({ optionsFrom })`), by id
+   * (`platform/admin-extensions.md` decisions 14 to 19). Per brand with `brands`. Separate from
+   * `forms.sources` on purpose: that registry is listed to every reader, previewed by the
+   * form builder and rendered on public forms, and a source registered here reaches none of
+   * those. A field may name either. An id in both throws. A list is kept in D1 and refreshed
+   * in the background by `folio.refreshOptionSources` (keep it in `scheduled()`), never by a
+   * render. `lookup` labels a retired value for the admin.
+   */
+  optionSources?: Readonly<Record<string, FolioOptionSource<Env>>>;
+  /**
+   * Linked-data panels, by document type name (`platform/admin-extensions.md` decision 21): a
+   * host function that answers a small structured summary of the host's own data about a
+   * document (a product's variants, price and stock), which the inspector draws, read-only, on
+   * the root block of a document of that type. Per brand with `brands`. JSON, not HTML: Folio
+   * renders every string as text. Called per inspector open, under `timeoutMs`, with nothing
+   * cached on the server (it receives the editor, so a shared cache would leak one editor's
+   * view to another): cache inside `load` if your own data is expensive.
+   */
+  panels?: Readonly<Record<string, FolioPanel<Env>>>;
+  /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An
    * explicit list rather than every declared singleton: a singleton read once
@@ -1113,6 +1151,27 @@ export interface Folio<Env> {
    * not own, so the host's own routes always win.
    */
   handle: (req: Request, env: Env, ctx: ExecutionContext) => Promise<Response | null>;
+  /**
+   * Who the signed-in editor is, for a host's own route (`platform/admin-extensions.md`
+   * decision 1). Answers null with no credential (and never calls `bindings`), under
+   * `auth: 'open'`, for a token unless `tokens: true`, for a refused `Origin` on an unsafe
+   * method, and on a deployment with `sites` for any origin but `sites.admin`. Pass the
+   * original `Request`: the resolution is memoised on it.
+   */
+  editor: (req: Request, env: Env, opts?: FolioEditorOptions) => Promise<FolioEditor | null>;
+  /**
+   * `editor()` as a gate: a `302` to sign-in for a `GET`, `401` otherwise, `403` below
+   * `opts.role`. An admission carries `HOST_PAGE_HEADERS` to spread onto the response.
+   */
+  requireEditor: (
+    req: Request,
+    env: Env,
+    opts?: FolioEditorOptions & { role?: Role; page?: string },
+  ) => Promise<{ editor: FolioEditor; headers: Record<string, string> } | Response>;
+  /** `{base}/login?next=<path+query>`, on `sites.admin` with `sites`. */
+  signInUrl: (req: Request, next?: string) => string;
+  /** The CSRF `Origin` check alone, for a host route that does not read the editor. */
+  originAllowed: (req: Request) => boolean;
   /**
    * One request's worth of reads on one D1 session — see `FolioReader`.
    *

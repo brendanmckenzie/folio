@@ -3,7 +3,8 @@ import type { Mutation } from "../../../src/core/mutations";
 import { MAX_TX_MUTATIONS } from "../../../src/core/protocol";
 import { FolioError } from "../../../src/server/errors";
 import type { StoryStub } from "../../../src/server/types";
-import { commitAll, txIdFromKey } from "../../../src/server/write";
+import type { Doc } from "../../../src/core/doc";
+import { commitAll, txIdFromKey, writeDocument } from "../../../src/server/write";
 
 /**
  * The write path's arithmetic and its refusal mapping, against a fake stub.
@@ -186,5 +187,66 @@ describe("commitAll refusals", () => {
         actor,
       ),
     ).rejects.toThrow(/transaction 1 of 2/);
+  });
+});
+
+describe("writeDocument's check", () => {
+  const doc = (title: string): Doc => ({
+    root: "r0",
+    bloks: {
+      r0: { uid: "r0", type: "page", parent: null, slot: null, order: "a0", data: { title } },
+    },
+  });
+  const run = (check?: (m: Mutation[], current: Doc) => Promise<void>) => {
+    const { stub, calls } = accepting();
+    const order: string[] = [];
+    const wrapped = {
+      ...stub,
+      commit: async (...args: Parameters<StoryStub["commit"]>) => {
+        order.push("commit");
+        return stub.commit(...args);
+      },
+    } as unknown as StoryStub;
+    const result = writeDocument(
+      { draft: async () => doc("old"), stub: wrapped },
+      () => doc("new"),
+      actor,
+      undefined,
+      undefined,
+      check &&
+        (async (m, current) => {
+          order.push("check");
+          await check(m, current);
+        }),
+    );
+    return { result, calls, order };
+  };
+
+  it("runs between diff and commit, handed the mutations and the draft", async () => {
+    let seen: { mutations: Mutation[]; title: unknown } | null = null;
+    const { result, order } = run(async (mutations, current) => {
+      seen = { mutations, title: current.bloks.r0?.data.title };
+    });
+    await result;
+    expect(order).toEqual(["check", "commit"]);
+    expect(seen).toEqual({
+      mutations: [{ t: "set", uid: "r0", field: "title", value: "new" }],
+      title: "old",
+    });
+  });
+
+  it("commits nothing when it throws, and the throw is the caller's", async () => {
+    const { result, calls, order } = run(async () => {
+      throw new FolioError("unavailable", "not loaded");
+    });
+    await expect(result).rejects.toMatchObject({ code: "unavailable", status: 503 });
+    expect(order).toEqual(["check"]);
+    expect(calls).toEqual([]);
+  });
+
+  it("is optional: no check is the write it always was", async () => {
+    const { result, order } = run();
+    await result;
+    expect(order).toEqual(["commit"]);
   });
 });

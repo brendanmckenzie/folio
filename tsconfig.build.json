@@ -65,5 +65,5 @@
     "rootDir": "src",
     "outDir": "dist/types"
   },
-  "include": ["src/core", "src/server", "src/vite", "src/form", "src/preview/Render.tsx", "src/preview/mount.tsx"]
+  "include": ["src/core", "src/server", "src/vite", "src/form", "src/host", "src/preview/Render.tsx", "src/preview/mount.tsx"]
 }

@@ -49,6 +49,7 @@ const READS = [
   "get_document",
   "check_document",
   "list_versions",
+  "list_field_options",
 ];
 /**
  * `READS` plus `preview_document` — the one tool whose own `need` is

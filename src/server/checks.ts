@@ -44,10 +44,13 @@ import { asRichtext, richtextToText } from "../core/richtext";
 import { type BlockSchema, type DocumentType, type SchemaIndex, typeByName } from "../core/schema";
 import type { StoryMeta } from "../core/story";
 import { gateValue, isUngated } from "../core/gate";
+import { optionListKey } from "../core/option-sources";
 import { asAsset, asAssets, isImageAsset } from "../core/values";
 import { decodeAccess, isPublicEffective } from "./asset-access";
 import type { ResolvedGate } from "./gate";
 import type { WritingGuide } from "./types";
+import type { ResolvedOptionSource } from "./form-responses";
+import { effectiveSettings, type ListRef, listId, type OptionListRow } from "./option-sources";
 import { avoidMatchers } from "./writing";
 
 export type ContentCheckSeverity = "error" | "warning" | "info";
@@ -107,6 +110,13 @@ export interface CheckContext {
    * called at most once, and only for a document with an image in an asset field.
    */
   gatedAssets?: (keys: string[]) => Promise<Map<string, { site: string; value: string }>>;
+  /**
+   * The stored option lists of the sourced selects the document holds (`platform/admin-extensions.md`
+   * decision 20), by `listId`, in one read on the request's session. Supplied only for a brand
+   * with field sources, called at most once, and only for a document that stores a sourced value.
+   * A ref with no row is absent from the map.
+   */
+  optionLists?: (refs: ListRef[]) => Promise<Map<string, OptionListRow>>;
 }
 
 /** The brand half: its schema, its types, its guide. A `BrandRuntime` is one. */
@@ -116,6 +126,8 @@ export interface CheckBrand {
   writing: WritingGuide | null;
   /** The brand's resolved gate: what `gated-asset-embedded` compares the page's own value to. */
   gate?: Pick<ResolvedGate, "config" | "assets"> | null;
+  /** The sources a field may name, for `option-not-offered`: `BrandRuntime.fieldSources`. */
+  fieldSources?: ReadonlyMap<string, ResolvedOptionSource>;
 }
 
 /** A finding before the walker places it. */
@@ -534,6 +546,102 @@ async function gatedEmbedFindings(
   return out;
 }
 
+/**
+ * `option-not-offered` and `option-list-unavailable` (`platform/admin-extensions.md`
+ * decision 20): what a sourced select stores against the last good list.
+ *
+ * The admin and an importer write past the membership check a v1 write makes, and a product
+ * archived after a page was written must not block an unrelated publish, so drift is reported
+ * here instead: a warning for a stored id the list no longer offers (`patch_fields` repairs
+ * it), and an **info** for a list that never loaded, which says nothing about the document and
+ * is the host's to fix (`fix: "schema"`, once per field). One list read for the document.
+ */
+async function optionFindings(
+  doc: Doc,
+  brand: CheckBrand,
+  ctx: CheckContext,
+  declared: ReadonlySet<string>,
+): Promise<{ blok: Blok; draft: Draft }[]> {
+  if (!ctx.optionLists || !brand.fieldSources || brand.fieldSources.size === 0) return [];
+  const stored: {
+    blok: Blok;
+    field: string;
+    label: string;
+    locale?: string;
+    value: string;
+    source: ResolvedOptionSource;
+    ref: ListRef;
+  }[] = [];
+  for (const blok of Object.values(doc.bloks)) {
+    const def = brand.schema[blok.type];
+    if (!def) continue;
+    for (const [name, field] of Object.entries(def.fields)) {
+      if (field.kind !== "select" || !field.optionsFrom) continue;
+      const source = brand.fieldSources.get(field.optionsFrom.source);
+      if (!source) continue;
+      // The stored value is an id, not a label, so every locale checks the source-locale list.
+      const ref = {
+        source: source.id,
+        key: optionListKey(effectiveSettings(source, field.optionsFrom.settings), ""),
+      };
+      for (const { locale, value } of storedByLocale(blok, name, declared)) {
+        if (typeof value !== "string" || value === "") continue;
+        if (field.options.some((o) => o.value === value)) continue;
+        stored.push({
+          blok,
+          field: name,
+          label: field.label ?? name,
+          ...(locale !== undefined ? { locale } : {}),
+          value,
+          source,
+          ref,
+        });
+      }
+    }
+  }
+  if (stored.length === 0) return [];
+
+  const rows = await ctx.optionLists([
+    ...new Map(stored.map((s) => [listId(s.ref), s.ref])).values(),
+  ]);
+  const out: { blok: Blok; draft: Draft }[] = [];
+  const unavailable = new Set<string>();
+  for (const s of stored) {
+    const options = rows.get(listId(s.ref))?.options ?? null;
+    if (options === null) {
+      const once = `${s.blok.uid}\u0000${s.field}`;
+      if (unavailable.has(once)) continue;
+      unavailable.add(once);
+      out.push({
+        blok: s.blok,
+        draft: {
+          check: "option-list-unavailable",
+          severity: "info",
+          message: `${s.label} takes its choices from ${s.source.label}, which has not loaded, so its value cannot be checked.`,
+          field: s.field,
+          fix: "schema",
+          detail: { source: s.source.id },
+        },
+      });
+      continue;
+    }
+    if (options.some((o) => o.value === s.value)) continue;
+    out.push({
+      blok: s.blok,
+      draft: {
+        check: "option-not-offered",
+        severity: "warning",
+        message: `${s.label} is "${s.value}", which ${s.source.label} no longer offers.`,
+        field: s.field,
+        ...(s.locale !== undefined ? { locale: s.locale } : {}),
+        fix: "patch_fields",
+        detail: { source: s.source.id, value: s.value },
+      },
+    });
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ walker --- */
 
 const SEVERITY_RANK: Record<ContentCheckSeverity, number> = { error: 0, warning: 1, info: 2 };
@@ -649,6 +757,7 @@ export async function checkDocument(
     placed.push(...targetFindings(located, rows, brand.types));
   }
   placed.push(...(await gatedEmbedFindings(doc, brand, ctx, declared)));
+  placed.push(...(await optionFindings(doc, brand, ctx, declared)));
 
   const localeRank = new Map((ctx.locales?.available ?? []).map((l, i) => [l.code, i]));
   const rank = ({ blok, draft }: { blok: Blok; draft: Draft }) => {

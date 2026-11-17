@@ -1843,6 +1843,14 @@ values while a preview renders the draft. It is indexed by the query API, so it 
 queryable. It carries per-locale values for free. The only thing it does not have
 is a URL, and that is the point.
 
+### A record that points at the host's data
+
+A record type (a product, a person) often needs to name something in the host's own database. Give
+it a sourced `select` (see "A document field that takes its options from a source" under Forms) and
+the record stores the host's id. For several, which a sourced select cannot hold, use a block list: a
+`blocks` slot that allows one block whose only field is the sourced select. The slot keeps the
+editor's order and the block carries no other data.
+
 ## Collections
 
 An insights index, a news list, a team grid, a paginated archive and a sitemap are
@@ -3036,6 +3044,19 @@ muted beneath it, and the CSV puts the label in the question's column and the st
 value in a following `<name>:value` column. A response taken before the feature has
 `optionLabels: {}` and shows the raw value. A `submitted` hook gets `optionLabels` too.
 
+**Two registries, and what each exposes.** A form question names a source under
+`forms.sources`. A document field (`select({ optionsFrom })`, below) names one under
+`optionSources`, or under `forms.sources` too: `optionSources` is for fields only, and **no
+form can list it, preview it or publish it**. That is the reason there are two keys.
+`forms.sources` is listed to every signed-in reader by `GET {base}/api/forms/registry`,
+previewed with settings an editor chose by the form builder, and rendered to anonymous
+visitors on a published form; a source you register under `optionSources` appears in none of
+those and runs only with the settings your schema declares. A source also under
+`forms.sources` keeps that exposure whether or not a field names it, and an id in both keys
+makes `createFolio` throw (one `option_lists` row per source id). Both registries accept
+`lookup(values, input, env)`, which labels values no longer in the list for the admin
+(next section).
+
 **Host sources.** Folio calls your `load` for you, never while rendering. A page reads the
 last good list from `option_lists`. Editors see your sources through a signed-in route
 and the builder previews the list, with its status and any failure category.
@@ -3055,6 +3076,77 @@ entrypoint that issued it, so the background refresh and the cron must run throu
 entrypoint you cache on, as for `runSchedules`. Without
 `folio.refreshOptionSources(env, { waitUntil })` in `scheduled()`, a list refreshes only
 on saves and submissions, so a list nobody saves or submits to goes stale on the page.
+
+### A document field that takes its options from a source
+
+`select({ optionsFrom: { source: 'products', settings: { collection: 'tees' } } })` makes a
+field's choices the host's own list, so an editor picks "Classic tee" and never pastes an
+id, and an agent writing the same page cannot store a product the shop does not have.
+
+```ts
+const productPage = defineBlock({
+  name: 'productPage', label: 'Product page',
+  fields: {
+    title: text({ indexed: true }),
+    // The stored value is the source's `value`, the shop's own id.
+    product: select({ label: 'Product', optionsFrom: { source: 'products' }, indexed: true }),
+  },
+  render: ({ product }) => <ProductHero id={product} />,   // `product` is "prod_8812"
+})
+
+createFolio<Env>({
+  …,
+  optionSources: {
+    products: {
+      label: 'Products',
+      load: async ({ settings, signal }, env) => (await shop(env).products({ signal })).map((p) => ({ value: p.id, label: p.name })),
+      // Optional, admin only: a label for a stored id the list no longer offers.
+      lookup: async (ids, _input, env) => (await shop(env).byIds(ids)).map((p) => ({ value: p.id, label: p.name })),
+    },
+  },
+})
+```
+
+- **Stored: the host's id**, exactly what a static select stores, so `content_index`,
+  `fieldValue`, `dataOf`, the v1 nested shape and migrations are unchanged. With
+  `indexed: true` the id is queryable: `folio.query({ type: 'product-page', where: [{ field: 'product',
+  op: 'eq', value: id }] })` finds the editorial page for a product. Ordering by the field orders
+  by id, not by label.
+- **Rendered: the id only.** `resolveValue` is unchanged and a block's `render` receives
+  `"prod_8812"`. Rendering the product is yours, because you own the data; a render that read
+  labels from `option_lists` would add a read and a cache tag per page for something you
+  already have. So a changed list never purges a page.
+- **The type is `string`.** A sourced select defaults to empty, never to its first typed
+  option. `options` beside `optionsFrom` are typed extras: they come after the sourced list and
+  win a value collision. `translatable` is refused.
+- **Checked at construction**: a source in neither registry, `content` (use `reference({ types })`),
+  a setting the source does not declare or of the wrong kind, a `select` setting outside its
+  options, `translatable`, a default that is not a typed extra, `optionsFrom` on another kind,
+  and a sourced select as the `gate` field.
+- **The list is the cached `option_lists` list**, with spec 37's TTL, lease and last-good rule:
+  the cron (`folio.refreshOptionSources`, keep it in `scheduled()`), the admin and a content API
+  write refresh it, and it is never pruned while a schema names it. The cap of 500 options stays;
+  narrow a larger catalogue with settings, for example one field per collection.
+- **The admin** offers the list in the inspector. A stored value the list no longer has is kept
+  and shown (as its `lookup` label, else the raw id) with "No longer offered by Products", and a
+  list that never loaded is a disabled control with the failure category and a Retry. Past 20
+  options a filter box narrows the list. `lookup` is asked only about values the open document
+  already stores, at most 20 per open, and is never cached, so make it answer only what a viewer
+  of the document may see.
+- **Writes are checked** (`PATCH /documents/:id/fields`, `PUT /documents/:id/content`, `POST /documents`,
+  so `patch_fields`, `write_content` and `create_document`): a value in the last good list (fresh or
+  stale) or a typed extra or `""` passes, anything else is `400 bad_request`, and a list that has never
+  loaded is refreshed (up to 10 seconds) and then `503 unavailable`, because failing open would let a
+  token store any string. Only values a write *changes* are checked, so a merge payload that hands back
+  a stored retired id is not refused. The admin's keystrokes and publish are not checked: the picker
+  offers only listed values, a product archived after a page was written must not block an unrelated
+  publish, and `check_document` reports the drift (`option-not-offered`, `option-list-unavailable`).
+  `GET /api/v1/options/:block/:field` and the MCP tool `list_field_options` answer what a field offers.
+
+`reference` is deliberately not extended: it means "a Folio story" and writes `content_refs`, is
+fenced to the chain and resolved two hops deep, none of which an external id has. Several products in
+order is a block list: a `blocks` slot allowing one block whose only field is the sourced select keeps
+the editor's order.
 
 ### The two hidden inputs, which nothing else will tell you about
 
@@ -3411,6 +3503,202 @@ delays the response; a cache purge that must land before the next read opts in w
 `await: ['published']`. Not delivery-guaranteed: at most once, no retries, no
 ordering between hooks. A host that needs that writes one line to a Cloudflare Queue
 inside the hook, which is the right tool for it.
+
+## Extending the admin
+
+A host that runs a shop (or a booking system, or a members' directory) on the same Worker as
+Folio needs screens of its own: orders, stock, discounts. Folio does not run host code inside
+its admin bundle, and it does not host-define field kinds. It has four narrow extension
+points instead: `folio.editor()` ("Your own routes behind Folio's sign-in", under Auth),
+**host pages**, **sourced selects** ("Options from a source", under Forms) and **linked-data
+panels**. This chapter is the first and the last of those; each is additive and a host that
+declares none of them is unchanged.
+
+### Host pages
+
+`admin.pages` lists screens your own Worker serves. Folio puts each in its sidebar and shows it
+inside the admin's chrome, in a same-origin `<iframe>` of your route, so an operator moves from
+a product page to its stock without a second login, a second tab or a second look.
+
+```ts
+createFolio<Env>({
+  …,
+  admin: {
+    pages: [
+      { id: 'orders', label: 'Orders', path: '/admin/orders', role: 'editor', group: 'Shop', icon: 'receipt' },
+      { id: 'discounts', label: 'Discounts', path: '/admin/discounts', role: 'publisher', group: 'Shop', icon: 'percent' },
+    ],
+  },
+})
+```
+
+| Key | Meaning |
+| --- | --- |
+| `id` | `/^[a-z][a-z0-9-]{0,31}$/`, unique. The admin route is `{mount}/host/<id>`. |
+| `label` | The sidebar label and the first crumb. 1 to 40 characters. |
+| `path` | Your route, on the admin's origin: starts with `/`, not `//`, no `?` or `#`, no trailing `/`, not `{basePath}` or under it, and no page's path a prefix of another's. |
+| `icon` | `window` (default), `receipt`, `box`, `tag`, `stack`, `percent`, `people` or `chart`. |
+| `role` | The minimum role. Default `viewer`. |
+| `group` | A sidebar heading, in first-appearance order. Pages with none sit together after the groups. |
+| `scope` | `deployment` (default): the data belongs to no site and the role is the `*` grant. `site`: the data is per site, the frame gets `folio_scope` and the role is the effective role on it. Needs `sites`. |
+| `brands` | With `brands`, on a `site` page only: shown and admitted only under a scope of these brands. |
+
+At most 20 pages. `createFolio` throws, naming the key, for a bad or duplicate id, a path that
+breaks a rule above, nested paths (a frame's location has to map to exactly one page), an unknown
+icon or role, `scope: 'site'` without `sites`, `brands` without `brands` or on a `deployment` page
+(it would be drawn in the sidebar and enforced nowhere), and **any page under `auth: 'open'`**,
+where `editor()` answers `null` and every page would refuse everyone.
+
+**The sidebar is an affordance; your route is the authority.** Gate every request the page
+makes, including `POST`s and the JSON endpoints it calls:
+
+```ts
+const gate = await folio.requireEditor(req, env, { page: 'orders' })
+if (gate instanceof Response) return gate
+const { editor, headers } = gate
+return new Response(html, { headers: { ...headers, 'content-type': 'text/html; charset=utf-8' } })
+```
+
+`{ page }` enforces what the page declares: the role, and for a `site` page the scope (read from
+the `folio_scope` query parameter, else the `x-folio-scope` header, and checked against the
+registry before any role is computed) and its `brands`. An unknown id throws. **Send the
+`headers` you are handed.** They are `frame-ancestors 'self'`, `private, no-store`, `nosniff` and
+`same-origin` referrer policy, and a route that discards them is framable by a same-site sibling
+(`www.example.com` framing `cms.example.com`), because `SameSite=Lax` still sends the cookie there.
+Serve the page on the admin origin: with `sites` that is `sites.admin`, and a live host or a
+preview origin never admits an editor.
+
+**Deep links and Back.** The page `orders` at `/admin/orders` is `{base}/host/orders`, and
+`{base}/host/orders/1042?tab=items` frames `/admin/orders/1042?tab=items`: paste it to a
+colleague and they land on the order inside the admin. Browsers keep one joint session history,
+so a link followed inside the frame adds an entry Back will traverse. The admin therefore
+**mirrors, and never pushes**: after each load it `replaceState`s its own URL to match the
+frame's, and only its own navigations (a sidebar click, a crumb) add entries. A frame location
+under no declared page (a link to `/`, to a Folio document) is promoted to the top window, but
+only an `http(s)` URL on the admin's origin: `about:blank`, `blob:` and `data:` are ignored, and
+a frame that navigated cross-origin is replaced by a notice rather than followed, so host
+content cannot make the admin an open redirect. A frame that lands on `{base}/login` (an expired
+session meeting `requireEditor`) is promoted to it with `next` set to the page inside the chrome.
+
+**With `sites`, a page is a `deployment` page or a `site` page.** A `deployment` page is a screen
+at the bare mount and under every scoped one; the bare-mount sidebar draws Sites and the
+`deployment` pages the caller may open. A `site` page is a screen only under `{base}/~<scope>`;
+at the bare mount its deep link renders "Open Orders in which site?" and choosing one goes to
+`{base}/~<scope>/host/<id>/…`. Only the frame's first URL is built by Folio, so three layers keep
+the scope on every request a `site` page makes: `requireEditor` reads `folio_scope` or
+`x-folio-scope`; `folio/host` adds `folio_scope` to every same-origin link and form and
+`x-folio-scope` to a `scoped()` fetch; and the admin replaces a frame that loaded a `site` page
+with no scope by one with it appended (one extra load, no history entry).
+
+**Title and breadcrumbs.** With no host code the admin reads the frame's `document.title` on each
+load and draws `Shop / Orders / <title>`. A page that wants more tells the admin with
+`folio/host` (browser only, no dependencies, no React):
+
+```ts
+import { announce, connectHostPage, notice, scoped } from 'folio/host'
+
+connectHostPage({ page: { id: 'orders', scope: 'site', path: '/admin/orders' }, frame: true })
+announce({ title: 'Order #1042', crumbs: [{ text: 'Open orders', href: '/admin/orders?state=open' }] })
+notice('Saved')                                  // the admin's toast
+await fetch('/admin/api/orders', scoped({ method: 'POST' }))   // x-folio-scope when a scope is held
+```
+
+`announce` and `notice` are no-ops outside the frame. `connectHostPage` holds the scope in
+`sessionStorage` per page id (per tab: two tabs on two sites never share it), announces the title
+now and on `popstate`, and with `frame: true` sends a top-level visit to `/admin/orders/1042`
+into the admin (`{base}/host/orders/1042`, or `{base}/~<scope>/host/…` when the tab holds a
+scope). A router calls `announce({ path })` from its own navigation hook; Folio does not patch
+`history`. Pass `page.path` when you use `frame: true`: the helper has no config to read, and the
+path is what turns the location into the admin URL's remainder.
+
+The messages are a public, versioned protocol, separate from `PROTOCOL_VERSION` (which guards a
+stale admin tab and is cheap to bump): `{ folio: 'host-page', v: 1, type: 'announce', title?,
+crumbs?, path? }` and `{ …, type: 'notice', message, tone? }`. The admin accepts one only from its
+own frame on its own origin, caps every string (title 120, crumbs 4 of 60, notice 200), drops a
+crumb `href` that is not under a declared page, renders everything as text, and ignores an unknown
+`v` with one `console.warn`. A `v: 2` would be accepted beside `v: 1`, never instead of it.
+
+**Look.** `/folio-host.css` (emitted by the Vite plugin; `folio/host.css` for a bundler) carries
+Folio's semantic tokens under a `--folio-` prefix, in light and in dark (`prefers-color-scheme` and
+`[data-theme]`): `--folio-bg-app`, `-bg-panel`, `-bg-inset`, `-bg-hover`, `-fg`, `-fg-muted`,
+`-fg-subtle`, `-fg-accent`, `-border`, `-border-strong`, `-ring`, `-state-{ok,warn,danger,accent}-{bg,border,fg}`,
+`-text-{xs,sm,base,lg,xl}`, `-space-{0..6}`, `-radius-{sm,md,lg,full}`, `-font-ui`, `-font-mono`. The
+scale tier is not published. An opt-in element layer styles the page when its body has
+`class="folio-host"`: the body, headings, links, `table`, `button` and
+`.folio-button[data-variant="primary|subtle|danger"]`, `input`, `select`, `textarea`,
+`.folio-badge[data-tone="ok|warn|danger|accent"]` and `.folio-muted`. Nothing outside `body.folio-host`
+but the tokens on `:root`; a page that wants its own styling reads the tokens or ignores both.
+
+**Troubleshooting.**
+
+| What you see | What it is |
+| --- | --- |
+| "This page refused to be shown inside Folio" | The route sends `X-Frame-Options: DENY` or a `frame-ancestors` that excludes the admin. Send `HOST_PAGE_HEADERS` (they carry `frame-ancestors 'self'`) and remove the conflicting header. |
+| The page is a 403 in the frame and "Open this page from the admin, inside a site." | A `site` page was opened with no `folio_scope`. Open it from the admin, or use `connectHostPage` so links and forms carry it. |
+| The page is a 302 to sign-in for an editor who is signed in | The route is on a live host or a preview origin of a deployment with `sites`, where `editor()` answers `null`. Serve it on `sites.admin`. |
+| The item is not in the sidebar | The caller's `*` grant (or, for a `site` page, their role and the scope's brand) does not reach the page's `role`. The route would refuse them too. |
+| Back needs two presses | The host patches `history` and also announces, or the page redirects in a loop. Navigate with ordinary links and let the admin mirror. |
+
+### Linked-data panels
+
+A panel shows the host's own facts about a document, read-only, on the document's root block in the
+inspector: "6 variants · from $28.50 · 3 editions left" beside a Product record's fields, with a link to the
+screen that edits them. `panels` is keyed by document type name, per brand with `brands`.
+
+```ts
+createFolio<Env>({
+  …,
+  panels: {
+    product: {
+      label: 'Shop',                  // the card's heading, 1 to 40 characters
+      role: 'viewer',                 // the minimum role on the document's scope; default viewer
+      timeoutMs: 3000,                // 500 to 10000, default 3000
+      async load({ data, editor, locale, signal }, env) {
+        const p = await shop(env).product(String(data.product), { signal })
+        if (!p) return null           // nothing linked: the card is not drawn
+        return {
+          items: [
+            { label: 'Variants', value: String(p.variants) },
+            { label: 'From', value: p.from },
+            { label: 'Editions left', value: String(p.left), tone: p.left < 5 ? 'warn' : 'neutral' },
+          ],
+          note: p.note,
+          link: { label: 'Open in Products', href: `/admin/products/${p.id}` },
+        }
+      },
+    },
+  },
+})
+```
+
+`load` receives `story`, `data` (the draft root block's data in the source locale, read through the
+document's Durable Object, so it is what the editor sees now and not the two-second `draft_data` mirror),
+`locale`, `scope`, `brand`, `editor` (the signed-in person projected exactly as `folio.editor()` does, from the
+actor the route already resolved, so no second credential read; `null` under `auth: 'open'`) and a `signal`
+that aborts at `timeoutMs`.
+
+- **JSON, rendered by Folio.** `items` at most 8 (`label` 1 to 40 characters, `value` 1 to 80, `tone` one of
+  `neutral`, `ok`, `warn`, `danger`), `note` at most 280, `link` with a `label` of 1 to 40. Every string is cut
+  at its cap with an ellipsis and drawn as React text in the admin's own tokens, in light and dark. An item that
+  fails is dropped, never the card; a `link` is dropped unless its `href` is a same-origin path (rewritten to
+  the admin's URL when it is under a declared host page, so it opens inside the chrome) or an `https:` URL
+  (opened in a new tab with `rel="noopener noreferrer"`); an answer with no usable item and no note is
+  `malformed`. HTML from the host would need a sanitiser or a second iframe, and a host that needs more than a
+  summary links to a host page.
+- **The route** is `GET {base}/api/stories/:id/panel?locale=`: internal and scoped, fenced to the story's chain,
+  `READ` plus the panel's role. A person needs the role or above as their effective role on the scope; a token
+  needs `content:read:draft` (the panel is computed from the draft) and **only when the panel's role is
+  `viewer`**, because a role has no token equivalent. Either refusal is `403`. It answers `{ status: 'ok',
+  summary, at }`, `{ status: 'none' }` or `{ status: 'error', reason: 'timeout' | 'threw' | 'malformed' }`. A
+  thrown value is logged as `folio: panel <type> failed (<reason>)` and the editor sees the category, never the
+  message. Panels are not in `/api/v1` or MCP on purpose: the summary is the host's data, and the host owns its
+  own API for it.
+- **Nothing is cached on the server**, because `load` receives the editor and a shared cache would leak one
+  editor's view to another; cache inside `load` if your own data is expensive. The admin keeps the last answer for
+  the open document, refetches (debounced three seconds) when a root scalar of the draft changes, on Refresh and
+  on re-open, and never polls.
+- **The manifest** carries `panels: { [type]: { label, role } }` when a brand declares any, and nothing otherwise,
+  so a host without panels has a byte-identical manifest. A panel on a page type works as it does on a record.
 
 ## Reads and replicas
 
@@ -4159,6 +4447,71 @@ Out of scope, deliberately: **site-visitor auth** — who may *read* a published
 page. That is a different problem, and reading a published page still needs no
 account at all. See "Visitor access" below: a host predicate `reader.page()`
 consults, never Folio accounts.
+
+### Your own routes behind Folio's sign-in
+
+A host that runs its own admin screens on the same Worker (orders, stock, discounts) has
+no reason to build a second login. `folio.editor()` asks Folio, in-process, who is
+signed in, through whichever door the site uses (magic link, OIDC, a trusted proxy,
+Cloudflare Access, a passkey): every provider ends in one ordinary session, so there is one
+credential to read.
+
+```ts
+// A route of yours, under any framework.
+const gate = await folio.requireEditor(req, env, { role: 'publisher' })
+if (gate instanceof Response) return gate        // 302 to sign-in, 401, or 403
+const { editor, headers } = gate                 // headers: send them on your response
+return new Response(render(editor), { headers: { ...headers, 'content-type': 'text/html' } })
+```
+
+`folio.editor(req, env, opts?)` is the data: `{ kind: 'user', user, role, grants, scope,
+brand, session }`, or `{ kind: 'token', … }`, or `null`. `requireEditor` is the gate:
+
+| Situation | Answer |
+| --- | --- |
+| no editor, `GET` or `HEAD` | `302` to `folio.signInUrl(req)`, which is `{base}/login?next=<path and query>` |
+| no editor, any other method | `401`, `Sign in to Folio first.` |
+| `role` given and the editor's role is below it, or none | `403` naming the role |
+| admitted | `{ editor, headers }`, `headers` being `HOST_PAGE_HEADERS` |
+
+Every refusal is `private, no-store`. A few things are decided for you, and each fails closed:
+
+- **No credential costs nothing.** With no session cookie (and no bearer header when you pass
+  `tokens: true`) `editor()` answers `null` before it touches `bindings`, so an anonymous
+  request through a route that calls it reads no database. With a cookie it reads once, on a D1
+  session, and memoises the answer on the `Request` object: **pass the original request**, not a
+  clone, or a loader and an action each pay for a read. Revocation is immediate because the
+  session row is read every time.
+- **`role` is the effective role on a scope.** With no `scope` it is the deployment-wide `*`
+  grant (`grants['*']`), and a person whose grants are all on sites has `role: null` there.
+  On a deployment with `sites`, pass `{ scope: 'alpha' }` to get the role on that site, group
+  or `shared`. A scope Folio does not serve (a typo, a deleted site, a site of no configured
+  brand) answers `role: null` even for a platform admin, and does not throw: it usually comes
+  from a URL parameter. Read `role === null` as refused. `grants` lists every grant by scope id.
+- **The scope is a selection, never an authority.** Folio checks it against the registry and
+  computes the role; a request cannot claim a role by naming a scope.
+- **On a deployment with `sites`, only the admin origin answers.** `editor()` is `null` for a
+  request on a live host or a preview origin, because cookies ignore ports and a session cookie
+  leaks from the admin's port to a live host's in development. Serve your admin screens on
+  `sites.admin`.
+- **A token is not an editor unless you say so.** `tokens: true` accepts `Authorization: Bearer
+  folio_…` and answers `{ kind: 'token', scopes, site }` with `role: null`; a gate that asks for a
+  `role` refuses a token, because a role has no token equivalent.
+- **Under `auth: 'open'` it answers `null`.** There are no users to resolve, and a synthetic admin
+  would make your screens public on a deployment that forgot `auth`.
+- **CSRF is checked inside it.** For a method other than `GET`, `HEAD` and `OPTIONS`, `editor()`
+  answers `null` when the request's `Origin` is another site's. The session cookie is
+  `SameSite=Lax` as well, so a cross-site form `POST` carries no cookie. `folio.originAllowed(req)`
+  is the same check on its own, for a route that does not read the editor.
+
+`HOST_PAGE_HEADERS` is `content-security-policy: frame-ancestors 'self'`, `cache-control: private,
+no-store`, `x-content-type-options: nosniff` and `referrer-policy: same-origin`. A page that
+discards them is framable by a same-site sibling (`www.example.com` framing `cms.example.com`),
+because `SameSite=Lax` still sends the cookie there. A host that sets its own CSP merges the
+directive.
+
+The projection omits the session hash, the person's colour and where their role came from. It is
+the smallest object that cannot leak later; `GET {base}/api/me` redacts the same way.
 
 ## Visitor access
 
@@ -4912,6 +5265,14 @@ its front end's cached entrypoint. Every payload also gains `site`: the scope th
 owns what changed (`default` on a single-site deployment, `null` for `migrated` and
 `reindexed`, and the row's own id for `siteChanged`).
 
+### Host admin pages
+
+`admin.pages` (see "Extending the admin") on a deployment with `sites` lives on `sites.admin`: a host
+page is the admin's own origin, framed, and `requireEditor` answers `null` anywhere else. A `deployment`
+page needs no scope and is drawn at the bare mount; a `site` page is per site, gets `folio_scope`
+under `{base}/~<scope>`, and renders a site chooser at the bare mount. `folio/host` and the admin
+carry the scope on every request the page makes.
+
 ### What a host does
 
 The host-side changes are short and are collected as a procedure in
@@ -5065,6 +5426,14 @@ description lists that brand's types and blocks. A token bound to a site (`POST 
 with `site`) carries its brand with it, so a token for one brand cannot write another's
 even at an unscoped URL. An unscoped route that picks a brand from a `~<scope>` in the
 URL checks the caller reaches that scope first, and answers `403` otherwise.
+
+### Host pages and brands
+
+`admin.pages` is deployment-wide, because the admin is one origin and one sidebar. A `site` page
+narrows itself with `brands: ['atlas']`: it is drawn and admitted only under a scope of those
+brands, and `requireEditor({ page })` refuses a brand-B editor passing a brand-B `folio_scope` to a
+brand-A page with `This page is not part of <brand label>.` `brands` on a `deployment` page throws,
+because it has no scope to take a brand from.
 
 ### What a hook or a mail is told
 
@@ -5342,6 +5711,15 @@ its first byte served and never exists as a public one. Elsewhere `access` is re
 `unsupported`. A token that reads a gated file's bytes needs only `content:read`, so a
 script can verify an upload it just made. See "Visitor access", "Gating files".
 
+### Fields that take their options from a source
+
+`GET /folio/api/v1/options/:block/:field?locale=` answers `{ source, label, status, loadedAt,
+failure?, options }` for a sourced select (`404` for an unknown block or field, `400` for a field with
+no `optionsFrom`). Read it before writing the field: `PATCH /fields`, `PUT /content` and `POST
+/documents` refuse a value the list does not offer (`400`), and answer `503` with the code
+`unavailable` when the list has never loaded. See "A document field that takes its options from a
+source" under Forms.
+
 ### A write is read, diff, commit
 
 ```
@@ -5464,8 +5842,8 @@ Two surfaces over one set of services.
 
 ## An MCP server, for assistants
 
-`{base}/mcp` is the same content again, for Claude or any other MCP client: eighteen
-tools, seventeen of them a v1 route above dispatched internally, so there is no second
+`{base}/mcp` is the same content again, for Claude or any other MCP client: nineteen
+tools, eighteen of them a v1 route above dispatched internally, so there is no second
 implementation of the access gate, the validation or the document shape. **Connecting one
 is documented in [`mcp.md`](mcp.md)** — mint a token on the admin's Access
 screen, then one `claude mcp add` command.
@@ -5491,6 +5869,10 @@ Three things about it are worth knowing here, because they are design rather tha
   `null` to inherit the folder's value. An agent loading protected material passes
   `access` on the upload, so the file is never public. Changing a public file's access
   queues the cache purge, and the answer reports `purge.pending`.
+- **`list_field_options` is how an agent learns what a sourced field accepts** (`content:read`,
+  the v1 options route). `patch_fields` and `write_content` refuse a value the list does not
+  offer (`invalid params`, naming the field, the source and this tool) and a list that has never
+  loaded is a server condition (`unavailable`).
 - **`preview_document` returns an image**, so an assistant can see whether a page looks
   right rather than infer it from markup. That one needs a Cloudflare Browser Rendering
   binding; without it the tool answers the draft URL and the rendered HTML and says why.
@@ -5591,7 +5973,7 @@ and finding **103 names that appeared nowhere a consumer could read**, at the on
 moment when un-exporting was still free. Thirty-seven of them were internals that
 had leaked through an `index` re-export and are gone; the rest are here.
 
-The eight subpaths in `package.json`, and who each is for:
+The subpaths and asset exports in `package.json`, and who each is for:
 
 | Subpath | For |
 | --- | --- |
@@ -5602,7 +5984,13 @@ The eight subpaths in `package.json`, and who each is for:
 | `folio/form` | `useFolioForm`, the optional headless hook that binds a form descriptor to a host's own inputs. React, client-side. |
 | `folio/render` | `FolioDoc`, the component that renders a resolved document, and `RenderRichtext`, which renders a richtext value you hold outside a block. Both live consumers import `FolioDoc`. |
 | `folio/preview` | The preview bundle's own entry. Folio's, not a host's. |
+| `folio/host` | The browser helper for a host page shown in the admin's frame: `framed`, `announce`, `notice`, `connectHostPage`, `scope`, `scoped`. No dependencies. |
+| `folio/host.css` | `folio-host.css`: Folio's semantic tokens as `--folio-*` and an opt-in element layer under `body.folio-host`. A CSS asset, also served at `/folio-host.css`. |
 | `folio/admin-entry` | The prebuilt admin bundle (`dist/admin/folio-admin.js`), which the Vite plugin emits and serves. Folio's, not a host's. |
+
+`folio/server` also exports `HOST_PAGE_HEADERS`, `HOST_PAGE_ICONS`, the types `FolioEditor`,
+`FolioEditorUser`, `FolioEditorToken`, `FolioEditorOptions`, `FolioAdminConfig` and `HostPage`, and
+the `Folio` methods `editor`, `requireEditor`, `signInUrl` and `originAllowed`.
 
 **What is deliberately *not* exported**, because each has been asked for and
 refused: `ShareGrant` (what a live share link authorises — a second gate built out
@@ -5792,7 +6180,9 @@ so deleting it would cost a host twenty lines and no capability. See
 
 ## Not built yet
 
-Custom field types defined by a host project. An **admin surface for outbound
+Custom field types defined by a host project (the **sourced select** covers "pick from the host's
+data", and a **plural** external pick, a multi-value select with a source, is not built: use a block
+list of one-field blocks, see "Data documents"). An **admin surface for outbound
 webhooks** — the publish hooks fire and a host's own code can act on them, but a
 *configured* webhook with a delivery log is what a client asks for on day one.
 

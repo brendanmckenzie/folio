@@ -32,6 +32,9 @@ export const MAX_SOURCED_OPTIONS = 500;
 /** A label is truncated to this many characters, `…` included (decision 4, 7). */
 export const MAX_OPTION_LABEL = 200;
 
+/** The longest a stored value may be, and what `FORM_FIELD` allows an option. */
+export const MAX_OPTION_VALUE = 120;
+
 /** `optionsFrom.settings` is bounded in bytes of JSON, so a PATCH cannot park a
  *  megabyte in a question. */
 const MAX_SETTINGS_BYTES = 4096;
@@ -189,6 +192,19 @@ export function screenOptionLabel(raw: unknown): string | null {
 }
 
 /**
+ * Whether `value` is one a source may offer and a field may store: 1 to `MAX_OPTION_VALUE`
+ * characters, already trimmed and printable (`screenItems`' rule for a host's `value`).
+ */
+export function isOptionValue(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= MAX_OPTION_VALUE &&
+    screenOptionLabel(value) === value
+  );
+}
+
+/**
  * A collator for a locale code.replace(/_/g, "-"), never throwing. `validateLocales` accepts any
  * `[A-Za-z0-9_-]` code, and V8 rejects `en_AU` (and `x`, `1`) with a RangeError, which
  * would 500 every page and submit of the form. `_` is read as `-`; a code still refused
@@ -243,4 +259,21 @@ export function hasUnavailableOptions(resolution: Resolution): boolean {
     for (const field of form.fields) if (field.optionsFrom?.unavailable) return true;
   }
   return false;
+}
+
+/**
+ * What a sourced select offers: the sourced entries first, then the field's typed extras,
+ * an extra winning a value collision so the editor's label stands
+ * (`platform/admin-extensions.md` decision 14). `null` (the list is unavailable) gives the
+ * extras only. Labels go through `screenOptionLabel`, the value standing in for one that fails.
+ */
+export function fieldOptions(
+  list: readonly FormFieldOption[] | null,
+  extras: readonly { value: string; label: string }[],
+): { value: string; label: string }[] {
+  const taken = new Set(extras.map((o) => o.value));
+  const sourced = (list ?? [])
+    .filter((o) => !taken.has(o.value))
+    .map((o) => ({ value: o.value, label: screenOptionLabel(o.label) ?? o.value }));
+  return [...sourced, ...extras.map((o) => ({ value: o.value, label: o.label }))];
 }

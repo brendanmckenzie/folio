@@ -921,7 +921,7 @@ const schema = await json(`${API}/schema`);
 check(
   "the manifest carries every declared document type",
   schema.types?.map((t) => `${t.name}:${t.kind}`).join(",") ===
-    "page:page,insight:page,person:record,office:record,settings:singleton,header:singleton",
+    "page:page,insight:page,feature:page,person:record,office:record,product:record,settings:singleton,header:singleton",
   schema.types?.map((t) => `${t.name}:${t.kind}`).join(","),
 );
 check(

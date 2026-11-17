@@ -8,6 +8,7 @@
  * enforcement. The reject path has to be correct even when this is wrong.
  */
 import type { AuthPolicy } from "../server/auth/config";
+import type { MeHostPage } from "../server/admin-config";
 import type { MePreview, MeScope, MeSites } from "../server/auth/me-sites";
 import { atLeast, type Role, type Scope } from "../server/auth/roles";
 import type { BrandRef } from "../server/types";
@@ -136,6 +137,14 @@ export interface Me {
    */
   sites?: MeSites;
   /**
+   * The host pages the deployment declares (`admin.pages`), **present only when it
+   * declares some** (`platform/admin-extensions.md` decision 13). `allowed` is computed
+   * on the server from the `*` grant, because `actor.role` is `viewer` for a person with
+   * no `*` row and a site-only editor would otherwise see a page the host then refuses.
+   * The sidebar is an affordance; the host route is the authority.
+   */
+  hostPages?: readonly MeHostPage[];
+  /**
    * The scope the admin is showing, set by `atScope` and never by the server. On a
    * multi-site deployment it decides which role every predicate below reads; absent
    * there means "no scope chosen", which grants nothing scoped (the Sites screen is
@@ -205,6 +214,21 @@ export function scopeChoices(me: Me): readonly MeScope[] {
 }
 
 /**
+ * Whether a host page is drawn for the caller on `scope` (decision 13). Absent, not
+ * disabled: a `deployment` page (and every page with no `sites`) reads the server's
+ * `allowed`; a `site` page needs a scope whose effective role reaches the page's `role`
+ * and whose brand the page's `brands` allows. Only an affordance: the host route's own
+ * `requireEditor({ page })` is the authority.
+ */
+export function canSeeHostPage(me: Me, page: MeHostPage, scope: string | null): boolean {
+  if (!me.sites || page.scope === "deployment") return page.allowed === true;
+  if (scope === null) return false;
+  const entry = me.sites.scopes.find((s) => s.id === scope);
+  if (!entry || !atLeast(entry.role, page.role)) return false;
+  return !page.brands || (entry.brand !== null && page.brands.includes(entry.brand.id));
+}
+
+/**
  * The configured brands, on a deployment with `brands`; empty everywhere else. Empty
  * is how the Sites screen knows there is no brand field to draw
  * (`multi-brand.md` decision 20).
@@ -261,6 +285,17 @@ export function canManageSites(me: Me): boolean {
   if (!me.sites) return false;
   if (me.mode === "open") return true;
   return asUser(me) !== null && me.sites.platform;
+}
+
+/**
+ * Whether the linked-data panel for a document type is drawn for the caller
+ * (`platform/admin-extensions.md` decision 21): their effective role on the shown scope reaches
+ * the panel's `role`. A token never drives the admin. Only an affordance: the panel route gates
+ * both currencies itself, and a refusal there draws nothing.
+ */
+export function canSeePanel(me: Me, role: Role): boolean {
+  if (me.mode === "open") return true;
+  return atLeastRole(me, role);
 }
 
 /** May they change a document's contents? */

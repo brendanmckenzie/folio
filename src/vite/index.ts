@@ -288,6 +288,18 @@ export function folio(options: FolioPluginOptions): Plugin[] {
           for (const [name, { source, file }] of adminFiles()) {
             this.emitFile({ type: "asset", fileName: name, source, originalFileName: file });
           }
+        } else if ((this as { environment?: { name: string } }).environment?.name === "client") {
+          // The admin is built from source here, but `folio-host.css` is a host page's
+          // stylesheet and always comes from the package build.
+          const host = hostCss();
+          if (host) {
+            this.emitFile({
+              type: "asset",
+              fileName: HOST_CSS,
+              source: host.source,
+              originalFileName: host.file,
+            });
+          }
         }
         if (noSplit) return;
         for (const [entry, stylesheet] of entryPairs) {
@@ -301,12 +313,13 @@ export function folio(options: FolioPluginOptions): Plugin[] {
      * build emits it. In source mode Vite's module graph serves it instead.
      */
     configureServer(server) {
-      if (!prebuilt) return;
       server.middlewares.use((req, res, next) => {
         const name = (req.url ?? "").split("?")[0]?.slice(1) ?? "";
-        const file = /^folio-admin[\w.-]*\.(js|css)$/.test(name)
-          ? adminFiles().get(name)?.source
-          : undefined;
+        let file: string | undefined;
+        if (name === HOST_CSS) file = hostCss()?.source;
+        else if (prebuilt && /^folio-admin[\w.-]*\.(js|css)$/.test(name)) {
+          file = adminFiles().get(name)?.source;
+        }
         if (file === undefined) return next();
         res.setHeader("Content-Type", name.endsWith(".css") ? "text/css" : "text/javascript");
         res.setHeader("Cache-Control", "no-cache");
@@ -583,9 +596,26 @@ function entryName(id: string): string {
  * `dist/vite.js` sits one directory below the package root and `src/vite/index.ts`
  * two, which is the same walk `adminEntry` makes.
  */
-function adminFiles(): Map<string, { source: string; file: string }> {
+const HOST_CSS = "folio-host.css";
+
+/** Where the prebuilt admin and `folio-host.css` sit: `dist/admin/`, from `dist/` or `src/`. */
+function adminDist(): string {
   const dir = import.meta.dirname;
-  const dist = path.resolve(dir, path.basename(dir) === "vite" ? "../../dist" : ".", "admin");
+  return path.resolve(dir, path.basename(dir) === "vite" ? "../../dist" : ".", "admin");
+}
+
+/**
+ * `folio-host.css` from the package build, or null when `dist/admin` has not been built
+ * (a Folio checkout before `pnpm build`): a host page then has no stylesheet to link,
+ * which the dev server's 404 shows, rather than failing a build that never asked.
+ */
+function hostCss(): { source: string; file: string } | null {
+  const file = path.join(adminDist(), HOST_CSS);
+  return existsSync(file) ? { source: readFileSync(file, "utf8"), file } : null;
+}
+
+function adminFiles(): Map<string, { source: string; file: string }> {
+  const dist = adminDist();
   if (!existsSync(path.join(dist, "folio-admin.js"))) {
     throw new Error(
       `folio: the prebuilt admin is missing (${dist}). Folio's \`prepare\` step builds it when the ` +
@@ -595,7 +625,7 @@ function adminFiles(): Map<string, { source: string; file: string }> {
   }
   return new Map(
     readdirSync(dist)
-      .filter((n) => n.startsWith("folio-admin") && /\.(js|css)$/.test(n))
+      .filter((n) => (n.startsWith("folio-admin") && /\.(js|css)$/.test(n)) || n === HOST_CSS)
       .map((n) => [
         n,
         { source: readFileSync(path.join(dist, n), "utf8"), file: path.join(dist, n) },

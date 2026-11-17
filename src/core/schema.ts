@@ -180,6 +180,13 @@ export interface Manifest {
    */
   hooks?: ManifestHooks;
   /**
+   * The linked-data panels this brand declares, by document type
+   * (`platform/admin-extensions.md` decision 21): the card's heading and the role that may see
+   * it. **Absent when the brand declares none**, so a host without panels gets a byte-identical
+   * manifest. Labels are headings like "Shop", not secrets; the route is the gate.
+   */
+  panels?: Record<string, { label: string; role: "viewer" | "editor" | "publisher" | "admin" }>;
+  /**
    * The brand this manifest describes (`multi-brand.md` decision 12), as
    * `folio/server`'s `BrandRef`. **Present only on a deployment with `brands`**,
    * whose manifest is a brand's; absent everywhere else, so a single-brand

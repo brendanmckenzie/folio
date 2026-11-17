@@ -30,7 +30,9 @@ const key = (screen: Screen): string =>
     ? `documents:${screen.type}`
     : screen.name === "edit"
       ? `edit:${screen.id}`
-      : screen.name;
+      : screen.name === "host"
+        ? `host:${screen.id}`
+        : screen.name;
 
 /**
  * The left sidebar: labelled, collapsible to a 48px icon rail, and the same on

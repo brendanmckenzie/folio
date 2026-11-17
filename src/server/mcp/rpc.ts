@@ -104,7 +104,7 @@ export function httpStatusFor(code: number): number {
  * A `FolioError`'s code in JSON-RPC's own space
  * (`mcp-server.md`'s "Errors"): `bad_request` is the caller's fault and maps to
  * *invalid params*; everything else — `unauthorized`, `forbidden`, `not_found`,
- * `conflict`, `too_large`, `unsupported`, `incomplete` — is the server
+ * `conflict`, `too_large`, `unsupported`, `incomplete`, `unavailable` — is the server
  * reporting a condition, which JSON-RPC has exactly one code for.
  *
  * The **message travels verbatim**, wherever this is used. `errors.ts` is

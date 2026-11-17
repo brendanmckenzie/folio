@@ -3,7 +3,7 @@
 # Run EVERY end-to-end script, each against its own fresh server and database,
 # several at a time.
 #
-#   ./scripts/e2e-all.sh                        # all 27
+#   ./scripts/e2e-all.sh                        # all 28
 #   ./scripts/e2e-all.sh scripts/sync-test.mjs scripts/space-test.mjs   # a subset
 #   FOLIO_E2E_JOBS=2 ./scripts/e2e-all.sh       # two at a time (default: half the CPUs, 2 to 6)
 #

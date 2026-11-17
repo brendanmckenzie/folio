@@ -1,0 +1,706 @@
+import { createExecutionContext, env } from "cloudflare:test";
+import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { defineBlock, select, text } from "../../src/core";
+import { optionListKey } from "../../src/core/option-sources";
+import type { DocumentType } from "../../src/core/schema";
+import { createFolio, type FolioBindings, type FolioConfig, magicLink } from "../../src/server";
+import type { Scope } from "../../src/server/auth/roles";
+import { createToken } from "../../src/server/auth/tokens";
+
+/**
+ * Option sources on document fields (`platform/admin-extensions.md` decisions 14 to 20),
+ * in real D1 and workerd. The vendor is a counting `load`.
+ *
+ * Built up per step: this first half is the registry (step 10): a source registered for
+ * fields only reaches no forms surface, and a field's list survives the cron and the prune.
+ */
+
+const bindings = (e: Cloudflare.Env): FolioBindings => ({
+  db: e.DB,
+  story: e.STORY,
+  media: e.MEDIA,
+  images: e.IMAGES,
+});
+
+const DAY = 86_400_000;
+
+const calls: string[] = [];
+let behaviour: "list" | "throw" = "list";
+
+/** What `products.lookup` was asked, and how it answers. */
+const lookups: string[][] = [];
+let lookupMode: "labels" | "hang" | "throw" = "labels";
+
+const products = {
+  label: "Products",
+  ttl: 60,
+  lookup(values: readonly string[]) {
+    lookups.push([...values]);
+    if (lookupMode === "hang") return new Promise<never>(() => {});
+    if (lookupMode === "throw") throw new Error("https://shop.example/?key=SECRET");
+    return values.filter((v) => v === "prod_9").map((value) => ({ value, label: "Archived tee" }));
+  },
+  load() {
+    calls.push("products");
+    if (behaviour === "throw") throw new Error("https://shop.example/?key=SECRET");
+    return [
+      { value: "prod_1", label: "Classic tee" },
+      { value: "prod_2", label: "Hoodie" },
+    ];
+  },
+};
+const customers = {
+  label: "Customers",
+  ttl: 60,
+  load() {
+    calls.push("customers");
+    return [{ value: "cus_1", label: "Mina" }];
+  },
+};
+const countries = {
+  label: "Countries",
+  ttl: 60,
+  load() {
+    calls.push("countries");
+    return [{ value: "ke", label: "Kenya" }];
+  },
+};
+
+const productPage = defineBlock({
+  name: "productPage",
+  label: "Product page",
+  summary: "title",
+  fields: {
+    title: text({ indexed: true }),
+    product: select({ label: "Product", optionsFrom: { source: "products" }, indexed: true }),
+  },
+  render: () => null,
+});
+
+const types: DocumentType[] = [
+  { name: "productPage", label: "Product page", kind: "page", root: "productPage", default: true },
+];
+
+const config = {
+  blocks: [productPage],
+  types,
+  bindings,
+  basePath: "/folio",
+  auth: { providers: [magicLink<Cloudflare.Env>({ send: () => {} })] },
+  logger: { warn: () => {}, error: () => {} },
+  forms: { sources: { countries } },
+  optionSources: { products, customers },
+} satisfies FolioConfig<Cloudflare.Env>;
+const folio = createFolio<Cloudflare.Env>(config);
+
+let reader: Record<string, string>;
+let editor: Record<string, string>;
+
+const bearer = async (name: string, scopes: Scope[]) => ({
+  authorization: `Bearer ${(await createToken(env.DB, { name, scopes })).token}`,
+});
+
+async function call(
+  path: string,
+  auth: Record<string, string> | null,
+  init: { method?: string; body?: unknown } = {},
+) {
+  const res = await folio.handle(
+    new Request(`https://cms.example/folio${path}`, {
+      method: init.method ?? "GET",
+      headers: {
+        ...(auth ?? {}),
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    }),
+    env,
+    createExecutionContext(),
+  );
+  if (!res) throw new Error(`handle() answered null for ${path}`);
+  return res;
+}
+
+const rows = async () =>
+  (
+    await env.DB.prepare(
+      "select brand, source, key, options is not null as loaded, loaded_at from option_lists order by brand, source, key",
+    ).all<{ brand: string; source: string; key: string; loaded: number; loaded_at: number }>()
+  ).results;
+
+const FORM = "frm_bbbbbbbbbbbb";
+const insertForm = () =>
+  env.DB.prepare(
+    `insert into forms (id, name, label, fields, created_at, updated_at, site_id)
+     values (?, 'f', 'Enquiry', '[]', 1000, 1000, 'default')`,
+  )
+    .bind(FORM)
+    .run();
+
+beforeAll(async () => {
+  reader = await bearer("fs-reader", ["content:read"]);
+  editor = await bearer("fs-editor", ["content:read", "content:write"]);
+});
+
+beforeEach(async () => {
+  calls.length = 0;
+  lookups.length = 0;
+  behaviour = "list";
+  lookupMode = "labels";
+  await env.DB.batch([
+    env.DB.prepare("delete from forms"),
+    env.DB.prepare("delete from option_lists"),
+  ]);
+  await insertForm();
+});
+
+describe("a field-only source stays out of forms", () => {
+  it("is not listed by GET /forms/registry, which keeps its own sources", async () => {
+    const body = (await (await call("/api/forms/registry", reader)).json()) as {
+      sources: { id: string }[];
+    };
+    expect(body.sources.map((s) => s.id)).toEqual(["countries"]);
+    expect(calls).toEqual([]);
+  });
+
+  it("is refused as a form question's source, and saves nothing", async () => {
+    const res = await call(`/api/forms/${FORM}`, editor, {
+      method: "PATCH",
+      body: {
+        expectedUpdatedAt: 1000,
+        fields: [
+          { name: "who", kind: "select", label: "Who", optionsFrom: { source: "customers" } },
+        ],
+      },
+    });
+    expect(res.status).toBe(400);
+    expect(calls).toEqual([]);
+    const form = await env.DB.prepare("select fields from forms where id = ?")
+      .bind(FORM)
+      .first<{ fields: string }>();
+    expect(form?.fields).toBe("[]");
+  });
+
+  it("is refused by the builder preview, and never loaded", async () => {
+    const res = await call(`/api/forms/${FORM}/option-preview`, editor, {
+      method: "POST",
+      body: { field: "who", optionsFrom: { source: "customers" }, locale: null },
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(calls).toEqual([]);
+  });
+
+  it("does not put a field source on the unauthenticated manifest, only the field's descriptor", async () => {
+    const body = await (await call("/api/schema", null)).text();
+    expect(body).not.toContain("Customers");
+    expect(body).not.toContain("customers");
+    expect(body).toContain('"optionsFrom":{"source":"products"}');
+  });
+});
+
+describe("folio.refreshOptionSources and a field's list", () => {
+  it("loads the lists the schema names with no sourced form saved at all", async () => {
+    const report = await folio.refreshOptionSources(env);
+    expect(report).toMatchObject({ due: 1, loaded: 1, failed: 0 });
+    expect(calls).toEqual(["products"]);
+    expect(await rows()).toMatchObject([{ brand: "", source: "products", loaded: 1 }]);
+  });
+
+  it("refreshes a list loaded nine days ago instead of pruning it", async () => {
+    const old = Date.now() - 9 * DAY;
+    await env.DB.prepare(
+      `insert into option_lists (brand, source, key, options, digest, loaded_at, attempted_at)
+       values ('', 'products', ?, '[{"value":"prod_old","label":"Old"}]', 'd', ?, ?)`,
+    )
+      .bind(optionListKey(undefined, ""), old, old)
+      .run();
+    const report = await folio.refreshOptionSources(env);
+    expect(report).toMatchObject({ due: 1, loaded: 1, pruned: 0 });
+    const [row] = await rows();
+    expect(row).toMatchObject({ source: "products", loaded: 1 });
+    expect(row?.loaded_at).toBeGreaterThan(old + 8 * DAY);
+  });
+
+  it("prunes a week-old list that nothing names", async () => {
+    const old = Date.now() - 9 * DAY;
+    await env.DB.prepare(
+      `insert into option_lists (brand, source, key, options, digest, loaded_at, attempted_at)
+       values ('', 'retired', '', '[]', 'd', ?, ?)`,
+    )
+      .bind(old, old)
+      .run();
+    const report = await folio.refreshOptionSources(env);
+    expect(report.pruned).toBe(1);
+    expect((await rows()).map((r) => r.source)).toEqual(["products"]);
+  });
+
+  it("does not load a source no field names", async () => {
+    await folio.refreshOptionSources(env);
+    expect(calls).not.toContain("customers");
+    expect(calls).not.toContain("countries");
+  });
+});
+
+/* ------------------------------------------------------- v1 content writes --- */
+
+const KEY = optionListKey(undefined, "");
+
+/** A list as the store holds it: `loadedAt` decides fresh (ttl 60 s) or stale. */
+const putList = async (
+  options: string[],
+  loadedAt = Date.now(),
+  source = "products",
+): Promise<void> => {
+  await env.DB.prepare("delete from option_lists where source = ?").bind(source).run();
+  await env.DB.prepare(
+    `insert into option_lists (brand, source, key, options, digest, loaded_at, attempted_at)
+     values ('', ?, ?, ?, 'd', ?, ?)`,
+  )
+    .bind(
+      source,
+      KEY,
+      JSON.stringify(options.map((value) => ({ value, label: value }))),
+      loadedAt,
+      loadedAt,
+    )
+    .run();
+};
+
+const writer = async () => bearer(`fs-writer-${Math.random()}`, ["content:read", "content:write"]);
+let write: Record<string, string>;
+
+const v1 = async (
+  path: string,
+  init: { method?: string; body?: unknown; auth?: Record<string, string> } = {},
+) => {
+  const res = await folio.handle(
+    new Request(`https://cms.example/folio/api/v1${path}`, {
+      method: init.method ?? "GET",
+      headers: {
+        ...(init.auth ?? write),
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    }),
+    env,
+    createExecutionContext(),
+  );
+  if (!res) throw new Error(`handle() answered null for ${path}`);
+  return res;
+};
+
+const create = async (content?: unknown) => {
+  const res = await v1("/documents", {
+    method: "POST",
+    body: { type: "productPage", title: "A product page", ...(content ? { content } : {}) },
+  });
+  return res;
+};
+const patchFields = (id: string, fields: Record<string, unknown>) =>
+  v1(`/documents/${id}/fields`, { method: "PATCH", body: { fields } });
+const putContent = (id: string, fields: Record<string, unknown>) =>
+  v1(`/documents/${id}/content`, { method: "PUT", body: { content: { fields } } });
+
+const draftProduct = async (id: string) => {
+  const res = await v1(`/documents/${id}?status=draft`);
+  const body = (await res.json()) as { content: { fields: Record<string, unknown> } };
+  return body.content.fields.product;
+};
+
+describe("v1 writes to a sourced select (decision 20)", () => {
+  let id: string;
+  beforeAll(async () => {
+    write = await writer();
+  });
+  beforeEach(async () => {
+    const res = await create();
+    expect(res.status).toBe(201);
+    id = ((await res.json()) as { id: string }).id;
+  });
+
+  it("accepts a value the loaded list offers, and refuses one it does not", async () => {
+    await putList(["prod_1", "prod_2"]);
+    expect((await patchFields(id, { product: "prod_1" })).status).toBe(200);
+    expect(await draftProduct(id)).toBe("prod_1");
+
+    const refused = await patchFields(id, { product: "prod_x" });
+    expect(refused.status).toBe(400);
+    const body = (await refused.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("bad_request");
+    expect(body.error.message).toContain("productPage.product");
+    expect(body.error.message).toContain("`products`");
+    expect(body.error.message).toContain("/api/v1/options/productPage/product");
+    expect(await draftProduct(id)).toBe("prod_1");
+  });
+
+  it("accepts the empty string and null, which clear the field", async () => {
+    await putList(["prod_1"]);
+    await patchFields(id, { product: "prod_1" });
+    expect((await patchFields(id, { product: "" })).status).toBe(200);
+    expect((await patchFields(id, { product: null })).status).toBe(200);
+  });
+
+  it("refuses PUT content the same way, and accepts a listed value", async () => {
+    await putList(["prod_1"]);
+    expect((await putContent(id, { product: "prod_x" })).status).toBe(400);
+    expect((await putContent(id, { product: "prod_1" })).status).toBe(200);
+    expect(await draftProduct(id)).toBe("prod_1");
+  });
+
+  it("accepts a stale list's value when the refresh fails", async () => {
+    await putList(["prod_1"], Date.now() - 3_600_000);
+    behaviour = "throw";
+    expect((await patchFields(id, { product: "prod_1" })).status).toBe(200);
+    // A stale list is checked as it stands: an outage is not the writer's problem.
+    expect((await patchFields(id, { product: "prod_x" })).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("answers 503 unavailable for a list that never loaded and a load that throws", async () => {
+    behaviour = "throw";
+    const res = await patchFields(id, { product: "prod_1" });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("unavailable");
+    expect(body.error.message).toContain("has not loaded");
+    expect(body.error.message).not.toContain("SECRET");
+    expect(calls).toEqual(["products"]);
+    expect(await draftProduct(id)).toBeFalsy();
+  });
+
+  it("refreshes a never-loaded list under the lease and then decides", async () => {
+    expect((await patchFields(id, { product: "prod_1" })).status).toBe(200);
+    expect(calls).toEqual(["products"]);
+    expect((await rows()).map((r) => r.source)).toEqual(["products"]);
+    expect((await patchFields(id, { product: "prod_x" })).status).toBe(400);
+    expect(calls).toEqual(["products"]);
+  });
+
+  it("does not refuse a merge payload that hands back a stored retired id", async () => {
+    await putList(["prod_9"]);
+    await patchFields(id, { product: "prod_9" });
+    await putList(["prod_1"]);
+    expect((await putContent(id, { title: "Renamed", product: "prod_9" })).status).toBe(200);
+    expect(await draftProduct(id)).toBe("prod_9");
+    // The same value through PATCH is no change either.
+    expect((await patchFields(id, { product: "prod_9" })).status).toBe(200);
+  });
+
+  it("checks a create's content, and writes nothing when it is refused", async () => {
+    await putList(["prod_1"]);
+    const before = (await env.DB.prepare("select count(*) as n from stories").first<{
+      n: number;
+    }>())!.n;
+    const refused = await create({ fields: { product: "prod_x" } });
+    expect(refused.status).toBe(400);
+    expect(
+      (await env.DB.prepare("select count(*) as n from stories").first<{ n: number }>())!.n,
+    ).toBe(before);
+    const ok = await create({ fields: { product: "prod_1" } });
+    expect(ok.status).toBe(201);
+  });
+
+  it("leaves a field that is not sourced alone", async () => {
+    await putList(["prod_1"]);
+    expect((await patchFields(id, { title: "Anything at all" })).status).toBe(200);
+    expect(calls).toEqual([]);
+  });
+});
+
+/* ---------------------------------------------- GET /api/v1/options/:b/:f --- */
+
+describe("GET /api/v1/options/:block/:field", () => {
+  beforeAll(async () => {
+    write = await writer();
+  });
+  const options = (block: string, field: string, query = "") =>
+    v1(`/options/${block}/${field}${query}`);
+
+  it("answers a fresh list as stored, with no call to the source", async () => {
+    await putList(["prod_1", "prod_2"]);
+    const res = await options("productPage", "product");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      source: string;
+      status: string;
+      loadedAt: number;
+      options: { value: string; label: string }[];
+    };
+    expect(body).toMatchObject({
+      source: "products",
+      status: "fresh",
+      options: [
+        { value: "prod_1", label: "prod_1" },
+        { value: "prod_2", label: "prod_2" },
+      ],
+    });
+    expect(body.loadedAt).toBeGreaterThan(0);
+    expect(calls).toEqual([]);
+  });
+
+  it("refreshes a missing list under the lease and answers what loaded", async () => {
+    const res = await options("productPage", "product");
+    const body = (await res.json()) as { status: string; options: { value: string }[] };
+    expect(body.status).toBe("fresh");
+    expect(body.options.map((o) => o.value)).toEqual(["prod_1", "prod_2"]);
+    expect(calls).toEqual(["products"]);
+  });
+
+  it("refreshes a stale list, and answers the stale one with the failure when the source throws", async () => {
+    await putList(["prod_old"], Date.now() - 3_600_000);
+    behaviour = "throw";
+    const res = await options("productPage", "product");
+    const body = (await res.json()) as {
+      status: string;
+      failure?: string;
+      options: { value: string }[];
+    };
+    expect(body).toMatchObject({ status: "stale", failure: "threw" });
+    expect(body.options.map((o) => o.value)).toEqual(["prod_old"]);
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+    behaviour = "list";
+    await putList(["prod_old"], Date.now() - 3_600_000);
+    const again = (await (await options("productPage", "product")).json()) as {
+      status: string;
+      options: { value: string }[];
+    };
+    expect(again.status).toBe("fresh");
+    expect(again.options.map((o) => o.value)).toEqual(["prod_1", "prod_2"]);
+  });
+
+  it("answers never-loaded with no options and a failure category when the first load fails", async () => {
+    behaviour = "throw";
+    const res = await options("productPage", "product");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      status: "never-loaded",
+      failure: "threw",
+      options: [],
+      loadedAt: null,
+    });
+  });
+
+  it("is 404 for an unknown block or field, and 400 for a field with no optionsFrom", async () => {
+    expect((await options("nope", "product")).status).toBe(404);
+    expect((await options("productPage", "nope")).status).toBe(404);
+    const plain = await options("productPage", "title");
+    expect(plain.status).toBe(400);
+    expect(((await plain.json()) as { error: { code: string } }).error.code).toBe("bad_request");
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses an unknown locale, and needs content:read", async () => {
+    await putList(["prod_1"]);
+    expect((await options("productPage", "product", "?locale=xx")).status).toBe(501);
+    const none = await v1("/options/productPage/product", { auth: {} });
+    expect(none.status).toBe(401);
+    const wrong = await bearer(`fs-nowrite-${Math.random()}`, ["assets:write"]);
+    expect((await v1("/options/productPage/product", { auth: wrong })).status).toBe(403);
+  });
+});
+
+/* ----------------------------------------------------- GET .../check (spec 44) --- */
+
+describe("check_document over a sourced select", () => {
+  let id: string;
+  beforeAll(async () => {
+    write = await writer();
+  });
+  beforeEach(async () => {
+    const res = await create();
+    id = ((await res.json()) as { id: string }).id;
+  });
+  const check = async () => {
+    const res = await v1(`/documents/${id}/check?status=draft`);
+    expect(res.status).toBe(200);
+    return (await res.json()) as {
+      findings: {
+        check: string;
+        severity: string;
+        fix: string;
+        detail?: Record<string, unknown>;
+      }[];
+    };
+  };
+  const named = (report: Awaited<ReturnType<typeof check>>, name: string) =>
+    report.findings.filter((f) => f.check === name);
+
+  it("reports an id the list no longer offers as option-not-offered, and fixes through patch_fields", async () => {
+    await putList(["prod_1"]);
+    await patchFields(id, { product: "prod_1" });
+    expect(named(await check(), "option-not-offered")).toEqual([]);
+
+    // The shop retired prod_1 after the page was written.
+    await putList(["prod_2"]);
+    const [finding] = named(await check(), "option-not-offered");
+    expect(finding).toMatchObject({
+      severity: "warning",
+      fix: "patch_fields",
+      detail: { source: "products", value: "prod_1" },
+    });
+    expect(named(await check(), "field-shape")).toEqual([]);
+  });
+
+  it("reports a list that never loaded as option-list-unavailable (info, fix schema)", async () => {
+    await putList(["prod_1"]);
+    await patchFields(id, { product: "prod_1" });
+    await env.DB.prepare("delete from option_lists").run();
+    const [finding] = named(await check(), "option-list-unavailable");
+    expect(finding).toMatchObject({
+      severity: "info",
+      fix: "schema",
+      detail: { source: "products" },
+    });
+  });
+
+  it("makes no list read for a document that stores no sourced value", async () => {
+    expect(named(await check(), "option-not-offered")).toEqual([]);
+    expect(named(await check(), "option-list-unavailable")).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+});
+
+/* ----------------------------------------------------- GET /api/field-options --- */
+
+describe("GET /api/field-options (the inspector's picker)", () => {
+  beforeAll(async () => {
+    write = await writer();
+  });
+  const internal = (query: string, auth: Record<string, string> = write) =>
+    call(`/api/field-options?${query}`, auth);
+  type Answer = {
+    source: string;
+    status: string;
+    options: { value: string; label: string }[];
+    missing?: { value: string; label: string | null }[];
+  };
+  const storing = async (...values: string[]) => {
+    await putList(["prod_9", ...values]);
+    const made = await create();
+    const id = ((await made.json()) as { id: string }).id;
+    await patchFields(id, { product: "prod_9" });
+    return id;
+  };
+
+  it("answers the list like the v1 route, with no missing without a story", async () => {
+    await putList(["prod_1", "prod_2"]);
+    const res = await internal("block=productPage&field=product");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Answer;
+    expect(body).toMatchObject({ source: "products", status: "fresh" });
+    expect(body.options.map((o) => o.value)).toEqual(["prod_1", "prod_2"]);
+    expect("missing" in body).toBe(false);
+    expect(lookups).toEqual([]);
+  });
+
+  it("needs block and field, and the caller to be signed in", async () => {
+    expect((await internal("block=productPage")).status).toBe(400);
+    expect((await internal("block=productPage&field=product", {})).status).toBe(401);
+    expect((await internal("block=productPage&field=title")).status).toBe(400);
+    expect((await internal("block=nope&field=product")).status).toBe(404);
+  });
+
+  it("labels a retired value the document stores, asking lookup only about that draft's values", async () => {
+    const id = await storing("prod_1");
+    // The shop retires prod_9; the page still stores it.
+    await putList(["prod_1"]);
+    const body = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect(body.missing).toEqual([{ value: "prod_9", label: "Archived tee" }]);
+    expect(lookups).toEqual([["prod_9"]]);
+    // The list itself is unchanged, and nothing was stored for the label.
+    expect(body.options.map((o) => o.value)).toEqual(["prod_1"]);
+  });
+
+  it("says nothing of a value the list still offers, and does not call lookup", async () => {
+    const id = await storing();
+    const body = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect("missing" in body).toBe(false);
+    expect(lookups).toEqual([]);
+  });
+
+  it("gives a null label when lookup throws, hangs or the source has none", async () => {
+    const id = await storing("prod_1");
+    await putList(["prod_1"]);
+    lookupMode = "throw";
+    const threw = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect(threw.missing).toEqual([{ value: "prod_9", label: null }]);
+    expect(JSON.stringify(threw)).not.toContain("SECRET");
+
+    lookupMode = "hang";
+    const started = Date.now();
+    const hung = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect(hung.missing).toEqual([{ value: "prod_9", label: null }]);
+    expect(Date.now() - started).toBeLessThan(6_000);
+  }, 10_000);
+
+  it("is 404 for a story that does not exist", async () => {
+    await putList(["prod_1"]);
+    expect((await internal("block=productPage&field=product&story=sty_nope000000")).status).toBe(
+      404,
+    );
+  });
+});
+
+/* ------------------------------------------------- the fence, with sites --- */
+
+describe("GET /api/field-options with sites", () => {
+  const sited = createFolio<Cloudflare.Env>({
+    ...config,
+    sites: { admin: "https://cms.example" },
+    route: (p: string) => `/${p}`,
+  } as unknown as FolioConfig<Cloudflare.Env>);
+  const at = async (path: string) => {
+    const res = await sited.handle(
+      new Request(`https://cms.example/folio${path}`, { headers: write }),
+      env,
+      createExecutionContext(),
+    );
+    return res as Response;
+  };
+
+  beforeAll(async () => {
+    write = await writer();
+    await env.DB.batch([
+      env.DB.prepare(
+        `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
+           ('fsalpha', 'site', 'Alpha', null, 'live', null, 0, 0),
+           ('fsbravo', 'site', 'Bravo', null, 'live', null, 0, 0)`,
+      ),
+      env.DB.prepare(
+        `insert into stories (id, type, slug, path, ord, title, updated_at, site_id)
+         values ('sty_fs_bravo', 'productPage', 'b', 'b', 'a0', 'Bravo page', 1, 'fsbravo')`,
+      ),
+    ]);
+  });
+
+  it("answers the list under a scope, and needs one", async () => {
+    await putList(["prod_1"]);
+    expect((await at("/~fsalpha/api/field-options?block=productPage&field=product")).status).toBe(
+      200,
+    );
+    const bare = await at("/api/field-options?block=productPage&field=product");
+    expect(bare.status).toBe(400);
+    expect(((await bare.json()) as { error: { code: string } }).error.code).toBe("site_required");
+  });
+
+  it("is 404 for another site's story, and answers a story of the scope's own chain", async () => {
+    await putList(["prod_1"]);
+    const other = await at(
+      "/~fsalpha/api/field-options?block=productPage&field=product&story=sty_fs_bravo",
+    );
+    expect(other.status).toBe(404);
+    const own = await at(
+      "/~fsbravo/api/field-options?block=productPage&field=product&story=sty_fs_bravo",
+    );
+    expect(own.status).toBe(200);
+  });
+});

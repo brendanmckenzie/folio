@@ -710,6 +710,9 @@ const RESPONSES = {
  * `storyByPath` on the request's chain.
  */
 const UNSCOPED_IDS = [
+  // `platform/admin-extensions.md` decision 20: names a block and a field of the scope's
+  // brand (a registry read through `c.var.brand`, which `withScope` has fenced), not a row.
+  "GET /api/v1/options/:block/:field",
   "PATCH /api/users/:id",
   "DELETE /api/users/:id",
   "DELETE /api/users/:id/passkeys",
@@ -756,6 +759,10 @@ const FENCED_ELSEWHERE = [
   "GET /api/story/:id/socket",
   "GET /edit/:id",
   "GET /preview/global/:name",
+  // `platform/admin-extensions.md` decision 21: a read fenced to the chain like every id route,
+  // but answered only for a type that declares a panel, so it is not a row of the status walk
+  // (the walk's config declares none). Its own fence cases are in `panels.test.ts`.
+  "GET /api/stories/:id/panel",
   // A read of the source and a write in the request's scope: not one reach, so not a
   // row of the walk. Their own cases below.
   "POST /api/stories/:id/duplicate",

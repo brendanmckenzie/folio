@@ -12,7 +12,7 @@ state on your behalf. The cost of implementing one revision is that a client whi
 *only* speak a handshake-based revision (`2025-11-25` or earlier) cannot connect; it gets
 a `400` naming what would work. Current clients negotiate this automatically.
 
-Eighteen tools, seventeen of them an existing v1 route dispatched internally (see
+Nineteen tools, eighteen of them an existing v1 route dispatched internally (see
 [`docs/specs/platform/mcp-server.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/platform/mcp-server.md) decision 2). So an assistant can do what a person can
 do, an agent's edit appears live in an open editor, and it lands in the activity trail
 attributed to the token rather than to whoever minted it.
@@ -32,14 +32,16 @@ Scopes, and what each buys:
 
 | Scope | Tools it unlocks |
 | --- | --- |
-| `content:read` | `get_schema`, `search_documents`, `query_documents`, `get_document`, `check_document`, `list_versions` |
+| `content:read` | `get_schema`, `search_documents`, `query_documents`, `get_document`, `check_document`, `list_versions`, `list_field_options` |
 | `content:read:draft` | the above, plus `preview_document` |
 | `content:write` | the above, plus `create_document`, `write_content`, `patch_fields`, `move_document`, `duplicate_document`, `restore_version` |
 | `publish` | the reads, plus `publish_document`, `unpublish_document` |
 | `assets:write` | `upload_asset`, `update_asset`, **and nothing else** |
 | `admin` | everything, including `delete_document` |
 
-Two of those are worth knowing rather than discovering:
+Two of those are worth knowing rather than discovering (and a third, `list_field_options`, is how an
+agent learns what a field that takes its options from the site's own data accepts: call it before
+`patch_fields` or `write_content` on such a field, which refuse a value the list does not offer):
 
 - **`assets:write` implies no content access at all**, which is the whole reason it is a
   separate scope. A token holding only it gets those two tools.

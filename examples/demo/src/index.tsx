@@ -17,6 +17,8 @@ import { renderToReadableStream } from "react-dom/server.edge";
 import { blocks } from "./blocks";
 import { SubmissionStatus, type SubmissionState } from "./blocks/contact";
 import { migrations } from "./migrations";
+import { PRODUCTS, RETIRED, shelf } from "./catalogue";
+import { orderDetail, ordersList } from "./orders";
 
 // Two Durable Object classes now. SpaceDO is the space channel
 // (editing/live-collaboration.md): one instance for the whole site, no storage at
@@ -210,6 +212,15 @@ const folio = createFolio<Env>({
     // because Folio derives a path from the tree (checkpoint 3). `under`
     // constrains where one may be created *and* dragged, with a refusal notice.
     { name: "insight", label: "Insight", kind: "page", root: "insightPage", under: ["page"] },
+    // A deliberately long label: the content list's type column is fixed, and this is
+    // what shows it truncating with the full label on hover.
+    {
+      name: "feature",
+      label: "Long-form editorial feature",
+      kind: "page",
+      root: "insightPage",
+      under: ["page"],
+    },
     // Unrouted, and many of them. `titleField` is needed because personRecord
     // has no `title` field for the tree cache to have guessed at.
     //
@@ -234,6 +245,14 @@ const folio = createFolio<Env>({
       kind: "record",
       root: "officeRecord",
       titleField: "city",
+    },
+    // A third record type, whose `product` field picks from the shop's catalogue.
+    {
+      name: "product",
+      label: "Product",
+      kind: "record",
+      root: "productRecord",
+      titleField: "name",
     },
     // Unrouted, and exactly one — enforced by the derived id `sng_settings`
     // rather than by a constraint. Created on first access, never by an editor.
@@ -349,6 +368,73 @@ const folio = createFolio<Env>({
     },
   },
   basePath: "/folio",
+  // Choices for a document field from the host's own data (`select({ optionsFrom })`,
+  // `platform/admin-extensions.md`, feature 3). Separate from `forms.sources`: no form can
+  // list, preview or render it. Keep `folio.refreshOptionSources` in `scheduled()`.
+  optionSources: {
+    catalogue: {
+      label: "Catalogue",
+      ttl: 60,
+      load: () => {
+        // `/dev/catalogue?down=1` (below) takes the shop down, to see a list that never loaded.
+        if (shelf.down) throw new Error("the demo's shop is down");
+        return PRODUCTS.filter((p) => !shelf.retired.has(p.id)).map((p) => ({
+          value: p.id,
+          label: p.name,
+        }));
+      },
+      // Names a stored id the list no longer offers, for the admin only.
+      lookup: (ids) =>
+        [...PRODUCTS.map((p) => ({ id: p.id, name: p.name })), ...RETIRED]
+          .filter((p) => ids.includes(p.id))
+          .map((p) => ({ value: p.id, label: p.name })),
+    },
+  },
+  // The host's own facts about a Product record, beside its fields in the inspector
+  // (`platform/admin-extensions.md`, feature 4). JSON, rendered by Folio; the link into
+  // `/admin/orders` opens inside the chrome because that path is a declared host page.
+  panels: {
+    product: {
+      label: "Shop",
+      load: ({ data }) => {
+        // `/dev/catalogue?panel=throw|hang|garbage|ok` (below) makes the host's side misbehave, to
+        // see the card's error line (and, for `hang`, its three second timeout) and Retry.
+        if (shelf.panel === "throw") throw new Error("the demo's shop panel threw");
+        if (shelf.panel === "hang") return new Promise<never>(() => {});
+        if (shelf.panel === "garbage") return { items: "nope" } as never;
+        const found = PRODUCTS.find((p) => p.id === data.product);
+        if (!found) return null;
+        return {
+          items: [
+            { label: "Variants", value: String(found.variants) },
+            { label: "From", value: found.price },
+            {
+              label: "Editions left",
+              value: String(found.left),
+              tone: found.left < 5 ? "warn" : "neutral",
+            },
+          ],
+          note: `${found.name} is on sale in the demo shop.`,
+          link: { label: "Open orders", href: "/admin/orders?state=open" },
+        };
+      },
+    },
+  },
+  // A screen of the host's own in Folio's sidebar and chrome (`platform/admin-extensions.md`).
+  // Folio draws the item and the frame; `/admin/orders` below is the host's route and
+  // gates itself with `folio.requireEditor`, which is where the role is enforced.
+  admin: {
+    pages: [
+      {
+        id: "orders",
+        label: "Orders",
+        path: "/admin/orders",
+        icon: "receipt",
+        role: "editor",
+        group: "Shop",
+      },
+    ],
+  },
   // content-model/localisation.md: two languages, one document per story.
   // `default` is the *source* locale — the one `Blok.data` holds — and everything
   // else is a per-field override in `Blok.i18n`. Marking a field
@@ -490,6 +576,30 @@ export default {
       }
       return Response.json({ fail: countriesDown });
     }
+    // Local development only, like the route above: retires a product from the catalogue the
+    // `product` field picks from (`?retire=prod_8814`), brings them all back (`?restore=1`), takes
+    // the shop down (`?down=1` or `0`), and `?stale=1` ages every stored option list past its ttl
+    // and its lease so the next open refreshes. For the browser checks in
+    // `docs/specs/platform/admin-extensions.md`; not a pattern to copy.
+    if (url.pathname === "/dev/catalogue") {
+      if (url.hostname !== "localhost" && url.hostname !== "127.0.0.1") {
+        return new Response("Not found", { status: 404 });
+      }
+      const retire = url.searchParams.get("retire");
+      if (retire) shelf.retired.add(retire);
+      if (url.searchParams.get("restore") === "1") shelf.retired.clear();
+      if (url.searchParams.has("down")) shelf.down = url.searchParams.get("down") === "1";
+      const panel = url.searchParams.get("panel");
+      if (panel === "ok" || panel === "throw" || panel === "hang" || panel === "garbage") {
+        shelf.panel = panel;
+      }
+      if (url.searchParams.get("stale") === "1") {
+        await env.DB.prepare(
+          "update option_lists set loaded_at = loaded_at - 604800000, attempted_at = attempted_at - 604800000 where source = 'catalogue' and loaded_at is not null",
+        ).run();
+      }
+      return Response.json({ retired: [...shelf.retired], down: shelf.down, panel: shelf.panel });
+    }
     // Where `gate.assetDenied` sends a stranger who opens a gated file. A host's own page,
     // not a Folio route; the real one would be the host's sign-in or purchase flow.
     if (url.pathname === "/sign-in") {
@@ -509,6 +619,47 @@ export default {
       const expiresIn = Number(url.searchParams.get("expiresIn") ?? "") || undefined;
       return Response.json({
         url: await folio.signAsset(env, src, expiresIn === undefined ? {} : { expiresIn }),
+      });
+    }
+    // A host admin page, framed by Folio's shell at `{base}/host/orders`. Every request
+    // to it, a `GET` here, a `POST` or a JSON endpoint in a real shop, goes through
+    // `requireEditor`: it answers a redirect to sign-in, a 401 or a 403, or the editor and
+    // the headers (`frame-ancestors 'self'`, `no-store`) to send back.
+    if (url.pathname === "/admin/orders" || url.pathname.startsWith("/admin/orders/")) {
+      const gate = await folio.requireEditor(req, env, { page: "orders" });
+      if (gate instanceof Response) return gate;
+      const id = url.pathname.slice("/admin/orders".length).replace(/^\//, "");
+      // Two pages that exist only for the browser checks: one the browser refuses to frame
+      // (`X-Frame-Options: DENY`, which is also a `frame-ancestors` that excludes the admin), and
+      // one slower than the admin's 15 second "taking a while" overlay.
+      if (id === "refused") {
+        return new Response(
+          "<!doctype html><title>Refused</title><p>You should not see this framed.</p>",
+          {
+            headers: {
+              ...gate.headers,
+              "content-security-policy": "frame-ancestors 'none'",
+              "x-frame-options": "DENY",
+              "content-type": "text/html; charset=utf-8",
+            },
+          },
+        );
+      }
+      if (id === "slow") {
+        await new Promise((resolve) => setTimeout(resolve, 17_000));
+        return new Response(ordersList(null), {
+          headers: { ...gate.headers, "content-type": "text/html; charset=utf-8" },
+        });
+      }
+      const html = id ? orderDetail(id) : ordersList(url.searchParams.get("state"));
+      if (html === null) {
+        return new Response("No such order", {
+          status: 404,
+          headers: { ...gate.headers, "content-type": "text/plain; charset=utf-8" },
+        });
+      }
+      return new Response(html, {
+        headers: { ...gate.headers, "content-type": "text/html; charset=utf-8" },
       });
     }
     if (url.pathname === "/sitemap.xml") {

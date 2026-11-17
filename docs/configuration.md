@@ -339,6 +339,23 @@ styled by imports.
 
 ---
 
+#### `admin: { pages: HostPage[] }`
+
+Absent by default, and absent is a complete behaviour: the sidebar is Folio's own. Each page is a
+screen your Worker serves, listed in the sidebar and shown inside the admin's chrome
+(`docs/handbook.md`, "Extending the admin"): `id` (`/^[a-z][a-z0-9-]{0,31}$/`, unique), `label` (1 to
+40 characters), `path` (a path on the admin's origin, normalised, with no `?`, `#` or trailing `/`,
+not `basePath` or under it, and no page's path a prefix of another's), `icon` (`window` by default;
+`receipt`, `box`, `tag`, `stack`, `percent`, `people`, `chart`), `role` (`viewer` by default), `group`
+(a sidebar heading, 1 to 40 characters), `scope` (`deployment` by default, or `site` with `sites`) and
+`brands` (a `site` page under `brands`). At most 20. Deployment-wide: it is not a brand key.
+
+Failure modes, all at construction: an unknown key, a duplicate or malformed `id`, a `path` that breaks a
+rule, nested paths, an unknown `icon` or `role`, `scope: 'site'` without `sites`, `brands` without
+`brands` or on a `deployment` page, an unconfigured brand id, more than 20 pages, and any page under
+`auth: 'open'`. The sidebar is not a permission: the host route calls
+`folio.requireEditor(req, env, { page })`, which enforces the role, scope and brands.
+
 ### Many sites in one deployment
 
 #### `sites: SitesConfig`
@@ -509,6 +526,20 @@ built-in `field.*` helpers are idempotent, and an `up` of your own may not be.
 ---
 
 ### Behaviour
+
+#### `panels: Record<string, FolioPanel<Env>>`
+
+Absent by default: the inspector draws no linked-data card. Keyed by document type name, per brand with
+`brands`. Each panel is `{ label, role?, timeoutMs?, load }`: `label` is the card's heading (1 to 40
+characters), `role` the minimum role on the document's scope (default `viewer`), `timeoutMs` how long `load` may
+take before the card says "timed out" (500 to 10000, default 3000), and `load(ctx, env)` answers a
+`FolioPanelSummary` (`items`, `note`, `link`) or `null` for "nothing linked". Nothing is cached. See
+`docs/handbook.md`, "Linked-data panels".
+
+Failure modes, at construction: a key that names no declared document type, an unknown key on a panel, a `label`
+outside 1 to 40 characters, a `load` that is not a function, an unknown `role`, and a `timeoutMs` that is not a
+whole number from 500 to 10000. At run time a `load` that throws, times out or answers nothing usable is a
+category on the card, and a token with `content:read:draft` is refused a panel whose role is above `viewer`.
 
 #### `hooks: FolioHooks<Env>`
 
@@ -681,6 +712,25 @@ empty or holds a short key is logged and every signature is then treated as inva
 `expiresIn` is seconds, default 300, capped at 86 400. It is a top-level key beside
 `brands`, never inside one: verification must not depend on a brand before the file's
 row has been read.
+
+#### `optionSources: Record<string, FolioOptionSource<Env>>`
+
+Absent by default: no document field takes its options from a source. Registers sources for
+**document fields only** (`select({ optionsFrom: { source, settings? } })`), per brand with `brands`.
+Each source is `{ label, load, lookup?, settings?, ttl?, localised? }`, exactly `forms.sources`'s shape
+plus `lookup(values, input, env)`, which labels a stored value the list no longer offers for the admin
+(at most 20 values, under a short deadline, never stored). It is a separate key from `forms.sources`
+because that registry is listed by `GET {base}/api/forms/registry`, previewed by the form builder and
+rendered on published forms: a source here reaches none of those. A field may name a source from either
+key. Defaults and limits are spec 37's (`ttl` 3600, 60 to 604800; at most 500 options of 1 to 120
+characters). Keep `folio.refreshOptionSources` in `scheduled()`. See `docs/handbook.md`, "A document
+field that takes its options from a source".
+
+Failure modes, at construction: an id in both `optionSources` and `forms.sources`, a `load` or `lookup`
+that is not a function, a `ttl` out of range, and (per field) a source in neither registry, `content`, an
+undeclared or wrong-kind setting, `translatable`, a default that is not a typed option, and a sourced
+select as the `gate` field. At run time a never-loaded list answers `503 unavailable` to a content API
+write.
 
 #### `forms: FolioForms<Env>`
 
@@ -1138,6 +1188,8 @@ you can recognise one:
 | `gate.allowsAsset` or `gate.assetDenied` not a function, or `assetDenied` without `allowsAsset` | A key that reads as a constraint and enforces nothing |
 | `describe.fn` not a function, or `concurrency` outside 1–8 | Would 500 on whichever request reached it first |
 | `forms.verify` not a function, `ratePerHour` outside 0–100 | The discovering request is an anonymous POST from the internet |
+| `panels`: a key that is not a declared document type name, an unknown key, a `label` outside 1 to 40 characters, a `load` that is not a function, an unknown `role`, or a `timeoutMs` outside 500 to 10000 | The editor who opens a document of that type is the first to find it |
+| `optionSources`: an id in both it and `forms.sources`; a source with a `load` or `lookup` that is not a function; or a field whose `optionsFrom` names a source in neither registry, names `content`, sets an undeclared or wrong-kind setting, is `translatable`, has a default that is not a typed option, or is the `gate` field | One `option_lists` row per source id, a picker nothing can fill, or a public value that cannot be checked against a list that loads later |
 | `forms.sources`: an id that is not `[a-z][a-z0-9-]*` or is `content`, a `load` that is not a function, `ttl` outside 60–604800, `localised` not a boolean, a setting of another kind | A form naming the source would fail on an anonymous POST |
 | `forms.actions`: a duplicate or malformed id, no `check` or `deliver`, a setting kind outside the six, a code named `error`, codes on an action with no `check` | An integration an editor attaches and nothing runs |
 | An unknown key in `hooks` (or in `hooks.await`) | A typo means a hook that silently never fires |
@@ -1156,6 +1208,7 @@ you can recognise one:
 | A key that belongs in a brand (`blocks`, `types`, `globals`, `previewCss`, `previewWrap`, `gate`, `forms`, `describe`, `writing`, `migrations`, `root`) at the top beside `brands`, or `sites.settings` | It would be validated against no registry, or an arbitrary one |
 | `assets.brands` whose keys differ from `brands`', or `assets.preview` at the top with `brands` | A brand with no preview bundle, or a bundle for a brand that does not exist |
 | A brand migration id without its `<brand>/` prefix | `schema_migrations` is keyed by id alone, so two brands' `0001` would collide |
+| `admin.pages`: a malformed or duplicate `id`, a `path` off the admin origin, under `basePath` or nested with another page's, an unknown `icon` or `role`, `scope: 'site'` without `sites`, `brands` without `brands` or on a `deployment` page, more than 20 pages, or any page under `auth: 'open'` | A sidebar item the frame cannot show, a filter nothing enforces, or a page that would refuse everyone |
 | `sites` with `auth: 'open'` | Not refused: it logs a warning, because every scope is then editable and every preview origin shows drafts to anyone who reaches it |
 
 ---

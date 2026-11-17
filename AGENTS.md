@@ -245,6 +245,31 @@ all of it in `get_schema` and an editor sees it in the inspector, so write it on
 `help` and `guidance` ride in the unauthenticated manifest, like labels. Anything a
 brand would not publish belongs in `writing`.
 
+## Your own admin screens
+
+A host that needs screens of its own (orders, stock, discounts) does not build a second login or
+put code in Folio's bundle. Declare the pages in `createFolio({ admin: { pages } })`; Folio lists
+them in its sidebar and shows each inside the admin's chrome, in a same-origin iframe of **your**
+route (`docs/handbook.md`, "Extending the admin"). Your route is the authority:
+
+```tsx
+const gate = await folio.requireEditor(req, env, { page: 'orders' })
+if (gate instanceof Response) return gate            // 302 to sign-in, 401, or 403
+const { editor, headers } = gate                     // spread `headers` onto your response
+return new Response(html, { headers: { ...headers, 'content-type': 'text/html; charset=utf-8' } })
+```
+
+- **Send the `headers` `requireEditor` returns.** They carry `frame-ancestors 'self'` and `no-store`;
+  a route that drops them is framable by a same-site sibling and may be cached.
+- **Serve the page on the admin origin.** With `sites` that is `sites.admin`: `editor()` answers
+  `null` on a live host or a preview origin, and under `auth: 'open'`. `admin.pages` is refused under
+  `auth: 'open'`.
+- **A `site` page keeps its scope in `folio_scope` (or `x-folio-scope`)**, which `requireEditor`
+  checks against the registry. In the page, `connectHostPage` from `folio/host` adds it to every link
+  and form, and `scoped()` adds the header to a `fetch`. Style with `/folio-host.css` and
+  `class="folio-host"` on the body.
+- **Never read Folio's session cookie yourself.** `folio.editor()` is the one way to ask who is signed in.
+
 ## A multi-site host
 
 Skip this unless `createFolio` has a `sites` key. Without one, none of it applies
@@ -426,6 +451,10 @@ that site's brand.
 
 - **`folio.handle()` first, and it returns `null`.** If a Folio path 404s, your
   router ran first.
+- **Gate every host admin route, and its JSON endpoints, with `folio.requireEditor`.** It is the
+  one place a host asks who is signed in (`docs/handbook.md`, "Your own routes behind Folio's
+  sign-in"); spread the `headers` it returns onto the response. Never read Folio's session cookie
+  yourself.
 - **`redirect()` and `status()` belong in your own miss branch.** Folio will not
   answer them for you, deliberately — it does not own your 404.
 - **Read fields with `fieldValue(blok, name, locale)` / `dataOf(blok, locale)`**
@@ -547,7 +576,9 @@ bindings and the D1 migrations, and names the fix for each finding.
   brand, or one the config does not name, serves nothing, and a brand id is permanent
   once rows carry it.
 - **No host-defined custom field types.** The field set is what `folio/core`
-  exports.
+  exports. What a host can do instead is `select({ optionsFrom })`: a select whose choices come from
+  a source you register under `optionSources` (the stored value is your id; `reference` is not
+  extended to external ids, and a multi-value external pick is a block list of one-field blocks).
 
 ## LLM tasks
 
