@@ -70,6 +70,13 @@ ordered lists, and a usage count so deleting one is not a guess.
    it — sounds appealing and is ambiguous the moment two pages reference it
    differently. Singletons solve their own version of this with `previewPath`
    (`globals.md`) because a header genuinely renders in one place; a person does not.
+
+   > **Superseded in part (2026-11-17).** Records gained `previewPath` in v1.2.0 (#74),
+   > previewing a record in the context of a host page that a block reads through
+   > `resolution.record`, and v1.8.0 adds `previewRoot` (spec 45,
+   > `record-preview-root.md`), which previews it inside a block Folio synthesises with
+   > no stored page. Form mode remains the answer for a record type that declares
+   > neither. The text above stays as the record of why the first version had none.
 4. **Deleting a referenced record warns with a count, and proceeds (recommended).**
    The count comes from `content_refs` (`collections.md`), so it is published
    references only. Blocking the delete would mean maintaining referential integrity
@@ -548,7 +555,9 @@ dialog could do harm.
    sit asking to be clicked in a pane that does not exist.
 9. **A singleton keeps its preview**, so form mode is records (and
    unknown-type documents) only. That is `globals.md`'s decision 4 standing, and
-   consistent with checkpoint 3's own aside about `previewPath`.
+   consistent with checkpoint 3's own aside about `previewPath`. (Records have since
+   gained previews of their own: `previewPath` in v1.2.0 and `previewRoot` in v1.8.0, see
+   the note under decision 3. Form mode is now a record type that declares neither.)
 
 ### Where the spec's Ground truth had drifted
 

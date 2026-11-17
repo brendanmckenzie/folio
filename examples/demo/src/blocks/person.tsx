@@ -1,4 +1,5 @@
 import {
+  resolveReference,
   asset,
   defineBlock,
   defineRecord,
@@ -132,6 +133,36 @@ export const personCard = defineBlock({
     // `content` is the record rendered through its own root block, so this card
     // never restates a person's markup.
     return <section className="card">{person.content}</section>;
+  },
+});
+
+/**
+ * The frame a person is previewed in (`previewRoot: 'personFrame'` on the `person`
+ * type, `content-model/record-preview-root.md`). Folio builds a blank instance of it
+ * per request and renders it with `resolution.record` set to the person being
+ * edited: no stored page, nothing in the new-document menu, nothing to publish. It
+ * reads the person's **draft** through `resolveReference` and draws a card from its
+ * `data`, so a keystroke in the form is a keystroke in the card.
+ */
+export const personFrame = defineBlock({
+  name: "personFrame",
+  label: "Person preview",
+  fields: { heading: text({ label: "Heading", default: "Team" }) },
+  render: ({ heading }, resolution) => {
+    const person = resolveReference(resolution.record, resolution, ["person"]);
+    return (
+      <main className="person-frame">
+        <h1>{heading}</h1>
+        {person ? (
+          <section className="card">
+            <h2>{String(person.data.fullName ?? "")}</h2>
+            <p>{String(person.data.role ?? "")}</p>
+          </section>
+        ) : (
+          <p>No person to preview.</p>
+        )}
+      </main>
+    );
   },
 });
 

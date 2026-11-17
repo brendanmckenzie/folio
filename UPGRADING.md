@@ -1320,6 +1320,35 @@ there is no migration and no wire change. Do not move field-only sources under `
 because that exposes them to the form builder and to published forms. A field that held a sourced id becomes
 `text({ indexed: true })` for the rollback, so the stored strings stay valid and indexed.
 
+### Record preview without a host page (v1.8.0)
+
+**No action; opt-in per type.** A `record` type may now declare `previewRoot`, the name of a
+block (with a `render`) in its brand's registry. The editor then previews the record inside a blank
+instance of that block that Folio builds per request and never stores, rendered with
+`resolution.record` set to the record's id, its **draft** at `resolution.docs[id]` and every configured
+global above it, updating on every keystroke. A type that declares only `previewPath`, or neither, behaves
+exactly as before, and `previewRoot` wins when both are set. `previewRoot` on a `page` or a `singleton`, an
+unknown block, and a `defineRecord` block with no `render` each throw at construction.
+
+If you built the `previewPath` workaround, an unpublished page of a type nobody should create, kept alive by
+an importer step and a check script and guarded by a router branch that 404s it, migrate in this order:
+
+1. Write the frame block: any block with a `render` that reads `resolveReference(resolution.record,
+   resolution, [...types])`, as the page's own block did. Two record types may share one.
+2. Declare `previewRoot: '<block>'` on each record type, and deploy. Leave `previewPath` in place for now; the
+   root wins, so the page is already unused.
+3. Delete the hidden page, its type, the router guard, and the importer and verification steps that kept it
+   alive.
+4. Remove `previewPath` from the record types.
+
+The request `/?_folio=preview&record=<id>` must reach `folio.handle()` before your own routes, which the
+documented integration does; the path in it is ignored. Share links for records and MCP `preview_document`
+are unchanged (neither applies to a record). No migration, no `PROTOCOL_VERSION` bump.
+
+**Rolling back from v1.8.0** is safe once `previewRoot` is removed from your types: nothing is stored and
+there is no wire change. A record type left on `previewRoot` on an older release is a key the older release
+does not read, so the editor opens it as a form (or through `previewPath` if you kept it).
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

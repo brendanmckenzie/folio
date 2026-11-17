@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 45
 > **Size:** S
-> **Status:** draft
+> **Status:** done (built 2026-11-17, v1.8.0)
 > **Wire version:** none. `PROTOCOL_VERSION` stays at 5 (decision 12)
 > **Migration:** none
 > **Release:** v1.8.0 (minor; every change is additive, decision 12)
@@ -769,3 +769,39 @@ covers the keystroke loop end to end.
 - **Static data or a preset in the frame**, decision 3.
 - **`previewRoot` on singletons**, decision 4.
 - **Removing `previewPath` from records**, decision 2.
+
+## Implementation notes
+
+Built 2026-11-17 on `feat/record-preview-root`, in the four phases the plan lays out. The
+decisions all held; what the plan got wrong or left open is small.
+
+1. **`previewClause` had a second caller.** `globalRows` (the Settings screen's globals table)
+   calls it with a type and no schema, so the new `schema` argument is optional and defaults to
+   empty. Globals are singletons and never read it. The plan named only `typeRows`.
+2. **Adding the two record fixtures to `settings-screen.test.ts` moved an existing count.** The
+   `settingsView` totals test counted five types; it counts seven now. The plan's "existing
+   record-preview tests pass unmodified" covers the four preview files and was kept, but this
+   one is a fixture count, not a behaviour.
+3. **`previewPage`'s option bag is now a named export, `PreviewPageOpts`.** Two overloads and an
+   implementation signature would otherwise have repeated a forty-line inline type three times.
+   No call site changes.
+4. **`_folio_id` is refused on any presence for a `previewRoot` record, not only on a
+   deployment with `sites`.** The plan says "if `_folio_id` is present". Today the parameter is
+   read only on a site's preview origin, so on a single-site deployment it is otherwise
+   ignored; refusing it there too keeps one rule for a request naming two documents.
+5. **The configured global's singleton row is created by the render, and the "nothing stored"
+   test says so.** A preview that draws a global creates its `sng_` row on first use (this is today's behaviour for every preview). The
+   acceptance criterion "no row for any host page" is what is asserted: the test counts
+   `stories` rows excluding that singleton type, and checks that no Durable Object storage
+   exists for the synthetic root's uid.
+6. **The demo's frame draws from `person.data`, not `person.content`.** `resolveReference`
+   answers `{ id, title, path, url, data }` and has no `content` (only a `reference` field's
+   resolved value carries it), so `personFrame` builds its own small card from `fullName` and
+   `role`. The handbook example does the same.
+7. **The frame block carries no marker.** The plan's acceptance criterion "no
+   `data-folio-uid` for the frame" holds, but the markup does contain `data-folio-uid` for every
+   configured global (they render in `edit` mode as today), so the test asserts on the frame's
+   `data-folio-type` rather than the bare attribute.
+8. **The browser pass the plan lists for phase 4 was not run.** The workers tests exercise the
+   real `handle()` in workerd and the unit test hydrates a synthetic page, but nobody has opened
+   a person on the demo and typed. That pass is the owner's before tagging, like 44's.
