@@ -31,4 +31,9 @@ export const RETIRED: readonly { id: string; name: string }[] = [
  * and a list go down without editing code: ids in `retired` leave the list `load` answers
  * (`lookup` still names them), and `down` makes `load` throw.
  */
-export const shelf = { retired: new Set<string>(), down: false };
+export const shelf = {
+  retired: new Set<string>(),
+  down: false,
+  /** What the Shop panel does (`/dev/catalogue?panel=`): answer, throw, hang or answer garbage. */
+  panel: "ok" as "ok" | "throw" | "hang" | "garbage",
+};

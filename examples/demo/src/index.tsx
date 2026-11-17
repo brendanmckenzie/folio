@@ -397,6 +397,11 @@ const folio = createFolio<Env>({
     product: {
       label: "Shop",
       load: ({ data }) => {
+        // `/dev/catalogue?panel=throw|hang|garbage|ok` (below) makes the host's side misbehave, to
+        // see the card's error line (and, for `hang`, its three second timeout) and Retry.
+        if (shelf.panel === "throw") throw new Error("the demo's shop panel threw");
+        if (shelf.panel === "hang") return new Promise<never>(() => {});
+        if (shelf.panel === "garbage") return { items: "nope" } as never;
         const found = PRODUCTS.find((p) => p.id === data.product);
         if (!found) return null;
         return {
@@ -584,12 +589,16 @@ export default {
       if (retire) shelf.retired.add(retire);
       if (url.searchParams.get("restore") === "1") shelf.retired.clear();
       if (url.searchParams.has("down")) shelf.down = url.searchParams.get("down") === "1";
+      const panel = url.searchParams.get("panel");
+      if (panel === "ok" || panel === "throw" || panel === "hang" || panel === "garbage") {
+        shelf.panel = panel;
+      }
       if (url.searchParams.get("stale") === "1") {
         await env.DB.prepare(
           "update option_lists set loaded_at = loaded_at - 604800000, attempted_at = attempted_at - 604800000 where source = 'catalogue' and loaded_at is not null",
         ).run();
       }
-      return Response.json({ retired: [...shelf.retired], down: shelf.down });
+      return Response.json({ retired: [...shelf.retired], down: shelf.down, panel: shelf.panel });
     }
     // Where `gate.assetDenied` sends a stranger who opens a gated file. A host's own page,
     // not a Folio route; the real one would be the host's sign-in or purchase flow.

@@ -264,8 +264,10 @@ export function Inspector(props: InspectorProps) {
       {def.help ? <p className={css.blockHelp}>{def.help}</p> : null}
 
       {/* Context first, then the form (decision 21): the host's own summary of this document, on
-          its root blok only. It draws nothing while the host has nothing linked. */}
-      {props.panel && blok.parent === null && !props.form ? (
+          its root blok only, in form mode too: a record, the commerce product, is edited as a
+          form and is the main place a panel is wanted. It draws nothing while the host has
+          nothing linked. */}
+      {props.panel && blok.parent === null ? (
         <LinkedPanel
           apiBase={props.apiBase}
           storyId={props.story.id}
