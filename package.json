@@ -90,6 +90,7 @@
       "types": "./dist/types/host/index.d.ts",
       "default": "./dist/host.js"
     },
+    "./host.css": "./dist/admin/folio-host.css",
     "./admin-entry": "./dist/admin/folio-admin.js"
   },
   "peerDependencies": {
