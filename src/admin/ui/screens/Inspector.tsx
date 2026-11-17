@@ -11,6 +11,10 @@ import { Button } from "../Button";
 import { EmptyState } from "../EmptyState";
 import { type AssetLocks, isPublicPage } from "./assets-model";
 import { FieldRow } from "./fields/FieldRow";
+import type { HostPageRef } from "./host-page-model";
+import { LinkedPanel } from "./LinkedPanel";
+import { panelKey } from "./linked-panel-model";
+import { bareMount, scopedMount, scopeOfApiBase } from "../route";
 import { PageAddress } from "./fields/PageAddress";
 import css from "./Inspector.module.css";
 import { useAssetLocks } from "./useAssetAccess";
@@ -101,6 +105,14 @@ export interface InspectorProps {
    * makes the request.
    */
   assetAccess?: ManifestAssetAccess;
+  /**
+   * This document type's linked-data panel, from `manifest.panels` (`platform/admin-extensions.md`
+   * decision 21): present only where the brand declares one for the story's type and the caller's
+   * role reaches it. It draws on the root blok, above the address and the fields.
+   */
+  panel?: { label: string };
+  /** The declared host pages, so the panel's link into one opens inside the chrome. */
+  hostPages?: readonly HostPageRef[];
 }
 
 /**
@@ -250,6 +262,20 @@ export function Inspector(props: InspectorProps) {
       {/* What the block is for (`authoring-guidance.md` decision 5): the same line an
           agent reads in get_schema, under the block's heading. Absent, nothing. */}
       {def.help ? <p className={css.blockHelp}>{def.help}</p> : null}
+
+      {/* Context first, then the form (decision 21): the host's own summary of this document, on
+          its root blok only. It draws nothing while the host has nothing linked. */}
+      {props.panel && blok.parent === null && !props.form ? (
+        <LinkedPanel
+          apiBase={props.apiBase}
+          storyId={props.story.id}
+          label={props.panel.label}
+          locale={isSourceLocale ? null : locale}
+          refetchKey={panelKey(blok.data)}
+          pages={props.hostPages ?? []}
+          mount={scopedMount(bareMount(props.mount), scopeOfApiBase(props.apiBase))}
+        />
+      ) : null}
 
       {/* Routing lives in D1 rather than in the document, so it is a `PATCH` and not a
           mutation. Only on the root block of a routed page: a nested block has no

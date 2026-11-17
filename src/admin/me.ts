@@ -287,6 +287,17 @@ export function canManageSites(me: Me): boolean {
   return asUser(me) !== null && me.sites.platform;
 }
 
+/**
+ * Whether the linked-data panel for a document type is drawn for the caller
+ * (`platform/admin-extensions.md` decision 21): their effective role on the shown scope reaches
+ * the panel's `role`. A token never drives the admin. Only an affordance: the panel route gates
+ * both currencies itself, and a refusal there draws nothing.
+ */
+export function canSeePanel(me: Me, role: Role): boolean {
+  if (me.mode === "open") return true;
+  return atLeastRole(me, role);
+}
+
 /** May they change a document's contents? */
 export function canEdit(me: Me): boolean {
   if (me.mode === "open") return true;

@@ -14,6 +14,7 @@ import {
   actorLabel,
   atScope,
   canSeeHostPage,
+  canSeePanel,
   fetchMe,
   firstScope,
   isMultiSite,
@@ -755,6 +756,17 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
   );
 }
 
+/**
+ * The Inspector's linked-data panel for a story type (`platform/admin-extensions.md` decision 21):
+ * the manifest's `{ label, role }`, only when the caller's role on the shown scope reaches it (the
+ * route re-checks), with the host pages a link may open inside the chrome.
+ */
+function panelFor(a: ScreenArgs, type: string) {
+  const panel = a.manifest?.panels?.[type];
+  if (!panel || !canSeePanel(a.me, panel.role)) return {};
+  return { panel: { label: panel.label }, hostPages: a.me.hostPages ?? [] };
+}
+
 type AssetView = "grid" | "table";
 const isAssetView = (raw: string): raw is AssetView => raw === "grid" || raw === "table";
 const isViewMode = (raw: string): raw is ViewMode => raw === "tree" || raw === "flat";
@@ -951,6 +963,7 @@ function screenFor(a: ScreenArgs) {
             <Inspector
               {...slot}
               {...(a.manifest?.assetAccess ? { assetAccess: a.manifest.assetAccess } : {})}
+              {...panelFor(a, slot.story.type)}
             />
           )}
           history={(slot) =>

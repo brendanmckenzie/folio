@@ -11,6 +11,7 @@ import {
   canPublish,
   canReadResponses,
   canSeeHostPage,
+  canSeePanel,
   canShare,
   type Me,
   OPEN,
@@ -264,5 +265,20 @@ describe("host pages (platform/admin-extensions.md decision 13)", () => {
       expect(canSeeHostPage(me, sitePage, "ghost")).toBe(false);
       expect(canSeeHostPage(me, { ...sitePage, brands: undefined }, "bravo")).toBe(true);
     });
+  });
+});
+
+describe("canSeePanel (platform/admin-extensions.md decision 21)", () => {
+  it("is the effective role reaching the panel's role", () => {
+    expect(canSeePanel(user("viewer"), "viewer")).toBe(true);
+    expect(canSeePanel(user("editor"), "publisher")).toBe(false);
+    expect(canSeePanel(user("publisher"), "publisher")).toBe(true);
+    expect(canSeePanel(user("admin"), "editor")).toBe(true);
+  });
+
+  it("is everyone's under auth: open, and nobody's for a token or a signed-out caller", () => {
+    expect(canSeePanel(OPEN, "admin")).toBe(true);
+    expect(canSeePanel(token, "viewer")).toBe(false);
+    expect(canSeePanel(signedOut, "viewer")).toBe(false);
   });
 });
