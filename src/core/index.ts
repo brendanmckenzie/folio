@@ -353,3 +353,5 @@ export type {
   HostPageIcon,
   ScreenedHostFrame,
 } from "./host-page";
+export { screenPanel } from "./panels";
+export type { FolioPanelSummary, PanelAnswer, PanelTone } from "./panels";

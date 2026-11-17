@@ -759,6 +759,10 @@ const FENCED_ELSEWHERE = [
   "GET /api/story/:id/socket",
   "GET /edit/:id",
   "GET /preview/global/:name",
+  // `platform/admin-extensions.md` decision 21: a read fenced to the chain like every id route,
+  // but answered only for a type that declares a panel, so it is not a row of the status walk
+  // (the walk's config declares none). Its own fence cases are in `panels.test.ts`.
+  "GET /api/stories/:id/panel",
   // A read of the source and a write in the request's scope: not one reach, so not a
   // row of the walk. Their own cases below.
   "POST /api/stories/:id/duplicate",

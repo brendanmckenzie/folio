@@ -73,6 +73,7 @@ import { validateWriting } from "./writing";
 import { logActionWarnings } from "./form-actions";
 import { type ResolvedHostPage, validateAdmin } from "./admin-config";
 import { mergeFieldSources, validateFieldSources } from "./field-sources";
+import { type ResolvedPanel, validatePanels } from "./panels-config";
 import {
   type ResolvedForms,
   type ResolvedOptionSource,
@@ -314,6 +315,8 @@ export interface BrandRuntime {
    * builder preview and `checkOptionSources` still see form sources alone.
    */
   fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
+  /** `panels`, validated, by document type name (`platform/admin-extensions.md` decision 21). */
+  panels: ReadonlyMap<string, ResolvedPanel>;
   describe: ResolvedDescribe | null;
   /**
    * This brand's writing guide (`authoring-guidance.md` decision 6), or null. Read
@@ -733,6 +736,7 @@ const BRAND_KEYS = [
   "gate",
   "forms",
   "optionSources",
+  "panels",
   "describe",
   "writing",
   "migrations",
@@ -827,6 +831,7 @@ interface PreparedBrand {
   forms: ResolvedForms | null;
   optionSources: ReadonlyMap<string, ResolvedOptionSource>;
   fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
+  panels: ReadonlyMap<string, ResolvedPanel>;
   previewCss: readonly string[];
   previewWrap: PreviewWrap | undefined;
 }
@@ -884,6 +889,12 @@ function prepareBrand<Env>(
     const optionSources = validateSources(brand.optionSources, "optionSources");
     const fieldSources = mergeFieldSources(optionSources, forms?.sources);
     validateFieldSources(schema, fieldSources);
+    // Same timing, same reason: a `load` that is not a function, a `timeoutMs` out of range or
+    // a panel for a type nobody declared is found by an editor opening a document.
+    const panels = validatePanels(
+      brand.panels,
+      types.map((t) => t.name),
+    );
     // Same timing, same reason: `globals` naming an unknown type or a non-
     // singleton one is a config mistake, not a runtime surprise the first page
     // render discovers (`../../docs/specs/content-model/globals.md`).
@@ -929,6 +940,7 @@ function prepareBrand<Env>(
       forms,
       optionSources,
       fieldSources,
+      panels,
       previewCss: brand.previewCss ?? [],
       previewWrap: brand.previewWrap,
     };
@@ -2198,6 +2210,14 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       manifest: {
         ...toManifest(registry, types, globals, locales),
         ...manifestHooks(config.hooks),
+        // Absent with none declared, so a host without panels gets the manifest it always did.
+        ...(b.panels.size > 0
+          ? {
+              panels: Object.fromEntries(
+                [...b.panels.values()].map((p) => [p.type, { label: p.label, role: p.role }]),
+              ),
+            }
+          : {}),
         ...assetAccessManifest(gate),
         ...(b.id !== null && b.label !== null ? { brand: { id: b.id, label: b.label } } : {}),
         ...(b.id !== null && b.settings ? { settings: b.settings } : {}),
@@ -2212,6 +2232,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       forms,
       optionSources: b.optionSources,
       fieldSources: b.fieldSources,
+      panels: b.panels,
       describe,
       writing,
       previewWrap: b.previewWrap,

@@ -333,6 +333,8 @@ export type { Access, Actor, Role, Scope, TokenActor, UserActor } from "./auth/r
  */
 export { HOST_PAGE_HEADERS } from "./editor";
 export type { FolioAdminConfig, HostPage } from "./admin-config";
+export type { FolioPanel, FolioPanelContext } from "./panels-config";
+export type { FolioPanelSummary } from "../core/panels";
 export { HOST_PAGE_ICONS } from "../core/host-page";
 export type { HostPageIcon } from "../core/host-page";
 export type {

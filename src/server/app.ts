@@ -26,6 +26,7 @@ import { shellRoutes } from "./routes/shell";
 import { siteRoutes } from "./routes/sites";
 import { spaceRoutes } from "./routes/space";
 import { fieldOptionRoutes } from "./routes/api/options";
+import { panelRoutes } from "./routes/panels";
 import { storyRoutes } from "./routes/stories";
 import type { Manifest } from "../core/schema";
 import type { FolioRuntime } from "./runtime";
@@ -179,6 +180,7 @@ export function createApp<Env>(
   app.route("/api", passkeyRoutes<Env>(rt));
   app.route("/api", storyRoutes<Env>(rt));
   app.route("/api", fieldOptionRoutes<Env>(rt));
+  app.route("/api", panelRoutes<Env>(rt));
   // After `storyRoutes`, which owns `/story/:id/publish` and `/unpublish`. Order is
   // not load-bearing here — `/story/:id/schedule` is a distinct literal segment,
   // not a `:param` either one could swallow — and it reads next to its siblings.

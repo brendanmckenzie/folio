@@ -29,6 +29,7 @@ import type { RenderMode } from "../preview/Render";
 import type { AuthConfig, OpenAuth } from "./auth/config";
 import type { Actor, Role } from "./auth/roles";
 import type { FolioAdminConfig } from "./admin-config";
+import type { FolioPanel } from "./panels-config";
 import type { FolioEditor, FolioEditorOptions } from "./editor";
 import type { FolioHooks } from "./hooks";
 import type { AuditOptions, AuditReport } from "./audit";
@@ -760,6 +761,8 @@ export interface FolioBrand<Env> {
   forms?: FolioForms<Env>;
   /** As `FolioSingleConfig.optionSources`, for this brand. */
   optionSources?: Readonly<Record<string, FolioOptionSource<Env>>>;
+  /** As `FolioSingleConfig.panels`, for this brand's document types. */
+  panels?: Readonly<Record<string, FolioPanel<Env>>>;
   describe?: FolioDescribe<Env>;
   /** This brand's voice and avoided terms, served to agents on the gated v1 `/schema` only. */
   writing?: WritingGuide;
@@ -785,6 +788,7 @@ export interface FolioBrandedConfig<Env>
     | "gate"
     | "forms"
     | "optionSources"
+    | "panels"
     | "describe"
     | "writing"
     | "migrations"
@@ -814,6 +818,7 @@ export interface FolioBrandedConfig<Env>
   gate?: never;
   forms?: never;
   optionSources?: never;
+  panels?: never;
   describe?: never;
   writing?: never;
   migrations?: never;
@@ -1029,6 +1034,16 @@ export interface FolioSingleConfig<Env> {
    * render. `lookup` labels a retired value for the admin.
    */
   optionSources?: Readonly<Record<string, FolioOptionSource<Env>>>;
+  /**
+   * Linked-data panels, by document type name (`platform/admin-extensions.md` decision 21): a
+   * host function that answers a small structured summary of the host's own data about a
+   * document (a product's variants, price and stock), which the inspector draws, read-only, on
+   * the root block of a document of that type. Per brand with `brands`. JSON, not HTML: Folio
+   * renders every string as text. Called per inspector open, under `timeoutMs`, with nothing
+   * cached on the server (it receives the editor, so a shared cache would leak one editor's
+   * view to another): cache inside `load` if your own data is expensive.
+   */
+  panels?: Readonly<Record<string, FolioPanel<Env>>>;
   /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An
