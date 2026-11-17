@@ -1289,6 +1289,14 @@ calls none of them runs exactly as before. Two behaviours to know before you rel
 `auth: 'open'` `editor()` answers `null`, and on a deployment with `sites` it answers only on
 `sites.admin`. See "Your own routes behind Folio's sign-in" in `docs/handbook.md`.
 
+### Host pages in the admin (v1.7.0)
+
+Nothing to do until `admin.pages` is set. A host that sets it serves each page on the admin origin,
+sends `HOST_PAGE_HEADERS` (returned by `requireEditor`), and gates the route with
+`folio.requireEditor(req, env, { page })`. `admin.pages` is refused under `auth: 'open'`. New exports:
+`folio/host` (the browser helper), `folio/host.css` and `/folio-host.css`. See "Extending the admin" in
+`docs/handbook.md`.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

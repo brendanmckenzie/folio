@@ -3412,6 +3412,141 @@ delays the response; a cache purge that must land before the next read opts in w
 ordering between hooks. A host that needs that writes one line to a Cloudflare Queue
 inside the hook, which is the right tool for it.
 
+## Extending the admin
+
+A host that runs a shop (or a booking system, or a members' directory) on the same Worker as
+Folio needs screens of its own: orders, stock, discounts. Folio does not run host code inside
+its admin bundle, and it does not host-define field kinds. It has four narrow extension
+points instead: `folio.editor()` ("Your own routes behind Folio's sign-in", under Auth),
+**host pages**, **sourced selects** ("Options from a source", under Forms) and **linked-data
+panels**. This chapter is the first and the last of those; each is additive and a host that
+declares none of them is unchanged.
+
+### Host pages
+
+`admin.pages` lists screens your own Worker serves. Folio puts each in its sidebar and shows it
+inside the admin's chrome, in a same-origin `<iframe>` of your route, so an operator moves from
+a product page to its stock without a second login, a second tab or a second look.
+
+```ts
+createFolio<Env>({
+  …,
+  admin: {
+    pages: [
+      { id: 'orders', label: 'Orders', path: '/admin/orders', role: 'editor', group: 'Shop', icon: 'receipt' },
+      { id: 'discounts', label: 'Discounts', path: '/admin/discounts', role: 'publisher', group: 'Shop', icon: 'percent' },
+    ],
+  },
+})
+```
+
+| Key | Meaning |
+| --- | --- |
+| `id` | `/^[a-z][a-z0-9-]{0,31}$/`, unique. The admin route is `{mount}/host/<id>`. |
+| `label` | The sidebar label and the first crumb. 1 to 40 characters. |
+| `path` | Your route, on the admin's origin: starts with `/`, not `//`, no `?` or `#`, no trailing `/`, not `{basePath}` or under it, and no page's path a prefix of another's. |
+| `icon` | `window` (default), `receipt`, `box`, `tag`, `stack`, `percent`, `people` or `chart`. |
+| `role` | The minimum role. Default `viewer`. |
+| `group` | A sidebar heading, in first-appearance order. Pages with none sit together after the groups. |
+| `scope` | `deployment` (default): the data belongs to no site and the role is the `*` grant. `site`: the data is per site, the frame gets `folio_scope` and the role is the effective role on it. Needs `sites`. |
+| `brands` | With `brands`, on a `site` page only: shown and admitted only under a scope of these brands. |
+
+At most 20 pages. `createFolio` throws, naming the key, for a bad or duplicate id, a path that
+breaks a rule above, nested paths (a frame's location has to map to exactly one page), an unknown
+icon or role, `scope: 'site'` without `sites`, `brands` without `brands` or on a `deployment` page
+(it would be drawn in the sidebar and enforced nowhere), and **any page under `auth: 'open'`**,
+where `editor()` answers `null` and every page would refuse everyone.
+
+**The sidebar is an affordance; your route is the authority.** Gate every request the page
+makes, including `POST`s and the JSON endpoints it calls:
+
+```ts
+const gate = await folio.requireEditor(req, env, { page: 'orders' })
+if (gate instanceof Response) return gate
+const { editor, headers } = gate
+return new Response(html, { headers: { ...headers, 'content-type': 'text/html; charset=utf-8' } })
+```
+
+`{ page }` enforces what the page declares: the role, and for a `site` page the scope (read from
+the `folio_scope` query parameter, else the `x-folio-scope` header, and checked against the
+registry before any role is computed) and its `brands`. An unknown id throws. **Send the
+`headers` you are handed.** They are `frame-ancestors 'self'`, `private, no-store`, `nosniff` and
+`same-origin` referrer policy, and a route that discards them is framable by a same-site sibling
+(`www.example.com` framing `cms.example.com`), because `SameSite=Lax` still sends the cookie there.
+Serve the page on the admin origin: with `sites` that is `sites.admin`, and a live host or a
+preview origin never admits an editor.
+
+**Deep links and Back.** The page `orders` at `/admin/orders` is `{base}/host/orders`, and
+`{base}/host/orders/1042?tab=items` frames `/admin/orders/1042?tab=items`: paste it to a
+colleague and they land on the order inside the admin. Browsers keep one joint session history,
+so a link followed inside the frame adds an entry Back will traverse. The admin therefore
+**mirrors, and never pushes**: after each load it `replaceState`s its own URL to match the
+frame's, and only its own navigations (a sidebar click, a crumb) add entries. A frame location
+under no declared page (a link to `/`, to a Folio document) is promoted to the top window, but
+only an `http(s)` URL on the admin's origin: `about:blank`, `blob:` and `data:` are ignored, and
+a frame that navigated cross-origin is replaced by a notice rather than followed, so host
+content cannot make the admin an open redirect. A frame that lands on `{base}/login` (an expired
+session meeting `requireEditor`) is promoted to it with `next` set to the page inside the chrome.
+
+**With `sites`, a page is a `deployment` page or a `site` page.** A `deployment` page is a screen
+at the bare mount and under every scoped one; the bare-mount sidebar draws Sites and the
+`deployment` pages the caller may open. A `site` page is a screen only under `{base}/~<scope>`;
+at the bare mount its deep link renders "Open Orders in which site?" and choosing one goes to
+`{base}/~<scope>/host/<id>/…`. Only the frame's first URL is built by Folio, so three layers keep
+the scope on every request a `site` page makes: `requireEditor` reads `folio_scope` or
+`x-folio-scope`; `folio/host` adds `folio_scope` to every same-origin link and form and
+`x-folio-scope` to a `scoped()` fetch; and the admin replaces a frame that loaded a `site` page
+with no scope by one with it appended (one extra load, no history entry).
+
+**Title and breadcrumbs.** With no host code the admin reads the frame's `document.title` on each
+load and draws `Shop / Orders / <title>`. A page that wants more tells the admin with
+`folio/host` (browser only, no dependencies, no React):
+
+```ts
+import { announce, connectHostPage, notice, scoped } from 'folio/host'
+
+connectHostPage({ page: { id: 'orders', scope: 'site', path: '/admin/orders' }, frame: true })
+announce({ title: 'Order #1042', crumbs: [{ text: 'Open orders', href: '/admin/orders?state=open' }] })
+notice('Saved')                                  // the admin's toast
+await fetch('/admin/api/orders', scoped({ method: 'POST' }))   // x-folio-scope when a scope is held
+```
+
+`announce` and `notice` are no-ops outside the frame. `connectHostPage` holds the scope in
+`sessionStorage` per page id (per tab: two tabs on two sites never share it), announces the title
+now and on `popstate`, and with `frame: true` sends a top-level visit to `/admin/orders/1042`
+into the admin (`{base}/host/orders/1042`, or `{base}/~<scope>/host/…` when the tab holds a
+scope). A router calls `announce({ path })` from its own navigation hook; Folio does not patch
+`history`. Pass `page.path` when you use `frame: true`: the helper has no config to read, and the
+path is what turns the location into the admin URL's remainder.
+
+The messages are a public, versioned protocol, separate from `PROTOCOL_VERSION` (which guards a
+stale admin tab and is cheap to bump): `{ folio: 'host-page', v: 1, type: 'announce', title?,
+crumbs?, path? }` and `{ …, type: 'notice', message, tone? }`. The admin accepts one only from its
+own frame on its own origin, caps every string (title 120, crumbs 4 of 60, notice 200), drops a
+crumb `href` that is not under a declared page, renders everything as text, and ignores an unknown
+`v` with one `console.warn`. A `v: 2` would be accepted beside `v: 1`, never instead of it.
+
+**Look.** `/folio-host.css` (emitted by the Vite plugin; `folio/host.css` for a bundler) carries
+Folio's semantic tokens under a `--folio-` prefix, in light and in dark (`prefers-color-scheme` and
+`[data-theme]`): `--folio-bg-app`, `-bg-panel`, `-bg-inset`, `-bg-hover`, `-fg`, `-fg-muted`,
+`-fg-subtle`, `-fg-accent`, `-border`, `-border-strong`, `-ring`, `-state-{ok,warn,danger,accent}-{bg,border,fg}`,
+`-text-{xs,sm,base,lg,xl}`, `-space-{0..6}`, `-radius-{sm,md,lg,full}`, `-font-ui`, `-font-mono`. The
+scale tier is not published. An opt-in element layer styles the page when its body has
+`class="folio-host"`: the body, headings, links, `table`, `button` and
+`.folio-button[data-variant="primary|subtle|danger"]`, `input`, `select`, `textarea`,
+`.folio-badge[data-tone="ok|warn|danger|accent"]` and `.folio-muted`. Nothing outside `body.folio-host`
+but the tokens on `:root`; a page that wants its own styling reads the tokens or ignores both.
+
+**Troubleshooting.**
+
+| What you see | What it is |
+| --- | --- |
+| "This page refused to be shown inside Folio" | The route sends `X-Frame-Options: DENY` or a `frame-ancestors` that excludes the admin. Send `HOST_PAGE_HEADERS` (they carry `frame-ancestors 'self'`) and remove the conflicting header. |
+| The page is a 403 in the frame and "Open this page from the admin, inside a site." | A `site` page was opened with no `folio_scope`. Open it from the admin, or use `connectHostPage` so links and forms carry it. |
+| The page is a 302 to sign-in for an editor who is signed in | The route is on a live host or a preview origin of a deployment with `sites`, where `editor()` answers `null`. Serve it on `sites.admin`. |
+| The item is not in the sidebar | The caller's `*` grant (or, for a `site` page, their role and the scope's brand) does not reach the page's `role`. The route would refuse them too. |
+| Back needs two presses | The host patches `history` and also announces, or the page redirects in a loop. Navigate with ordinary links and let the admin mirror. |
+
 ## Reads and replicas
 
 D1 puts your database in exactly one place. Every query is a network round trip
@@ -4977,6 +5112,14 @@ its front end's cached entrypoint. Every payload also gains `site`: the scope th
 owns what changed (`default` on a single-site deployment, `null` for `migrated` and
 `reindexed`, and the row's own id for `siteChanged`).
 
+### Host admin pages
+
+`admin.pages` (see "Extending the admin") on a deployment with `sites` lives on `sites.admin`: a host
+page is the admin's own origin, framed, and `requireEditor` answers `null` anywhere else. A `deployment`
+page needs no scope and is drawn at the bare mount; a `site` page is per site, gets `folio_scope`
+under `{base}/~<scope>`, and renders a site chooser at the bare mount. `folio/host` and the admin
+carry the scope on every request the page makes.
+
 ### What a host does
 
 The host-side changes are short and are collected as a procedure in
@@ -5130,6 +5273,14 @@ description lists that brand's types and blocks. A token bound to a site (`POST 
 with `site`) carries its brand with it, so a token for one brand cannot write another's
 even at an unscoped URL. An unscoped route that picks a brand from a `~<scope>` in the
 URL checks the caller reaches that scope first, and answers `403` otherwise.
+
+### Host pages and brands
+
+`admin.pages` is deployment-wide, because the admin is one origin and one sidebar. A `site` page
+narrows itself with `brands: ['atlas']`: it is drawn and admitted only under a scope of those
+brands, and `requireEditor({ page })` refuses a brand-B editor passing a brand-B `folio_scope` to a
+brand-A page with `This page is not part of <brand label>.` `brands` on a `deployment` page throws,
+because it has no scope to take a brand from.
 
 ### What a hook or a mail is told
 
@@ -5656,7 +5807,7 @@ and finding **103 names that appeared nowhere a consumer could read**, at the on
 moment when un-exporting was still free. Thirty-seven of them were internals that
 had leaked through an `index` re-export and are gone; the rest are here.
 
-The eight subpaths in `package.json`, and who each is for:
+The subpaths and asset exports in `package.json`, and who each is for:
 
 | Subpath | For |
 | --- | --- |
@@ -5667,7 +5818,13 @@ The eight subpaths in `package.json`, and who each is for:
 | `folio/form` | `useFolioForm`, the optional headless hook that binds a form descriptor to a host's own inputs. React, client-side. |
 | `folio/render` | `FolioDoc`, the component that renders a resolved document, and `RenderRichtext`, which renders a richtext value you hold outside a block. Both live consumers import `FolioDoc`. |
 | `folio/preview` | The preview bundle's own entry. Folio's, not a host's. |
+| `folio/host` | The browser helper for a host page shown in the admin's frame: `framed`, `announce`, `notice`, `connectHostPage`, `scope`, `scoped`. No dependencies. |
+| `folio/host.css` | `folio-host.css`: Folio's semantic tokens as `--folio-*` and an opt-in element layer under `body.folio-host`. A CSS asset, also served at `/folio-host.css`. |
 | `folio/admin-entry` | The prebuilt admin bundle (`dist/admin/folio-admin.js`), which the Vite plugin emits and serves. Folio's, not a host's. |
+
+`folio/server` also exports `HOST_PAGE_HEADERS`, `HOST_PAGE_ICONS`, the types `FolioEditor`,
+`FolioEditorUser`, `FolioEditorToken`, `FolioEditorOptions`, `FolioAdminConfig` and `HostPage`, and
+the `Folio` methods `editor`, `requireEditor`, `signInUrl` and `originAllowed`.
 
 **What is deliberately *not* exported**, because each has been asked for and
 refused: `ShareGrant` (what a live share link authorises — a second gate built out

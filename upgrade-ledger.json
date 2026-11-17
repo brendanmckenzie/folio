@@ -294,7 +294,8 @@
       "rollback": "safe",
       "migrations": [],
       "headings": [
-        "Host access to the editor session (v1.7.0)"
+        "Host access to the editor session (v1.7.0)",
+        "Host pages in the admin (v1.7.0)"
       ]
     }
   ]

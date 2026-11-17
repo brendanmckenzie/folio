@@ -115,7 +115,7 @@ origin from `FOLIO_E2E_BASE`, which `e2e.sh` sets, and fall back to
 
 ```
 ./scripts/e2e.sh scripts/sync-test.mjs     # one script
-./scripts/e2e-all.sh                       # all 27, one fresh database each, several at a time
+./scripts/e2e-all.sh                       # all 28, one fresh database each, several at a time
 ./scripts/e2e-all.sh scripts/sync-test.mjs scripts/space-test.mjs   # a subset
 FOLIO_E2E_JOBS=2 ./scripts/e2e-all.sh      # choose how many at once
 ```
@@ -131,7 +131,7 @@ wrangler) and its own dev server, so "one fresh database each" is unchanged; onl
 waiting is gone. `scripts/lib/e2e-sweep.mjs` is the pool: it runs `build:js` once,
 migrates and seeds once into a template state directory that each script copies, hands
 out ports itself, buffers each script's output and prints it whole when the script ends,
-and on failure names the script's output file and dev-server log. Cold, 27 scripts take
+and on failure names the script's output file and dev-server log. Cold, 28 scripts take
 about 35 seconds on a 10-core laptop, against about nine minutes serially before.
 
 Knobs, all environment variables:
@@ -438,6 +438,21 @@ are free to go the next time that code is touched.
   lagging replica). `folio.runSchedules` is the retry, so it must reach the cached entrypoint, like
   every purge. A fourth write path that gates a file and does not queue a row ships a file that is
   public at the edge for a year, and nothing errors. `deleteAsset` leaves its row on purpose.
+- **`folio.editor` reads on a session, and only on the admin origin** (spec 44). It resolves the
+  credential on `sessionFor(...)` like the reader, memoises per `Request` in the closure `createFolio`
+  returns (module scope would let two instances answer each other), reads no D1 with no credential,
+  answers `null` under `auth: 'open'`, off `sites.admin`, for a token without `tokens: true` and for a
+  refused `Origin` on an unsafe method, and **checks a scope against the registry before computing a
+  role**: `effectiveRole` answers the `*` grant for any id, because `writersOf` always appends `*`.
+  With no scope the role is `grants['*']`, never `UserActor.role` (which defaults to `viewer`).
+  `requireEditor({ page })` is where a host page's role, scope and brands are enforced; the sidebar is
+  not a permission.
+- **Host-page frames are a public protocol versioned apart from `PROTOCOL_VERSION`** (spec 44). The
+  `{ folio: 'host-page', v: 1 }` messages are the other end of a contract that does not ship with Folio,
+  so they change only by adding a `v: 2` the admin accepts beside `v: 1`, whatever the wire version
+  does. The admin accepts one only from its own iframe on its own origin and screens every string
+  (`screenHostFrame`); it mirrors the frame's location with `replaceState` and never pushes, and
+  promotes only `http(s)` locations on its origin that are under no declared page.
 - **Every registry read goes through the scope's brand** (spec 34). `FolioRuntime`
   has no `schema`, `types`, `registry`, `globals`, `forms`, `resolve` or `page` of its
   own: a route reads `c.var.brand`, an entry point off a request reaches
@@ -713,7 +728,7 @@ no wire change. Its Implementation notes record where the plan was wrong, and `s
 --asset` is the only check that a purge reaches every copy, so run it on a consumer's staging before
 tagging a release that touches the asset route, the tags or the queue.
 
-Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on multi-brand-host staging; 38 adds no migration. `folio/form` is the eighth export subpath, and `release.mjs`'s anchors check `dist/form.js`.
+Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on multi-brand-host staging; 38 adds no migration. `folio/form` joined the seven code subpaths (`core`, `engine`, `server`, `vite`, `form`, `render`, `preview`) that `exports` carries beside `./admin-entry`, and `release.mjs`'s anchors check `dist/form.js`. Spec 44 adds two entries, `./host` (code, so anchored on `dist/host.js`) and `./host.css` (the file `dist/admin/folio-host.css`): eight code subpaths, and `./admin-entry` and `./host.css` as files.
 
 **Specs 1–22, 24–38, 40, 41 and 43 are done** (36–38 in v1.3.0, 40 and 41 in v1.4.0, 43 in v1.6.0; 39 and 42 are `draft`) — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and

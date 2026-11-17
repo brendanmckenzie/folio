@@ -339,6 +339,23 @@ styled by imports.
 
 ---
 
+#### `admin: { pages: HostPage[] }`
+
+Absent by default, and absent is a complete behaviour: the sidebar is Folio's own. Each page is a
+screen your Worker serves, listed in the sidebar and shown inside the admin's chrome
+(`docs/handbook.md`, "Extending the admin"): `id` (`/^[a-z][a-z0-9-]{0,31}$/`, unique), `label` (1 to
+40 characters), `path` (a path on the admin's origin, normalised, with no `?`, `#` or trailing `/`,
+not `basePath` or under it, and no page's path a prefix of another's), `icon` (`window` by default;
+`receipt`, `box`, `tag`, `stack`, `percent`, `people`, `chart`), `role` (`viewer` by default), `group`
+(a sidebar heading, 1 to 40 characters), `scope` (`deployment` by default, or `site` with `sites`) and
+`brands` (a `site` page under `brands`). At most 20. Deployment-wide: it is not a brand key.
+
+Failure modes, all at construction: an unknown key, a duplicate or malformed `id`, a `path` that breaks a
+rule, nested paths, an unknown `icon` or `role`, `scope: 'site'` without `sites`, `brands` without
+`brands` or on a `deployment` page, an unconfigured brand id, more than 20 pages, and any page under
+`auth: 'open'`. The sidebar is not a permission: the host route calls
+`folio.requireEditor(req, env, { page })`, which enforces the role, scope and brands.
+
 ### Many sites in one deployment
 
 #### `sites: SitesConfig`
@@ -1156,6 +1173,7 @@ you can recognise one:
 | A key that belongs in a brand (`blocks`, `types`, `globals`, `previewCss`, `previewWrap`, `gate`, `forms`, `describe`, `writing`, `migrations`, `root`) at the top beside `brands`, or `sites.settings` | It would be validated against no registry, or an arbitrary one |
 | `assets.brands` whose keys differ from `brands`', or `assets.preview` at the top with `brands` | A brand with no preview bundle, or a bundle for a brand that does not exist |
 | A brand migration id without its `<brand>/` prefix | `schema_migrations` is keyed by id alone, so two brands' `0001` would collide |
+| `admin.pages`: a malformed or duplicate `id`, a `path` off the admin origin, under `basePath` or nested with another page's, an unknown `icon` or `role`, `scope: 'site'` without `sites`, `brands` without `brands` or on a `deployment` page, more than 20 pages, or any page under `auth: 'open'` | A sidebar item the frame cannot show, a filter nothing enforces, or a page that would refuse everyone |
 | `sites` with `auth: 'open'` | Not refused: it logs a warning, because every scope is then editable and every preview origin shows drafts to anyone who reaches it |
 
 ---
