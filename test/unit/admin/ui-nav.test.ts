@@ -292,3 +292,148 @@ describe("activeItem", () => {
     expect(activeItem(groups, { name: "edit", id: "sty_x" }, "ghost")).toEqual({ name: "content" });
   });
 });
+
+/* ------------------------------------------------------------- host pages --- */
+
+describe("host pages in the nav (platform/admin-extensions.md decision 13)", () => {
+  type HostPages = NonNullable<Me["hostPages"]>;
+  const page = (id: string, extra: Partial<HostPages[number]> = {}): HostPages[number] => ({
+    id,
+    label: id[0]?.toUpperCase() + id.slice(1),
+    path: `/admin/${id}`,
+    icon: "window",
+    role: "viewer",
+    scope: "deployment",
+    allowed: true,
+    ...extra,
+  });
+  const withPages = (pages: HostPages): Me => ({ ...ADMIN, hostPages: pages });
+
+  it("adds nothing when none are declared", () => {
+    const before = nav({ types: [PAGE], globals: [], me: ADMIN });
+    expect(nav({ types: [PAGE], globals: [], me: { ...ADMIN, hostPages: undefined } })).toEqual(
+      before,
+    );
+  });
+
+  it("draws one group per declared group, in first-appearance order, then the ungrouped", () => {
+    const groups = nav({
+      types: [PAGE],
+      globals: [],
+      me: withPages([
+        page("orders", { group: "Shop", icon: "receipt" }),
+        page("reports"),
+        page("stock", { group: "Stock" }),
+        page("products", { group: "Shop", icon: "tag" }),
+      ]),
+    });
+    expect(labels(groups)).toEqual([
+      ["Home", "Content", "Assets", "Forms"],
+      ["Orders", "Products"],
+      ["Stock"],
+      ["Reports"],
+      ["Model", "Redirects", "Schedules", "Access", "Settings"],
+    ]);
+    expect(groups[1]?.label).toBe("Shop");
+    expect(groups[1]?.collapsible).toBe(true);
+    expect(groups[1]?.items[0]).toEqual({
+      label: "Orders",
+      icon: "receipt",
+      screen: { name: "host", id: "orders", rest: "" },
+    });
+    expect(groups[3]?.label).toBeUndefined();
+  });
+
+  it("omits a deployment page the server did not allow", () => {
+    const groups = nav({
+      types: [PAGE],
+      globals: [],
+      me: withPages([page("orders", { allowed: false }), page("stock")]),
+    });
+    expect(labels(groups).flat()).not.toContain("Orders");
+    expect(labels(groups).flat()).toContain("Stock");
+  });
+
+  describe("on a deployment with sites", () => {
+    const sites = (scopes: { id: string; role: "viewer" | "editor" | "admin"; brand?: string }[]) =>
+      ({
+        settings: null,
+        platform: true,
+        brands: [],
+        scopes: scopes.map((s) => ({
+          id: s.id,
+          name: s.id,
+          kind: "site" as const,
+          group: null,
+          role: s.role,
+          chain: [s.id],
+          status: "live" as const,
+          preview: null,
+          brand: s.brand ? { id: s.brand, label: s.brand.toUpperCase() } : null,
+        })),
+        previewable: [],
+      }) as unknown as NonNullable<Me["sites"]>;
+
+    const multi = (
+      pages: HostPages,
+      scopes: { id: string; role: "viewer" | "editor" | "admin"; brand?: string }[] = [
+        { id: "alpha", role: "editor" },
+      ],
+    ): Me => ({
+      ...ADMIN,
+      sites: sites(scopes),
+      hostPages: pages,
+    });
+
+    it("gates a site page by the role on the shown scope", () => {
+      const me = multi([
+        page("orders", { scope: "site", role: "editor", allowed: undefined }),
+        page("discounts", { scope: "site", role: "admin", allowed: undefined }),
+      ]);
+      const shown = nav({ types: [PAGE], globals: [], me, scope: "alpha" });
+      expect(labels(shown).flat()).toContain("Orders");
+      expect(labels(shown).flat()).not.toContain("Discounts");
+    });
+
+    it("gates a site page by the scope's brand", () => {
+      const me = multi(
+        [page("orders", { scope: "site", brands: ["a"], allowed: undefined })],
+        [
+          { id: "alpha", role: "editor", brand: "a" },
+          { id: "bravo", role: "editor", brand: "b" },
+        ],
+      );
+      expect(labels(nav({ types: [PAGE], globals: [], me, scope: "alpha" })).flat()).toContain(
+        "Orders",
+      );
+      expect(labels(nav({ types: [PAGE], globals: [], me, scope: "bravo" })).flat()).not.toContain(
+        "Orders",
+      );
+    });
+
+    it("draws Sites and the allowed deployment pages, and no site pages, at the bare mount", () => {
+      const me = multi([
+        page("stock"),
+        page("hidden", { allowed: false }),
+        page("orders", { scope: "site", allowed: undefined }),
+      ]);
+      const groups = nav({ types: [PAGE], globals: [], me, scope: null });
+      expect(labels(groups)).toEqual([["Sites"], ["Stock"]]);
+    });
+
+    it("draws just the deployment pages at the bare mount for someone who may not manage sites", () => {
+      const me: Me = { ...multi([page("stock")]), actor: EDITOR.actor };
+      me.sites = { ...me.sites!, platform: false };
+      expect(labels(nav({ types: [PAGE], globals: [], me, scope: null }))).toEqual([["Stock"]]);
+    });
+  });
+
+  it("lights the page's item for any path under it", () => {
+    const groups = nav({ types: [PAGE], globals: [], me: withPages([page("orders")]) });
+    expect(activeItem(groups, { name: "host", id: "orders", rest: "1042/lines" })).toEqual({
+      name: "host",
+      id: "orders",
+      rest: "",
+    });
+  });
+});

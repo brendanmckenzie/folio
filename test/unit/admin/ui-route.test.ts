@@ -373,3 +373,88 @@ describe("documentTitle", () => {
     expect(documentTitle(parse("/folio/content", MOUNT))).toBe("Content · Folio");
   });
 });
+
+/* ------------------------------------------------------------- host pages --- */
+
+describe("the host screen (platform/admin-extensions.md decision 8)", () => {
+  it("parses the page id and the rest, at the bare and a scoped mount", () => {
+    expect(parse("/folio/host/orders", MOUNT).screen).toEqual({
+      name: "host",
+      id: "orders",
+      rest: "",
+    });
+    expect(parse("/folio/host/orders/1042?tab=items", MOUNT)).toEqual({
+      screen: { name: "host", id: "orders", rest: "1042" },
+      query: { tab: "items" },
+    });
+    expect(parse("/folio/~alpha/host/orders/a/b", "/folio/~alpha").screen).toEqual({
+      name: "host",
+      id: "orders",
+      rest: "a/b",
+    });
+  });
+
+  it("round-trips through href, with the query", () => {
+    const screen = { name: "host" as const, id: "orders", rest: "1042/lines" };
+    const url = href(screen, MOUNT, { tab: "items" });
+    expect(url).toBe("/folio/host/orders/1042/lines?tab=items");
+    expect(parse(url, MOUNT)).toEqual({ screen, query: { tab: "items" } });
+    expect(href(screen, "/folio/~alpha")).toBe("/folio/~alpha/host/orders/1042/lines");
+    expect(href({ name: "host", id: "orders", rest: "" }, MOUNT)).toBe("/folio/host/orders");
+  });
+
+  it("keeps an encoded slash, question mark and hash inside their one segment", () => {
+    for (const encoded of ["a%2Fb", "a%3Fb", "a%23b", "a%20b"]) {
+      const screen = { name: "host" as const, id: "orders", rest: `x/${encoded}` };
+      const url = href(screen, MOUNT);
+      expect(url).toBe(`/folio/host/orders/x/${encoded}`);
+      expect(parse(url, MOUNT).screen).toEqual(screen);
+    }
+  });
+
+  it("does not match a bare /host", () => {
+    expect(parse("/folio/host", MOUNT).screen).toMatchObject({ name: "missing" });
+  });
+
+  it("makes the page's label the last crumb when nothing is announced", () => {
+    const route = parse("/folio/host/orders", MOUNT);
+    expect(crumbs(route, { host: { label: "Orders", group: "Shop" } })).toEqual([
+      { text: "Shop" },
+      { text: "Orders" },
+    ]);
+    expect(crumbs(route, { host: { label: "Orders" } })).toEqual([{ text: "Orders" }]);
+  });
+
+  it("draws group, label, announced crumbs and title, and titles the tab by the last", () => {
+    const route = parse("/folio/host/orders/1042", MOUNT);
+    const ctx = {
+      host: {
+        label: "Orders",
+        group: "Shop",
+        title: "Order #1042",
+        crumbs: [
+          {
+            text: "Open orders",
+            screen: { name: "host" as const, id: "orders", rest: "" },
+            query: { state: "open" },
+          },
+        ],
+      },
+    };
+    expect(crumbs(route, ctx)).toEqual([
+      { text: "Shop" },
+      { text: "Orders", screen: { name: "host", id: "orders", rest: "" } },
+      {
+        text: "Open orders",
+        screen: { name: "host", id: "orders", rest: "" },
+        query: { state: "open" },
+      },
+      { text: "Order #1042" },
+    ]);
+    expect(documentTitle(route, ctx)).toBe("Order #1042 · Folio");
+  });
+
+  it("falls back to the page id before /me has said what the page is", () => {
+    expect(crumbs(parse("/folio/host/orders", MOUNT))).toEqual([{ text: "orders" }]);
+  });
+});

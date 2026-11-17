@@ -13,6 +13,7 @@ import { spaceEventEffect, useSpace } from "../hooks/useSpace";
 import {
   actorLabel,
   atScope,
+  canSeeHostPage,
   fetchMe,
   firstScope,
   isMultiSite,
@@ -68,6 +69,7 @@ import { Home } from "./screens/Home";
 import { Inspector } from "./screens/Inspector";
 import { Keys } from "./screens/Keys";
 import { Stub } from "./screens/Stub";
+import { HostPage, type HostAnnounce } from "./screens/HostPage";
 import { Shell } from "./Shell";
 import { type Bindings, SAVE_NOTICE, useShortcuts } from "./shortcuts";
 import { Toast } from "./Toast";
@@ -439,6 +441,9 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
     if (space.notice) setNotice(space.notice);
   }, [space.notice]);
 
+  /** What the open host page announced, for the top bar and the tab title. */
+  const [hostAnnounce, setHostAnnounce] = useState<HostAnnounce | null>(null);
+
   const groups = useMemo(
     () => nav({ types, globals: manifest?.globals ?? [], me, scope }),
     [types, manifest?.globals, me, scope],
@@ -475,6 +480,11 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
   }, [first, bare.base]);
 
   const label = (name: string) => types.find((t) => t.name === name)?.label;
+  /** The declared page the route is on, once `/me` has said which there are. */
+  const hostPage =
+    route.screen.name === "host"
+      ? me.hostPages?.find((p) => p.id === (route.screen as { id: string }).id)
+      : undefined;
   const siteName = isMultiSite(me) && scope !== null ? scopeName(me, scope) : undefined;
   const crumbContext = useMemo(
     (): CrumbContext => ({
@@ -485,6 +495,20 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
       // matching, and the crumb falls back to "Form" until the new one loads.
       formLabel: (id) => (formTitle?.id === id ? formTitle.label : undefined),
       userLabel: (id) => (userTitle?.id === id ? userTitle.label : undefined),
+      ...(hostPage
+        ? {
+            host: {
+              label: hostPage.label,
+              ...(hostPage.group ? { group: hostPage.group } : {}),
+              ...(hostAnnounce?.id === hostPage.id
+                ? {
+                    ...(hostAnnounce.title ? { title: hostAnnounce.title } : {}),
+                    crumbs: hostAnnounce.crumbs,
+                  }
+                : {}),
+            },
+          }
+        : {}),
       ...(open
         ? {
             chain: local
@@ -498,7 +522,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           }
         : {}),
     }),
-    [siteName, types, open, local, fetched.chain, formTitle, userTitle],
+    [siteName, types, open, local, fetched.chain, formTitle, userTitle, hostPage, hostAnnounce],
   );
   const trail = crumbs(route, crumbContext);
 
@@ -677,7 +701,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
         onSearch={() => setPalette(true)}
         actor={actorLabel(me)}
         user={user}
-        bare={editing}
+        bare={editing || route.screen.name === "host"}
       >
         {screenFor({
           route,
@@ -718,6 +742,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           preview: previewFor(open, previewType, previewHost, boot.base, isMultiSite(me)),
           onFormLabel: (id, formLabel) => setFormTitle({ id, label: formLabel }),
           onUserLabel: (id, label) => setUserTitle({ id, label }),
+          onHostAnnounce: setHostAnnounce,
           registerReload,
         })}
       </Shell>
@@ -795,6 +820,8 @@ interface ScreenArgs {
   onFormLabel: (id: string, label: string) => void;
   /** The Access user page reports the editor's name once its fetch answers. */
   onUserLabel: (id: string, label: string) => void;
+  /** The open host page reports what it announced: its title and crumbs. */
+  onHostAnnounce: (state: HostAnnounce) => void;
   /**
    * How a list screen hands its own `reload` to the shell, so the space channel
    * can re-read the list when somebody else moves, publishes or deletes a page.
@@ -817,7 +844,14 @@ function screenFor(a: ScreenArgs) {
   // reach has none. Both are said rather than left to a wall of 403s.
   if (!a.loading && isMultiSite(a.me)) {
     // `account` is about the person, not a scope's content: its routes are unscoped.
-    if (a.scope === null && route.screen.name !== "sites" && route.screen.name !== "account") {
+    // A host page at the bare mount is a `deployment` page, or a `site` page's chooser
+    // (`platform/admin-extensions.md` decision 8), so it is not "Choose a site." either.
+    if (
+      a.scope === null &&
+      route.screen.name !== "sites" &&
+      route.screen.name !== "account" &&
+      route.screen.name !== "host"
+    ) {
       return (
         <Stub>
           {firstScope(a.me) === null
@@ -1161,6 +1195,41 @@ function screenFor(a: ScreenArgs) {
           onNotice={a.notify}
         />
       );
+
+    case "host": {
+      // Nothing to frame until `/me` has said which pages exist.
+      if (a.loading) return null;
+      const id = route.screen.id;
+      const page = a.me.hostPages?.find((p) => p.id === id);
+      // A page that is not declared, or that this caller may not see on this scope (a
+      // `site` page whose brands exclude it), is not routed. The host route re-checks.
+      const reachable =
+        page !== undefined &&
+        (page.scope === "site" && a.scope === null && a.me.sites
+          ? true
+          : canSeeHostPage(a.me, page, a.scope));
+      if (!page || !reachable) {
+        return (
+          <Stub>
+            Nothing is routed at <code>{route.screen.id}</code>.
+          </Stub>
+        );
+      }
+      return (
+        <HostPage
+          page={page}
+          pages={a.me.hostPages ?? []}
+          rest={route.screen.rest}
+          query={route.query}
+          scope={a.scope}
+          base={a.bareBase}
+          me={a.me}
+          replace={a.replace}
+          notify={a.notify}
+          onAnnounce={a.onHostAnnounce}
+        />
+      );
+    }
 
     case "missing":
       return (

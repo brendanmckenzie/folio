@@ -52,7 +52,18 @@ export type IconName =
   | "schedules"
   | "forms"
   | "access"
-  | "settings";
+  | "settings"
+  // The eight a host page may name (`HOST_PAGE_ICONS`, `platform/admin-extensions.md`
+  // decision 12): the sidebar draws a page from the host's own config, so the set is
+  // closed here as everywhere else, and a name the config validator accepts has a drawing.
+  | "window"
+  | "receipt"
+  | "box"
+  | "tag"
+  | "stack"
+  | "percent"
+  | "people"
+  | "chart";
 
 /** The one place the grid, the weight, the caps and the joins are stated. */
 const svg = (children: ReactNode): ReactElement => (
@@ -218,6 +229,69 @@ export const ICONS: Record<IconName, ReactElement> = {
       <path d="M11.5 8.25h8" />
       <circle cx="16.25" cy="15.75" r="2.75" />
       <path d="M4.5 15.75h8" />
+    </>,
+  ),
+  /** A window: frame, title bar. The default for a host page, which is exactly "somebody
+   * else's screen in a frame". */
+  window: svg(
+    <>
+      <rect x="4" y="5" width="16" height="14" rx="2.5" />
+      <path d="M4 9.5h16" />
+    </>,
+  ),
+  /** A receipt: a slip with a torn edge and two lines. */
+  receipt: svg(
+    <>
+      <path d="M6.5 3.5h11v17l-2.75-1.75L12 20.5l-2.75-1.75L6.5 20.5z" />
+      <path d="M9.5 8.5h5" />
+      <path d="M9.5 12h5" />
+    </>,
+  ),
+  /** A parcel: a lid line and a tape stripe. Not `model`'s cube. */
+  box: svg(
+    <>
+      <rect x="4" y="7" width="16" height="12.5" rx="2" />
+      <path d="M4 11h16" />
+      <path d="M12 7v4" />
+    </>,
+  ),
+  /** A price tag: a pointed slab with a hole. */
+  tag: svg(
+    <>
+      <path d="M4.5 4.5h7l8 8-7 7-8-8z" />
+      <circle cx="8.5" cy="8.5" r="1.25" />
+    </>,
+  ),
+  /** Three layers, for stock or variants. */
+  stack: svg(
+    <>
+      <path d="M12 4.5 20 8.5 12 12.5 4 8.5z" />
+      <path d="M4 12.25l8 4 8-4" />
+      <path d="M4 16l8 4 8-4" />
+    </>,
+  ),
+  /** A percent sign, for discounts. */
+  percent: svg(
+    <>
+      <path d="M18 6 6 18" />
+      <circle cx="7.5" cy="7.5" r="2" />
+      <circle cx="16.5" cy="16.5" r="2" />
+    </>,
+  ),
+  /** A head and shoulders, for customers. */
+  people: svg(
+    <>
+      <circle cx="12" cy="8.5" r="3.25" />
+      <path d="M5.5 19.5c.75-3.5 3.25-5.25 6.5-5.25s5.75 1.75 6.5 5.25" />
+    </>,
+  ),
+  /** Three bars on a baseline, for reports. */
+  chart: svg(
+    <>
+      <path d="M5 19.5h14" />
+      <path d="M7.5 19.5v-6" />
+      <path d="M12 19.5V7.5" />
+      <path d="M16.5 19.5v-9" />
     </>,
   ),
 };

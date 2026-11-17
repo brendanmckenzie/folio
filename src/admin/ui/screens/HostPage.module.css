@@ -1,0 +1,103 @@
+/*
+ * A host page in the shell (`platform/admin-extensions.md` decision 10): the frame fills
+ * `<main>` and the page scrolls itself, so sticky headers, infinite lists and
+ * `position: fixed` dialogs inside it behave as they do at top level. Nothing here
+ * resizes to the frame's content.
+ */
+.wrap {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-app);
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg-app);
+}
+
+/* Over the frame, not beside it: the page may still finish loading under it. */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  background: var(--bg-overlay);
+  color: var(--fg);
+}
+
+.overlayCard,
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 28rem;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-menu);
+}
+
+.notice {
+  margin: var(--space-5) auto;
+  box-shadow: none;
+}
+
+.heading {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.body {
+  margin: 0;
+  color: var(--fg-muted);
+}
+
+.link {
+  align-self: flex-start;
+  color: var(--fg-accent);
+}
+
+/* The site chooser: a column of links, one per site the page may be opened in. */
+.chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 28rem;
+  padding: var(--space-4);
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+}
+
+.choice a {
+  display: block;
+  padding: var(--space-2) var(--space-3);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.choice a:hover {
+  background: var(--bg-hover);
+}
+
+.choice + .choice {
+  border-top: 1px solid var(--border);
+}

@@ -8,6 +8,7 @@
  * enforcement. The reject path has to be correct even when this is wrong.
  */
 import type { AuthPolicy } from "../server/auth/config";
+import type { MeHostPage } from "../server/admin-config";
 import type { MePreview, MeScope, MeSites } from "../server/auth/me-sites";
 import { atLeast, type Role, type Scope } from "../server/auth/roles";
 import type { BrandRef } from "../server/types";
@@ -136,6 +137,14 @@ export interface Me {
    */
   sites?: MeSites;
   /**
+   * The host pages the deployment declares (`admin.pages`), **present only when it
+   * declares some** (`platform/admin-extensions.md` decision 13). `allowed` is computed
+   * on the server from the `*` grant, because `actor.role` is `viewer` for a person with
+   * no `*` row and a site-only editor would otherwise see a page the host then refuses.
+   * The sidebar is an affordance; the host route is the authority.
+   */
+  hostPages?: readonly MeHostPage[];
+  /**
    * The scope the admin is showing, set by `atScope` and never by the server. On a
    * multi-site deployment it decides which role every predicate below reads; absent
    * there means "no scope chosen", which grants nothing scoped (the Sites screen is
@@ -202,6 +211,21 @@ export function canEditIn(me: Me, owner: string | undefined): boolean {
  * no `sites`, which is what keeps the switcher out of a single-site admin. */
 export function scopeChoices(me: Me): readonly MeScope[] {
   return me.sites?.scopes ?? [];
+}
+
+/**
+ * Whether a host page is drawn for the caller on `scope` (decision 13). Absent, not
+ * disabled: a `deployment` page (and every page with no `sites`) reads the server's
+ * `allowed`; a `site` page needs a scope whose effective role reaches the page's `role`
+ * and whose brand the page's `brands` allows. Only an affordance: the host route's own
+ * `requireEditor({ page })` is the authority.
+ */
+export function canSeeHostPage(me: Me, page: MeHostPage, scope: string | null): boolean {
+  if (!me.sites || page.scope === "deployment") return page.allowed === true;
+  if (scope === null) return false;
+  const entry = me.sites.scopes.find((s) => s.id === scope);
+  if (!entry || !atLeast(entry.role, page.role)) return false;
+  return !page.brands || (entry.brand !== null && page.brands.includes(entry.brand.id));
 }
 
 /**

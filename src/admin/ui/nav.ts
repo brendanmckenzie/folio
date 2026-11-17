@@ -12,7 +12,7 @@
  */
 import { type DocumentType, singletonId } from "../../core/schema";
 import { layerId } from "../../core/sites";
-import { canManageAccess, canManageSites, type Me } from "../me";
+import { canManageAccess, canManageSites, canSeeHostPage, type Me } from "../me";
 // Type-only, and it has to stay that way: `verbatimModuleSyntax` erases this
 // import entirely, so naming an icon here does not pull `icons.tsx` — or React —
 // into a module the Node tests import.
@@ -73,8 +73,13 @@ export function nav(input: NavInput): NavGroup[] {
   // A deployment with `sites` and no scope chosen: nothing scoped can be drawn
   // (every list is a scope's own), so the nav is the registry alone — or nothing,
   // for somebody who may not manage it, whose way in is the scope switcher.
+  // The platform's `deployment` host pages need no scope, so they are drawn here too
+  // (`platform/admin-extensions.md` decision 13); a `site` page is not.
   if (input.me.sites && !input.scope) {
-    return canManageSites(input.me) ? [{ items: [sitesItem] }] : [];
+    return [
+      ...(canManageSites(input.me) ? [{ items: [sitesItem] }] : []),
+      ...hostGroups(input.me, null),
+    ];
   }
 
   const groups: NavGroup[] = [{ items: primary(input.types) }];
@@ -91,7 +96,41 @@ export function nav(input: NavInput): NavGroup[] {
     groups.push(...recordGroups(records));
   }
 
+  groups.push(...hostGroups(input.me, input.me.sites ? (input.scope ?? null) : null));
+
   groups.push({ items: administration(input.me) });
+  return groups;
+}
+
+/**
+ * The host pages the caller may see, after the record groups and before
+ * administration (decision 13): one collapsible group per declared `group` in
+ * first-appearance order, then the ungrouped pages in one unheaded group.
+ */
+function hostGroups(me: Me, scope: string | null): NavGroup[] {
+  const named = new Map<string, NavItem[]>();
+  const rest: NavItem[] = [];
+  for (const page of me.hostPages ?? []) {
+    if (!canSeeHostPage(me, page, scope)) continue;
+    const item: NavItem = {
+      label: page.label,
+      icon: page.icon,
+      screen: { name: "host", id: page.id, rest: "" },
+    };
+    if (!page.group) {
+      rest.push(item);
+      continue;
+    }
+    const bucket = named.get(page.group);
+    if (bucket) bucket.push(item);
+    else named.set(page.group, [item]);
+  }
+  const groups: NavGroup[] = [...named].map(([label, items]) => ({
+    label,
+    items,
+    collapsible: true,
+  }));
+  if (rest.length > 0) groups.push({ items: rest });
   return groups;
 }
 
@@ -264,6 +303,8 @@ export function activeItem(groups: readonly NavGroup[], screen: Screen, type?: s
   // early return since neither screen name is `'edit'`.
   if (screen.name === "form" || screen.name === "responses") return { name: "forms" };
   if (screen.name === "accessUser") return { name: "access" };
+  // Every host path under a page lights the page's own item, whatever `rest` is.
+  if (screen.name === "host") return { name: "host", id: screen.id, rest: "" };
   if (screen.name !== "edit") return screen;
   const match = groups
     .flatMap((g) => g.items)

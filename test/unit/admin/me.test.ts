@@ -10,6 +10,7 @@ import {
   canManageContent,
   canPublish,
   canReadResponses,
+  canSeeHostPage,
   canShare,
   type Me,
   OPEN,
@@ -195,5 +196,73 @@ describe("Me.passkeys", () => {
     const open: Me = { ...user("editor"), passkeys: { allowed: true } };
     expect(open.passkeys?.allowed).toBe(true);
     expect(open.passkeys?.reason).toBeUndefined();
+  });
+});
+
+describe("host pages (platform/admin-extensions.md decision 13)", () => {
+  type HostPage = NonNullable<Me["hostPages"]>[number];
+  const orders: HostPage = {
+    id: "orders",
+    label: "Orders",
+    path: "/admin/orders",
+    icon: "receipt",
+    role: "editor",
+    scope: "deployment",
+    allowed: true,
+  };
+
+  it("honours the server's allowed over the actor's role, which is viewer for a site-only editor", () => {
+    // `actor.role` is `admin` here, and the server still said no: the `*` grant is what counts.
+    const me: Me = { ...user("admin"), hostPages: [{ ...orders, allowed: false }] };
+    expect(canSeeHostPage(me, me.hostPages![0]!, null)).toBe(false);
+    const ok: Me = { ...user("viewer"), hostPages: [orders] };
+    expect(canSeeHostPage(ok, orders, null)).toBe(true);
+  });
+
+  it("reads allowed on a deployment page even with sites", () => {
+    const me = {
+      ...user("viewer"),
+      sites: { scopes: [], platform: false, previewable: [], settings: null, brands: [] },
+    } as unknown as Me;
+    expect(canSeeHostPage(me, orders, null)).toBe(true);
+    expect(canSeeHostPage(me, { ...orders, allowed: false }, "alpha")).toBe(false);
+  });
+
+  describe("a site page", () => {
+    const sitePage: HostPage = { ...orders, scope: "site", allowed: undefined, brands: ["a"] };
+    const scope = (id: string, role: "viewer" | "editor", brand: string | null) => ({
+      id,
+      name: id,
+      kind: "site",
+      group: null,
+      role,
+      chain: [id],
+      status: "live",
+      preview: null,
+      brand: brand ? { id: brand, label: brand } : null,
+    });
+    const me = {
+      ...user("viewer"),
+      sites: {
+        scopes: [
+          scope("alpha", "editor", "a"),
+          scope("bravo", "editor", "b"),
+          scope("charlie", "viewer", "a"),
+        ],
+        platform: false,
+        previewable: [],
+        settings: null,
+        brands: [],
+      },
+    } as unknown as Me;
+
+    it("needs a scope, a role that reaches the page's, and an allowed brand", () => {
+      expect(canSeeHostPage(me, sitePage, null)).toBe(false);
+      expect(canSeeHostPage(me, sitePage, "alpha")).toBe(true);
+      expect(canSeeHostPage(me, sitePage, "bravo")).toBe(false);
+      expect(canSeeHostPage(me, sitePage, "charlie")).toBe(false);
+      expect(canSeeHostPage(me, sitePage, "ghost")).toBe(false);
+      expect(canSeeHostPage(me, { ...sitePage, brands: undefined }, "bravo")).toBe(true);
+    });
   });
 });
