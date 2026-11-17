@@ -307,6 +307,13 @@
       "rollback": "safe",
       "migrations": [],
       "headings": ["Record preview without a host page (v1.8.0)"]
+    },
+    {
+      "version": "1.8.1",
+      "date": "2026-11-18",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": ["Singleton preview without a host page (v1.8.1)"]
     }
   ]
 }

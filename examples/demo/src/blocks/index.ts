@@ -3,7 +3,7 @@ import { contactForm } from "./contact";
 import { cta } from "./cta";
 import { embed, section } from "./embed";
 import { feature, features } from "./features";
-import { headerRoot } from "./header";
+import { chromeFrame, headerRoot } from "./header";
 import { hero } from "./hero";
 import { insightList, insightPage } from "./insight";
 import { gallery, image } from "./media";
@@ -56,6 +56,9 @@ export const blocks = [
   section,
   personCard,
   officeCard,
+  // The frame the header global is previewed above: a blank instance Folio builds per
+  // request, never stored (`previewRoot` on the `header` type in src/index.tsx).
+  chromeFrame,
   // The frame a person is previewed in: a blank instance Folio builds per request, never
   // stored (`previewRoot` on the `person` type in src/index.tsx).
   personFrame,

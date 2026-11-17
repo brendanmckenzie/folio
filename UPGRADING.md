@@ -1349,6 +1349,33 @@ are unchanged (neither applies to a record). No migration, no `PROTOCOL_VERSION`
 there is no wire change. A record type left on `previewRoot` on an older release is a key the older release
 does not read, so the editor opens it as a form (or through `previewPath` if you kept it).
 
+### Singleton preview without a host page (v1.8.1)
+
+**No action; opt-in per type.** A `singleton` type that is one of the brand's `globals` may now declare
+`previewRoot`, the name of a block (with a `render`) in its brand's registry, as a `record` type could in
+v1.8.0. The editor then previews the global inside a blank instance of that block that Folio builds per request
+and never stores, with the global's draft applied exactly as `&as=<name>` applies it on a `previewPath` page:
+every configured global drawn as usual, the edited one updating on every keystroke, and the frame drawn as
+static context with no edit markers. A header or footer editor then shows the globals and a short neutral
+frame rather than a page hero. A singleton that declares only `previewPath`, or neither, behaves exactly as
+before, and `previewRoot` wins when both are set. `previewRoot` on a `page`, an unknown block, a block with no
+`render`, and a singleton that is not one of `globals` each throw at construction.
+
+The frame receives its own field defaults and the ordinary preview `Resolution` (the globals, the site, the
+locale, any `previewParams`). Nothing on it names the global being edited, and it is not re-rendered on a
+keystroke, so write it as a neutral stand-in for a page body; Folio draws the globals itself, above it, in
+the order `globals` declares them.
+
+To adopt it, write the frame block, declare `previewRoot: '<block>'` on the singleton type, and deploy. If the
+`previewPath` page existed only to host the preview, remove `previewPath` and then the page. The request
+`/?_folio=preview&as=<name>` must reach `folio.handle()` before your own routes, which the documented
+integration does; the path in it is ignored. The bare `{base}/preview/global/:name` route, share links and MCP
+`preview_document` are unchanged. No migration, no `PROTOCOL_VERSION` bump.
+
+**Rolling back from v1.8.1** is safe once `previewRoot` is removed from your singleton types: nothing is stored
+and there is no wire change. v1.8.0 refuses `previewRoot` on a singleton at construction, so a config that
+keeps it will not start on the older release.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

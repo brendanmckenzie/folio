@@ -167,6 +167,11 @@ export function usePreviewHost(apiBase: string, path: string | undefined): Story
  * `/preview/global/:name`) when there is no `previewPath` declared, or no story
  * currently lives at the one that is.
  *
+ * A type with `previewRoot` answers the site root with `&as=<name>` and no host page
+ * at all, and wins over `previewPath` (`singleton-preview-root.md` decision 5): the
+ * server synthesises the page, so the path is never read and `candidates` is not
+ * searched.
+ *
  * Moved here from `admin/GlobalsList.tsx` when port phase 8 deleted the old admin,
  * next to `usePreviewHost` — the hook that now supplies its one candidate. Pure and
  * exported so it is tested without an iframe.
@@ -176,11 +181,12 @@ export function usePreviewHost(apiBase: string, path: string | undefined): Story
  * fabricating an empty `children` to satisfy a type this never read.
  */
 export function globalPreviewUrl(
-  type: Pick<DocumentType, "name" | "previewPath">,
+  type: Pick<DocumentType, "name" | "previewPath" | "previewRoot">,
   candidates: readonly Pick<StoryMeta, "path" | "previewUrl">[],
   /** The bare mount, not `apiBase`: `/preview/global/:name` renders HTML. */
   base: string,
 ): string {
+  if (type.previewRoot !== undefined) return `/?_folio=preview&as=${encodeURIComponent(type.name)}`;
   if (type.previewPath !== undefined) {
     const host = candidates.find((s) => s.path === type.previewPath);
     if (host?.previewUrl) return `${host.previewUrl}&as=${encodeURIComponent(type.name)}`;

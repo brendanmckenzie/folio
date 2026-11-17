@@ -255,6 +255,15 @@ preview already draws the global alone on the host's stylesheet, and the frame w
 need a second key on `Resolution` (the global's name) for the block to read, which is
 a new contract for a case nobody has asked for.
 
+> **Amended (2026-11-18, v1.8.1).** Spec 46 (`singleton-preview-root.md`) allows
+> `previewRoot` on a singleton that is one of `globals`, as the page of the in-context
+> `&as=` preview rather than a frame for the bare one. The objection above does not
+> apply to that form: the frame there is static context and draws nothing about the
+> global (Folio draws the global in its own wrapper), so no key on `Resolution` is
+> added. The case that was not asked for here was asked for, for headers and footers
+> that a page hero crowds out. `previewRoot` on a `page` is still refused. The text
+> above stays as the record of the first decision.
+
 ### 5. The block must be in the record's brand's registry and must render
 
 Checked at construction, per brand:

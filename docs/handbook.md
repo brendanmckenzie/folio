@@ -824,6 +824,28 @@ there is exactly one editable document at a time. A singleton with no
 `previewPath` gets a bare preview instead: itself, alone, with a note that
 no host page was configured.
 
+A real page is often the wrong context for a header or footer: its hero dominates
+the preview and the footer sits below a screen of content. Give the type
+`previewRoot` instead, naming a block of yours with a `render`, and the admin
+previews the global above a blank instance of that block, built per request and
+never stored, at `/?_folio=preview&as=<name>`:
+
+```ts
+{ name: 'footer', label: 'Footer', kind: 'singleton', root: 'footerRoot',
+  previewRoot: 'chromeFrame' },   // a short neutral block, not a page type's root
+```
+
+Everything else is the `previewPath` behaviour above: the edited global is the one
+editable document and updates on every keystroke, every other configured global
+renders as usual, and the frame is static context with no edit markers. The globals
+are drawn above the frame in the order `globals` declares them, as on any preview in
+Folio's own shell. The frame receives its own field defaults and the ordinary
+`Resolution`; nothing on it names the global being edited, so write it as a neutral
+stand-in for a page body. The singleton must be one of `globals` (only a configured
+global answers `&as=`), and the block must exist and render, or construction throws.
+`previewRoot` wins over `previewPath` when both are set, and the path in the URL is
+never read. The bare `{base}/preview/global/:name` route is unchanged.
+
 A global is a document like any other: it drafts, versions, undoes and
 publishes the same way, through the same inspector. What it does not do is
 string interpolation — `{{ settings.phone }}` inside a text field is out of
@@ -1737,7 +1759,7 @@ export const personFrame = defineBlock({
 
 The block must be one of the **record's brand's** blocks and must have a `render`; a
 `defineRecord` block draws nothing, so naming one throws at construction, as does
-`previewRoot` on a `page` or a `singleton`. Two record types may share one frame. The
+`previewRoot` on a `page`. (A singleton may declare one too since v1.8.1; see Globals.) Two record types may share one frame. The
 frame has no data of its own (a `{ block, data }` form was rejected: it would be a
 second content store, in code, that an editor cannot change), so a host that wants an
 editable heading or promo strip around the record uses `previewPath` below. When a type
@@ -1792,8 +1814,9 @@ the tree this type kind exists to leave.
 **With neither**, the record opens in **form mode**: full width, no preview
 iframe, no viewport switcher, no "View live". There is no page to draw it on, and
 previewing it inside whichever page references it is ambiguous the moment two pages
-reference it differently. A singleton is previewed the same way through its own
-`previewPath`, with `&as=`, and has no `previewRoot`: its own block already renders it.
+reference it differently. A singleton is previewed through its own `previewPath`
+or `previewRoot` with `&as=` (Globals, above), and its own block renders it, so it
+never sets `resolution.record`.
 Publish, History, undo, presence and multiplayer are unchanged either way; none of
 them ever depended on there being a preview. A record whose root has a `blocks` field still
 shows the block tree, so "a person with a list of accreditations" works exactly

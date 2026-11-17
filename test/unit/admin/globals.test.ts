@@ -59,6 +59,24 @@ describe("globalPreviewUrl", () => {
     );
   });
 
+  it("answers the site root for a previewRoot, with no host page (spec 46)", () => {
+    expect(globalPreviewUrl(type({ previewRoot: "frame" }), [], "/folio")).toBe(
+      "/?_folio=preview&as=header",
+    );
+  });
+
+  it("lets previewRoot win over previewPath, with a host page present", () => {
+    expect(globalPreviewUrl(type({ previewRoot: "frame", previewPath: "" }), hosts, "/folio")).toBe(
+      "/?_folio=preview&as=header",
+    );
+  });
+
+  it("encodes the type name in a previewRoot URL", () => {
+    expect(globalPreviewUrl(type({ name: "a b", previewRoot: "frame" }), [], "/folio")).toBe(
+      "/?_folio=preview&as=a%20b",
+    );
+  });
+
   it("encodes the type name in both URL shapes", () => {
     expect(globalPreviewUrl(type({ name: "a b", previewPath: "" }), hosts, "/folio")).toBe(
       "/?_folio=preview&as=a%20b",

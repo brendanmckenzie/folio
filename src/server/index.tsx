@@ -854,6 +854,35 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       target = found;
     }
 
+    /**
+     * `as` naming a global whose type declares `previewRoot` (`singleton-preview-root.md`
+     * decision 2): like a `previewRoot` record, there is no host page, so it is answered
+     * here, before the page at the path is looked up, and the path is never read. The
+     * same refusals as `as` on a page below, made before any read: **a share grant may
+     * not use it**, **nor may a `draft` request**, and `_folio_id` names a page to draw
+     * when there is none. `record` beside it was refused above. The type lookup is
+     * configuration, not D1, so nothing a refusal depends on is stored. A singleton
+     * without `previewRoot`, and every refusal of an unknown name, fall through to the
+     * unchanged path below.
+     */
+    const framed = as !== null ? brand.typeOf(as) : undefined;
+    if (
+      as !== null &&
+      framed?.kind === "singleton" &&
+      framed.previewRoot !== undefined &&
+      brand.globals.includes(as)
+    ) {
+      if (shared.length > 0 || mode === "draft" || url.searchParams.has("_folio_id")) return null;
+      return previewPage(rt, bindings, null, {
+        root: framed.previewRoot,
+        as,
+        locale,
+        mode,
+        ...(on ? { site: on.render, admin: on.admin } : {}),
+        ...branded,
+      });
+    }
+
     // The path with the host's own locale decoration removed. Derived by
     // asking `config.route` rather than by assuming a prefix convention: the
     // admin built this URL from `previewUrls`, which `route` produced, so the

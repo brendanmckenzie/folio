@@ -132,11 +132,13 @@ export function shellPage(rt: FolioRuntime): Promise<Response> {
 }
 
 /**
- * The page a `previewRoot` record is drawn in: one blank instance of `block` (each
- * field at its default, every slot empty, and no `default` preset, which is an
- * editor's starting content and not a preview's), minted fresh per request and never
- * stored. The uids ride to the client in the bootstrap's `editing.page`, so hydration
- * matches (`record-preview-root.md` decisions 3 and 10).
+ * The page a `previewRoot` record or singleton is drawn in: one blank instance of
+ * `block` (each field at its default, every slot empty, and no `default` preset, which
+ * is an editor's starting content and not a preview's), minted fresh per request and
+ * never stored. For a record the uids ride to the client in the bootstrap's
+ * `editing.page`, so hydration matches (`record-preview-root.md` decisions 3 and 10);
+ * for a singleton the page is never hydrated at all, only the global's own wrapper is
+ * (`singleton-preview-root.md` decision 3).
  */
 function syntheticHost(schema: SchemaIndex, block: string): Doc {
   const blok = blankBlok(schema, block, null, null, "a0");
@@ -145,6 +147,13 @@ function syntheticHost(schema: SchemaIndex, block: string): Doc {
 
 /** The options `previewPage` takes, which its two shapes share. */
 export interface PreviewPageOpts {
+  /**
+   * A configured global edited in the context of this page (`?as=<name>`,
+   * `../../docs/specs/content-model/globals.md` decision 4), or of a block Folio
+   * synthesises (`DocumentType.previewRoot` on the singleton, the overload with no
+   * story). The page renders in `off` mode as context and the global's draft is the
+   * one editable document, hydrated into its own `data-folio-global` wrapper.
+   */
   as?: string;
   /**
    * A `record` previewed in the context of this page (`DocumentType.previewPath` on
@@ -249,15 +258,16 @@ export async function previewPage(
   opts: PreviewPageOpts,
 ): Promise<Response>;
 /**
- * A record previewed inside a block Folio synthesises (`DocumentType.previewRoot`,
- * `../../docs/specs/content-model/record-preview-root.md`): no stored host page, so no
- * story. `root` is the block name; the record is required.
+ * A record or a global previewed inside a block Folio synthesises
+ * (`DocumentType.previewRoot`, `../../docs/specs/content-model/record-preview-root.md`
+ * and `singleton-preview-root.md`): no stored host page, so no story. `root` is the
+ * block name; exactly one of the record and `as` names the document being edited.
  */
 export async function previewPage(
   rt: FolioRuntime,
   bindings: ReadBindings,
   story: null,
-  opts: PreviewPageOpts & { root: string; record: StoryMeta },
+  opts: PreviewPageOpts & { root: string } & ({ record: StoryMeta } | { as: string }),
 ): Promise<Response>;
 export async function previewPage(
   rt: FolioRuntime,
@@ -267,11 +277,13 @@ export async function previewPage(
 ): Promise<Response> {
   const draft = opts.mode === "draft";
   const { brand } = opts;
-  // No story is a record in a block Folio synthesises (`previewRoot`): the page is a
-  // blank instance of that block, built here and never stored, so no row is read and
-  // no Durable Object is touched or created for it.
-  if (story === null && (opts.root === undefined || !opts.record)) {
-    throw new Error("previewPage: a render with no story needs a `root` and a `record`");
+  // No story is a record or a global in a block Folio synthesises (`previewRoot`): the
+  // page is a blank instance of that block, built here and never stored, so no row is
+  // read and no Durable Object is touched or created for it.
+  if (story === null && (opts.root === undefined || !opts.record === (opts.as === undefined))) {
+    throw new Error(
+      "previewPage: a render with no story needs a `root` and exactly one of `record` and `as`",
+    );
   }
   const doc =
     story === null
@@ -365,7 +377,7 @@ export async function previewPage(
 
   return html(
     <Shell
-      title={`Preview · ${(story ?? (opts.record as StoryMeta)).title}`}
+      title={`Preview · ${story?.title ?? opts.record?.title ?? brand.typeOf(opts.as)?.label ?? opts.as}`}
       stylesheets={stylesheets}
       // A brand's global stylesheet is scoped under this (decision 10). Only on a
       // deployment with `brands`, so a single-brand preview's markup is unchanged.

@@ -278,6 +278,39 @@ describe("construction", () => {
     expect(() => withRoot("prose")).not.toThrow();
   });
 
+  it("checks a global's previewRoot against its own brand's registry and globals (spec 46)", () => {
+    const footer = defineBlock({
+      name: "footer",
+      label: "Footer",
+      fields: { note: text() },
+      render: () => null,
+    });
+    const withRoot = (previewRoot: string, globals: string[] = ["footer"]) =>
+      createFolio({
+        ...config,
+        brands: {
+          ...brands,
+          harbour: {
+            ...brands.harbour!,
+            blocks: [hbrRoot, hbrProse, footer],
+            types: [
+              ...hbrTypes,
+              { name: "footer", label: "Footer", kind: "singleton", root: "footer", previewRoot },
+            ],
+            globals,
+          },
+        },
+      });
+    // `header` exists, but only atlas declares it.
+    expect(() => withRoot("header")).toThrow(
+      /document type 'footer' names previewRoot 'header', which is not in the registry/,
+    );
+    expect(() => withRoot("prose", [])).toThrow(
+      /'footer' names previewRoot 'prose', but is not one of 'globals'/,
+    );
+    expect(() => withRoot("prose")).not.toThrow();
+  });
+
   it("builds one brand runtime per brand, each with its own pageRoot and prose", () => {
     expect([...rt.brands.keys()]).toEqual(["atlas", "harbour"]);
     expect(Object.keys(rt.brands.get("atlas")!.schema.pageRoot!.fields)).toEqual([

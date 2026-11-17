@@ -727,6 +727,13 @@ a brand block that `previewPage(rt, bindings, null, { root, record })` draws wit
 path; a fourth `previewPage` caller with a story is unchanged. Its Implementation notes record where the plan
 was wrong.
 
+Spec 46 (singleton preview without a host page, `content-model/singleton-preview-root.md`) was built
+2026-11-18 and ships as v1.8.1, same shape: `previewRoot` on a global, drawn by
+`previewPage(rt, bindings, null, { root, as })` with the unchanged `&as=` bootstrap (the page is never
+hydrated, so the frame is told nothing). `previewBranch` answers it after the record branch and before the
+page lookup; a singleton without `previewRoot` takes the unchanged path. A singleton that is not one of
+`globals` may not declare it.
+
 Spec 44 (admin extensions, `platform/admin-extensions.md`) was built 2026-11-17 and ships as v1.7.0, with no migration and
 no wire change (`PROTOCOL_VERSION` stays at 5; the host-page frames are their own public protocol). It adds
 `folio.editor`, `folio.requireEditor`, `folio.signInUrl` and `folio.originAllowed`, `admin.pages` and the

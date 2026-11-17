@@ -909,6 +909,21 @@ function prepareBrand<Env>(
     // singleton one is a config mistake, not a runtime surprise the first page
     // render discovers (`../../docs/specs/content-model/globals.md`).
     validateGlobals(brand.globals, types);
+    // A singleton's `previewRoot` renders through `&as=<name>`, which the preview
+    // branch answers only for a configured global (the edited draft is read from
+    // `resolution.globals`). On any other singleton it would be a key that does
+    // nothing (`../../docs/specs/content-model/singleton-preview-root.md` decision 4).
+    for (const type of types) {
+      if (
+        type.kind === "singleton" &&
+        type.previewRoot !== undefined &&
+        !(brand.globals ?? []).includes(type.name)
+      ) {
+        throw new Error(
+          `folio: document type '${type.name}' names previewRoot '${type.previewRoot}', but is not one of 'globals' (a singleton is previewed with &as=, which only a configured global answers)`,
+        );
+      }
+    }
     // Same timing, same reason: a duplicate migration id, or a set whose declared
     // order and lexicographic order disagree, would migrate documents in an order
     // that depends on which comparison happened to be used

@@ -303,13 +303,17 @@ describe("validateTypes", () => {
     expect(() => validateTypes([PAGE, { ...PERSON, previewRoot: "page" }], schema)).not.toThrow();
   });
 
-  it("refuses `previewRoot` on a page and on a singleton", () => {
+  it("refuses `previewRoot` on a page", () => {
     expect(() => validateTypes([{ ...PAGE, previewRoot: "page" }], schema)).toThrow(
-      /'page' is kind 'page' and cannot declare 'previewRoot'/,
+      /'page' is kind 'page' and cannot declare 'previewRoot' — only a record or a singleton/,
     );
+  });
+
+  it("accepts `previewRoot` on a singleton naming a block in the registry (spec 46)", () => {
     const SINGLE: DocumentType = { name: "site", label: "Site", kind: "singleton", root: "page" };
-    expect(() => validateTypes([PAGE, { ...SINGLE, previewRoot: "page" }], schema)).toThrow(
-      /'site' is kind 'singleton' and cannot declare 'previewRoot'/,
+    expect(() => validateTypes([PAGE, { ...SINGLE, previewRoot: "page" }], schema)).not.toThrow();
+    expect(() => validateTypes([PAGE, { ...SINGLE, previewRoot: "ghost" }], schema)).toThrow(
+      /'site' names previewRoot 'ghost', which is not in the registry/,
     );
   });
 
