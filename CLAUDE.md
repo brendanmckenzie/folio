@@ -720,6 +720,14 @@ when written and stale by the time it was built.
 
 Specs 40 (authoring guidance and content checks, `content-model/authoring-guidance.md`) and 41 (the agent CLI, `foundation/agent-cli.md`) were built 2026-11-04 and ship together as v1.4.0 (ledger date 2026-11-05); neither adds a migration or touches the wire. 40 added `GET {base}/api/v1/documents/:id/check` and the seventeenth MCP tool, `check_document`; 41 added `folio doctor`, `folio upgrade`, `folio add block` and `folio preview block`, and `upgrade-ledger.json`.
 
+Spec 44 (admin extensions, `platform/admin-extensions.md`) was built 2026-11-17 and ships as v1.7.0, with no migration and
+no wire change (`PROTOCOL_VERSION` stays at 5; the host-page frames are their own public protocol). It adds
+`folio.editor`, `folio.requireEditor`, `folio.signInUrl` and `folio.originAllowed`, `admin.pages` and the
+`folio/host` and `folio/host.css` exports, `select({ optionsFrom })` with the per-brand `optionSources` registry, the
+nineteenth MCP tool `list_field_options`, the `unavailable` error code, two check names and `panels`. Its
+Implementation notes record where the plan was wrong; the browser pass on the demo (the iframe's joint history,
+the mirror, the look) is the owner's before tagging.
+
 Spec 43 (visitor access for media-library files, `platform/asset-access.md`) was built 2026-11-16 and
 ships as v1.6.0 with `0019_asset_access.sql` (issue #178). It adds `gate.allowsAsset`, `gate.assetDenied`,
 the top-level `assetSigning`, `folio.signAsset` and `page.signAsset`, the `asset_purges` queue, the
@@ -730,7 +738,7 @@ tagging a release that touches the asset route, the tags or the queue.
 
 Specs 36 (form actions), 37 (form option sources) and 38 (form steps and the `folio/form` hook, `content-model/form-steps.md`) were built 2026-11-03/04 and released together as v1.3.0 on 2026-11-04, after the owner's browser review on multi-brand-host staging; 38 adds no migration. `folio/form` joined the seven code subpaths (`core`, `engine`, `server`, `vite`, `form`, `render`, `preview`) that `exports` carries beside `./admin-entry`, and `release.mjs`'s anchors check `dist/form.js`. Spec 44 adds two entries, `./host` (code, so anchored on `dist/host.js`) and `./host.css` (the file `dist/admin/folio-host.css`): eight code subpaths, and `./admin-entry` and `./host.css` as files.
 
-**Specs 1–22, 24–38, 40, 41 and 43 are done** (36–38 in v1.3.0, 40 and 41 in v1.4.0, 43 in v1.6.0; 39 and 42 are `draft`) — 34 (`foundation/multi-brand.md`) since the owner's
+**Specs 1–22, 24–38, 40, 41, 43 and 44 are done** (36–38 in v1.3.0, 40 and 41 in v1.4.0, 43 in v1.6.0, 44 in v1.7.0; 39 and 42 are `draft`) — 34 (`foundation/multi-brand.md`) since the owner's
 browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and
 merged to `main` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33

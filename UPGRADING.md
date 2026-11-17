@@ -1308,6 +1308,13 @@ are checked against its list and may answer `503` with the new error code `unava
 source used only by fields, keep `folio.refreshOptionSources` in `scheduled()`, or its list refreshes only
 when an editor or a write asks.
 
+### Linked-data panels (v1.7.0)
+
+Nothing to do until `panels` is set (per brand with `brands`). A panel is a host function per document type
+that answers a small structured summary the inspector draws on the document's root block; it is called per
+open with a timeout and nothing is cached on the server. `Manifest.panels` appears only when a brand declares
+one. See "Linked-data panels" in `docs/handbook.md`.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

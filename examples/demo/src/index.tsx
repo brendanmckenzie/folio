@@ -383,6 +383,31 @@ const folio = createFolio<Env>({
           .map((p) => ({ value: p.id, label: p.name })),
     },
   },
+  // The host's own facts about a Product record, beside its fields in the inspector
+  // (`platform/admin-extensions.md`, feature 4). JSON, rendered by Folio; the link into
+  // `/admin/orders` opens inside the chrome because that path is a declared host page.
+  panels: {
+    product: {
+      label: "Shop",
+      load: ({ data }) => {
+        const found = PRODUCTS.find((p) => p.id === data.product);
+        if (!found) return null;
+        return {
+          items: [
+            { label: "Variants", value: String(found.variants) },
+            { label: "From", value: found.price },
+            {
+              label: "Editions left",
+              value: String(found.left),
+              tone: found.left < 5 ? "warn" : "neutral",
+            },
+          ],
+          note: `${found.name} is on sale in the demo shop.`,
+          link: { label: "Open orders", href: "/admin/orders?state=open" },
+        };
+      },
+    },
+  },
   // A screen of the host's own in Folio's sidebar and chrome (`platform/admin-extensions.md`).
   // Folio draws the item and the frame; `/admin/orders` below is the host's route and
   // gates itself with `folio.requireEditor`, which is where the role is enforced.

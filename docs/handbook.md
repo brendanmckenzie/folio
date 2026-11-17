@@ -3639,6 +3639,67 @@ but the tokens on `:root`; a page that wants its own styling reads the tokens or
 | The item is not in the sidebar | The caller's `*` grant (or, for a `site` page, their role and the scope's brand) does not reach the page's `role`. The route would refuse them too. |
 | Back needs two presses | The host patches `history` and also announces, or the page redirects in a loop. Navigate with ordinary links and let the admin mirror. |
 
+### Linked-data panels
+
+A panel shows the host's own facts about a document, read-only, on the document's root block in the
+inspector: "6 variants · from $28.50 · 3 editions left" beside a Product record's fields, with a link to the
+screen that edits them. `panels` is keyed by document type name, per brand with `brands`.
+
+```ts
+createFolio<Env>({
+  …,
+  panels: {
+    product: {
+      label: 'Shop',                  // the card's heading, 1 to 40 characters
+      role: 'viewer',                 // the minimum role on the document's scope; default viewer
+      timeoutMs: 3000,                // 500 to 10000, default 3000
+      async load({ data, editor, locale, signal }, env) {
+        const p = await shop(env).product(String(data.product), { signal })
+        if (!p) return null           // nothing linked: the card is not drawn
+        return {
+          items: [
+            { label: 'Variants', value: String(p.variants) },
+            { label: 'From', value: p.from },
+            { label: 'Editions left', value: String(p.left), tone: p.left < 5 ? 'warn' : 'neutral' },
+          ],
+          note: p.note,
+          link: { label: 'Open in Products', href: `/admin/products/${p.id}` },
+        }
+      },
+    },
+  },
+})
+```
+
+`load` receives `story`, `data` (the draft root block's data in the source locale, read through the
+document's Durable Object, so it is what the editor sees now and not the two-second `draft_data` mirror),
+`locale`, `scope`, `brand`, `editor` (the signed-in person projected exactly as `folio.editor()` does, from the
+actor the route already resolved, so no second credential read; `null` under `auth: 'open'`) and a `signal`
+that aborts at `timeoutMs`.
+
+- **JSON, rendered by Folio.** `items` at most 8 (`label` 1 to 40 characters, `value` 1 to 80, `tone` one of
+  `neutral`, `ok`, `warn`, `danger`), `note` at most 280, `link` with a `label` of 1 to 40. Every string is cut
+  at its cap with an ellipsis and drawn as React text in the admin's own tokens, in light and dark. An item that
+  fails is dropped, never the card; a `link` is dropped unless its `href` is a same-origin path (rewritten to
+  the admin's URL when it is under a declared host page, so it opens inside the chrome) or an `https:` URL
+  (opened in a new tab with `rel="noopener noreferrer"`); an answer with no usable item and no note is
+  `malformed`. HTML from the host would need a sanitiser or a second iframe, and a host that needs more than a
+  summary links to a host page.
+- **The route** is `GET {base}/api/stories/:id/panel?locale=`: internal and scoped, fenced to the story's chain,
+  `READ` plus the panel's role. A person needs the role or above as their effective role on the scope; a token
+  needs `content:read:draft` (the panel is computed from the draft) and **only when the panel's role is
+  `viewer`**, because a role has no token equivalent. Either refusal is `403`. It answers `{ status: 'ok',
+  summary, at }`, `{ status: 'none' }` or `{ status: 'error', reason: 'timeout' | 'threw' | 'malformed' }`. A
+  thrown value is logged as `folio: panel <type> failed (<reason>)` and the editor sees the category, never the
+  message. Panels are not in `/api/v1` or MCP on purpose: the summary is the host's data, and the host owns its
+  own API for it.
+- **Nothing is cached on the server**, because `load` receives the editor and a shared cache would leak one
+  editor's view to another; cache inside `load` if your own data is expensive. The admin keeps the last answer for
+  the open document, refetches (debounced three seconds) when a root scalar of the draft changes, on Refresh and
+  on re-open, and never polls.
+- **The manifest** carries `panels: { [type]: { label, role } }` when a brand declares any, and nothing otherwise,
+  so a host without panels has a byte-identical manifest. A panel on a page type works as it does on a record.
+
 ## Reads and replicas
 
 D1 puts your database in exactly one place. Every query is a network round trip

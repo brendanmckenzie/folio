@@ -527,6 +527,20 @@ built-in `field.*` helpers are idempotent, and an `up` of your own may not be.
 
 ### Behaviour
 
+#### `panels: Record<string, FolioPanel<Env>>`
+
+Absent by default: the inspector draws no linked-data card. Keyed by document type name, per brand with
+`brands`. Each panel is `{ label, role?, timeoutMs?, load }`: `label` is the card's heading (1 to 40
+characters), `role` the minimum role on the document's scope (default `viewer`), `timeoutMs` how long `load` may
+take before the card says "timed out" (500 to 10000, default 3000), and `load(ctx, env)` answers a
+`FolioPanelSummary` (`items`, `note`, `link`) or `null` for "nothing linked". Nothing is cached. See
+`docs/handbook.md`, "Linked-data panels".
+
+Failure modes, at construction: a key that names no declared document type, an unknown key on a panel, a `label`
+outside 1 to 40 characters, a `load` that is not a function, an unknown `role`, and a `timeoutMs` that is not a
+whole number from 500 to 10000. At run time a `load` that throws, times out or answers nothing usable is a
+category on the card, and a token with `content:read:draft` is refused a panel whose role is above `viewer`.
+
 #### `hooks: FolioHooks<Env>`
 
 After-commit callbacks in your own Worker. Not webhooks: your host and Folio are
@@ -1174,6 +1188,7 @@ you can recognise one:
 | `gate.allowsAsset` or `gate.assetDenied` not a function, or `assetDenied` without `allowsAsset` | A key that reads as a constraint and enforces nothing |
 | `describe.fn` not a function, or `concurrency` outside 1–8 | Would 500 on whichever request reached it first |
 | `forms.verify` not a function, `ratePerHour` outside 0–100 | The discovering request is an anonymous POST from the internet |
+| `panels`: a key that is not a declared document type name, an unknown key, a `label` outside 1 to 40 characters, a `load` that is not a function, an unknown `role`, or a `timeoutMs` outside 500 to 10000 | The editor who opens a document of that type is the first to find it |
 | `optionSources`: an id in both it and `forms.sources`; a source with a `load` or `lookup` that is not a function; or a field whose `optionsFrom` names a source in neither registry, names `content`, sets an undeclared or wrong-kind setting, is `translatable`, has a default that is not a typed option, or is the `gate` field | One `option_lists` row per source id, a picker nothing can fill, or a public value that cannot be checked against a list that loads later |
 | `forms.sources`: an id that is not `[a-z][a-z0-9-]*` or is `content`, a `load` that is not a function, `ttl` outside 60–604800, `localised` not a boolean, a setting of another kind | A form naming the source would fail on an anonymous POST |
 | `forms.actions`: a duplicate or malformed id, no `check` or `deliver`, a setting kind outside the six, a code named `error`, codes on an action with no `check` | An integration an editor attaches and nothing runs |
