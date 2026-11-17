@@ -663,6 +663,14 @@ describe("the pane", () => {
     expect(src).not.toContain("alpha.example");
   });
 
+  it("sends a previewRoot record's root URL through site/start, naming no story", () => {
+    const rec = story({ id: "sty_rec", path: null, site: "alpha" });
+    const pane = paneChoice(atScope(PLATFORM, "alpha"), rec, null);
+    const src = paneSource(pane, "/?_folio=preview&record=sty_rec", rec, "/folio");
+    expect(src).toBe("/folio/~alpha/site/start?next=%2F%3F_folio%3Dpreview%26record%3Dsty_rec");
+    expect(decodeURIComponent(src!)).not.toContain("_folio_id");
+  });
+
   it("names no story for a document with no path", () => {
     const layer = story({ id: "sng_x:alpha", path: null, site: "alpha" });
     const pane = paneChoice(atScope(PLATFORM, "alpha"), layer, null);

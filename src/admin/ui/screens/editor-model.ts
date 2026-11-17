@@ -660,7 +660,7 @@ export interface EditorLayout {
  * rail always.
  *
  * Previewing does not change the answer, because a flat document has nothing for
- * the rail to show. A record's preview (`previewPath`) draws the host page in
+ * the rail to show. A record's preview (`previewRoot` or `previewPath`) draws the host page in
  * `off` mode, so it has no block markers and a click selects nothing
  * (`preview/mount.tsx`); the rail would be the only route to a nested block. A
  * global's `?as=` preview *is* in edit mode and can select blocks, but for a flat

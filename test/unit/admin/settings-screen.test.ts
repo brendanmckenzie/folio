@@ -72,6 +72,21 @@ const manifest: Manifest = {
       titleField: "fullName",
       group: "Directory",
     },
+    {
+      name: "fellow",
+      label: "Fellow",
+      kind: "record",
+      root: "personRoot",
+      previewRoot: "hero",
+      previewPath: "ignored",
+    },
+    {
+      name: "guest",
+      label: "Guest",
+      kind: "record",
+      root: "personRoot",
+      previewPath: "guests",
+    },
     { name: "header", label: "Header", kind: "singleton", root: "headerRoot", previewPath: "" },
     { name: "seo", label: "SEO defaults", kind: "singleton", root: "seoRoot" },
   ],
@@ -255,6 +270,12 @@ describe("typeRows", () => {
     expect(row("header").preview).toBe("The site root");
     expect(row("seo").preview).toBe("No host page configured");
     expect(row("page").preview).toBe("");
+  });
+
+  it("says how each record previews, previewRoot first", () => {
+    expect(row("fellow").preview).toBe("Block “Hero”");
+    expect(row("guest").preview).toBe("/guests");
+    expect(row("person").preview).toBe("Form only");
   });
 
   it("marks the default type and the ones loaded into every render", () => {
@@ -609,7 +630,7 @@ describe("cacheFacts", () => {
 describe("settingsView", () => {
   it('counts each section before the filter, so a heading can say "n of N"', () => {
     const v = view();
-    expect(v.totals.types).toBe(5);
+    expect(v.totals.types).toBe(7);
     expect(v.totals.blocks).toBe(7);
     expect(v.totals.globals).toBe(1);
     expect(v.totals.locales).toBe(3);
