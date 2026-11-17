@@ -40,3 +40,46 @@
   overflow: hidden;
   display: flex;
 }
+
+/*
+ * Narrow (`NARROW_QUERY` in `narrow.ts`, the same 720px). The sidebar is the 48px
+ * rail in a slot of its own, and `»` opens the full one as an overlay above the
+ * screen, so `main` keeps the rest of the viewport instead of 150px of it.
+ */
+.slot {
+  display: flex;
+  flex: 0 0 48px;
+  width: 48px;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgb(0 0 0 / 0.4);
+  cursor: default;
+}
+
+.panel {
+  position: relative;
+  display: flex;
+  height: 100%;
+  box-shadow: var(--shadow-lg, 0 8px 24px rgb(0 0 0 / 0.25));
+}
+
+.panel:focus {
+  outline: none;
+}
+
+@media (max-width: 720px) {
+  .screen {
+    padding: var(--space-2);
+  }
+}

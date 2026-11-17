@@ -147,9 +147,9 @@ describe("the styling scope", () => {
           return false;
         }
       });
-    // Dialog, Palette, FocusMode, HistoryPanel, Toast. Asserted so a sixth is a
-    // decision rather than an accident.
-    expect(fixed.map(({ file }) => file).sort()).toHaveLength(5);
+    // Dialog, Palette, FocusMode, HistoryPanel, Toast, and Shell's narrow-width
+    // sidebar overlay. Asserted so a seventh is a decision rather than an accident.
+    expect(fixed.map(({ file }) => file).sort()).toHaveLength(6);
     for (const { file } of fixed) {
       expect(src(file), `${file} is fixed-position but never applies ${UI_SCOPE}`).toMatch(
         /scoped\(/,
