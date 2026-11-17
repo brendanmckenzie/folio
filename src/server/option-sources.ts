@@ -18,6 +18,7 @@ import type { LocaleConfig } from "../core/locales";
 import {
   CONTENT_SOURCE,
   contentOptionSettings,
+  MAX_OPTION_VALUE,
   MAX_SOURCED_OPTIONS,
   optionListKey,
   screenOptionLabel,
@@ -34,8 +35,7 @@ import type { BrandRef, FolioLogger } from "./types";
 /** One load per key per this long, across every isolate (decision 7). */
 export const LEASE_MS = 30_000;
 
-/** The longest a stored value may be, and what `FORM_FIELD` allows an option. */
-export const MAX_OPTION_VALUE = 120;
+export { MAX_OPTION_VALUE };
 
 /** Why a load failed: a category and never the thrown message (decision 16). */
 export type OptionFailure = "timeout" | "threw" | "malformed" | "empty";

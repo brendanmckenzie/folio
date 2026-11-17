@@ -32,6 +32,9 @@ export const MAX_SOURCED_OPTIONS = 500;
 /** A label is truncated to this many characters, `…` included (decision 4, 7). */
 export const MAX_OPTION_LABEL = 200;
 
+/** The longest a stored value may be, and what `FORM_FIELD` allows an option. */
+export const MAX_OPTION_VALUE = 120;
+
 /** `optionsFrom.settings` is bounded in bytes of JSON, so a PATCH cannot park a
  *  megabyte in a question. */
 const MAX_SETTINGS_BYTES = 4096;
@@ -186,6 +189,19 @@ export function screenOptionLabel(raw: unknown): string | null {
   return chars.length > MAX_OPTION_LABEL
     ? `${chars.slice(0, MAX_OPTION_LABEL - 1).join("")}…`
     : trimmed;
+}
+
+/**
+ * Whether `value` is one a source may offer and a field may store: 1 to `MAX_OPTION_VALUE`
+ * characters, already trimmed and printable (`screenItems`' rule for a host's `value`).
+ */
+export function isOptionValue(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= 1 &&
+    value.length <= MAX_OPTION_VALUE &&
+    screenOptionLabel(value) === value
+  );
 }
 
 /**
