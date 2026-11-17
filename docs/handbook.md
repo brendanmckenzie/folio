@@ -1697,7 +1697,58 @@ direction, and ties by id. That sort pages by offset over an unindexed expressio
 which is fine into the low thousands of documents per type; the other two keep a
 keyset.
 
-Selecting a record opens the editor in one of two ways, decided by its type.
+Selecting a record opens the editor in one of three ways, decided by its type.
+
+**With `previewRoot`**, the editor shows a block of yours beside the form, with no page
+behind it. Name any block that has a `render` (a slim layout block that exists only to
+frame previews is the usual choice):
+
+```ts
+{ name: 'person', label: 'Person', kind: 'record', root: 'personRecord', previewRoot: 'personFrame' }
+```
+
+Folio builds a blank instance of that block per request (each field at its `default`,
+every `blocks` slot empty, and not its `default` preset, which is an editor's starting
+content) and draws it with `resolution.record` set to the record's id, the record's
+**draft** at `resolution.docs[id]`, and every configured global above it. The block is
+never stored, so there is no page to hide from the new-document menu, to keep out of
+the content list, to guard against publishing, or to recreate on every deployment.
+Edits update the frame on every keystroke with no round trip. The block reads the
+record exactly as the `previewPath` page below does:
+
+```tsx
+import { defineBlock, resolveReference, text } from 'folio/core'
+
+export const personFrame = defineBlock({
+  name: 'personFrame',
+  label: 'Person preview',
+  fields: { heading: text({ default: 'Team' }) },
+  render: ({ heading }, resolution) => {
+    const person = resolveReference(resolution.record, resolution, ['person'])
+    return (
+      <main>
+        <h1>{heading}</h1>
+        {person ? <PersonCard name={String(person.data.fullName)} /> : null}
+      </main>
+    )
+  },
+})
+```
+
+The block must be one of the **record's brand's** blocks and must have a `render`; a
+`defineRecord` block draws nothing, so naming one throws at construction, as does
+`previewRoot` on a `page` or a `singleton`. Two record types may share one frame. The
+frame has no data of its own (a `{ block, data }` form was rejected: it would be a
+second content store, in code, that an editor cannot change), so a host that wants an
+editable heading or promo strip around the record uses `previewPath` below. When a type
+declares both, `previewRoot` wins and the path is never read, which is the ordinary
+state while a host migrates.
+
+The preview loads `/?_folio=preview&record=<id>` at the site root, so that request has
+to reach `folio.handle()` before your own routes, as it does in the documented
+integration; the path itself is ignored. It renders in the source locale. Every refusal
+below applies, and `_folio_id` is refused too, since it would name a page to draw and
+there is none.
 
 **With `previewPath`**, the editor shows a host page of yours beside the form. The
 page is rendered with `resolution.record` set to the record's id and the record's
@@ -1738,11 +1789,11 @@ be on the site being previewed and the record in that site's chain. There is no
 per-record path: giving a record a URL of its own makes it a page and brings back
 the tree this type kind exists to leave.
 
-**Without `previewPath`**, the record opens in **form mode**: full width, no preview
+**With neither**, the record opens in **form mode**: full width, no preview
 iframe, no viewport switcher, no "View live". There is no page to draw it on, and
 previewing it inside whichever page references it is ambiguous the moment two pages
 reference it differently. A singleton is previewed the same way through its own
-`previewPath`, with `&as=`.
+`previewPath`, with `&as=`, and has no `previewRoot`: its own block already renders it.
 Publish, History, undo, presence and multiplayer are unchanged either way; none of
 them ever depended on there being a preview. A record whose root has a `blocks` field still
 shows the block tree, so "a person with a list of accreditations" works exactly

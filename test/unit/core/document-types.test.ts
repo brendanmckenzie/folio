@@ -299,6 +299,26 @@ describe("validateTypes", () => {
     );
   });
 
+  it("accepts `previewRoot` on a record naming a block in the registry", () => {
+    expect(() => validateTypes([PAGE, { ...PERSON, previewRoot: "page" }], schema)).not.toThrow();
+  });
+
+  it("refuses `previewRoot` on a page and on a singleton", () => {
+    expect(() => validateTypes([{ ...PAGE, previewRoot: "page" }], schema)).toThrow(
+      /'page' is kind 'page' and cannot declare 'previewRoot'/,
+    );
+    const SINGLE: DocumentType = { name: "site", label: "Site", kind: "singleton", root: "page" };
+    expect(() => validateTypes([PAGE, { ...SINGLE, previewRoot: "page" }], schema)).toThrow(
+      /'site' is kind 'singleton' and cannot declare 'previewRoot'/,
+    );
+  });
+
+  it("refuses `previewRoot` naming a block that is not in the registry", () => {
+    expect(() => validateTypes([PAGE, { ...PERSON, previewRoot: "ghost" }], schema)).toThrow(
+      /'person' names previewRoot 'ghost', which is not in the registry/,
+    );
+  });
+
   it("refuses `under` naming an undeclared type", () => {
     expect(() => validateTypes([{ ...PAGE, under: ["ghost"] }], schema)).toThrow(
       /'under' unknown type 'ghost'/,

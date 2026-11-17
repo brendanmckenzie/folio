@@ -300,6 +300,13 @@
         "Option sources on document fields (v1.7.0)",
         "Linked-data panels (v1.7.0)"
       ]
+    },
+    {
+      "version": "1.8.0",
+      "date": "2026-11-17",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": ["Record preview without a host page (v1.8.0)"]
     }
   ]
 }

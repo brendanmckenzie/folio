@@ -226,14 +226,16 @@ const folio = createFolio<Env>({
     //
     // content-model/data-documents.md is what makes a record *usable*: the Data
     // rail lists People with a count, selecting it opens a table whose columns
-    // are personRecord's `indexed` fields, and opening one is a full-width form
-    // with no preview — there is nothing to preview.
+    // are personRecord's `indexed` fields, and opening one is a form beside a live
+    // preview. `previewRoot` names the block Folio draws the person inside, with no
+    // stored host page (content-model/record-preview-root.md).
     {
       name: "person",
       label: "Person",
       kind: "record",
       root: "personRecord",
       titleField: "fullName",
+      previewRoot: "personFrame",
     },
     // A second record type, and the one that shows checkpoint 1: `officeRecord`
     // declares no `render` at all. An office is an address and a phone number,

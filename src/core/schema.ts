@@ -120,10 +120,19 @@ export interface DocumentType {
    * host page at that path: the page renders with `resolution.record` set to the
    * record's id and the record's **draft** at `resolution.docs[id]`, which the
    * page's own block reads with `resolveReference(resolution.record, resolution)`.
-   * A record with none is edited as a form, with no preview. A page has a URL of its
-   * own, so the key means nothing on one.
+   * A record with neither this nor `previewRoot` is edited as a form, with no
+   * preview. `previewRoot` wins when both are set. A page has a URL of its own, so
+   * the key means nothing on one.
    */
   previewPath?: string;
+  /**
+   * A `record` only: the block Folio draws a record's editor preview inside, with no
+   * stored page. Folio builds a blank instance of it (field defaults, no preset) and
+   * renders it in the record-preview path with `resolution.record` set, exactly as a
+   * `previewPath` page is rendered. Must name a block with a `render` in this brand's
+   * registry. Wins over `previewPath` when both are set.
+   */
+  previewRoot?: string;
 }
 
 /**
@@ -403,6 +412,20 @@ export function validateTypes(types: readonly DocumentType[], schema: SchemaInde
       throw new Error(
         `folio: document type '${type.name}' is kind '${type.kind}' and cannot declare 'under' — only a page lives in the tree`,
       );
+    }
+    // Same reasoning as `under`: a page renders itself and a singleton has its own
+    // previews, so `previewRoot` on either would be a key that does nothing.
+    if (type.previewRoot !== undefined) {
+      if (type.kind !== "record") {
+        throw new Error(
+          `folio: document type '${type.name}' is kind '${type.kind}' and cannot declare 'previewRoot' — only a record is previewed inside a synthetic root`,
+        );
+      }
+      if (!schema[type.previewRoot]) {
+        throw new Error(
+          `folio: document type '${type.name}' names previewRoot '${type.previewRoot}', which is not in the registry`,
+        );
+      }
     }
   }
 

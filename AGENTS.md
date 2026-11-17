@@ -185,12 +185,15 @@ the publish that creates the record. A draft is the editor's alone and a share n
 one. `unique` is enforced at publish (`409 conflict`), not on a keystroke. Folio writes no
 redirect when a slug changes.
 
-**A record is previewed through a page of yours, if its type names one.** A `record`
-type (a person, an office) has no URL, so with no `previewPath` the editor opens it
-as a form with no preview. Give the type `previewPath: 'team/member'` (the path of a
-routed page) and the editor renders *that page* beside the form, with
-`resolution.record` set to the record's id and the record's **draft** at
-`resolution.docs[id]`. The page's own block draws it:
+**A record is previewed in a block of yours, if its type names one.** A `record`
+type (a person, an office) has no URL, so with neither key below the editor opens it
+as a form with no preview. Give the type `previewRoot: 'personFrame'` (any block with a
+`render`) and the editor renders a blank instance of *that block*, built per request and
+never stored, beside the form, with `resolution.record` set to the record's id and the
+record's **draft** at `resolution.docs[id]`. No page has to exist. Use `previewPath:
+'team/member'` (the path of a routed page) instead when an editor should be able to
+change the frame around the record; it renders *that page* the same way, and
+`previewRoot` wins when both are set. Either block draws the record like this:
 
 ```tsx
 render: ({ heading }, resolution) => {
@@ -200,7 +203,7 @@ render: ({ heading }, resolution) => {
 }
 ```
 
-This is editor-only: there is no share link for a record, and the page renders
+This is editor-only: there is no share link for a record, and the frame renders
 with no edit markers, so the form is the editing surface. Nothing in your route
 changes, and `resolution.record` is never set outside the editor.
 

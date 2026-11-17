@@ -194,17 +194,21 @@ export function globalPreviewUrl(
  * `&record=<id>` appended, which `handle()` answers with the page rendered around the
  * record's draft.
  *
- * Undefined when the type declares no `previewPath` or no story lives at it, and that
- * is form mode, as it always was for a record. **There is no bare fallback** like a
- * global's `/preview/global/:name`: a record is drawn by a host block, and without a
- * host page there is nothing that would draw it. Pure and exported so it is tested
- * without an iframe.
+ * A type with `previewRoot` answers the site root with no host page at all, and wins
+ * over `previewPath` (`record-preview-root.md` decisions 2 and 6): the server
+ * synthesises the page, so the path is never read. Otherwise undefined when the type
+ * declares no `previewPath` or no story lives at it, and that is form mode, as it
+ * always was for a record. **There is no fallback when the declared host page is
+ * missing**, and none like a global's `/preview/global/:name`: a record is drawn by a
+ * host block, and without a page there is nothing that would draw it. Pure and
+ * exported so it is tested without an iframe.
  */
 export function recordPreviewUrl(
-  type: Pick<DocumentType, "previewPath">,
+  type: Pick<DocumentType, "previewPath" | "previewRoot">,
   host: Pick<StoryMeta, "path" | "previewUrl"> | undefined,
   id: string,
 ): string | undefined {
+  if (type.previewRoot !== undefined) return `/?_folio=preview&record=${encodeURIComponent(id)}`;
   if (type.previewPath === undefined || !host?.previewUrl) return undefined;
   if (host.path !== type.previewPath) return undefined;
   return `${host.previewUrl}&record=${encodeURIComponent(id)}`;

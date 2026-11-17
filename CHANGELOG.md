@@ -8,6 +8,30 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.8.0
+
+A minor release with no migration and no wire change (`PROTOCOL_VERSION` stays at 5). **Every change adds**: a
+host that declares no `previewRoot` gets byte-identical `{base}/api/schema` and `{base}/api/v1/schema`
+answers. Spec 45 ([`content-model/record-preview-root.md`](docs/specs/content-model/record-preview-root.md),
+issue #182); read [Record preview without a host page](UPGRADING.md#record-preview-without-a-host-page-v180)
+before you use it.
+
+### Added
+
+- **`previewRoot` on a `record` type.** Names a block with a `render` in the record's brand's registry. The
+  editor previews the record inside a blank instance of it (field defaults, no preset) that Folio builds per
+  request, with `resolution.record` set, the record's draft at `resolution.docs[id]` and every global above
+  it. No page is stored, so there is nothing to hide from the new-document menu, guard against publishing or
+  keep alive on every deployment. `previewRoot` wins over `previewPath`, which keeps working for a frame an
+  editor can change. Refused at construction on a `page` or `singleton`, for an unknown block, and for a block
+  with no `render`.
+- **The Settings screen** says how each record type previews: `Block “<label>”`, its `previewPath`, or
+  `Form only`.
+
+### Breaking changes
+
+None.
+
 ## 1.7.0
 
 A minor release with no migration, no wire change (`PROTOCOL_VERSION` stays at 5) and no new binding. **Every

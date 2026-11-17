@@ -862,6 +862,16 @@ function prepareBrand<Env>(
     // top level all throw here (`../../docs/specs/foundation/document-types.md`).
     const types = documentTypes(brand);
     validateTypes(types, schema);
+    // `validateTypes` sees only the schema, which carries no `render`: a
+    // `previewRoot` block that draws nothing would be an empty frame forever
+    // (`../../docs/specs/content-model/record-preview-root.md` decision 5).
+    for (const type of types) {
+      if (type.previewRoot !== undefined && !registry[type.previewRoot]?.render) {
+        throw new Error(
+          `folio: document type '${type.name}' names previewRoot '${type.previewRoot}', which has no render (a defineRecord block draws nothing in a preview)`,
+        );
+      }
+    }
     // Same timing, same reason, and after `validateTypes` because it needs both
     // `types` and `schema`: a `gate` whose field is translatable, unindexed, the
     // wrong kind, or declared on no `page` root is a gate the editor believes in

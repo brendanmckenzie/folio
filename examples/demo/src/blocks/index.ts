@@ -13,6 +13,7 @@ import {
   officeCard,
   officeRecord,
   personCard,
+  personFrame,
   personRecord,
   productRecord,
 } from "./person";
@@ -55,6 +56,9 @@ export const blocks = [
   section,
   personCard,
   officeCard,
+  // The frame a person is previewed in: a blank instance Folio builds per request, never
+  // stored (`previewRoot` on the `person` type in src/index.tsx).
+  personFrame,
   // A `references()` field: a hand-picked, ordered list of people
   // (data-documents.md decision 3).
   leadership,

@@ -174,8 +174,9 @@ export interface TypeRow {
    * in the declaration.
    */
   topLevel: boolean | null;
-  /** `previewPath` for a singleton, resolved to something readable. `''` for a
-   * kind that has a URL of its own and needs no stand-in. */
+  /** How a singleton or a record is previewed, resolved to something readable: the
+   * `previewPath`, or for a record the `previewRoot` block (which wins) or "Form only".
+   * `''` for a page, which has a URL of its own and needs no stand-in. */
   preview: string;
   group: string;
   /** The type a bare "New page" creates. */
@@ -199,7 +200,7 @@ export function typeRows(manifest: Manifest, schema: Record<string, BlockSchema>
       under: type.under ?? [],
       where: whereClause(type, labelOf),
       topLevel: type.kind === "page" ? canNest(type, undefined) : null,
-      preview: previewClause(type),
+      preview: previewClause(type, schema),
       group: type.group ?? "",
       isDefault: Boolean(type.default),
       isGlobal: globals.has(type.name),
@@ -214,7 +215,15 @@ function whereClause(type: DocumentType, labelOf: (name: string) => string): str
   return `Only under ${type.under.map(labelOf).join(", ")}`;
 }
 
-function previewClause(type: DocumentType): string {
+function previewClause(type: DocumentType, schema: Record<string, BlockSchema> = {}): string {
+  if (type.kind === "record") {
+    // `previewRoot` wins over `previewPath` when both are set (spec 45 decision 2).
+    if (type.previewRoot !== undefined) {
+      return `Block “${schema[type.previewRoot]?.label ?? type.previewRoot}”`;
+    }
+    if (type.previewPath === undefined) return "Form only";
+    return type.previewPath === "" ? "The site root" : `/${type.previewPath}`;
+  }
   if (type.kind !== "singleton") return "";
   if (type.previewPath === undefined) return "No host page configured";
   return type.previewPath === "" ? "The site root" : `/${type.previewPath}`;

@@ -720,6 +720,13 @@ when written and stale by the time it was built.
 
 Specs 40 (authoring guidance and content checks, `content-model/authoring-guidance.md`) and 41 (the agent CLI, `foundation/agent-cli.md`) were built 2026-11-04 and ship together as v1.4.0 (ledger date 2026-11-05); neither adds a migration or touches the wire. 40 added `GET {base}/api/v1/documents/:id/check` and the seventeenth MCP tool, `check_document`; 41 added `folio doctor`, `folio upgrade`, `folio add block` and `folio preview block`, and `upgrade-ledger.json`.
 
+Spec 45 (record preview without a host page, `content-model/record-preview-root.md`) was built 2026-11-17 and
+ships as v1.8.0, with no migration and no wire change: `previewRoot` on a `record` type, a blank instance of
+a brand block that `previewPage(rt, bindings, null, { root, record })` draws with no story and no stored page.
+`previewBranch` reads `?record=` **before** the page at the path, and a `previewRoot` type never reads the
+path; a fourth `previewPage` caller with a story is unchanged. Its Implementation notes record where the plan
+was wrong.
+
 Spec 44 (admin extensions, `platform/admin-extensions.md`) was built 2026-11-17 and ships as v1.7.0, with no migration and
 no wire change (`PROTOCOL_VERSION` stays at 5; the host-page frames are their own public protocol). It adds
 `folio.editor`, `folio.requireEditor`, `folio.signInUrl` and `folio.originAllowed`, `admin.pages` and the

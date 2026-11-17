@@ -88,6 +88,11 @@ sequence because the dependency graph is the same one.
 | 42 | [The command palette](editing/command-palette.md) | editing | M | — | none | owner, 2026-11-04 |
 | 43 | [Visitor access for media library assets](platform/asset-access.md) | platform | L | — | `0019` (landed) | issue #178 |
 | 44 | [Admin extensions: the editor session, host pages, sourced selects and linked-data panels](platform/admin-extensions.md) | platform | L | — | none | owner, 2026-11-17 |
+| 45 | [Record preview without a host page (`previewRoot`)](content-model/record-preview-root.md) | content model | S | 14, #74 | none | issue #182 |
+
+**45 is done** (built 2026-11-17, v1.8.0, branch `feat/record-preview-root`): `previewRoot` on a `record` type
+previews the record inside a synthetic block with no stored host page, with no migration and no wire change. Its Implementation notes record
+where the plan was wrong.
 
 **44 is done** (built 2026-11-17, v1.7.0, branch `feat/admin-extensions`; the owner's browser pass is outstanding): four additive extension points
 (`folio.editor` and `requireEditor`, `admin.pages`, `select({ optionsFrom })` with an `optionSources`

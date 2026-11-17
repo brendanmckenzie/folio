@@ -9,9 +9,11 @@
 import type { ReactElement } from "react";
 import { renderToReadableStream } from "react-dom/server.edge";
 import { NO_STORE } from "../core/cache-tags";
+import type { Doc } from "../core/doc";
 import { recordResolution } from "../core/resolution-merge";
 import { buildResolution, previewParamsOf } from "../core/resolve";
 import { wrapPreview } from "../core/render-wrap";
+import { blankBlok, type SchemaIndex } from "../core/schema";
 import type { Registry as SiteRegistry } from "../core/sites";
 import type { StoryMeta } from "../core/story";
 import { FolioDoc, type RenderMode, renderGlobalNode } from "../preview/Render";
@@ -130,6 +132,72 @@ export function shellPage(rt: FolioRuntime): Promise<Response> {
 }
 
 /**
+ * The page a `previewRoot` record is drawn in: one blank instance of `block` (each
+ * field at its default, every slot empty, and no `default` preset, which is an
+ * editor's starting content and not a preview's), minted fresh per request and never
+ * stored. The uids ride to the client in the bootstrap's `editing.page`, so hydration
+ * matches (`record-preview-root.md` decisions 3 and 10).
+ */
+function syntheticHost(schema: SchemaIndex, block: string): Doc {
+  const blok = blankBlok(schema, block, null, null, "a0");
+  return { root: blok.uid, bloks: { [blok.uid]: blok } };
+}
+
+/** The options `previewPage` takes, which its two shapes share. */
+export interface PreviewPageOpts {
+  as?: string;
+  /**
+   * A `record` previewed in the context of this page (`DocumentType.previewPath` on
+   * a record, `?record=`) or of a block Folio synthesises (`previewRoot`, which is
+   * what the overload with no story is). The page renders in `off` mode as context, with the
+   * record's **draft** at `resolution.docs[id]` and `resolution.record` set, and
+   * the bootstrap points the preview client at the record: its mutations are the
+   * ones applied, and it re-renders the whole page, because a record is drawn by a
+   * host block reading data and has no Folio wrapper to hydrate on its own. The
+   * caller has already checked that it exists, is a record of this brand and is in
+   * the render's chain.
+   */
+  record?: StoryMeta;
+  bare?: boolean;
+  locale?: string;
+  mode?: PreviewMode;
+  /**
+   * The site this preview renders on, on a deployment with `sites`
+   * (`../../docs/specs/foundation/multi-site.md` decision 13): every read the
+   * resolution makes takes its chain, and it fills `Resolution.site`. Absent is
+   * the single-site render, exactly as before. `null` is a render for no site —
+   * an empty chain — which a branded bare preview of a group's layer uses,
+   * because a branded resolve refuses to default to `default`'s chain.
+   */
+  site?: SiteRender | null;
+  /**
+   * `sites.admin`, the one origin the preview may post to and hear from
+   * (decision 13, "every surface"), written into the bootstrap for
+   * `preview/mount.tsx`. Absent, the preview talks to its own origin, as it
+   * always has.
+   */
+  admin?: string;
+  /**
+   * "Alpha overrides this page": the name of the nearer scope that shadows the
+   * story being previewed at its path (a `_folio_id` preview of a page the site
+   * has forked). Drawn above the page, outside anything that hydrates.
+   */
+  overriddenBy?: string;
+  /**
+   * The brand this preview renders as (`multi-brand.md` decisions 9 and 10): its
+   * registry, schema, globals, wrap and preview bundle, and `data-folio-brand`
+   * on the shell. Required, so every caller names it: a request's is
+   * `c.var.brand`, `handle()`'s is the gated site's, and there is no default.
+   */
+  brand: BrandRuntime;
+  /**
+   * The registry snapshot the caller holds, for the draft's seed when `story` is
+   * a layer on a deployment with `brands` (`BrandRuntime.seedFor`).
+   */
+  registry?: SiteRegistry;
+}
+
+/**
  * The story's live draft — for the editor's iframe, or as a page.
  *
  * **`opts.mode` is which of those two** (`../../../docs/specs/platform/
@@ -178,70 +246,49 @@ export async function previewPage(
   rt: FolioRuntime,
   bindings: ReadBindings,
   story: StoryMeta,
-  opts: {
-    as?: string;
-    /**
-     * A `record` previewed in the context of this page (`DocumentType.previewPath` on
-     * a record, `?record=`). The page renders in `off` mode as context, with the
-     * record's **draft** at `resolution.docs[id]` and `resolution.record` set, and
-     * the bootstrap points the preview client at the record: its mutations are the
-     * ones applied, and it re-renders the whole page, because a record is drawn by a
-     * host block reading data and has no Folio wrapper to hydrate on its own. The
-     * caller has already checked that it exists, is a record of this brand and is in
-     * the render's chain.
-     */
-    record?: StoryMeta;
-    bare?: boolean;
-    locale?: string;
-    mode?: PreviewMode;
-    /**
-     * The site this preview renders on, on a deployment with `sites`
-     * (`../../docs/specs/foundation/multi-site.md` decision 13): every read the
-     * resolution makes takes its chain, and it fills `Resolution.site`. Absent is
-     * the single-site render, exactly as before. `null` is a render for no site —
-     * an empty chain — which a branded bare preview of a group's layer uses,
-     * because a branded resolve refuses to default to `default`'s chain.
-     */
-    site?: SiteRender | null;
-    /**
-     * `sites.admin`, the one origin the preview may post to and hear from
-     * (decision 13, "every surface"), written into the bootstrap for
-     * `preview/mount.tsx`. Absent, the preview talks to its own origin, as it
-     * always has.
-     */
-    admin?: string;
-    /**
-     * "Alpha overrides this page": the name of the nearer scope that shadows the
-     * story being previewed at its path (a `_folio_id` preview of a page the site
-     * has forked). Drawn above the page, outside anything that hydrates.
-     */
-    overriddenBy?: string;
-    /**
-     * The brand this preview renders as (`multi-brand.md` decisions 9 and 10): its
-     * registry, schema, globals, wrap and preview bundle, and `data-folio-brand`
-     * on the shell. Required, so every caller names it: a request's is
-     * `c.var.brand`, `handle()`'s is the gated site's, and there is no default.
-     */
-    brand: BrandRuntime;
-    /**
-     * The registry snapshot the caller holds, for the draft's seed when `story` is
-     * a layer on a deployment with `brands` (`BrandRuntime.seedFor`).
-     */
-    registry?: SiteRegistry;
-  },
+  opts: PreviewPageOpts,
+): Promise<Response>;
+/**
+ * A record previewed inside a block Folio synthesises (`DocumentType.previewRoot`,
+ * `../../docs/specs/content-model/record-preview-root.md`): no stored host page, so no
+ * story. `root` is the block name; the record is required.
+ */
+export async function previewPage(
+  rt: FolioRuntime,
+  bindings: ReadBindings,
+  story: null,
+  opts: PreviewPageOpts & { root: string; record: StoryMeta },
+): Promise<Response>;
+export async function previewPage(
+  rt: FolioRuntime,
+  bindings: ReadBindings,
+  story: StoryMeta | null,
+  opts: PreviewPageOpts & { root?: string },
 ): Promise<Response> {
   const draft = opts.mode === "draft";
   const { brand } = opts;
-  const doc = await brand.draftFor(bindings, story, opts.registry);
+  // No story is a record in a block Folio synthesises (`previewRoot`): the page is a
+  // blank instance of that block, built here and never stored, so no row is read and
+  // no Durable Object is touched or created for it.
+  if (story === null && (opts.root === undefined || !opts.record)) {
+    throw new Error("previewPage: a render with no story needs a `root` and a `record`");
+  }
+  const doc =
+    story === null
+      ? syntheticHost(brand.schema, opts.root as string)
+      : await brand.draftFor(bindings, story, opts.registry);
   // `story` is what lets the narrowed resolution reach this page's ancestors (a
   // breadcrumb still has to resolve) and what lets a collection listing this very
   // document show its **draft** title rather than its published one
   // (`../../docs/specs/content-model/collections.md` decision 3).
   const siteField = opts.site !== undefined ? { site: opts.site } : {};
+  // With no story the page resolves with none: no ancestors, no second-hop exclusion,
+  // no form page, no path, and above all no collection patch, which would otherwise
+  // show the record's card carrying the blank frame block's data (decision 8).
   const pageResolution = await brand.resolve(bindings, doc, {
     draft: true,
     locale: opts?.locale,
-    story,
+    ...(story ? { story } : {}),
     ...siteField,
   });
   // The record's draft is read through `draftFor` (never a bare `getOrInit`) and
@@ -318,7 +365,7 @@ export async function previewPage(
 
   return html(
     <Shell
-      title={`Preview · ${story.title}`}
+      title={`Preview · ${(story ?? (opts.record as StoryMeta)).title}`}
       stylesheets={stylesheets}
       // A brand's global stylesheet is scoped under this (decision 10). Only on a
       // deployment with `brands`, so a single-brand preview's markup is unchanged.
@@ -385,7 +432,7 @@ export async function previewPage(
       </div>
       {opts?.bare ? (
         <p style={{ padding: "1em", font: "13px system-ui", color: "#666" }}>
-          No host page is configured to preview “{story.title}” in context (no `previewPath` on its
+          No host page is configured to preview “{story?.title}” in context (no `previewPath` on its
           document type) — shown on its own.
         </p>
       ) : null}

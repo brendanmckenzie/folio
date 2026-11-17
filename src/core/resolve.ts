@@ -178,8 +178,9 @@ export interface Resolution {
   site?: SiteContext;
   /**
    * The id of the record being previewed **in the context of this page**, set only by
-   * the editor's preview of a record whose type declares a `previewPath`. The host
-   * page's block reads it with `resolveReference(resolution.record, resolution)`,
+   * the editor's preview of a record whose type declares a `previewRoot` (the page is
+   * then a blank instance of that block) or a `previewPath` (the page is the stored
+   * one there). The host page's block reads it with `resolveReference(resolution.record, resolution)`,
    * which answers the record's draft from `docs`. Absent on every other render, a
    * live page included, so a block treats its absence as "render the page as usual".
    */
