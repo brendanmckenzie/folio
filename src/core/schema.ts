@@ -114,7 +114,7 @@ export interface DocumentType {
    * so the singleton's draft renders on top of a real page instead of a blank
    * background. `''` means the root story. Undefined gets a bare preview — the
    * singleton alone, on the host's stylesheet, with a note that no host page
-   * was configured.
+   * was configured. A singleton's `previewRoot` wins over it, as a record's does.
    *
    * A `record` may declare one too, and is then previewed in the context of the
    * host page at that path: the page renders with `resolution.record` set to the
@@ -126,11 +126,20 @@ export interface DocumentType {
    */
   previewPath?: string;
   /**
-   * A `record` only: the block Folio draws a record's editor preview inside, with no
-   * stored page. Folio builds a blank instance of it (field defaults, no preset) and
-   * renders it in the record-preview path with `resolution.record` set, exactly as a
-   * `previewPath` page is rendered. Must name a block with a `render` in this brand's
-   * registry. Wins over `previewPath` when both are set.
+   * A `record` or a configured-global `singleton`: the block Folio draws the
+   * document's editor preview inside, with no stored page. Folio builds a blank
+   * instance of it (field defaults, no preset) per request and never stores it.
+   *
+   * - A **record** renders in the record-preview path with `resolution.record` set,
+   *   exactly as a `previewPath` page is rendered.
+   * - A **singleton** renders in the `&as=<name>` path, exactly as on a `previewPath`
+   *   page: the frame is static context in `off` mode, every configured global is
+   *   drawn above it as usual, and the singleton's draft is the one editable document
+   *   (`../../docs/specs/content-model/singleton-preview-root.md`). The frame reads
+   *   nothing about the singleton; a short neutral block is the intended use.
+   *
+   * Must name a block with a `render` in this brand's registry, and a singleton must
+   * be one of the brand's `globals`. Wins over `previewPath` when both are set.
    */
   previewRoot?: string;
 }
@@ -413,12 +422,13 @@ export function validateTypes(types: readonly DocumentType[], schema: SchemaInde
         `folio: document type '${type.name}' is kind '${type.kind}' and cannot declare 'under' — only a page lives in the tree`,
       );
     }
-    // Same reasoning as `under`: a page renders itself and a singleton has its own
-    // previews, so `previewRoot` on either would be a key that does nothing.
+    // Same reasoning as `under`: a page renders itself, so `previewRoot` on one would
+    // be a key that does nothing. A record and a singleton are both previewed in
+    // something else's context, and either may name a synthetic one.
     if (type.previewRoot !== undefined) {
-      if (type.kind !== "record") {
+      if (type.kind === "page") {
         throw new Error(
-          `folio: document type '${type.name}' is kind '${type.kind}' and cannot declare 'previewRoot' — only a record is previewed inside a synthetic root`,
+          `folio: document type '${type.name}' is kind '${type.kind}' and cannot declare 'previewRoot' — only a record or a singleton is previewed inside a synthetic root`,
         );
       }
       if (!schema[type.previewRoot]) {

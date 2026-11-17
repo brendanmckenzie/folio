@@ -175,7 +175,7 @@ export interface TypeRow {
    */
   topLevel: boolean | null;
   /** How a singleton or a record is previewed, resolved to something readable: the
-   * `previewPath`, or for a record the `previewRoot` block (which wins) or "Form only".
+   * `previewRoot` block (which wins), the `previewPath`, or for a record "Form only".
    * `''` for a page, which has a URL of its own and needs no stand-in. */
   preview: string;
   group: string;
@@ -216,15 +216,16 @@ function whereClause(type: DocumentType, labelOf: (name: string) => string): str
 }
 
 function previewClause(type: DocumentType, schema: Record<string, BlockSchema> = {}): string {
+  if (type.kind === "page") return "";
+  // `previewRoot` wins over `previewPath` when both are set, for a record and a
+  // singleton alike (spec 45 decision 2, spec 46 decision 5).
+  if (type.previewRoot !== undefined) {
+    return `Block “${schema[type.previewRoot]?.label ?? type.previewRoot}”`;
+  }
   if (type.kind === "record") {
-    // `previewRoot` wins over `previewPath` when both are set (spec 45 decision 2).
-    if (type.previewRoot !== undefined) {
-      return `Block “${schema[type.previewRoot]?.label ?? type.previewRoot}”`;
-    }
     if (type.previewPath === undefined) return "Form only";
     return type.previewPath === "" ? "The site root" : `/${type.previewPath}`;
   }
-  if (type.kind !== "singleton") return "";
   if (type.previewPath === undefined) return "No host page configured";
   return type.previewPath === "" ? "The site root" : `/${type.previewPath}`;
 }

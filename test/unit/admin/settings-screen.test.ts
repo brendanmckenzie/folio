@@ -89,6 +89,14 @@ const manifest: Manifest = {
     },
     { name: "header", label: "Header", kind: "singleton", root: "headerRoot", previewPath: "" },
     { name: "seo", label: "SEO defaults", kind: "singleton", root: "seoRoot" },
+    {
+      name: "footer",
+      label: "Footer",
+      kind: "singleton",
+      root: "seoRoot",
+      previewRoot: "hero",
+      previewPath: "ignored",
+    },
   ],
   blocks: [
     {
@@ -270,6 +278,12 @@ describe("typeRows", () => {
     expect(row("header").preview).toBe("The site root");
     expect(row("seo").preview).toBe("No host page configured");
     expect(row("page").preview).toBe("");
+  });
+
+  it("says how a singleton previews, previewRoot first (spec 46)", () => {
+    expect(row("footer").preview).toBe("Block “Hero”");
+    expect(row("header").preview).toBe("The site root");
+    expect(row("seo").preview).toBe("No host page configured");
   });
 
   it("says how each record previews, previewRoot first", () => {
@@ -630,7 +644,7 @@ describe("cacheFacts", () => {
 describe("settingsView", () => {
   it('counts each section before the filter, so a heading can say "n of N"', () => {
     const v = view();
-    expect(v.totals.types).toBe(7);
+    expect(v.totals.types).toBe(8);
     expect(v.totals.blocks).toBe(7);
     expect(v.totals.globals).toBe(1);
     expect(v.totals.locales).toBe(3);

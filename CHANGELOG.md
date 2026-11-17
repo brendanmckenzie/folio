@@ -8,6 +8,31 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.8.1
+
+A patch with no migration and no wire change (`PROTOCOL_VERSION` stays at 5). It widens 1.8.0's
+`previewRoot` from records to globals: a host that declares no `previewRoot` on a singleton gets byte-identical
+`{base}/api/schema` and `{base}/api/v1/schema` answers. Spec 46
+([`content-model/singleton-preview-root.md`](docs/specs/content-model/singleton-preview-root.md)); read
+[Singleton preview without a host page](UPGRADING.md#singleton-preview-without-a-host-page-v181) before you use
+it.
+
+### Added
+
+- **`previewRoot` on a `singleton` type that is one of `globals`.** The editor previews the global inside a blank
+  instance of the named block (field defaults, no preset) that Folio builds per request and never stores, with
+  the global's draft applied exactly as `&as=<name>` applies it on a `previewPath` page: every configured global
+  drawn as usual, the edited one updating on every keystroke, and the frame static context in `off` mode. A
+  header or footer previews above a short neutral frame instead of a real page's hero. `previewRoot` wins over
+  `previewPath`. Still refused at construction on a `page`, for an unknown block and for a block with no
+  `render`; newly refused on a singleton that is not one of the brand's `globals`, which the preview could
+  not answer.
+- **The Settings screen** says `Block “<label>”` for a singleton with `previewRoot`.
+
+### Breaking changes
+
+None.
+
 ## 1.8.0
 
 A minor release with no migration and no wire change (`PROTOCOL_VERSION` stays at 5). **Every change adds**: a

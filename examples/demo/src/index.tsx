@@ -259,11 +259,19 @@ const folio = createFolio<Env>({
     // Unrouted, and exactly one — enforced by the derived id `sng_settings`
     // rather than by a constraint. Created on first access, never by an editor.
     { name: "settings", label: "Site settings", kind: "singleton", root: "settingsRoot" },
-    // A second singleton, also a global (below): the site header. `previewPath:
-    // ''` is what lets the admin preview it sitting on the homepage instead of
-    // a blank background (`content-model/globals.md` decision 4) — opening it
-    // points the iframe at `/?_folio=preview&as=header`.
-    { name: "header", label: "Header", kind: "singleton", root: "headerRoot", previewPath: "" },
+    // A second singleton, also a global (below): the site header. `previewRoot`
+    // is what lets the admin preview it above a short neutral frame instead of a
+    // blank background or the homepage's hero (content-model/singleton-preview-root.md);
+    // opening it points the iframe at `/?_folio=preview&as=header`. `previewPath:
+    // ''` would preview it on the homepage instead (`content-model/globals.md`
+    // decision 4).
+    {
+      name: "header",
+      label: "Header",
+      kind: "singleton",
+      root: "headerRoot",
+      previewRoot: "chromeFrame",
+    },
   ],
   bindings: (env) => ({
     db: env.DB,

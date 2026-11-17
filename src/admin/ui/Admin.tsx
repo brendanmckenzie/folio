@@ -680,9 +680,10 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
     open && !open.previewUrl ? types.find((t) => t.name === open.type) : undefined;
   const previewHost = usePreviewHost(
     boot.apiBase,
-    // A record with a `previewRoot` has no host page to fetch (spec 45).
-    previewType?.kind === "singleton" ||
-      (previewType?.kind === "record" && previewType.previewRoot === undefined)
+    // A record or a singleton with a `previewRoot` has no host page to fetch (specs 45
+    // and 46).
+    (previewType?.kind === "singleton" || previewType?.kind === "record") &&
+      previewType.previewRoot === undefined
       ? previewType.previewPath
       : undefined,
   );
@@ -1322,7 +1323,8 @@ function usePaletteActions({
  * - A **page** carries its own `previewUrl`, computed server-side by the host's
  *   `route` function.
  * - A **global** has none, but is not unpreviewable: `globalPreviewUrl` puts its
- *   draft on top of a real host page via `&as=<name>`, falling back to the bare
+ *   draft on top of a real host page via `&as=<name>`, or inside a block Folio
+ *   synthesises when its type declares `previewRoot`, falling back to the bare
  *   `/preview/global/:name` route. Reused rather than reimplemented — it is
  *   already pure and already tested.
  * - A **record** has neither, unless its type declares a `previewRoot` (a block Folio
@@ -1354,7 +1356,9 @@ function previewFor(
   // otherwise (form mode).
   if (type?.kind === "record") return recordPreviewUrl(type, host, story.id);
   if (type?.kind !== "singleton") return undefined;
-  if (multi && !host?.previewUrl) return undefined;
+  // A `previewRoot` global needs no host page, so it previews on a site's preview
+  // origin too: `paneSource` keeps the root URL's path and query (spec 46).
+  if (multi && !host?.previewUrl && type.previewRoot === undefined) return undefined;
   return globalPreviewUrl(type, host ? [host] : [], base);
 }
 

@@ -671,6 +671,14 @@ describe("the pane", () => {
     expect(decodeURIComponent(src!)).not.toContain("_folio_id");
   });
 
+  it("sends a previewRoot global's root URL through site/start, naming no story", () => {
+    const layer = story({ id: "sng_header:alpha", path: null, site: "alpha" });
+    const pane = paneChoice(atScope(PLATFORM, "alpha"), layer, null);
+    const src = paneSource(pane, "/?_folio=preview&as=header", layer, "/folio");
+    expect(src).toBe("/folio/~alpha/site/start?next=%2F%3F_folio%3Dpreview%26as%3Dheader");
+    expect(decodeURIComponent(src!)).not.toContain("_folio_id");
+  });
+
   it("names no story for a document with no path", () => {
     const layer = story({ id: "sng_x:alpha", path: null, site: "alpha" });
     const pane = paneChoice(atScope(PLATFORM, "alpha"), layer, null);
