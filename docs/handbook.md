@@ -1843,6 +1843,14 @@ values while a preview renders the draft. It is indexed by the query API, so it 
 queryable. It carries per-locale values for free. The only thing it does not have
 is a URL, and that is the point.
 
+### A record that points at the host's data
+
+A record type (a product, a person) often needs to name something in the host's own database. Give
+it a sourced `select` (see "A document field that takes its options from a source" under Forms) and
+the record stores the host's id. For several, which a sourced select cannot hold, use a block list: a
+`blocks` slot that allows one block whose only field is the sourced select. The slot keeps the
+editor's order and the block carries no other data.
+
 ## Collections
 
 An insights index, a news list, a team grid, a paginated archive and a sitemap are
@@ -3036,6 +3044,19 @@ muted beneath it, and the CSV puts the label in the question's column and the st
 value in a following `<name>:value` column. A response taken before the feature has
 `optionLabels: {}` and shows the raw value. A `submitted` hook gets `optionLabels` too.
 
+**Two registries, and what each exposes.** A form question names a source under
+`forms.sources`. A document field (`select({ optionsFrom })`, below) names one under
+`optionSources`, or under `forms.sources` too: `optionSources` is for fields only, and **no
+form can list it, preview it or publish it**. That is the reason there are two keys.
+`forms.sources` is listed to every signed-in reader by `GET {base}/api/forms/registry`,
+previewed with settings an editor chose by the form builder, and rendered to anonymous
+visitors on a published form; a source you register under `optionSources` appears in none of
+those and runs only with the settings your schema declares. A source also under
+`forms.sources` keeps that exposure whether or not a field names it, and an id in both keys
+makes `createFolio` throw (one `option_lists` row per source id). Both registries accept
+`lookup(values, input, env)`, which labels values no longer in the list for the admin
+(next section).
+
 **Host sources.** Folio calls your `load` for you, never while rendering. A page reads the
 last good list from `option_lists`. Editors see your sources through a signed-in route
 and the builder previews the list, with its status and any failure category.
@@ -3055,6 +3076,77 @@ entrypoint that issued it, so the background refresh and the cron must run throu
 entrypoint you cache on, as for `runSchedules`. Without
 `folio.refreshOptionSources(env, { waitUntil })` in `scheduled()`, a list refreshes only
 on saves and submissions, so a list nobody saves or submits to goes stale on the page.
+
+### A document field that takes its options from a source
+
+`select({ optionsFrom: { source: 'products', settings: { collection: 'tees' } } })` makes a
+field's choices the host's own list, so an editor picks "Classic tee" and never pastes an
+id, and an agent writing the same page cannot store a product the shop does not have.
+
+```ts
+const productPage = defineBlock({
+  name: 'productPage', label: 'Product page',
+  fields: {
+    title: text({ indexed: true }),
+    // The stored value is the source's `value`, the shop's own id.
+    product: select({ label: 'Product', optionsFrom: { source: 'products' }, indexed: true }),
+  },
+  render: ({ product }) => <ProductHero id={product} />,   // `product` is "prod_8812"
+})
+
+createFolio<Env>({
+  …,
+  optionSources: {
+    products: {
+      label: 'Products',
+      load: async ({ settings, signal }, env) => (await shop(env).products({ signal })).map((p) => ({ value: p.id, label: p.name })),
+      // Optional, admin only: a label for a stored id the list no longer offers.
+      lookup: async (ids, _input, env) => (await shop(env).byIds(ids)).map((p) => ({ value: p.id, label: p.name })),
+    },
+  },
+})
+```
+
+- **Stored: the host's id**, exactly what a static select stores, so `content_index`,
+  `fieldValue`, `dataOf`, the v1 nested shape and migrations are unchanged. With
+  `indexed: true` the id is queryable: `folio.query({ type: 'product-page', where: [{ field: 'product',
+  op: 'eq', value: id }] })` finds the editorial page for a product. Ordering by the field orders
+  by id, not by label.
+- **Rendered: the id only.** `resolveValue` is unchanged and a block's `render` receives
+  `"prod_8812"`. Rendering the product is yours, because you own the data; a render that read
+  labels from `option_lists` would add a read and a cache tag per page for something you
+  already have. So a changed list never purges a page.
+- **The type is `string`.** A sourced select defaults to empty, never to its first typed
+  option. `options` beside `optionsFrom` are typed extras: they come after the sourced list and
+  win a value collision. `translatable` is refused.
+- **Checked at construction**: a source in neither registry, `content` (use `reference({ types })`),
+  a setting the source does not declare or of the wrong kind, a `select` setting outside its
+  options, `translatable`, a default that is not a typed extra, `optionsFrom` on another kind,
+  and a sourced select as the `gate` field.
+- **The list is the cached `option_lists` list**, with spec 37's TTL, lease and last-good rule:
+  the cron (`folio.refreshOptionSources`, keep it in `scheduled()`), the admin and a content API
+  write refresh it, and it is never pruned while a schema names it. The cap of 500 options stays;
+  narrow a larger catalogue with settings, for example one field per collection.
+- **The admin** offers the list in the inspector. A stored value the list no longer has is kept
+  and shown (as its `lookup` label, else the raw id) with "No longer offered by Products", and a
+  list that never loaded is a disabled control with the failure category and a Retry. Past 20
+  options a filter box narrows the list. `lookup` is asked only about values the open document
+  already stores, at most 20 per open, and is never cached, so make it answer only what a viewer
+  of the document may see.
+- **Writes are checked** (`PATCH /documents/:id/fields`, `PUT /documents/:id/content`, `POST /documents`,
+  so `patch_fields`, `write_content` and `create_document`): a value in the last good list (fresh or
+  stale) or a typed extra or `""` passes, anything else is `400 bad_request`, and a list that has never
+  loaded is refreshed (up to 10 seconds) and then `503 unavailable`, because failing open would let a
+  token store any string. Only values a write *changes* are checked, so a merge payload that hands back
+  a stored retired id is not refused. The admin's keystrokes and publish are not checked: the picker
+  offers only listed values, a product archived after a page was written must not block an unrelated
+  publish, and `check_document` reports the drift (`option-not-offered`, `option-list-unavailable`).
+  `GET /api/v1/options/:block/:field` and the MCP tool `list_field_options` answer what a field offers.
+
+`reference` is deliberately not extended: it means "a Folio story" and writes `content_refs`, is
+fenced to the chain and resolved two hops deep, none of which an external id has. Several products in
+order is a block list: a `blocks` slot allowing one block whose only field is the sourced select keeps
+the editor's order.
 
 ### The two hidden inputs, which nothing else will tell you about
 
@@ -5558,6 +5650,15 @@ its first byte served and never exists as a public one. Elsewhere `access` is re
 `unsupported`. A token that reads a gated file's bytes needs only `content:read`, so a
 script can verify an upload it just made. See "Visitor access", "Gating files".
 
+### Fields that take their options from a source
+
+`GET /folio/api/v1/options/:block/:field?locale=` answers `{ source, label, status, loadedAt,
+failure?, options }` for a sourced select (`404` for an unknown block or field, `400` for a field with
+no `optionsFrom`). Read it before writing the field: `PATCH /fields`, `PUT /content` and `POST
+/documents` refuse a value the list does not offer (`400`), and answer `503` with the code
+`unavailable` when the list has never loaded. See "A document field that takes its options from a
+source" under Forms.
+
 ### A write is read, diff, commit
 
 ```
@@ -5680,8 +5781,8 @@ Two surfaces over one set of services.
 
 ## An MCP server, for assistants
 
-`{base}/mcp` is the same content again, for Claude or any other MCP client: eighteen
-tools, seventeen of them a v1 route above dispatched internally, so there is no second
+`{base}/mcp` is the same content again, for Claude or any other MCP client: nineteen
+tools, eighteen of them a v1 route above dispatched internally, so there is no second
 implementation of the access gate, the validation or the document shape. **Connecting one
 is documented in [`mcp.md`](mcp.md)** — mint a token on the admin's Access
 screen, then one `claude mcp add` command.
@@ -5707,6 +5808,10 @@ Three things about it are worth knowing here, because they are design rather tha
   `null` to inherit the folder's value. An agent loading protected material passes
   `access` on the upload, so the file is never public. Changing a public file's access
   queues the cache purge, and the answer reports `purge.pending`.
+- **`list_field_options` is how an agent learns what a sourced field accepts** (`content:read`,
+  the v1 options route). `patch_fields` and `write_content` refuse a value the list does not
+  offer (`invalid params`, naming the field, the source and this tool) and a list that has never
+  loaded is a server condition (`unavailable`).
 - **`preview_document` returns an image**, so an assistant can see whether a page looks
   right rather than infer it from markup. That one needs a Cloudflare Browser Rendering
   binding; without it the tool answers the draft URL and the rendered HTML and says why.
@@ -6014,7 +6119,9 @@ so deleting it would cost a host twenty lines and no capability. See
 
 ## Not built yet
 
-Custom field types defined by a host project. An **admin surface for outbound
+Custom field types defined by a host project (the **sourced select** covers "pick from the host's
+data", and a **plural** external pick, a multi-value select with a source, is not built: use a block
+list of one-field blocks, see "Data documents"). An **admin surface for outbound
 webhooks** — the publish hooks fire and a host's own code can act on them, but a
 *configured* webhook with a delivery log is what a client asks for on day one.
 

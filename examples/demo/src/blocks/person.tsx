@@ -5,6 +5,7 @@ import {
   reference,
   references,
   richtext,
+  select,
   text,
 } from "folio/core";
 
@@ -224,5 +225,28 @@ export const officeCard = defineBlock({
         )}
       </section>
     );
+  },
+});
+
+/**
+ * A record that points at the host's own data (`platform/admin-extensions.md`, feature 3).
+ * `product` is a `select` whose choices are the shop's catalogue (`optionSources.catalogue` in
+ * `src/index.tsx`): the editor picks "Classic tee" and the record stores `prod_8812`. It is
+ * `indexed`, so `folio.query` can find the editorial record for a product by that id. Like
+ * `officeRecord` it has no `render`: it is data, and the shop's own route draws the product.
+ */
+export const productRecord = defineRecord({
+  name: "productRecord",
+  label: "Product",
+  summary: "name",
+  fields: {
+    name: text({ label: "Name", required: true, indexed: true }),
+    product: select({
+      label: "Catalogue product",
+      help: "Which product in the shop this is about.",
+      optionsFrom: { source: "catalogue" },
+      indexed: true,
+    }),
+    blurb: text({ label: "Editorial blurb", translatable: true }),
   },
 });

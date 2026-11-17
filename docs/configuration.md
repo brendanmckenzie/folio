@@ -699,6 +699,25 @@ empty or holds a short key is logged and every signature is then treated as inva
 `brands`, never inside one: verification must not depend on a brand before the file's
 row has been read.
 
+#### `optionSources: Record<string, FolioOptionSource<Env>>`
+
+Absent by default: no document field takes its options from a source. Registers sources for
+**document fields only** (`select({ optionsFrom: { source, settings? } })`), per brand with `brands`.
+Each source is `{ label, load, lookup?, settings?, ttl?, localised? }`, exactly `forms.sources`'s shape
+plus `lookup(values, input, env)`, which labels a stored value the list no longer offers for the admin
+(at most 20 values, under a short deadline, never stored). It is a separate key from `forms.sources`
+because that registry is listed by `GET {base}/api/forms/registry`, previewed by the form builder and
+rendered on published forms: a source here reaches none of those. A field may name a source from either
+key. Defaults and limits are spec 37's (`ttl` 3600, 60 to 604800; at most 500 options of 1 to 120
+characters). Keep `folio.refreshOptionSources` in `scheduled()`. See `docs/handbook.md`, "A document
+field that takes its options from a source".
+
+Failure modes, at construction: an id in both `optionSources` and `forms.sources`, a `load` or `lookup`
+that is not a function, a `ttl` out of range, and (per field) a source in neither registry, `content`, an
+undeclared or wrong-kind setting, `translatable`, a default that is not a typed option, and a sourced
+select as the `gate` field. At run time a never-loaded list answers `503 unavailable` to a content API
+write.
+
 #### `forms: FolioForms<Env>`
 
 ```ts
@@ -1155,6 +1174,7 @@ you can recognise one:
 | `gate.allowsAsset` or `gate.assetDenied` not a function, or `assetDenied` without `allowsAsset` | A key that reads as a constraint and enforces nothing |
 | `describe.fn` not a function, or `concurrency` outside 1–8 | Would 500 on whichever request reached it first |
 | `forms.verify` not a function, `ratePerHour` outside 0–100 | The discovering request is an anonymous POST from the internet |
+| `optionSources`: an id in both it and `forms.sources`; a source with a `load` or `lookup` that is not a function; or a field whose `optionsFrom` names a source in neither registry, names `content`, sets an undeclared or wrong-kind setting, is `translatable`, has a default that is not a typed option, or is the `gate` field | One `option_lists` row per source id, a picker nothing can fill, or a public value that cannot be checked against a list that loads later |
 | `forms.sources`: an id that is not `[a-z][a-z0-9-]*` or is `content`, a `load` that is not a function, `ttl` outside 60–604800, `localised` not a boolean, a setting of another kind | A form naming the source would fail on an anonymous POST |
 | `forms.actions`: a duplicate or malformed id, no `check` or `deliver`, a setting kind outside the six, a code named `error`, codes on an action with no `check` | An integration an editor attaches and nothing runs |
 | An unknown key in `hooks` (or in `hooks.await`) | A typo means a hook that silently never fires |

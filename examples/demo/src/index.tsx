@@ -17,6 +17,7 @@ import { renderToReadableStream } from "react-dom/server.edge";
 import { blocks } from "./blocks";
 import { SubmissionStatus, type SubmissionState } from "./blocks/contact";
 import { migrations } from "./migrations";
+import { PRODUCTS, RETIRED } from "./catalogue";
 import { orderDetail, ordersList } from "./orders";
 
 // Two Durable Object classes now. SpaceDO is the space channel
@@ -245,6 +246,14 @@ const folio = createFolio<Env>({
       root: "officeRecord",
       titleField: "city",
     },
+    // A third record type, whose `product` field picks from the shop's catalogue.
+    {
+      name: "product",
+      label: "Product",
+      kind: "record",
+      root: "productRecord",
+      titleField: "name",
+    },
     // Unrouted, and exactly one — enforced by the derived id `sng_settings`
     // rather than by a constraint. Created on first access, never by an editor.
     { name: "settings", label: "Site settings", kind: "singleton", root: "settingsRoot" },
@@ -359,6 +368,21 @@ const folio = createFolio<Env>({
     },
   },
   basePath: "/folio",
+  // Choices for a document field from the host's own data (`select({ optionsFrom })`,
+  // `platform/admin-extensions.md`, feature 3). Separate from `forms.sources`: no form can
+  // list, preview or render it. Keep `folio.refreshOptionSources` in `scheduled()`.
+  optionSources: {
+    catalogue: {
+      label: "Catalogue",
+      ttl: 60,
+      load: () => PRODUCTS.map((p) => ({ value: p.id, label: p.name })),
+      // Names a stored id the list no longer offers, for the admin only.
+      lookup: (ids) =>
+        [...PRODUCTS.map((p) => ({ id: p.id, name: p.name })), ...RETIRED]
+          .filter((p) => ids.includes(p.id))
+          .map((p) => ({ value: p.id, label: p.name })),
+    },
+  },
   // A screen of the host's own in Folio's sidebar and chrome (`platform/admin-extensions.md`).
   // Folio draws the item and the frame; `/admin/orders` below is the host's route and
   // gates itself with `folio.requireEditor`, which is where the role is enforced.

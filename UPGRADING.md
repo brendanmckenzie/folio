@@ -1297,6 +1297,17 @@ sends `HOST_PAGE_HEADERS` (returned by `requireEditor`), and gates the route wit
 `folio/host` (the browser helper), `folio/host.css` and `/folio-host.css`. See "Extending the admin" in
 `docs/handbook.md`.
 
+### Option sources on document fields (v1.7.0)
+
+`optionSources` (per brand with `brands`) registers sources for document fields only; no form can list,
+preview or render them. A field may also name a `forms.sources` source. `forms.sources` is unchanged,
+and an id in both throws at construction. `select({ optionsFrom })` is new. v1 writes to a sourced select
+are checked against its list and may answer `503` with the new error code `unavailable`: a TypeScript
+`switch` that is exhaustive over `FolioErrorCode` must add it. `check_document` gains
+`option-not-offered` and `option-list-unavailable`, and MCP gains `list_field_options`. If you register a
+source used only by fields, keep `folio.refreshOptionSources` in `scheduled()`, or its list refreshes only
+when an editor or a write asks.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

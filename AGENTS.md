@@ -576,7 +576,9 @@ bindings and the D1 migrations, and names the fix for each finding.
   brand, or one the config does not name, serves nothing, and a brand id is permanent
   once rows carry it.
 - **No host-defined custom field types.** The field set is what `folio/core`
-  exports.
+  exports. What a host can do instead is `select({ optionsFrom })`: a select whose choices come from
+  a source you register under `optionSources` (the stored value is your id; `reference` is not
+  extended to external ids, and a multi-value external pick is a block list of one-field blocks).
 
 ## LLM tasks
 

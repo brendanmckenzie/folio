@@ -693,7 +693,7 @@ Exports are deliberate: `folio/core` is the whole contract for defining blocks a
 rendering resolved pages; `folio/engine` is document tooling for bulk imports and
 migrations (`apply()` outside a transaction bypasses sync, undo and multiplayer).
 
-The MCP tools are one table, `server/mcp/tools.ts`: eighteen, seventeen of them a v1
+The MCP tools are one table, `server/mcp/tools.ts`: nineteen, eighteen of them a v1
 route dispatched internally and `preview_document` the one that is not.
 `check_document` is the route-backed `GET {base}/api/v1/documents/:id/check`, computed
 by `server/checks.ts`, and `test/unit/mcp/tools.test.ts` pins the count.
