@@ -498,3 +498,23 @@
     transition: none !important;
   }
 }
+
+/*
+ * Narrow (`NARROW_QUERY`, `ui/narrow.ts`). With the sidebar a 48px rail the screen has
+ * about 330px, and the metadata columns alone asked for 264 of it, which is what sent
+ * the list sideways. The stamp is the one column nothing else says (the badge and the
+ * title still do), so it goes, and the grid loses its last track with it.
+ */
+@media (max-width: 720px) {
+  .cols {
+    grid-template-columns: 96px;
+  }
+
+  .cols[data-typed] {
+    grid-template-columns: 72px 96px;
+  }
+
+  .stamp {
+    display: none;
+  }
+}
