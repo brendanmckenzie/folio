@@ -764,3 +764,37 @@ describe("a trusted provider beside the others", () => {
     expect(html).toContain('href="/folio/login/oidc?next=%2Ffolio%2Fedit"');
   });
 });
+
+/* ------------------------------------------------- a host path behind it --- */
+
+describe("a trusted sign-in and a host route", () => {
+  it("sends a visitor to sign-in with next, and editor() recognises the session it mints", async () => {
+    await seedAnn();
+    const { provider } = headerProvider("proxy", "x-identity");
+    const folio = folioWith({ providers: [capturingMagicLink, provider] });
+    const host = `${ORIGIN}/admin/orders`;
+
+    // The host's gate: no session yet, so it sends the browser to `{base}/login?next=`.
+    const gate = (await folio.requireEditor(new Request(host), env, {})) as Response;
+    expect(gate.status).toBe(302);
+    const login = gate.headers.get("location") as string;
+    expect(login).toBe("/folio/login?next=%2Fadmin%2Forders");
+
+    // The trusted provider signs the browser in on that page and returns it to the host path.
+    const signedIn = await call(folio, login, { headers: { "x-identity": "ann@example.com" } });
+    expect(signedIn.status).toBe(302);
+    expect(signedIn.headers.get("location")).toBe("/admin/orders");
+    const token = cookieFrom(signedIn, SECURE_COOKIE) as string;
+
+    const editor = await folio.editor(
+      new Request(host, { headers: { cookie: `${SECURE_COOKIE}=${token}` } }),
+      env,
+    );
+    expect(editor).toMatchObject({
+      kind: "user",
+      user: { email: "ann@example.com" },
+      role: "editor",
+      session: { provider: "proxy" },
+    });
+  });
+});

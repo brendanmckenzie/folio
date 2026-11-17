@@ -27,7 +27,8 @@ import type { Registry as SiteRegistry, SiteRef, Surface } from "../core/sites";
 import type { StoryMeta, StoryNode } from "../core/story";
 import type { RenderMode } from "../preview/Render";
 import type { AuthConfig, OpenAuth } from "./auth/config";
-import type { Actor } from "./auth/roles";
+import type { Actor, Role } from "./auth/roles";
+import type { FolioEditor, FolioEditorOptions } from "./editor";
 import type { FolioHooks } from "./hooks";
 import type { AuditOptions, AuditReport } from "./audit";
 import type { CacheVerdict } from "./cache-request";
@@ -1113,6 +1114,27 @@ export interface Folio<Env> {
    * not own, so the host's own routes always win.
    */
   handle: (req: Request, env: Env, ctx: ExecutionContext) => Promise<Response | null>;
+  /**
+   * Who the signed-in editor is, for a host's own route (`platform/admin-extensions.md`
+   * decision 1). Answers null with no credential (and never calls `bindings`), under
+   * `auth: 'open'`, for a token unless `tokens: true`, for a refused `Origin` on an unsafe
+   * method, and on a deployment with `sites` for any origin but `sites.admin`. Pass the
+   * original `Request`: the resolution is memoised on it.
+   */
+  editor: (req: Request, env: Env, opts?: FolioEditorOptions) => Promise<FolioEditor | null>;
+  /**
+   * `editor()` as a gate: a `302` to sign-in for a `GET`, `401` otherwise, `403` below
+   * `opts.role`. An admission carries `HOST_PAGE_HEADERS` to spread onto the response.
+   */
+  requireEditor: (
+    req: Request,
+    env: Env,
+    opts?: FolioEditorOptions & { role?: Role },
+  ) => Promise<{ editor: FolioEditor; headers: Record<string, string> } | Response>;
+  /** `{base}/login?next=<path+query>`, on `sites.admin` with `sites`. */
+  signInUrl: (req: Request, next?: string) => string;
+  /** The CSRF `Origin` check alone, for a host route that does not read the editor. */
+  originAllowed: (req: Request) => boolean;
   /**
    * One request's worth of reads on one D1 session — see `FolioReader`.
    *

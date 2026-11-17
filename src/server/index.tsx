@@ -36,6 +36,7 @@ import { allows, mayPreviewDrafts, READ_DRAFT } from "./auth/roles";
 import { deleteExpiredSessions } from "./auth/session";
 import { claimShare, sharedStoriesAt } from "./auth/shares";
 import { PRIMARY_FIRST, readBookmark, sessionFor } from "./db";
+import { createEditorGate } from "./editor";
 import { answerMiss, envelope, FolioError } from "./errors";
 import type { ResolvedGate } from "./gate";
 import { appliedMigrations, type MigrateReport, ownMigrations, runMigrations } from "./migrate";
@@ -326,6 +327,17 @@ export {
   SCOPES,
 } from "./auth/roles";
 export type { Access, Actor, Role, Scope, TokenActor, UserActor } from "./auth/roles";
+/**
+ * The signed-in editor for a host's own routes (`platform/admin-extensions.md`):
+ * `folio.editor()` / `folio.requireEditor()`, and the headers a gated host page sends.
+ */
+export { HOST_PAGE_HEADERS } from "./editor";
+export type {
+  FolioEditor,
+  FolioEditorOptions,
+  FolioEditorToken,
+  FolioEditorUser,
+} from "./editor";
 export type {
   AuthConfig,
   AuthProvider,
@@ -1900,8 +1912,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     return { pending, behind, complete: behind === 0 };
   };
 
+  // One per instance: its per-`Request` memo must not be shared between two Folios.
+  const editors = createEditorGate(config, rt);
+
   return {
     handle,
+    editor: editors.editor,
+    requireEditor: editors.requireEditor,
+    signInUrl: editors.signInUrl,
+    originAllowed: editors.originAllowed,
     reader,
     cacheProps,
     // Unconditional: the host has made its own entitlement decision (decision 9).
