@@ -710,6 +710,9 @@ const RESPONSES = {
  * `storyByPath` on the request's chain.
  */
 const UNSCOPED_IDS = [
+  // `platform/admin-extensions.md` decision 20: names a block and a field of the scope's
+  // brand (a registry read through `c.var.brand`, which `withScope` has fenced), not a row.
+  "GET /api/v1/options/:block/:field",
   "PATCH /api/users/:id",
   "DELETE /api/users/:id",
   "DELETE /api/users/:id/passkeys",

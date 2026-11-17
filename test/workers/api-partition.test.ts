@@ -99,7 +99,7 @@ describe("the /api partition", () => {
    * exactly this list**. A new internal route cannot leak into it, because anything
    * not named here has to 404 under `/api/v1`.
    */
-  const V1_SEGMENTS = ["schema", "documents", "assets", "search"];
+  const V1_SEGMENTS = ["schema", "documents", "assets", "search", "options"];
 
   it("keeps the v1 surface to exactly its documented segments", async () => {
     for (const path of INTERNAL) {
@@ -340,6 +340,7 @@ describe("the v1 route list", () => {
     "GET /documents/:id/versions",
     "GET /documents/by-path",
     "GET /documents/by-path/:path{.*}",
+    "GET /options/:block/:field",
     "GET /schema",
     "GET /search",
     "PATCH /assets/:id",

@@ -51,6 +51,7 @@ import {
   tagsQuery,
 } from "../../validate";
 import { documentRoutes } from "./documents";
+import { optionRoutes } from "./options";
 import { pageRoutes } from "./pages";
 import { searchRoutes } from "./search";
 import { siteReadRoutes } from "./sites";
@@ -106,6 +107,7 @@ export function apiRoutes<Env>(
 
   app.route("/", documentRoutes<Env>(rt));
   app.route("/", searchRoutes<Env>(rt));
+  app.route("/", optionRoutes<Env>(rt));
   // The two below mount nothing on a deployment with no `sites`: their routes do not
   // exist there, and `{base}/api/v1` is exactly what it always was.
   app.route("/", siteReadRoutes<Env>(rt));

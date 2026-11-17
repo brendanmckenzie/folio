@@ -260,3 +260,20 @@ export function hasUnavailableOptions(resolution: Resolution): boolean {
   }
   return false;
 }
+
+/**
+ * What a sourced select offers: the sourced entries first, then the field's typed extras,
+ * an extra winning a value collision so the editor's label stands
+ * (`platform/admin-extensions.md` decision 14). `null` (the list is unavailable) gives the
+ * extras only. Labels go through `screenOptionLabel`, the value standing in for one that fails.
+ */
+export function fieldOptions(
+  list: readonly FormFieldOption[] | null,
+  extras: readonly { value: string; label: string }[],
+): { value: string; label: string }[] {
+  const taken = new Set(extras.map((o) => o.value));
+  const sourced = (list ?? [])
+    .filter((o) => !taken.has(o.value))
+    .map((o) => ({ value: o.value, label: screenOptionLabel(o.label) ?? o.value }));
+  return [...sourced, ...extras.map((o) => ({ value: o.value, label: o.label }))];
+}

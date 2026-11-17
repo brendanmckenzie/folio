@@ -110,19 +110,36 @@ const NOT_TOOLS: readonly string[] = [
 ];
 
 describe("the tool table", () => {
-  it("names eighteen tools, each once — seventeen route-backed and preview_document with none", () => {
-    // Seventeen are a `{method, path}` over the v1 app; `preview_document` is
+  it("names nineteen tools, each once — eighteen route-backed and preview_document with none", () => {
+    // Eighteen are a `{method, path}` over the v1 app; `preview_document` is
     // `?_folio=draft` plus a `browser` binding (decisions 5, 5a) and has
     // neither — `routes/mcp.ts`'s `tools/call` branches to it before the
-    // internal dispatch the other seventeen share.
-    expect(MCP_TOOLS).toHaveLength(18);
-    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(18);
+    // internal dispatch the other eighteen share.
+    expect(MCP_TOOLS).toHaveLength(19);
+    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(19);
     const preview = toolByName("preview_document");
     expect(preview?.method).toBeUndefined();
     expect(preview?.path).toBeUndefined();
     expect(MCP_TOOLS.filter((tool) => !routed(tool)).map((tool) => tool.name)).toEqual([
       "preview_document",
     ]);
+  });
+
+  it("dispatches list_field_options to the v1 options route at READ, as a plain GET", () => {
+    const tool = toolByName("list_field_options");
+    expect([tool?.method, tool?.path, tool?.need.scope]).toEqual([
+      "GET",
+      "/options/:block/:field",
+      "content:read",
+    ]);
+    expect(tool?.query).toEqual(["locale"]);
+    expect(tool?.inputSchema.required).toEqual(["block", "field"]);
+    expect(Object.keys(tool?.inputSchema.properties ?? {}).sort()).toEqual([
+      "block",
+      "field",
+      "locale",
+    ]);
+    expect(tool?.narrowed).toBeUndefined();
   });
 
   it("gives update_asset the access, alt and description the v1 route takes, and nothing admin-only", () => {
@@ -385,6 +402,7 @@ describe("the tool table", () => {
       get_document: "content:read",
       check_document: "content:read",
       list_versions: "content:read",
+      list_field_options: "content:read",
       preview_document: "content:read:draft",
       create_document: "content:write",
       write_content: "content:write",

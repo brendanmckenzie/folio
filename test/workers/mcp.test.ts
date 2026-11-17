@@ -271,6 +271,7 @@ const READS = [
   "get_document",
   "check_document",
   "list_versions",
+  "list_field_options",
 ];
 /**
  * `READS` plus `preview_document` — the one tool whose own `need` is
@@ -594,7 +595,7 @@ describe("tools/list", () => {
   it("admin — every tool, including delete_document", async () => {
     const offered = await listed(await tokenFor("admin"));
     expect(offered).toContain("delete_document");
-    expect(offered).toHaveLength(18);
+    expect(offered).toHaveLength(19);
   });
 
   /**
@@ -618,7 +619,7 @@ describe("tools/list", () => {
    * has no access control by choice, and MCP is not the place to invent some.
    */
   it("offers every tool on an open deployment, with no credential at all", async () => {
-    expect(await listed(undefined, open)).toHaveLength(18);
+    expect(await listed(undefined, open)).toHaveLength(19);
   });
 
   /** Names the site's own declared types, which is a bounded list of strings

@@ -395,3 +395,95 @@ describe("v1 writes to a sourced select (decision 20)", () => {
     expect(calls).toEqual([]);
   });
 });
+
+/* ---------------------------------------------- GET /api/v1/options/:b/:f --- */
+
+describe("GET /api/v1/options/:block/:field", () => {
+  beforeAll(async () => {
+    write = await writer();
+  });
+  const options = (block: string, field: string, query = "") =>
+    v1(`/options/${block}/${field}${query}`);
+
+  it("answers a fresh list as stored, with no call to the source", async () => {
+    await putList(["prod_1", "prod_2"]);
+    const res = await options("productPage", "product");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      source: string;
+      status: string;
+      loadedAt: number;
+      options: { value: string; label: string }[];
+    };
+    expect(body).toMatchObject({
+      source: "products",
+      status: "fresh",
+      options: [
+        { value: "prod_1", label: "prod_1" },
+        { value: "prod_2", label: "prod_2" },
+      ],
+    });
+    expect(body.loadedAt).toBeGreaterThan(0);
+    expect(calls).toEqual([]);
+  });
+
+  it("refreshes a missing list under the lease and answers what loaded", async () => {
+    const res = await options("productPage", "product");
+    const body = (await res.json()) as { status: string; options: { value: string }[] };
+    expect(body.status).toBe("fresh");
+    expect(body.options.map((o) => o.value)).toEqual(["prod_1", "prod_2"]);
+    expect(calls).toEqual(["products"]);
+  });
+
+  it("refreshes a stale list, and answers the stale one with the failure when the source throws", async () => {
+    await putList(["prod_old"], Date.now() - 3_600_000);
+    behaviour = "throw";
+    const res = await options("productPage", "product");
+    const body = (await res.json()) as {
+      status: string;
+      failure?: string;
+      options: { value: string }[];
+    };
+    expect(body).toMatchObject({ status: "stale", failure: "threw" });
+    expect(body.options.map((o) => o.value)).toEqual(["prod_old"]);
+    expect(JSON.stringify(body)).not.toContain("SECRET");
+    behaviour = "list";
+    await putList(["prod_old"], Date.now() - 3_600_000);
+    const again = (await (await options("productPage", "product")).json()) as {
+      status: string;
+      options: { value: string }[];
+    };
+    expect(again.status).toBe("fresh");
+    expect(again.options.map((o) => o.value)).toEqual(["prod_1", "prod_2"]);
+  });
+
+  it("answers never-loaded with no options and a failure category when the first load fails", async () => {
+    behaviour = "throw";
+    const res = await options("productPage", "product");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      status: "never-loaded",
+      failure: "threw",
+      options: [],
+      loadedAt: null,
+    });
+  });
+
+  it("is 404 for an unknown block or field, and 400 for a field with no optionsFrom", async () => {
+    expect((await options("nope", "product")).status).toBe(404);
+    expect((await options("productPage", "nope")).status).toBe(404);
+    const plain = await options("productPage", "title");
+    expect(plain.status).toBe(400);
+    expect(((await plain.json()) as { error: { code: string } }).error.code).toBe("bad_request");
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses an unknown locale, and needs content:read", async () => {
+    await putList(["prod_1"]);
+    expect((await options("productPage", "product", "?locale=xx")).status).toBe(501);
+    const none = await v1("/options/productPage/product", { auth: {} });
+    expect(none.status).toBe(401);
+    const wrong = await bearer(`fs-nowrite-${Math.random()}`, ["assets:write"]);
+    expect((await v1("/options/productPage/product", { auth: wrong })).status).toBe(403);
+  });
+});
