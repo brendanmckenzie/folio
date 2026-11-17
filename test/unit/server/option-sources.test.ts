@@ -5,10 +5,13 @@ import type { FormField } from "../../../src/core/forms";
 import type { DocumentType } from "../../../src/core/schema";
 import { toSchemaIndex } from "../../../src/core/block";
 import { FolioError } from "../../../src/server/errors";
-import { validateForms } from "../../../src/server/form-responses";
+import { mergeFieldSources, validateFieldSources } from "../../../src/server/field-sources";
+import { validateForms, validateSources } from "../../../src/server/form-responses";
 import {
   checkOptionSources,
   digestOptions,
+  hostListsOf,
+  schemaFieldsOf,
   listStatus,
   type OptionListRow,
   type RefreshResult,
@@ -403,5 +406,188 @@ describe("checkOptionSources", () => {
 
   it("refuses content settings with no type", () => {
     expect(refusal({ source: "content", settings: {} })).toMatch(/type/);
+  });
+});
+
+/* ------------------------------------------------ field sources (spec 44) --- */
+
+describe("option sources for document fields", () => {
+  const source = (extra: Record<string, unknown> = {}) => ({
+    label: "Products",
+    load,
+    settings: {
+      collection: { kind: "text" as const, label: "Collection" },
+      limit: { kind: "number" as const, label: "Limit" },
+      live: { kind: "boolean" as const, label: "Live" },
+      sort: {
+        kind: "select" as const,
+        label: "Sort",
+        options: [
+          { value: "name", label: "Name" },
+          { value: "price", label: "Price" },
+        ],
+      },
+    },
+    ...extra,
+  });
+  const sources = (extra: Record<string, unknown> = {}) =>
+    validateSources({ products: source(extra) }, "optionSources");
+  const schemaWith = (field: unknown) =>
+    toSchemaIndex({
+      page: defineBlock({
+        name: "page",
+        label: "Page",
+        fields: { title: text(), product: field as never },
+        render: () => null,
+      }),
+    } as never);
+  const refuses = (field: unknown, message: RegExp, registry = sources()) =>
+    expect(() => validateFieldSources(schemaWith(field), registry)).toThrow(message);
+
+  it("accepts a field naming a registered source, with declared settings", () => {
+    expect(() =>
+      validateFieldSources(
+        schemaWith(
+          select({
+            optionsFrom: {
+              source: "products",
+              settings: { collection: "tees", limit: 5, live: true, sort: "price" },
+            },
+            options: [{ value: "none", label: "None" }],
+            default: "none",
+          }),
+        ),
+        sources(),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses an unregistered source, naming the block, the field and what is registered", () => {
+    refuses(
+      select({ optionsFrom: { source: "nowhere" } }),
+      /block 'page' field 'product'.*'nowhere'.*products/,
+    );
+  });
+
+  it("refuses the content source, pointing at reference", () => {
+    refuses(select({ optionsFrom: { source: "content" } }), /reference\(\{ types \}\)/);
+  });
+
+  it("refuses a setting the source does not declare, a wrong kind and a select outside its options", () => {
+    refuses(
+      select({ optionsFrom: { source: "products", settings: { nope: 1 } } }),
+      /does not declare/,
+    );
+    refuses(select({ optionsFrom: { source: "products", settings: { limit: "5" } } }), /a number/);
+    refuses(
+      select({ optionsFrom: { source: "products", settings: { collection: 5 } } }),
+      /a string/,
+    );
+    refuses(
+      select({ optionsFrom: { source: "products", settings: { live: "yes" } } }),
+      /a boolean/,
+    );
+    refuses(
+      select({ optionsFrom: { source: "products", settings: { sort: "random" } } }),
+      /one of: name, price/,
+    );
+  });
+
+  it("refuses translatable, a default that is not a typed extra, and optionsFrom off a select", () => {
+    refuses(
+      { ...select({ optionsFrom: { source: "products" } }), translatable: true },
+      /translatable/,
+    );
+    refuses(
+      { ...select({ optionsFrom: { source: "products" } }), default: "prod_1" },
+      /default that is not one of its typed options/,
+    );
+    refuses({ ...text(), optionsFrom: { source: "products" } }, /is a text and has `optionsFrom`/);
+  });
+
+  it("refuses a malformed descriptor", () => {
+    refuses(
+      { ...select({ optionsFrom: { source: "products" } }), optionsFrom: "products" },
+      /malformed/,
+    );
+    refuses(select({ optionsFrom: { source: "Bad Id" } }), /invalid source/);
+  });
+
+  it("validates lookup as a function, in the same validator forms use", () => {
+    expect(() => sources({ lookup: "nope" })).toThrow(
+      /`optionSources.products`.lookup must be a function/,
+    );
+    expect(sources({ lookup: () => [] }).get("products")?.lookup).toBeTypeOf("function");
+    expect(() => validateSources({ products: source({ lookup: 5 }) })).toThrow(
+      /`forms.sources.products`.lookup/,
+    );
+  });
+
+  it("merges the two registries, and refuses an id in both", () => {
+    const forms = validateForms({ sources: { countries: source() } })!;
+    const merged = mergeFieldSources(sources(), forms.sources);
+    expect([...merged.keys()].sort()).toEqual(["countries", "products"]);
+    expect([...forms.sources.keys()]).toEqual(["countries"]);
+    expect(() =>
+      mergeFieldSources(sources(), validateForms({ sources: { products: source() } })!.sources),
+    ).toThrow(/both `optionSources` and `forms.sources`/);
+  });
+
+  describe("hostListsOf reads the registry it is told", () => {
+    const optionSources = sources();
+    const forms = validateForms({ sources: { countries: source({ label: "Countries" }) } })!;
+    const brand = {
+      brand: null,
+      forms,
+      optionSources,
+      fieldSources: mergeFieldSources(optionSources, forms.sources),
+    } as never;
+
+    it("defaults to forms.sources exactly as before", () => {
+      const lists = hostListsOf(
+        [{ optionsFrom: { source: "countries" } }, { optionsFrom: { source: "products" } }],
+        brand,
+        undefined,
+      );
+      expect(lists.map((l) => l.source.id)).toEqual(["countries"]);
+    });
+
+    it("reads fieldSources for a document field", () => {
+      const lists = hostListsOf(
+        [{ optionsFrom: { source: "countries" } }, { optionsFrom: { source: "products" } }],
+        brand,
+        undefined,
+        (brand as { fieldSources: never }).fieldSources,
+      );
+      expect(lists.map((l) => l.source.id).sort()).toEqual(["countries", "products"]);
+    });
+
+    it("lists a localised source once per locale", () => {
+      const localised = validateSources({ products: source({ localised: true }) }, "optionSources");
+      const b = { brand: null, forms: null, fieldSources: localised } as never;
+      const lists = hostListsOf(
+        [{ optionsFrom: { source: "products" } }],
+        b,
+        {
+          default: "en",
+          available: [
+            { code: "en", label: "English" },
+            { code: "fr", label: "French" },
+          ],
+        },
+        localised,
+      );
+      expect(lists.map((l) => l.locale)).toEqual(["", "fr"]);
+    });
+  });
+
+  it("schemaFieldsOf finds every sourced select in a brand's schema", () => {
+    const schema = schemaWith(select({ optionsFrom: { source: "products" } }));
+    expect(schemaFieldsOf({ schema } as never)).toEqual([{ optionsFrom: { source: "products" } }]);
+    expect(
+      schemaFieldsOf({
+        schema: schemaWith(select({ options: [{ value: "a", label: "A" }] })),
+      } as never),
+    ).toEqual([]);
   });
 });

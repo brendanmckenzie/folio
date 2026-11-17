@@ -183,6 +183,15 @@ describe("validateGate", () => {
     );
   });
 
+  it("throws for a select that takes its options from a source", () => {
+    const sourced = schemaWith(
+      select({ ...ACCESS, indexed: true, optionsFrom: { source: "products" } }),
+    );
+    expect(() => validateGate(gate(), TYPES, sourced)).toThrow(
+      /gate field 'access' on root block 'pageRoot' as a select with `optionsFrom`; a gate field's public value cannot be checked against a list that loads later/,
+    );
+  });
+
   it("throws for a field that is not indexed", () => {
     expect(() => validateGate(gate(), TYPES, schemaWith(select(ACCESS)))).toThrow(
       /document type 'page' declares gate field 'access' on root block 'pageRoot' without `indexed: true`/,

@@ -72,7 +72,13 @@ import { type ResolvedDescribe, validateDescribe } from "./describe";
 import { validateWriting } from "./writing";
 import { logActionWarnings } from "./form-actions";
 import { type ResolvedHostPage, validateAdmin } from "./admin-config";
-import { type ResolvedForms, validateForms } from "./form-responses";
+import { mergeFieldSources, validateFieldSources } from "./field-sources";
+import {
+  type ResolvedForms,
+  type ResolvedOptionSource,
+  validateForms,
+  validateSources,
+} from "./form-responses";
 import { compileForm, type Form, formsByIds, materialiseForm } from "./forms";
 import {
   effectiveSettings,
@@ -297,6 +303,17 @@ export interface BrandRuntime {
   indexedFields: ReadonlySet<string>;
   gate: ResolvedGate | null;
   forms: ResolvedForms | null;
+  /**
+   * `optionSources`, validated: the sources registered for document fields only, which no
+   * forms surface lists, previews or renders (`platform/admin-extensions.md` decision 16).
+   */
+  optionSources: ReadonlyMap<string, ResolvedOptionSource>;
+  /**
+   * What a field's `optionsFrom` may name: `optionSources` and `forms.sources` together.
+   * Read by field code only; `forms.sources` is untouched, so the registry route, the
+   * builder preview and `checkOptionSources` still see form sources alone.
+   */
+  fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
   describe: ResolvedDescribe | null;
   /**
    * This brand's writing guide (`authoring-guidance.md` decision 6), or null. Read
@@ -715,6 +732,7 @@ const BRAND_KEYS = [
   "previewWrap",
   "gate",
   "forms",
+  "optionSources",
   "describe",
   "writing",
   "migrations",
@@ -807,6 +825,8 @@ interface PreparedBrand {
   describe: ResolvedDescribe | null;
   writing: WritingGuide | null;
   forms: ResolvedForms | null;
+  optionSources: ReadonlyMap<string, ResolvedOptionSource>;
+  fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
   previewCss: readonly string[];
   previewWrap: PreviewWrap | undefined;
 }
@@ -857,6 +877,13 @@ function prepareBrand<Env>(
     // symptom is a contact form that silently collects nothing, on the one route in
     // this library a stranger can reach (`../../docs/specs/content-model/forms.md` decision 11).
     const forms = validateForms(brand.forms);
+    // Same timing, same reason: a field naming a source nobody registered, with a setting
+    // the source does not declare, or beside `translatable` is found by an editor opening
+    // the inspector. `optionSources` is its own registry, and an id also in `forms.sources`
+    // throws (`platform/admin-extensions.md` decisions 16 and 17).
+    const optionSources = validateSources(brand.optionSources, "optionSources");
+    const fieldSources = mergeFieldSources(optionSources, forms?.sources);
+    validateFieldSources(schema, fieldSources);
     // Same timing, same reason: `globals` naming an unknown type or a non-
     // singleton one is a config mistake, not a runtime surprise the first page
     // render discovers (`../../docs/specs/content-model/globals.md`).
@@ -900,6 +927,8 @@ function prepareBrand<Env>(
       describe,
       writing,
       forms,
+      optionSources,
+      fieldSources,
       previewCss: brand.previewCss ?? [],
       previewWrap: brand.previewWrap,
     };
@@ -2181,6 +2210,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       indexedFields: indexed,
       gate,
       forms,
+      optionSources: b.optionSources,
+      fieldSources: b.fieldSources,
       describe,
       writing,
       previewWrap: b.previewWrap,

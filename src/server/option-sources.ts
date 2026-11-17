@@ -20,6 +20,7 @@ import {
   contentOptionSettings,
   MAX_OPTION_VALUE,
   MAX_SOURCED_OPTIONS,
+  type OptionsFrom,
   optionListKey,
   screenOptionLabel,
 } from "../core/option-sources";
@@ -568,15 +569,20 @@ export function hostLocales(
  * its locales, deduplicated. `content` and an unregistered source name no row.
  */
 export function hostListsOf(
-  fields: readonly FormField[],
+  fields: readonly Pick<FormField, "optionsFrom">[],
   brand: BrandRuntime,
   locales: LocaleConfig | undefined,
+  /**
+   * Which registry `fields` name their sources in. A form's questions read
+   * `brand.forms?.sources` exactly as they always did; a document field reads
+   * `brand.fieldSources`, the union with `optionSources`.
+   */
+  sources: ReadonlyMap<string, ResolvedOptionSource> | undefined = brand.forms?.sources,
 ): HostList[] {
   const out = new Map<string, HostList>();
   for (const field of fields) {
     const from = field.optionsFrom;
-    const source =
-      from && from.source !== CONTENT_SOURCE ? brand.forms?.sources.get(from.source) : undefined;
+    const source = from && from.source !== CONTENT_SOURCE ? sources?.get(from.source) : undefined;
     if (!from || !source) continue;
     const settings = effectiveSettings(source, from.settings);
     for (const locale of hostLocales(source, locales)) {
@@ -601,15 +607,23 @@ export async function referencedLists(
   env: unknown,
   db: FolioDb,
 ): Promise<HostList[]> {
+  const out = new Map<string, HostList>();
+  // **The schema half needs no D1 read**: every brand's block fields that name a source,
+  // each in its locales (`platform/admin-extensions.md` decision 18). It comes first, and
+  // the forms read's early return below must not skip it, or a deployment with sourced
+  // fields and no sourced form would never refresh a field's list and the cron would prune it.
+  for (const brand of rt.brands.values()) {
+    for (const list of hostListsOf(schemaFieldsOf(brand), brand, rt.locales, brand.fieldSources)) {
+      out.set(list.canonical, list);
+    }
+  }
   const { results } = await retryRead(() =>
     db
       .prepare(`select id, fields, site_id from forms where fields like '%"optionsFrom"%'`)
       .all<{ id: string; fields: string; site_id: string }>(),
   );
-  if (results.length === 0) return [];
   const only = rt.brands.get(null);
-  const registry = only ? undefined : await rt.sites?.registry(env);
-  const out = new Map<string, HostList>();
+  const registry = results.length === 0 || only ? undefined : await rt.sites?.registry(env);
   for (const row of results) {
     const brand = only ?? (registry ? rt.forScope(registry, row.site_id) : null);
     if (!brand) continue;
@@ -622,6 +636,18 @@ export async function referencedLists(
     for (const list of hostListsOf(fields, brand, rt.locales)) out.set(list.canonical, list);
   }
   return [...out.values()].sort((a, b) => (a.canonical < b.canonical ? -1 : 1));
+}
+
+/** Every `optionsFrom` a brand's document fields declare, in schema order. */
+export function schemaFieldsOf(brand: BrandRuntime): { optionsFrom: OptionsFrom }[] {
+  const out: { optionsFrom: OptionsFrom }[] = [];
+  for (const block of Object.values(brand.schema)) {
+    for (const field of Object.values(block.fields)) {
+      if (field.kind === "select" && field.optionsFrom)
+        out.push({ optionsFrom: field.optionsFrom });
+    }
+  }
+  return out;
 }
 
 /** The lists of `lists` whose row is missing, never loaded or past its ttl. */

@@ -33,7 +33,7 @@ import type { FolioEditor, FolioEditorOptions } from "./editor";
 import type { FolioHooks } from "./hooks";
 import type { AuditOptions, AuditReport } from "./audit";
 import type { CacheVerdict } from "./cache-request";
-import type { FolioForms } from "./form-responses";
+import type { FolioForms, FolioOptionSource } from "./form-responses";
 import type { FolioDb } from "./db";
 import type { MigrateOptions, MigrateReport } from "./migrate";
 import type { ReindexOptions, ReindexReport } from "./reindex";
@@ -758,6 +758,8 @@ export interface FolioBrand<Env> {
   previewWrap?: PreviewWrap;
   gate?: FolioGate<Env>;
   forms?: FolioForms<Env>;
+  /** As `FolioSingleConfig.optionSources`, for this brand. */
+  optionSources?: Readonly<Record<string, FolioOptionSource<Env>>>;
   describe?: FolioDescribe<Env>;
   /** This brand's voice and avoided terms, served to agents on the gated v1 `/schema` only. */
   writing?: WritingGuide;
@@ -782,6 +784,7 @@ export interface FolioBrandedConfig<Env>
     | "previewWrap"
     | "gate"
     | "forms"
+    | "optionSources"
     | "describe"
     | "writing"
     | "migrations"
@@ -810,6 +813,7 @@ export interface FolioBrandedConfig<Env>
   previewWrap?: never;
   gate?: never;
   forms?: never;
+  optionSources?: never;
   describe?: never;
   writing?: never;
   migrations?: never;
@@ -1015,6 +1019,16 @@ export interface FolioSingleConfig<Env> {
    * a contact form that silently collects nothing.
    */
   forms?: FolioForms<Env>;
+  /**
+   * Option sources for **document fields** (`select({ optionsFrom })`), by id
+   * (`platform/admin-extensions.md` decisions 14 to 19). Per brand with `brands`. Separate from
+   * `forms.sources` on purpose: that registry is listed to every reader, previewed by the
+   * form builder and rendered on public forms, and a source registered here reaches none of
+   * those. A field may name either. An id in both throws. A list is kept in D1 and refreshed
+   * in the background by `folio.refreshOptionSources` (keep it in `scheduled()`), never by a
+   * render. `lookup` labels a retired value for the admin.
+   */
+  optionSources?: Readonly<Record<string, FolioOptionSource<Env>>>;
   /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An
