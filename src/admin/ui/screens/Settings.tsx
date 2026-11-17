@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { canManageAccess, type Me } from "../../me";
 import type { Manifest } from "../../../core/schema";
-import { Badge, type BadgeTone } from "../Badge";
+import { Badge } from "../Badge";
 import { EmptyState } from "../EmptyState";
 import { ListHeader } from "../List";
 import { type Column, Table } from "../Table";
@@ -11,8 +11,9 @@ import {
   type BlockCard,
   type Fact,
   type FieldRow,
-  type GlobalRow,
   type HookRow,
+  groupBlocks,
+  groupTypes,
   isEmpty,
   type LocaleRow,
   type PresetRow,
@@ -100,17 +101,14 @@ export function Settings(props: Props) {
   );
 
   /*
-   * The one sentence that makes the whole screen legible, and it names *where*
-   * rather than only *that*: "read-only" alone reads as a permission you might
-   * not have, while "declared in your Worker's `createFolio` call" is an address
-   * somebody can go to.
+   * One line, and it still names *where*: "read-only" alone reads as a permission
+   * you might not have, while `createFolio` is an address somebody can go to. The
+   * rationale (schema as code, one source of truth) lives in `ui-architecture.md`
+   * decision 6 and this file's header; it was four lines here and nobody read it.
    */
   const note = (
     <p className={css.note}>
-      Everything here is declared in code, in this site's <code>createFolio</code> call, and none of
-      it can be edited from the admin. Schema as code is what keeps the editor's form, a block's
-      props and the rendered HTML from drifting — a settings form would be a second source of truth
-      for the one thing that must have exactly one.
+      Declared in code in <code>createFolio</code>. Read-only here.
     </p>
   );
 
@@ -230,11 +228,9 @@ interface Ctx {
 function body(id: SectionId, ctx: Ctx): ReactNode {
   switch (id) {
     case "types":
-      return <Types view={ctx.view} onQuery={ctx.onQuery} />;
+      return <Types view={ctx.view} mount={ctx.mount} onQuery={ctx.onQuery} />;
     case "blocks":
       return <Blocks view={ctx.view} data={ctx.data} />;
-    case "globals":
-      return <Globals view={ctx.view} mount={ctx.mount} />;
     case "locales":
       return <Locales view={ctx.view} />;
     case "signin":
@@ -247,179 +243,204 @@ function body(id: SectionId, ctx: Ctx): ReactNode {
 }
 
 /**
- * The empty state for a section the host declared nothing in.
+ * The empty line for a section the host declared nothing in.
  *
- * **Its next step is prose, and it has no button.** `ui-architecture.md`'s
- * cross-cutting rule is that an empty state with no action is an error message,
- * and it is right everywhere else; here the action is a line of code in somebody's
- * Worker, so a button would be a control that cannot do what it says. Naming the
- * config key is the closest thing to an action this screen is allowed to offer.
+ * **A muted sentence, not an `EmptyState`.** It used to be the large centred
+ * empty state, four or five lines of it, twice on a site with no locales and no
+ * hooks. That shape is right where an empty list is a problem with a button to fix
+ * it (`ui-architecture.md`'s cross-cutting rule), and wrong here: the next step is a
+ * line of code in somebody's Worker, so there is no button, and "this site declares
+ * none" is a one-line answer. The next step stays as prose, naming the config key.
  */
-function Nothing({ title, children }: { title: string; children: ReactNode }) {
-  return <EmptyState title={title} body={children} />;
+function Nothing({ children }: { children: ReactNode }) {
+  return <p className={css.empty}>{children}</p>;
 }
 
 /* ----------------------------------------------------------- document types --- */
 
+/**
+ * Document types, one table per kind.
+ *
+ * **This was one eight-column table, and it is superseded** (it recorded that the
+ * header labels had to wrap to fit it). Most cells were an em dash or restated the
+ * kind: "Not in the tree — edited as a table" on every record, "yes" top level on
+ * every page. Each kind keeps only the columns that can differ within it, so the
+ * widths are apportioned per table and no header needs to wrap to fit. A kind with
+ * no types draws nothing.
+ */
 function Types({
   view,
+  mount,
   onQuery,
 }: {
   view: SettingsView;
+  mount: string;
   onQuery: (next: Record<string, string | undefined>) => void;
 }) {
-  const columns: Column<TypeRow>[] = [
-    {
-      key: "type",
-      label: "Type",
-      width: "22%",
-      /*
-       * `.stack`, not a bare `.pair`: the label, then the name and its badges on a
-       * declared second line. This is the one first column that shares its row with
-       * seven others, so it is the one where a wrapping `.pair` ran out of width and
-       * broke at a different point on every row — see `.stack` in the stylesheet.
-       */
-      cell: (row) => (
-        <span className={css.stack}>
-          <span className={css.pairLabel}>{row.label}</span>
-          <span className={css.pair}>
-            <span className={css.name}>{row.name}</span>
-            {row.isDefault ? (
-              <Badge title="A bare “New page” creates this type.">default</Badge>
-            ) : null}
-            {row.isGlobal ? (
-              <Badge tone="accent" title="Named in `globals`, so it is loaded into every render.">
-                global
-              </Badge>
-            ) : null}
-          </span>
+  const groups = groupTypes(view.types);
+
+  const typeCol = (width: string): Column<TypeRow> => ({
+    key: "type",
+    label: "Type",
+    width,
+    /*
+     * `.stack`, not a bare `.pair`: the label, then the name and its badges on a
+     * declared second line, so every row of every table is the same two lines tall.
+     */
+    cell: (row) => (
+      <span className={css.stack}>
+        <span className={css.pairLabel}>{row.label}</span>
+        <span className={css.pair}>
+          <span className={css.name}>{row.name}</span>
+          {row.isDefault ? (
+            <Badge title="A bare “New page” creates this type.">default</Badge>
+          ) : null}
+          {row.isGlobal ? (
+            <Badge tone="accent" title="Named in `globals`, so it is loaded into every render.">
+              global
+            </Badge>
+          ) : null}
+        </span>
+      </span>
+    ),
+  });
+
+  const rootCol = (width: string): Column<TypeRow> => ({
+    key: "root",
+    label: "Root block",
+    width,
+    /*
+     * Filters to that block: "which block is behind this type, and what does it
+     * declare" is a question this table should answer without a scroll. Narrowing
+     * to one card also opens it (`openCards` rule 2). A `<button>`, not an anchor
+     * with an `onClick`: it filters rather than navigating, and Biome's
+     * `useValidAnchor` is right that an anchor which goes nowhere is a button.
+     */
+    cell: (row) => (
+      <button
+        type="button"
+        className={css.linkButton}
+        title={`Show what ${row.root} declares`}
+        onClick={() => onQuery({ q: row.root })}
+      >
+        {row.root}
+      </button>
+    ),
+  });
+
+  const titleCol = (width: string): Column<TypeRow> => ({
+    key: "title",
+    label: "Title from",
+    width,
+    cell: (row) =>
+      row.titleField ? (
+        // Derived is the common case, so it is the quiet one: same text, muted,
+        // with the explanation in the tooltip rather than a word in every row.
+        <span
+          className={row.titleDerived ? css.derived : css.name}
+          title={
+            row.titleDerived
+              ? "Not declared. `titleFieldOf` derived it: a `title` field on the root block, then its `summary` field."
+              : undefined
+          }
+        >
+          {row.titleField}
+        </span>
+      ) : (
+        <span className={css.blank} title="No title field. Documents of this type read “Untitled”.">
+          —
         </span>
       ),
-    },
-    {
-      key: "kind",
-      label: "Kind",
-      width: "9%",
-      cell: (row) => <Badge tone={kindTone(row.kind)}>{row.kind}</Badge>,
-    },
-    {
-      key: "root",
-      label: "Root block",
-      width: "13%",
-      /*
-       * Filters to that block, which is the second route into eighty-seven of
-       * them: "which block is behind this type, and what does it declare" is a
-       * question the types table should answer without a scroll. Narrowing to one
-       * card also opens it (`openCards` rule 2), so the click lands on the schema
-       * rather than on a collapsed row.
-       *
-       * A `<button>`, not an anchor with an `onClick`: it filters rather than
-       * navigating, and Biome's `useValidAnchor` is right that an anchor which
-       * does not go anywhere is a button wearing the wrong element. Styled as a
-       * link because it reads as one, which is what `.linkButton` is for.
-       */
-      cell: (row) => (
-        <button
-          type="button"
-          className={css.linkButton}
-          title={`Show what ${row.root} declares`}
-          onClick={() => onQuery({ q: row.root })}
-        >
-          {row.root}
-        </button>
-      ),
-    },
-    {
-      key: "title",
-      label: "Title from",
-      width: "11%",
-      cell: (row) =>
-        row.titleField ? (
-          <span className={css.name}>
-            {row.titleField}
-            {row.titleDerived ? (
-              <span
-                className={css.hint}
-                title="Not declared. `titleFieldOf` derived it: a `title` field on the root block, then its `summary` field."
-              >
-                {" "}
-                derived
-              </span>
-            ) : null}
-          </span>
-        ) : (
-          <span
-            className={css.blank}
-            title="No title field. Documents of this type read “Untitled”."
-          >
-            —
-          </span>
-        ),
-    },
+  });
+
+  const dash = (value: string) => value || <span className={css.blank}>—</span>;
+
+  const pages: Column<TypeRow>[] = [
+    typeCol("26%"),
+    rootCol("20%"),
+    titleCol("16%"),
     {
       key: "where",
       label: "Where it can live",
-      width: "17%",
-      cell: (row) => <span className={css.clause}>{row.where}</span>,
-    },
-    {
-      key: "top",
-      label: "Top level",
-      width: "9%",
-      /*
-       * The refusal an editor actually meets, given its own column: an Insight
-       * that will not be created at the root of the tree is `under`, and the
-       * declaration says nothing about the top level at all. Spelling out the
-       * consequence in the title is the point of the column.
-       */
-      cell: (row) =>
-        row.topLevel === null ? (
-          <span className={css.blank}>—</span>
-        ) : row.topLevel ? (
-          <Badge tone="ok">yes</Badge>
-        ) : (
-          <Badge
-            tone="warn"
-            title="Declaring `under` also means this type can never sit at the top level, because the top level has no type to match. This is the refusal an editor sees when creating one there."
-          >
-            no
-          </Badge>
-        ),
-    },
-    {
-      key: "group",
-      label: "Sidebar group",
-      width: "10%",
-      cell: (row) => row.group || <span className={css.blank}>—</span>,
-    },
-    {
-      key: "preview",
-      label: "Previewed on",
-      width: "9%",
-      cell: (row) => row.preview || <span className={css.blank}>—</span>,
+      width: "38%",
+      cell: (row) => (
+        /*
+         * The refusal an editor actually meets, folded into the one cell that
+         * explains it: an Insight that will not be created at the root of the tree
+         * is `under`, and the declaration says nothing about the top level at all.
+         * A page that cannot sit at the top level is warned, as the old "no" badge was.
+         */
+        <span
+          className={row.topLevel === false ? css.clauseWarn : css.clause}
+          title={
+            row.topLevel === false
+              ? "Declaring `under` also means this type can never sit at the top level, because the top level has no type to match. This is the refusal an editor sees when creating one there."
+              : undefined
+          }
+        >
+          {row.where}
+        </span>
+      ),
     },
   ];
 
-  return (
-    <Table
-      label="Document types"
-      columns={columns}
-      rows={view.types}
-      rowKey={(row) => row.name}
-      empty={
-        <Nothing title="No document types match">
-          Every site declares at least one — <code>createFolio</code> refuses to start otherwise.
-        </Nothing>
-      }
-    />
-  );
-}
+  const records: Column<TypeRow>[] = [
+    typeCol("26%"),
+    rootCol("20%"),
+    titleCol("16%"),
+    { key: "group", label: "Sidebar group", width: "16%", cell: (row) => dash(row.group) },
+    { key: "preview", label: "Previewed on", width: "22%", cell: (row) => dash(row.preview) },
+  ];
 
-function kindTone(kind: TypeRow["kind"]): BadgeTone {
-  // `page` is the routed one and the only kind with a URL, which is the single
-  // most consequential fact in the row; the other two are facts rather than
-  // states, which is what `neutral` means here.
-  return kind === "page" ? "accent" : "neutral";
+  const singletons: Column<TypeRow>[] = [
+    // Sums to 90%, not 100%: the `Open` actions column is a `<col>` with no width, and
+    // declared widths that already fill the table leave it none, so the table was
+    // wider than its container and drew a horizontal scrollbar (the Globals bug).
+    typeCol("32%"),
+    rootCol("28%"),
+    { key: "preview", label: "Previewed on", width: "30%", cell: (row) => dash(row.preview) },
+  ];
+
+  const section = (heading: string, columns: Column<TypeRow>[], rows: TypeRow[], open = false) =>
+    rows.length === 0 ? null : (
+      <>
+        <h3 className={css.subHeading}>
+          {heading} <span className={css.count}>{rows.length}</span>
+        </h3>
+        <Table
+          label={heading}
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.name}
+          /*
+           * A link, not an `onOpen` callback: the URL is the state, and a singleton's
+           * one document is addressable. Asking for a singleton's type is what creates
+           * it, so this link always lands somewhere. This is what the Globals table
+           * carried that the type rows did not, and the only reason it is not simply gone.
+           */
+          actions={
+            open
+              ? (row) => (
+                  <a
+                    className={css.crossLink}
+                    href={href({ name: "documents", type: row.name }, mount)}
+                  >
+                    Open
+                  </a>
+                )
+              : undefined
+          }
+        />
+      </>
+    );
+
+  return (
+    <>
+      {section("Pages", pages, groups.pages)}
+      {section("Records", records, groups.records)}
+      {section("Singletons", singletons, groups.singletons, true)}
+    </>
+  );
 }
 
 /* -------------------------------------------------------------- block types --- */
@@ -445,59 +466,89 @@ function kindTone(kind: TypeRow["kind"]): BadgeTone {
 function Blocks({ view, data }: { view: SettingsView; data: ReturnType<typeof useSettings> }) {
   if (view.blocks.length === 0) {
     return (
-      <Nothing title="No block types match">
-        A site's blocks are the <code>blocks</code> array passed to <code>createFolio</code>.
+      <Nothing>
+        None declared. A site's blocks are the <code>blocks</code> array passed to{" "}
+        <code>createFolio</code>.
       </Nothing>
     );
   }
 
+  /*
+   * **Two groups, because the flat list mixed two audiences.** A document root is
+   * the block behind a type (it is where `indexed` takes effect and where the "root
+   * for" chip lives); every other block is a module an editor places in a slot.
+   * Thirty-five rows in one list buried the half somebody asks about by type.
+   */
+  const groups = groupBlocks(view.blocks);
+  const list = (heading: string, cards: BlockCard[]) =>
+    cards.length === 0 ? null : (
+      <>
+        <h3 className={css.subHeading}>
+          {heading} <span className={css.count}>{cards.length}</span>
+        </h3>
+        <div className={css.cards}>
+          {cards.map((card) => (
+            <details
+              className={css.card}
+              key={card.name}
+              open={data.isOpen(card.name)}
+              onToggle={(e) => data.setOpen(card.name, e.currentTarget.open)}
+            >
+              <summary className={css.summary}>
+                <span className={css.pairLabel}>{card.label}</span>
+                <span className={css.name}>{card.name}</span>
+                <span className={css.cardMeta}>{counts(card)}</span>
+                {card.rootFor.length > 0 ? (
+                  <Badge
+                    tone="accent"
+                    title="A document type's root block. `indexed` fields only project into the collection index here."
+                  >
+                    root for {card.rootFor.join(", ")}
+                  </Badge>
+                ) : null}
+                {card.presetsOnly ? (
+                  <Badge
+                    tone="neutral"
+                    title="The bare block is hidden from the add menu; only its presets are offered."
+                  >
+                    presets only
+                  </Badge>
+                ) : null}
+                {card.summary ? (
+                  <Badge mono title="The field whose value labels this block in the tree.">
+                    {card.summary}
+                  </Badge>
+                ) : null}
+              </summary>
+              <div className={css.cardBody}>
+                <Fields card={card} />
+                {card.slots.length > 0 ? <Slots card={card} /> : null}
+                {card.presets.length > 0 ? <Presets card={card} /> : null}
+              </div>
+            </details>
+          ))}
+        </div>
+      </>
+    );
+
   return (
-    <div className={css.cards}>
-      {view.blocks.map((card) => (
-        <details
-          className={css.card}
-          key={card.name}
-          open={data.isOpen(card.name)}
-          onToggle={(e) => data.setOpen(card.name, e.currentTarget.open)}
-        >
-          <summary className={css.summary}>
-            <span className={css.pairLabel}>{card.label}</span>
-            <span className={css.name}>{card.name}</span>
-            <span className={css.cardMeta}>
-              {plural(card.fields.length, "field")} · {plural(card.slots.length, "slot")} ·{" "}
-              {plural(card.presets.length, "preset")}
-            </span>
-            {card.rootFor.length > 0 ? (
-              <Badge
-                tone="accent"
-                title="A document type's root block. `indexed` fields only project into the collection index here."
-              >
-                root for {card.rootFor.join(", ")}
-              </Badge>
-            ) : null}
-            {card.presetsOnly ? (
-              <Badge
-                tone="neutral"
-                title="The bare block is hidden from the add menu; only its presets are offered."
-              >
-                presets only
-              </Badge>
-            ) : null}
-            {card.summary ? (
-              <Badge mono title="The field whose value labels this block in the tree.">
-                {card.summary}
-              </Badge>
-            ) : null}
-          </summary>
-          <div className={css.cardBody}>
-            <Fields card={card} />
-            {card.slots.length > 0 ? <Slots card={card} /> : null}
-            {card.presets.length > 0 ? <Presets card={card} /> : null}
-          </div>
-        </details>
-      ))}
-    </div>
+    <>
+      {list("Document roots", groups.roots)}
+      {list("Blocks", groups.modules)}
+    </>
   );
+}
+
+/** "5 fields · 1 slot", leaving out what is zero: "0 slots · 0 presets" on most rows said nothing. */
+function counts(card: BlockCard): string {
+  return [
+    [card.fields.length, "field"],
+    [card.slots.length, "slot"],
+    [card.presets.length, "preset"],
+  ]
+    .filter(([n]) => n !== 0)
+    .map(([n, noun]) => plural(n as number, noun as string))
+    .join(" · ");
 }
 
 function Fields({ card }: { card: BlockCard }) {
@@ -720,63 +771,6 @@ function plural(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
-/* ------------------------------------------------------------------ globals --- */
-
-function Globals({ view, mount }: { view: SettingsView; mount: string }) {
-  const columns: Column<GlobalRow>[] = [
-    {
-      key: "global",
-      label: "Global",
-      width: "44%",
-      cell: (row) => (
-        <span className={css.pair}>
-          <span className={css.pairLabel}>{row.label}</span>
-          <span className={css.name}>{row.name}</span>
-        </span>
-      ),
-    },
-    {
-      key: "root",
-      label: "Root block",
-      width: "28%",
-      cell: (row) => <span className={css.name}>{row.root}</span>,
-    },
-    { key: "preview", label: "Previewed on", width: "28%", cell: (row) => row.preview },
-  ];
-  return (
-    <>
-      <p className={css.subNote}>
-        Singleton documents loaded into every page's resolution, so the host can place a header or a
-        footer on any render.
-      </p>
-      <Table
-        label="Globals"
-        columns={columns}
-        rows={view.globals}
-        rowKey={(row) => row.name}
-        /*
-         * A link, not an `onOpen` callback: the URL is the state, and a global's
-         * one document is addressable. Asking for a singleton's type is what
-         * creates it, so this link always lands somewhere — `Documents` resolves
-         * a singleton straight to its editor.
-         */
-        actions={(row) => (
-          <a className={css.crossLink} href={href({ name: "documents", type: row.name }, mount)}>
-            Open
-          </a>
-        )}
-        empty={
-          <Nothing title="No globals declared">
-            A global is a <code>singleton</code> type named in <code>createFolio</code>'s{" "}
-            <code>globals</code>. It is an explicit list rather than every singleton, so the read
-            set of a page render stays obvious.
-          </Nothing>
-        }
-      />
-    </>
-  );
-}
-
 /* ------------------------------------------------------------------ locales --- */
 
 function Locales({ view }: { view: SettingsView }) {
@@ -826,21 +820,14 @@ function Locales({ view }: { view: SettingsView }) {
       cell: (row) => <span className={css.name}>{row.readOrder.join(" → ")}</span>,
     },
   ];
-  return (
-    <Table
-      label="Locales"
-      columns={columns}
-      rows={view.locales}
-      rowKey={(row) => row.code}
-      empty={
-        <Nothing title="Single-locale site">
-          Nothing declares <code>locales</code>, so there is no locale switcher, no second inspector
-          column, and every read is the source locale. One document would hold every language if
-          there were more than one.
-        </Nothing>
-      }
-    />
-  );
+  if (view.locales.length === 0) {
+    return (
+      <Nothing>
+        Single locale. Nothing declares <code>locales</code>.
+      </Nothing>
+    );
+  }
+  return <Table label="Locales" columns={columns} rows={view.locales} rowKey={(row) => row.code} />;
 }
 
 /* ------------------------------------------------------------------ sign-in --- */
@@ -850,7 +837,7 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
     {
       key: "provider",
       label: "Provider",
-      width: "18%",
+      width: "26%",
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -861,13 +848,13 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
     {
       key: "flow",
       label: "Flow",
-      width: "14%",
+      width: "16%",
       cell: (row) => <span className={css.clause}>{row.flow}</span>,
     },
     {
       key: "unknown",
       label: "An email with no account",
-      width: "26%",
+      width: "24%",
       cell: (row) => <span className={css.clause}>{row.unknownEmail}</span>,
     },
     // Where to go to change somebody's role, which is the fact an editor needs:
@@ -876,13 +863,13 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
     {
       key: "roles",
       label: "Roles",
-      width: "20%",
+      width: "14%",
       cell: (row) => <span className={css.clause}>{row.roles}</span>,
     },
     {
       key: "domains",
       label: "Enforced domains",
-      width: "22%",
+      width: "20%",
       cell: (row) => <span className={css.clause}>{row.domains}</span>,
     },
   ];
@@ -913,11 +900,7 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
         )}
       </p>
 
-      <Table
-        label="Sign-in providers"
-        columns={columns}
-        rows={view.providers}
-        rowKey={(row) => row.id}
+      {view.providers.length === 0 ? (
         /*
          * Two ways to be empty, and they are different answers. Under `open` there
          * is genuinely no sign-in flow. In session mode an empty list means the
@@ -925,21 +908,23 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
          * describe a site's security posture to a caller it cannot identify, which
          * is the whole point of the block living there.
          */
-        empty={
-          me.mode === "open" ? (
-            <Nothing title="No providers to list">
-              Under <code>auth: 'open'</code> there is no sign-in flow. A deployment that wants one
-              names providers in <code>createFolio</code>'s <code>auth</code> key.
-            </Nothing>
+        <Nothing>
+          {me.mode === "open" ? (
+            <>
+              No providers: under <code>auth: 'open'</code> there is no sign-in flow.
+            </>
           ) : (
-            <Nothing title="Sign in to see the sign-in policy">
-              Which providers are configured, and what they do with an unknown address, is answered
-              by <code>/api/me</code> rather than by the public schema — so it is not described to a
-              caller the server cannot identify.
-            </Nothing>
-          )
-        }
-      />
+            <>Sign in to see the sign-in policy. It is not described to an unidentified caller.</>
+          )}
+        </Nothing>
+      ) : (
+        <Table
+          label="Sign-in providers"
+          columns={columns}
+          rows={view.providers}
+          rowKey={(row) => row.id}
+        />
+      )}
 
       {view.session.length > 0 ? (
         <Facts label="Session policy" heading="Session policy" rows={view.session} />
@@ -990,10 +975,17 @@ function Hooks({ view }: { view: SettingsView }) {
         ),
     },
   ];
+  if (view.hooks.length === 0) {
+    return (
+      <Nothing>
+        None declared. Add handlers in <code>createFolio</code>'s <code>hooks</code>.
+      </Nothing>
+    );
+  }
   return (
     <>
       <p className={css.subNote}>
-        After-commit callbacks in the host's own Worker — a typed function call, not a webhook, so
+        After-commit callbacks in the host's own Worker: a typed function call, not a webhook, so
         there is no secret, no retry policy and no delivery log to configure.
       </p>
       <Table
@@ -1001,12 +993,6 @@ function Hooks({ view }: { view: SettingsView }) {
         columns={columns}
         rows={view.hooks}
         rowKey={(row) => row.event}
-        empty={
-          <Nothing title="No publish hooks declared">
-            Nothing runs after a write beyond Folio's own cache purge. A host adds handlers in{" "}
-            <code>createFolio</code>'s <code>hooks</code> key.
-          </Nothing>
-        }
       />
     </>
   );
@@ -1017,8 +1003,9 @@ function Hooks({ view }: { view: SettingsView }) {
 /**
  * The two sections that are not lists of declarations. Three columns, and the
  * third is why: a number on a settings screen with no explanation beside it is
- * the thing a reader has to go and look up, which is the problem this screen
- * exists to solve.
+ * the thing a reader has to go and look up. The explanation is kept but quiet (one
+ * clamped line, full text on hover), because a paragraph per row made two five-row
+ * tables read as the heaviest thing on the screen.
  */
 function Facts({
   label,
@@ -1037,14 +1024,20 @@ function Facts({
     {
       key: "value",
       label: "Value",
-      width: "18%",
+      width: "24%",
       cell: (row) => <span className={css.name}>{row.value}</span>,
     },
     {
       key: "why",
       label: "Why",
-      width: "60%",
-      cell: (row) => <span className={css.why}>{row.why}</span>,
+      width: "54%",
+      /* One line, clamped; the whole sentence is the tooltip and stays in the DOM for
+         a screen reader. Below 640px it wraps again, where there is no hover to reach it. */
+      cell: (row) => (
+        <span className={css.why} title={row.why}>
+          {row.why}
+        </span>
+      ),
     },
   ];
   return (

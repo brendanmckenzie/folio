@@ -5,7 +5,8 @@ import {
   conditionText,
   fieldRow,
   filterBlocks,
-  globalRows,
+  groupBlocks,
+  groupTypes,
   hookRows,
   isEmpty,
   localeRows,
@@ -231,7 +232,7 @@ describe("under, which is the refusal an editor meets", () => {
   it("says what a constrained type may sit under, by label and not by name", () => {
     // By label, because the person reading this screen met the refusal in an
     // editor that calls it "Page", not "page".
-    expect(row("insight").where).toBe("Only under Page");
+    expect(row("insight").where).toBe("Only under Page, never top level");
   });
 
   it("reports the top level closed, which the declaration never says", () => {
@@ -241,6 +242,11 @@ describe("under, which is the refusal an editor meets", () => {
     // confusing refusal in the product and it is invisible in the config.
     expect(row("insight").topLevel).toBe(false);
     expect(row("page").topLevel).toBe(true);
+  });
+
+  it("folds the top level into the page's where clause", () => {
+    expect(row("page").where).toBe("Anywhere, top level included");
+    expect(row("insight").where).toMatch(/never top level/);
   });
 
   it("leaves the question unanswered rather than answered wrongly for a kind that is not in the tree", () => {
@@ -507,20 +513,6 @@ describe("localeRows", () => {
 
 /* ---------------------------------------------------- globals, auth, hooks --- */
 
-describe("globalRows", () => {
-  it("joins each name back to its type", () => {
-    expect(globalRows(manifest)).toEqual([
-      { name: "header", label: "Header", root: "headerRoot", preview: "The site root" },
-    ]);
-  });
-
-  it('drops a name with no type rather than rendering an "unknown" row', () => {
-    // `validateGlobals` throws at construction for this, so a row for it would be
-    // a row for a state the server refuses to boot in.
-    expect(globalRows({ ...manifest, globals: ["nope"] })).toEqual([]);
-  });
-});
-
 describe("providerRows", () => {
   it("says how a person gets through, and what happens to a stranger", () => {
     expect(providerRows(policy)).toEqual([
@@ -627,12 +619,61 @@ describe("cacheFacts", () => {
 
 /* ------------------------------------------------------------------- screen --- */
 
+describe("groupTypes", () => {
+  it("splits by kind and leaves a kind with none empty", () => {
+    const g = groupTypes(view().types);
+    expect(g.pages.map((r) => r.name)).toEqual(["page", "insight"]);
+    expect(g.records.map((r) => r.name)).toEqual(["person", "fellow", "guest"]);
+    expect(g.singletons.every((r) => r.kind === "singleton")).toBe(true);
+    expect(g.pages.length + g.records.length + g.singletons.length).toBe(view().types.length);
+    expect(
+      groupTypes(
+        typeRows({ ...manifest, types: manifest.types.filter((t) => t.kind === "page") }, schema),
+      ).records,
+    ).toEqual([]);
+  });
+
+  it("keeps a global singleton in the singletons group, marked global", () => {
+    const header = groupTypes(view().types).singletons.find((r) => r.name === "header");
+    expect(header?.isGlobal).toBe(true);
+  });
+
+  it("finds a global by the word global", () => {
+    expect(view("global").types.map((t) => t.name)).toEqual(["header"]);
+  });
+});
+
+describe("groupBlocks", () => {
+  it("separates document roots from module blocks", () => {
+    const g = groupBlocks(view().blocks);
+    expect(g.roots.every((c) => c.rootFor.length > 0)).toBe(true);
+    expect(g.modules.every((c) => c.rootFor.length === 0)).toBe(true);
+    expect(g.roots.map((c) => c.name)).toContain("insightRoot");
+    expect(g.modules.map((c) => c.name)).toContain("hero");
+    expect(g.roots.length + g.modules.length).toBe(view().blocks.length);
+  });
+});
+
+describe("the sign-in count", () => {
+  it("counts providers, not providers plus the session settings under them", () => {
+    const v = view();
+    expect(v.totals.signin).toBe(policy.providers.length);
+    expect(shownIn(v, "signin")).toBe(policy.providers.length);
+    expect(v.session.length).toBeGreaterThan(0);
+  });
+
+  it("still draws the section when only a session setting matched", () => {
+    expect(visibleSections(view("session length"), "session length").map((s) => s.id)).toEqual([
+      "signin",
+    ]);
+  });
+});
+
 describe("settingsView", () => {
   it('counts each section before the filter, so a heading can say "n of N"', () => {
     const v = view();
     expect(v.totals.types).toBe(7);
     expect(v.totals.blocks).toBe(7);
-    expect(v.totals.globals).toBe(1);
     expect(v.totals.locales).toBe(3);
     expect(shownIn(v, "blocks")).toBe(7);
   });

@@ -18,8 +18,8 @@
   flex-direction: column;
   gap: var(--space-4);
   /* Wider than Documents' 1400px: the block-type tables carry six columns of
-     schema and a document type carries eight, and this screen is read rather than
-     scanned, so the extra width goes into columns nobody has to scroll to. */
+     schema, and this screen is read rather than scanned, so the extra width goes
+     into columns nobody has to scroll to. */
   max-width: 1600px;
   margin-inline: auto;
 }
@@ -223,6 +223,9 @@
  * header, and that is inert: it is absolutely positioned, 1px wide, `overflow: hidden`
  * and clipped to nothing, so a height it is given cannot be seen or take up space.
  */
+/* Superseded in part: the eight-column types table this was written for is now three
+   kind tables of three to five columns, so no header needs the wrap to fit. It stays
+   for the block tables' six columns and a narrow viewport. */
 .screen thead th {
   white-space: normal;
 }
@@ -374,16 +377,44 @@
   max-width: 44ch;
 }
 
-/* A setting's explanation, at a measure rather than at the column's width. The
-   `max-width` is what makes the wrapping rule above read as a paragraph instead of
-   a 130-character line: it caps what the column asks the table for, so the two
-   Facts tables settle at a column of prose and the rest of the width stays with the
-   setting's name. */
+/* A setting's explanation: quiet, small and one line. The full sentence is the
+   cell's `title`. `display: block` + `overflow: hidden` needs the table's fixed
+   layout to bound it, which `Column.width` gives. Wraps again on a narrow screen,
+   where a tooltip cannot be reached. */
 .why {
   display: block;
-  max-width: 62ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-xs);
-  line-height: 1.45;
+  color: var(--fg-subtle);
+}
+
+@media (max-width: 640px) {
+  .why {
+    white-space: normal;
+  }
+}
+
+/* A title field that was derived rather than declared: the common case, so muted. */
+.derived {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+/* The page kind's "where": a type that can never sit at the top level reads as a
+   warning, the old "no" badge folded into the clause. */
+.clauseWarn {
+  display: block;
+  max-width: 44ch;
+  color: var(--state-warn-fg);
+}
+
+/* An empty section: one muted line, not a centred empty state. */
+.empty {
+  margin: 0;
+  font-size: var(--text-sm);
   color: var(--fg-subtle);
 }
 
