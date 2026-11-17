@@ -4160,6 +4160,71 @@ page. That is a different problem, and reading a published page still needs no
 account at all. See "Visitor access" below: a host predicate `reader.page()`
 consults, never Folio accounts.
 
+### Your own routes behind Folio's sign-in
+
+A host that runs its own admin screens on the same Worker (orders, stock, discounts) has
+no reason to build a second login. `folio.editor()` asks Folio, in-process, who is
+signed in, through whichever door the site uses (magic link, OIDC, a trusted proxy,
+Cloudflare Access, a passkey): every provider ends in one ordinary session, so there is one
+credential to read.
+
+```ts
+// A route of yours, under any framework.
+const gate = await folio.requireEditor(req, env, { role: 'publisher' })
+if (gate instanceof Response) return gate        // 302 to sign-in, 401, or 403
+const { editor, headers } = gate                 // headers: send them on your response
+return new Response(render(editor), { headers: { ...headers, 'content-type': 'text/html' } })
+```
+
+`folio.editor(req, env, opts?)` is the data: `{ kind: 'user', user, role, grants, scope,
+brand, session }`, or `{ kind: 'token', … }`, or `null`. `requireEditor` is the gate:
+
+| Situation | Answer |
+| --- | --- |
+| no editor, `GET` or `HEAD` | `302` to `folio.signInUrl(req)`, which is `{base}/login?next=<path and query>` |
+| no editor, any other method | `401`, `Sign in to Folio first.` |
+| `role` given and the editor's role is below it, or none | `403` naming the role |
+| admitted | `{ editor, headers }`, `headers` being `HOST_PAGE_HEADERS` |
+
+Every refusal is `private, no-store`. A few things are decided for you, and each fails closed:
+
+- **No credential costs nothing.** With no session cookie (and no bearer header when you pass
+  `tokens: true`) `editor()` answers `null` before it touches `bindings`, so an anonymous
+  request through a route that calls it reads no database. With a cookie it reads once, on a D1
+  session, and memoises the answer on the `Request` object: **pass the original request**, not a
+  clone, or a loader and an action each pay for a read. Revocation is immediate because the
+  session row is read every time.
+- **`role` is the effective role on a scope.** With no `scope` it is the deployment-wide `*`
+  grant (`grants['*']`), and a person whose grants are all on sites has `role: null` there.
+  On a deployment with `sites`, pass `{ scope: 'alpha' }` to get the role on that site, group
+  or `shared`. A scope Folio does not serve (a typo, a deleted site, a site of no configured
+  brand) answers `role: null` even for a platform admin, and does not throw: it usually comes
+  from a URL parameter. Read `role === null` as refused. `grants` lists every grant by scope id.
+- **The scope is a selection, never an authority.** Folio checks it against the registry and
+  computes the role; a request cannot claim a role by naming a scope.
+- **On a deployment with `sites`, only the admin origin answers.** `editor()` is `null` for a
+  request on a live host or a preview origin, because cookies ignore ports and a session cookie
+  leaks from the admin's port to a live host's in development. Serve your admin screens on
+  `sites.admin`.
+- **A token is not an editor unless you say so.** `tokens: true` accepts `Authorization: Bearer
+  folio_…` and answers `{ kind: 'token', scopes, site }` with `role: null`; a gate that asks for a
+  `role` refuses a token, because a role has no token equivalent.
+- **Under `auth: 'open'` it answers `null`.** There are no users to resolve, and a synthetic admin
+  would make your screens public on a deployment that forgot `auth`.
+- **CSRF is checked inside it.** For a method other than `GET`, `HEAD` and `OPTIONS`, `editor()`
+  answers `null` when the request's `Origin` is another site's. The session cookie is
+  `SameSite=Lax` as well, so a cross-site form `POST` carries no cookie. `folio.originAllowed(req)`
+  is the same check on its own, for a route that does not read the editor.
+
+`HOST_PAGE_HEADERS` is `content-security-policy: frame-ancestors 'self'`, `cache-control: private,
+no-store`, `x-content-type-options: nosniff` and `referrer-policy: same-origin`. A page that
+discards them is framable by a same-site sibling (`www.example.com` framing `cms.example.com`),
+because `SameSite=Lax` still sends the cookie there. A host that sets its own CSP merges the
+directive.
+
+The projection omits the session hash, the person's colour and where their role came from. It is
+the smallest object that cannot leak later; `GET {base}/api/me` redacts the same way.
+
 ## Visitor access
 
 A site whose membership lives outside Folio — the host's own accounts, Auth0,

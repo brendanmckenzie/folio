@@ -426,6 +426,10 @@ that site's brand.
 
 - **`folio.handle()` first, and it returns `null`.** If a Folio path 404s, your
   router ran first.
+- **Gate every host admin route, and its JSON endpoints, with `folio.requireEditor`.** It is the
+  one place a host asks who is signed in (`docs/handbook.md`, "Your own routes behind Folio's
+  sign-in"); spread the `headers` it returns onto the response. Never read Folio's session cookie
+  yourself.
 - **`redirect()` and `status()` belong in your own miss branch.** Folio will not
   answer them for you, deliberately — it does not own your 404.
 - **Read fields with `fieldValue(blok, name, locale)` / `dataOf(blok, locale)`**

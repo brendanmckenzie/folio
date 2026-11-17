@@ -1281,6 +1281,14 @@ v1.6.0:
 A host that must roll back first moves protected files out of the library (or deletes
 them), then rolls back.
 
+### Host access to the editor session (v1.7.0)
+
+Nothing to do. `folio.editor`, `folio.requireEditor`, `folio.signInUrl` and `folio.originAllowed`
+are new, and `folio/server` exports `HOST_PAGE_HEADERS` and the `FolioEditor` types. A host that
+calls none of them runs exactly as before. Two behaviours to know before you rely on them: under
+`auth: 'open'` `editor()` answers `null`, and on a deployment with `sites` it answers only on
+`sites.admin`. See "Your own routes behind Folio's sign-in" in `docs/handbook.md`.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable
