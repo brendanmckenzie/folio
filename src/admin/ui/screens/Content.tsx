@@ -887,7 +887,13 @@ function PageRow({
         // put their badges at different x positions on adjacent rows — which is
         // what makes a wide list read as scattered instead of tabular.
         <span className={css.cols} data-typed={showType ? "" : undefined}>
-          {showType ? <Badge>{typeLabel ?? row.type}</Badge> : null}
+          {showType ? (
+            // The column is fixed, so a long label is cut inside it and the full
+            // text is on hover (`.typeCell` in the stylesheet).
+            <span className={css.typeCell}>
+              <Badge title={typeLabel ?? row.type}>{typeLabel ?? row.type}</Badge>
+            </span>
+          ) : null}
           <Badge tone={stateTone(row.state)}>{row.state}</Badge>
           <span className={css.stamp}>{when(row)}</span>
         </span>

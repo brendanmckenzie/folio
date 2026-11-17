@@ -210,6 +210,15 @@ const folio = createFolio<Env>({
     // because Folio derives a path from the tree (checkpoint 3). `under`
     // constrains where one may be created *and* dragged, with a refusal notice.
     { name: "insight", label: "Insight", kind: "page", root: "insightPage", under: ["page"] },
+    // A deliberately long label: the content list's type column is fixed, and this is
+    // what shows it truncating with the full label on hover.
+    {
+      name: "feature",
+      label: "Long-form editorial feature",
+      kind: "page",
+      root: "insightPage",
+      under: ["page"],
+    },
     // Unrouted, and many of them. `titleField` is needed because personRecord
     // has no `title` field for the tree cache to have guessed at.
     //

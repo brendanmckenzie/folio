@@ -259,6 +259,28 @@
   grid-template-columns: 72px 96px 80px;
 }
 
+/*
+ * The type column is a fixed width, and a badge sizes to its text, so a long type
+ * label ("Record preview") spilled into the state column. The cell stretches to the
+ * column and the badge inside is cut with an ellipsis; the full label is its `title`.
+ * Sized by the column itself, so nothing is widened for a deployment with short labels.
+ */
+.typeCell {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  justify-self: stretch;
+}
+
+.typeCell > * {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  line-height: 16px;
+  text-overflow: ellipsis;
+}
+
 .stamp {
   font-size: var(--text-xs);
   color: var(--fg-subtle);
