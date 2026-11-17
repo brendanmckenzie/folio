@@ -229,3 +229,169 @@ describe("folio.refreshOptionSources and a field's list", () => {
     expect(calls).not.toContain("countries");
   });
 });
+
+/* ------------------------------------------------------- v1 content writes --- */
+
+const KEY = optionListKey(undefined, "");
+
+/** A list as the store holds it: `loadedAt` decides fresh (ttl 60 s) or stale. */
+const putList = async (
+  options: string[],
+  loadedAt = Date.now(),
+  source = "products",
+): Promise<void> => {
+  await env.DB.prepare("delete from option_lists where source = ?").bind(source).run();
+  await env.DB.prepare(
+    `insert into option_lists (brand, source, key, options, digest, loaded_at, attempted_at)
+     values ('', ?, ?, ?, 'd', ?, ?)`,
+  )
+    .bind(
+      source,
+      KEY,
+      JSON.stringify(options.map((value) => ({ value, label: value }))),
+      loadedAt,
+      loadedAt,
+    )
+    .run();
+};
+
+const writer = async () => bearer(`fs-writer-${Math.random()}`, ["content:read", "content:write"]);
+let write: Record<string, string>;
+
+const v1 = async (
+  path: string,
+  init: { method?: string; body?: unknown; auth?: Record<string, string> } = {},
+) => {
+  const res = await folio.handle(
+    new Request(`https://cms.example/folio/api/v1${path}`, {
+      method: init.method ?? "GET",
+      headers: {
+        ...(init.auth ?? write),
+        ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+    }),
+    env,
+    createExecutionContext(),
+  );
+  if (!res) throw new Error(`handle() answered null for ${path}`);
+  return res;
+};
+
+const create = async (content?: unknown) => {
+  const res = await v1("/documents", {
+    method: "POST",
+    body: { type: "productPage", title: "A product page", ...(content ? { content } : {}) },
+  });
+  return res;
+};
+const patchFields = (id: string, fields: Record<string, unknown>) =>
+  v1(`/documents/${id}/fields`, { method: "PATCH", body: { fields } });
+const putContent = (id: string, fields: Record<string, unknown>) =>
+  v1(`/documents/${id}/content`, { method: "PUT", body: { content: { fields } } });
+
+const draftProduct = async (id: string) => {
+  const res = await v1(`/documents/${id}?status=draft`);
+  const body = (await res.json()) as { content: { fields: Record<string, unknown> } };
+  return body.content.fields.product;
+};
+
+describe("v1 writes to a sourced select (decision 20)", () => {
+  let id: string;
+  beforeAll(async () => {
+    write = await writer();
+  });
+  beforeEach(async () => {
+    const res = await create();
+    expect(res.status).toBe(201);
+    id = ((await res.json()) as { id: string }).id;
+  });
+
+  it("accepts a value the loaded list offers, and refuses one it does not", async () => {
+    await putList(["prod_1", "prod_2"]);
+    expect((await patchFields(id, { product: "prod_1" })).status).toBe(200);
+    expect(await draftProduct(id)).toBe("prod_1");
+
+    const refused = await patchFields(id, { product: "prod_x" });
+    expect(refused.status).toBe(400);
+    const body = (await refused.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("bad_request");
+    expect(body.error.message).toContain("productPage.product");
+    expect(body.error.message).toContain("`products`");
+    expect(body.error.message).toContain("/api/v1/options/productPage/product");
+    expect(await draftProduct(id)).toBe("prod_1");
+  });
+
+  it("accepts the empty string and null, which clear the field", async () => {
+    await putList(["prod_1"]);
+    await patchFields(id, { product: "prod_1" });
+    expect((await patchFields(id, { product: "" })).status).toBe(200);
+    expect((await patchFields(id, { product: null })).status).toBe(200);
+  });
+
+  it("refuses PUT content the same way, and accepts a listed value", async () => {
+    await putList(["prod_1"]);
+    expect((await putContent(id, { product: "prod_x" })).status).toBe(400);
+    expect((await putContent(id, { product: "prod_1" })).status).toBe(200);
+    expect(await draftProduct(id)).toBe("prod_1");
+  });
+
+  it("accepts a stale list's value when the refresh fails", async () => {
+    await putList(["prod_1"], Date.now() - 3_600_000);
+    behaviour = "throw";
+    expect((await patchFields(id, { product: "prod_1" })).status).toBe(200);
+    // A stale list is checked as it stands: an outage is not the writer's problem.
+    expect((await patchFields(id, { product: "prod_x" })).status).toBe(400);
+    expect(calls).toEqual([]);
+  });
+
+  it("answers 503 unavailable for a list that never loaded and a load that throws", async () => {
+    behaviour = "throw";
+    const res = await patchFields(id, { product: "prod_1" });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("unavailable");
+    expect(body.error.message).toContain("has not loaded");
+    expect(body.error.message).not.toContain("SECRET");
+    expect(calls).toEqual(["products"]);
+    expect(await draftProduct(id)).toBeFalsy();
+  });
+
+  it("refreshes a never-loaded list under the lease and then decides", async () => {
+    expect((await patchFields(id, { product: "prod_1" })).status).toBe(200);
+    expect(calls).toEqual(["products"]);
+    expect((await rows()).map((r) => r.source)).toEqual(["products"]);
+    expect((await patchFields(id, { product: "prod_x" })).status).toBe(400);
+    expect(calls).toEqual(["products"]);
+  });
+
+  it("does not refuse a merge payload that hands back a stored retired id", async () => {
+    await putList(["prod_9"]);
+    await patchFields(id, { product: "prod_9" });
+    await putList(["prod_1"]);
+    expect((await putContent(id, { title: "Renamed", product: "prod_9" })).status).toBe(200);
+    expect(await draftProduct(id)).toBe("prod_9");
+    // The same value through PATCH is no change either.
+    expect((await patchFields(id, { product: "prod_9" })).status).toBe(200);
+  });
+
+  it("checks a create's content, and writes nothing when it is refused", async () => {
+    await putList(["prod_1"]);
+    const before = (await env.DB.prepare("select count(*) as n from stories").first<{
+      n: number;
+    }>())!.n;
+    const refused = await create({ fields: { product: "prod_x" } });
+    expect(refused.status).toBe(400);
+    expect(
+      (await env.DB.prepare("select count(*) as n from stories").first<{ n: number }>())!.n,
+    ).toBe(before);
+    const ok = await create({ fields: { product: "prod_1" } });
+    expect(ok.status).toBe(201);
+  });
+
+  it("leaves a field that is not sourced alone", async () => {
+    await putList(["prod_1"]);
+    expect((await patchFields(id, { title: "Anything at all" })).status).toBe(200);
+    expect(calls).toEqual([]);
+  });
+});

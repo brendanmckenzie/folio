@@ -43,10 +43,18 @@ export type FolioErrorCode =
    * input. The message names the id that *was* created, so the caller can retry
    * the content alone rather than the whole create.
    */
-  | "incomplete";
+  | "incomplete"
+  /**
+   * A host dependency Folio needs to answer has never answered
+   * (`platform/admin-extensions.md` decision 20): a v1 write to a sourced select whose
+   * option list has never loaded cannot be checked, and failing open would let a token
+   * store any string under a field whose whole point is that it holds a real product.
+   * Retrying later can succeed, which is why it is a 503 and not a 400.
+   */
+  | "unavailable";
 
 /** Every status a FolioError can produce, so `c.json(body, status)` stays typed. */
-export type FolioErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 501 | 502;
+export type FolioErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 501 | 502 | 503;
 
 const STATUS: Record<FolioErrorCode, FolioErrorStatus> = {
   bad_request: 400,
@@ -58,6 +66,7 @@ const STATUS: Record<FolioErrorCode, FolioErrorStatus> = {
   too_large: 413,
   unsupported: 501,
   incomplete: 502,
+  unavailable: 503,
 };
 
 export class FolioError extends Error {

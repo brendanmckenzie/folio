@@ -17,7 +17,7 @@
  */
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { deepEqual } from "../../../core/diff";
+import { deepEqual, diff } from "../../../core/diff";
 import type { Doc, Json } from "../../../core/doc";
 import { isBareLayer } from "../../../core/layers";
 import { isKnownLocale } from "../../../core/locales";
@@ -90,6 +90,7 @@ import {
   storyPathParam,
 } from "../../validate";
 import { listVersions } from "../../versions";
+import { checkSourcedSets } from "../../option-sources";
 import { commitAll, restoreVersion, writeDocument, type WriteActor } from "../../write";
 import { queryFromParams } from "../content";
 import { brandOf, draftOf } from "../stories";
@@ -291,6 +292,18 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
     return code;
   };
+
+  /**
+   * The sourced-select membership check, on this request's session and brand
+   * (`platform/admin-extensions.md` decision 20). A deployment whose brand has no field source
+   * returns before reading anything.
+   */
+  const sourcedCheck = (c: Context<FolioEnv<Env>>, mutations: Mutation[], draft: Doc) =>
+    checkSourcedSets(
+      { rt, env: c.env, db: c.var.bindings().db, brand: brandOf(c) },
+      mutations,
+      draft,
+    );
 
   const deps = (c: Context<FolioEnv<Env>>, bindings: ReadBindings, story: StoryMeta) => ({
     draft: () => draftOf(c, rt)(story),
@@ -525,13 +538,17 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     // Before any write, so a payload the schema refuses costs nothing.
     const brand = brandOf(c);
-    let seeded = brand.seed(type, body.title);
+    const blank = brand.seed(type, body.title);
+    let seeded = blank;
     if (body.content !== undefined) {
       try {
         seeded = fromNested(body.content, brand.schema, seeded, { mode: "merge" });
       } catch (e) {
         rethrow(e);
       }
+      // Still before the row is written: a sourced select the list does not offer refuses
+      // the create with nothing written (`platform/admin-extensions.md` decision 20).
+      await sourcedCheck(c, diff(blank, seeded), blank);
     }
 
     let story: StoryMeta;
@@ -604,6 +621,8 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           writeActor(c),
           key,
           layer.layer,
+          // The membership check for a sourced select, between `diff` and `commitAll`.
+          (mutations, current) => sourcedCheck(c, mutations, current),
         ),
       );
     } catch (e) {
@@ -674,6 +693,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       setsFor(entry.uid, entry.fields, `bloks[${i}].fields`);
     }
 
+    await sourcedCheck(c, mutations, draft);
     return c.json(await commitAll(deps(c, bindings, story).stub, mutations, writeActor(c), key));
   });
 

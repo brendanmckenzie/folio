@@ -1,6 +1,7 @@
 import { createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
-import { blocks, defineBlock, text } from "../../src/core";
+import { blocks, defineBlock, select, text } from "../../src/core";
+import { optionListKey } from "../../src/core/option-sources";
 import type { NestedDoc } from "../../src/core/nested";
 import type { DocumentType } from "../../src/core/schema";
 import { singletonId } from "../../src/core/schema";
@@ -60,9 +61,16 @@ const pageRoot = defineBlock({
 const productRoot = defineBlock({
   name: "mcpProduct",
   label: "Product",
-  fields: { sku: text() },
+  fields: {
+    sku: text(),
+    // A sourced select, so `patch_fields` and `write_content` can show decision 20's refusals.
+    catalogue: select({ optionsFrom: { source: "catalogue" } }),
+  },
   render: () => null,
 });
+
+/** What the `catalogue` option source answers; `catalogueDown` makes its load throw. */
+let catalogueDown = false;
 
 /** `preview_document`'s fallback URL for a declared global — the one that
  * needed phase 4's `?mode=draft` fix on `/preview/global/:name`. */
@@ -119,6 +127,15 @@ function build(over: { mode?: AuthConfig<Cloudflare.Env> | "open"; mcp?: boolean
     // at all without this configured (`validateAssets`) — the same
     // requirement any host has, not something the tool adds.
     assets: { admin: "/mcp-admin.js", preview: "/mcp-preview.js" },
+    optionSources: {
+      catalogue: {
+        label: "Catalogue",
+        load: () => {
+          if (catalogueDown) throw new Error("https://shop.example/?key=SECRET");
+          return [{ value: "sku_1", label: "Classic tee" }];
+        },
+      },
+    },
     hooks: {
       published: async (e) => {
         // Deliberately asynchronous: a hook that resolves on the microtask queue
@@ -1150,5 +1167,80 @@ describe("createFolio({ mcp: false })", () => {
       off,
     );
     expect(res.status).toBe(200);
+  });
+});
+
+/* ------------------------------------------------------------ sourced selects --- */
+
+describe("a sourced select, through the write tools (platform/admin-extensions.md decision 20)", () => {
+  const putCatalogue = async (values: string[]) => {
+    await env.DB.prepare("delete from option_lists where source = 'catalogue'").run();
+    if (values.length === 0) return;
+    await env.DB.prepare(
+      `insert into option_lists (brand, source, key, options, digest, loaded_at, attempted_at)
+       values ('', 'catalogue', ?, ?, 'd', ?, ?)`,
+    )
+      .bind(
+        optionListKey(undefined, ""),
+        JSON.stringify(values.map((value) => ({ value, label: value }))),
+        Date.now(),
+        Date.now(),
+      )
+      .run();
+  };
+  const record = async () => {
+    const headers = await tokenFor("content:write");
+    const made = await callTool<{ id: string }>(
+      "create_document",
+      {
+        title: "A product",
+        type: "mcpProductType",
+        content: { type: "mcpProduct", fields: { sku: "tee" } },
+      },
+      headers,
+    );
+    return { id: made.value!.id, headers };
+  };
+
+  beforeEach(() => {
+    catalogueDown = false;
+  });
+
+  it("patch_fields refuses an id the list lacks as invalid params, naming the field and source", async () => {
+    await putCatalogue(["sku_1"]);
+    const { id, headers } = await record();
+    const refused = await callTool("patch_fields", { id, fields: { catalogue: "sku_x" } }, headers);
+    expect(refused.error?.code).toBe(-32602);
+    expect(refused.error?.message).toContain("mcpProduct.catalogue");
+    expect(refused.error?.message).toContain("`catalogue`");
+    expect(refused.error?.message).toContain("list_field_options");
+    const ok = await callTool<{ changed: number }>(
+      "patch_fields",
+      { id, fields: { catalogue: "sku_1" } },
+      headers,
+    );
+    expect(ok.value?.changed).toBe(1);
+  });
+
+  it("write_content refuses it the same way", async () => {
+    await putCatalogue(["sku_1"]);
+    const { id, headers } = await record();
+    const refused = await callTool(
+      "write_content",
+      { id, content: { type: "mcpProduct", fields: { catalogue: "sku_x" } } },
+      headers,
+    );
+    expect(refused.error?.code).toBe(-32602);
+    expect(refused.error?.message).toContain("mcpProduct.catalogue");
+  });
+
+  it("a list that never loaded is a server condition, with the message verbatim and no vendor detail", async () => {
+    await putCatalogue([]);
+    catalogueDown = true;
+    const { id, headers } = await record();
+    const refused = await callTool("patch_fields", { id, fields: { catalogue: "sku_1" } }, headers);
+    expect(refused.error?.code).toBe(-32603);
+    expect(refused.error?.message).toContain("has not loaded");
+    expect(refused.error?.message).not.toContain("SECRET");
   });
 });
