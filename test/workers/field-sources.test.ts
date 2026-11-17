@@ -27,9 +27,19 @@ const DAY = 86_400_000;
 const calls: string[] = [];
 let behaviour: "list" | "throw" = "list";
 
+/** What `products.lookup` was asked, and how it answers. */
+const lookups: string[][] = [];
+let lookupMode: "labels" | "hang" | "throw" = "labels";
+
 const products = {
   label: "Products",
   ttl: 60,
+  lookup(values: readonly string[]) {
+    lookups.push([...values]);
+    if (lookupMode === "hang") return new Promise<never>(() => {});
+    if (lookupMode === "throw") throw new Error("https://shop.example/?key=SECRET");
+    return values.filter((v) => v === "prod_9").map((value) => ({ value, label: "Archived tee" }));
+  },
   load() {
     calls.push("products");
     if (behaviour === "throw") throw new Error("https://shop.example/?key=SECRET");
@@ -134,7 +144,9 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   calls.length = 0;
+  lookups.length = 0;
   behaviour = "list";
+  lookupMode = "labels";
   await env.DB.batch([
     env.DB.prepare("delete from forms"),
     env.DB.prepare("delete from option_lists"),
@@ -546,5 +558,149 @@ describe("check_document over a sourced select", () => {
     expect(named(await check(), "option-not-offered")).toEqual([]);
     expect(named(await check(), "option-list-unavailable")).toEqual([]);
     expect(calls).toEqual([]);
+  });
+});
+
+/* ----------------------------------------------------- GET /api/field-options --- */
+
+describe("GET /api/field-options (the inspector's picker)", () => {
+  beforeAll(async () => {
+    write = await writer();
+  });
+  const internal = (query: string, auth: Record<string, string> = write) =>
+    call(`/api/field-options?${query}`, auth);
+  type Answer = {
+    source: string;
+    status: string;
+    options: { value: string; label: string }[];
+    missing?: { value: string; label: string | null }[];
+  };
+  const storing = async (...values: string[]) => {
+    await putList(["prod_9", ...values]);
+    const made = await create();
+    const id = ((await made.json()) as { id: string }).id;
+    await patchFields(id, { product: "prod_9" });
+    return id;
+  };
+
+  it("answers the list like the v1 route, with no missing without a story", async () => {
+    await putList(["prod_1", "prod_2"]);
+    const res = await internal("block=productPage&field=product");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Answer;
+    expect(body).toMatchObject({ source: "products", status: "fresh" });
+    expect(body.options.map((o) => o.value)).toEqual(["prod_1", "prod_2"]);
+    expect("missing" in body).toBe(false);
+    expect(lookups).toEqual([]);
+  });
+
+  it("needs block and field, and the caller to be signed in", async () => {
+    expect((await internal("block=productPage")).status).toBe(400);
+    expect((await internal("block=productPage&field=product", {})).status).toBe(401);
+    expect((await internal("block=productPage&field=title")).status).toBe(400);
+    expect((await internal("block=nope&field=product")).status).toBe(404);
+  });
+
+  it("labels a retired value the document stores, asking lookup only about that draft's values", async () => {
+    const id = await storing("prod_1");
+    // The shop retires prod_9; the page still stores it.
+    await putList(["prod_1"]);
+    const body = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect(body.missing).toEqual([{ value: "prod_9", label: "Archived tee" }]);
+    expect(lookups).toEqual([["prod_9"]]);
+    // The list itself is unchanged, and nothing was stored for the label.
+    expect(body.options.map((o) => o.value)).toEqual(["prod_1"]);
+  });
+
+  it("says nothing of a value the list still offers, and does not call lookup", async () => {
+    const id = await storing();
+    const body = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect("missing" in body).toBe(false);
+    expect(lookups).toEqual([]);
+  });
+
+  it("gives a null label when lookup throws, hangs or the source has none", async () => {
+    const id = await storing("prod_1");
+    await putList(["prod_1"]);
+    lookupMode = "throw";
+    const threw = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect(threw.missing).toEqual([{ value: "prod_9", label: null }]);
+    expect(JSON.stringify(threw)).not.toContain("SECRET");
+
+    lookupMode = "hang";
+    const started = Date.now();
+    const hung = (await (
+      await internal(`block=productPage&field=product&story=${id}`)
+    ).json()) as Answer;
+    expect(hung.missing).toEqual([{ value: "prod_9", label: null }]);
+    expect(Date.now() - started).toBeLessThan(6_000);
+  }, 10_000);
+
+  it("is 404 for a story that does not exist", async () => {
+    await putList(["prod_1"]);
+    expect((await internal("block=productPage&field=product&story=sty_nope000000")).status).toBe(
+      404,
+    );
+  });
+});
+
+/* ------------------------------------------------- the fence, with sites --- */
+
+describe("GET /api/field-options with sites", () => {
+  const sited = createFolio<Cloudflare.Env>({
+    ...config,
+    sites: { admin: "https://cms.example" },
+    route: (p: string) => `/${p}`,
+  } as unknown as FolioConfig<Cloudflare.Env>);
+  const at = async (path: string) => {
+    const res = await sited.handle(
+      new Request(`https://cms.example/folio${path}`, { headers: write }),
+      env,
+      createExecutionContext(),
+    );
+    return res as Response;
+  };
+
+  beforeAll(async () => {
+    write = await writer();
+    await env.DB.batch([
+      env.DB.prepare(
+        `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
+           ('fsalpha', 'site', 'Alpha', null, 'live', null, 0, 0),
+           ('fsbravo', 'site', 'Bravo', null, 'live', null, 0, 0)`,
+      ),
+      env.DB.prepare(
+        `insert into stories (id, type, slug, path, ord, title, updated_at, site_id)
+         values ('sty_fs_bravo', 'productPage', 'b', 'b', 'a0', 'Bravo page', 1, 'fsbravo')`,
+      ),
+    ]);
+  });
+
+  it("answers the list under a scope, and needs one", async () => {
+    await putList(["prod_1"]);
+    expect((await at("/~fsalpha/api/field-options?block=productPage&field=product")).status).toBe(
+      200,
+    );
+    const bare = await at("/api/field-options?block=productPage&field=product");
+    expect(bare.status).toBe(400);
+    expect(((await bare.json()) as { error: { code: string } }).error.code).toBe("site_required");
+  });
+
+  it("is 404 for another site's story, and answers a story of the scope's own chain", async () => {
+    await putList(["prod_1"]);
+    const other = await at(
+      "/~fsalpha/api/field-options?block=productPage&field=product&story=sty_fs_bravo",
+    );
+    expect(other.status).toBe(404);
+    const own = await at(
+      "/~fsbravo/api/field-options?block=productPage&field=product&story=sty_fs_bravo",
+    );
+    expect(own.status).toBe(200);
   });
 });

@@ -52,6 +52,9 @@ describe("the /api partition", () => {
     // and deliberately *not* `{base}/api/v1/schedules`, which would be a promise to
     // somebody's script about a surface nothing outside the admin reads yet.
     "/folio/api/schedules",
+    // `platform/admin-extensions.md` decision 19: the inspector's sourced-select picker. Internal,
+    // and deliberately not a v1 route (a version segment is a promise to a script).
+    "/folio/api/field-options",
     "/folio/api/content",
     "/folio/api/migrations",
     "/folio/api/audit",

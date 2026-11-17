@@ -1028,3 +1028,71 @@ export async function checkSourcedSets(
     }
   }
 }
+
+/** How long `lookup` may take, per inspector open (decision 19). */
+export const LOOKUP_MS = 3_000;
+/** The most values a `lookup` call is asked about. */
+export const MAX_LOOKUP_VALUES = 20;
+
+/**
+ * Labels for stored values a list no longer offers, **for the admin only** (decision 19).
+ * Calls the source's `lookup` with at most `MAX_LOOKUP_VALUES` values, raced against
+ * `LOOKUP_MS` like `load`, and stores nothing. A source with no `lookup`, a timeout, a throw
+ * or a malformed answer gives no label for any value (the caller then draws the raw value);
+ * it is a cosmetic call, so it logs a `warn` and never an error, and never the message.
+ */
+export async function lookupLabels(
+  deps: Pick<RefreshDeps, "env" | "brand" | "source" | "logger">,
+  settings: Readonly<Record<string, Json>> | undefined,
+  locale: string,
+  values: readonly string[],
+  timeoutMs: number = LOOKUP_MS,
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const { source } = deps;
+  if (!source.lookup || values.length === 0) return out;
+  const asked = values.slice(0, MAX_LOOKUP_VALUES);
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timedOut = new Promise<typeof TIMED_OUT>((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve(TIMED_OUT);
+      }, timeoutMs);
+    });
+    const looking = Promise.resolve().then(() =>
+      source.lookup!(
+        asked,
+        {
+          settings: (effectiveSettings(source, settings) ?? {}) as Readonly<
+            Record<string, string | number | boolean>
+          >,
+          locale: locale === "" ? null : locale,
+          brand: deps.brand,
+          signal: controller.signal,
+        },
+        deps.env,
+      ),
+    );
+    looking.catch(() => {});
+    const raced = await Promise.race([looking, timedOut]);
+    if (raced === TIMED_OUT) {
+      deps.logger.warn(`folio: option source "${source.id}" lookup timed out`);
+      return out;
+    }
+    if (!Array.isArray(raced)) return out;
+    for (const item of raced as unknown[]) {
+      if (!item || typeof item !== "object") continue;
+      const { value, label } = item as { value?: unknown; label?: unknown };
+      if (typeof value !== "string" || !asked.includes(value)) continue;
+      const screened = screenOptionLabel(label);
+      if (screened !== null) out.set(value, screened);
+    }
+  } catch {
+    deps.logger.warn(`folio: option source "${source.id}" lookup failed`);
+  } finally {
+    clearTimeout(timer);
+  }
+  return out;
+}

@@ -47,7 +47,10 @@ export function CollectionField({
   types,
   editable,
   onChange,
+  apiBase,
 }: {
+  /** `{base}/api`, so a filter on a sourced select can list its options. */
+  apiBase?: string;
   id: string;
   field: CollectionFieldDef;
   value: Json;
@@ -114,6 +117,7 @@ export function CollectionField({
       </p>
 
       <QueryControls
+        {...(apiBase ? { apiBase } : {})}
         schema={schema}
         value={stored}
         order={order}

@@ -310,6 +310,7 @@ export function Inspector(props: InspectorProps) {
                 schema,
                 types: props.types,
                 resolution: props.resolution,
+                story: props.story.id,
                 ...(assetLocks ? { assetLocks } : {}),
               }}
               expanded={expandedField === name}

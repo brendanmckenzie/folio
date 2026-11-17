@@ -3,6 +3,8 @@ import type { Field as FieldDef } from "../../../../core/fields";
 import type { CollectionValue, ContentOrderSpec, ContentWhere } from "../../../../core/query";
 import type { SchemaIndex } from "../../../../core/schema";
 import { Input, Select } from "../../Field";
+import { filterChoices } from "./sourced-select-model";
+import { useFieldOptions } from "./useFieldOptions";
 import css from "./fields.module.css";
 
 /**
@@ -32,6 +34,53 @@ export function filterField(schema: SchemaIndex, name: string): FieldDef | undef
     if (field && (field as { indexed?: unknown }).indexed === true) return field;
   }
   return undefined;
+}
+
+/**
+ * The block that declares the filterable `name`: the one `filterField` found the field on,
+ * which a sourced select needs to ask the server for its list.
+ */
+export function filterBlock(schema: SchemaIndex, name: string): string | undefined {
+  for (const [block, def] of Object.entries(schema)) {
+    const field = def.fields[name];
+    if (field && (field as { indexed?: unknown }).indexed === true) return block;
+  }
+  return undefined;
+}
+
+/**
+ * A filter on a sourced select (`platform/admin-extensions.md` decision 19): "Any", the
+ * sourced options, then the typed extras. It reads the same route the inspector does, with no
+ * story, so a `collection` filtering on a product field offers the products and not only "Any".
+ */
+function SourcedFilter({
+  apiBase,
+  block,
+  name,
+  field,
+  id,
+  current,
+  onPick,
+}: {
+  apiBase: string;
+  block: string;
+  name: string;
+  field: Extract<FieldDef, { kind: "select" }>;
+  id: string;
+  current: string;
+  onPick: (chosen: string) => void;
+}) {
+  const { answer } = useFieldOptions(apiBase, { block, field: name });
+  return (
+    <Select id={id} value={current} onChange={(e) => onPick(e.target.value)}>
+      <option value="">Any</option>
+      {filterChoices(answer, field.options).map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </Select>
+  );
 }
 
 /** The stored value with one filter replaced, or removed when the choice is "any". */
@@ -79,7 +128,11 @@ export function QueryControls({
   between,
   onChange,
   onCommit,
+  apiBase,
 }: {
+  /** `{base}/api`: given, a filter on a sourced select reads its list. Absent, it offers
+   * the typed extras alone, which is what it always did. */
+  apiBase?: string;
   schema: SchemaIndex;
   value: CollectionValue;
   /** The sort in effect, which is the stored one or the caller's default. */
@@ -120,7 +173,17 @@ export function QueryControls({
            */
           <label key={name} className={css.filter} htmlFor={idFor(name)}>
             <span>{def?.label ?? name}</span>
-            {def?.kind === "select" ? (
+            {def?.kind === "select" && def.optionsFrom && apiBase && filterBlock(schema, name) ? (
+              <SourcedFilter
+                apiBase={apiBase}
+                block={filterBlock(schema, name) as string}
+                name={name}
+                field={def}
+                id={idFor(name)}
+                current={current}
+                onPick={(chosen) => choose(withFilter(value, name, chosen))}
+              />
+            ) : def?.kind === "select" ? (
               <Select
                 id={idFor(name)}
                 value={current}

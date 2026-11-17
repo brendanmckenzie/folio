@@ -208,6 +208,8 @@ export function FieldRow(props: Props) {
                   {...(describedBy ? { describedBy } : {})}
                   {...(invalid ? { invalid } : {})}
                   name={name}
+                  block={blok.type}
+                  {...(isSourceLocale ? {} : { locale })}
                   field={field}
                   value={value}
                   editable={editable}

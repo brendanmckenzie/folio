@@ -34,6 +34,7 @@ import type { FieldCondition } from "../../../core/conditions";
 import type { Field } from "../../../core/fields";
 import type { AuthPolicy, AuthPolicyProvider } from "../../../server/auth/config";
 import { type LocaleConfig, localeChain } from "../../../core/locales";
+import { sourceDetail } from "./fields/sourced-select-model";
 import {
   type BlockSchema,
   canNest,
@@ -390,7 +391,8 @@ function fieldDetail(field: Field): string {
     case "date":
       return field.time ? "date and time" : "date";
     case "select":
-      return field.options.map((o) => o.value).join(", ");
+      // From a host's source: the source, not a value list (and no request to build one).
+      return field.optionsFrom ? sourceDetail(field) : field.options.map((o) => o.value).join(", ");
     case "asset":
       return field.accept ?? "";
     case "multiasset":
