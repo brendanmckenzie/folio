@@ -17,6 +17,7 @@ import { renderToReadableStream } from "react-dom/server.edge";
 import { blocks } from "./blocks";
 import { SubmissionStatus, type SubmissionState } from "./blocks/contact";
 import { migrations } from "./migrations";
+import { orderDetail, ordersList } from "./orders";
 
 // Two Durable Object classes now. SpaceDO is the space channel
 // (editing/live-collaboration.md): one instance for the whole site, no storage at
@@ -358,6 +359,21 @@ const folio = createFolio<Env>({
     },
   },
   basePath: "/folio",
+  // A screen of the host's own in Folio's sidebar and chrome (`platform/admin-extensions.md`).
+  // Folio draws the item and the frame; `/admin/orders` below is the host's route and
+  // gates itself with `folio.requireEditor`, which is where the role is enforced.
+  admin: {
+    pages: [
+      {
+        id: "orders",
+        label: "Orders",
+        path: "/admin/orders",
+        icon: "receipt",
+        role: "editor",
+        group: "Shop",
+      },
+    ],
+  },
   // content-model/localisation.md: two languages, one document per story.
   // `default` is the *source* locale — the one `Blok.data` holds — and everything
   // else is a per-field override in `Blok.i18n`. Marking a field
@@ -518,6 +534,25 @@ export default {
       const expiresIn = Number(url.searchParams.get("expiresIn") ?? "") || undefined;
       return Response.json({
         url: await folio.signAsset(env, src, expiresIn === undefined ? {} : { expiresIn }),
+      });
+    }
+    // A host admin page, framed by Folio's shell at `{base}/host/orders`. Every request
+    // to it, a `GET` here, a `POST` or a JSON endpoint in a real shop, goes through
+    // `requireEditor`: it answers a redirect to sign-in, a 401 or a 403, or the editor and
+    // the headers (`frame-ancestors 'self'`, `no-store`) to send back.
+    if (url.pathname === "/admin/orders" || url.pathname.startsWith("/admin/orders/")) {
+      const gate = await folio.requireEditor(req, env, { page: "orders" });
+      if (gate instanceof Response) return gate;
+      const id = url.pathname.slice("/admin/orders".length).replace(/^\//, "");
+      const html = id ? orderDetail(id) : ordersList(url.searchParams.get("state"));
+      if (html === null) {
+        return new Response("No such order", {
+          status: 404,
+          headers: { ...gate.headers, "content-type": "text/plain; charset=utf-8" },
+        });
+      }
+      return new Response(html, {
+        headers: { ...gate.headers, "content-type": "text/html; charset=utf-8" },
       });
     }
     if (url.pathname === "/sitemap.xml") {
