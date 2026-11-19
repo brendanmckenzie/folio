@@ -19,7 +19,7 @@ import { contentSql, runQuery, runQuerySlice } from "../../src/server/query";
  * fallback, which do not grow with the table) and a quarter, so a regression back to
  * walking the field fails by orders of magnitude, not by a margin.
  */
-const indexed = new Set(["date", "pub", "topic", "label"]);
+const indexed = new Set(["date", "pub", "topic", "label", "flag", "prio"]);
 const N = 2500;
 
 function spyDb() {
@@ -110,9 +110,17 @@ beforeAll(async () => {
   const day = 86_400_000;
   const when = (ms: number): [string, number] => [new Date(ms).toISOString(), ms];
   // 30 posts with old dates; N events with newer dates in the same field.
-  for (let i = 0; i < 30; i++) story(`p${i}`, "post", "default", { date: when(base + i * day) });
+  for (let i = 0; i < 30; i++)
+    story(`p${i}`, "post", "default", {
+      date: when(base + i * day),
+      flag: ["true", 1],
+      prio: ["1", 1 + (i % 3)],
+    });
   for (let i = 0; i < N; i++)
-    story(`e${i}`, "event", "default", { date: when(base + 1e11 + i * 6e4) });
+    story(`e${i}`, "event", "default", {
+      date: when(base + 1e11 + i * 6e4),
+      flag: ["true", 1],
+    });
   // N articles: a numeric field of their own, the shared one (older than the events), a rare
   // topic on 5, and a label on 10.
   for (let i = 0; i < N; i++) {
@@ -120,6 +128,8 @@ beforeAll(async () => {
       pub: when(base + i * 36e5),
       date: when(base - 1e10 + i * 36e5),
       topic: [i % 500 === 0 ? "rare" : "common", null],
+      flag: ["true", 1],
+      prio: [String(1 + (i % 3)), 1 + (i % 3)],
       ...(i < 10 ? { label: [`l${i}`, null] as [string, null] } : {}),
     });
   }
@@ -168,6 +178,26 @@ const CASES: [string, ContentQuery, readonly string[]][] = [
   [
     "a sparse field (10 of N)",
     { type: "article", order: { field: "label", dir: "asc" }, perPage: 12 },
+    ["default"],
+  ],
+  [
+    "a boolean every story shares (30 posts, N events, N articles)",
+    { type: "post", order: desc("flag"), perPage: 12 },
+    ["default"],
+  ],
+  [
+    "a boolean on the large type itself",
+    { type: "article", order: desc("flag"), perPage: 12 },
+    ["default"],
+  ],
+  [
+    "three distinct values, shared with a larger type",
+    { type: "post", order: { field: "prio", dir: "asc" }, perPage: 12 },
+    ["default"],
+  ],
+  [
+    "three distinct values on the large type itself",
+    { type: "article", order: desc("prio"), perPage: 12 },
     ["default"],
   ],
   ["a deep page", { type: "article", order: desc("pub"), perPage: 12, page: 100 }, ["default"]],

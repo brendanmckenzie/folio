@@ -480,22 +480,24 @@ export function contentSql(
  *
  * Each arm keeps at most `L = offset + limit` rows, which is all the page can use, and
  * the outer query orders the (at most 3L) rows and applies the offset. An arm is only
- * *run* when the arms before it did not fill `L`, which the arm tests against a
- * materialised copy of them (`a1`, `a2`), so a full first page never touches arm 2 or 3.
- * One statement means one round trip and one consistent read, however many groups a
- * page spans.
+ * *run* when the arms before it did not fill `L` and were not cut short, so a full
+ * first page never touches arm 2 or 3. One statement means one round trip and one
+ * consistent read, however many groups a page spans.
  *
- * **The walk is capped, because the index is not per type.** `content_index` has no
- * type or site column, so walking `(field, locale, num_value)` visits every story in
- * the database that has the field, other types and other sites included, and a small
- * listing in a shared field would read all of them to find its few rows. The walk is
- * therefore a derived table with `limit K` (`K` a few times the page), so it reads at
- * most `K` index rows and `K` primary-key probes however the data is shaped. When the
- * cap is what stopped an arm short of `L` the answer is not known to be complete, and
- * `runQuery` runs the old statement instead: the worst case is the old cost plus
- * about `2K` rows, and the common case (one type or site owns the field) never gets
- * there. `exhausted` is the one question that settles an under-full answer: did every
- * walk end before its cap.
+ * **The walk is capped in rows read, because the index is not per type.**
+ * `content_index` has no type or site column, so walking `(field, locale, num_value)`
+ * visits every story in the database that has the field, other types and other sites
+ * included. The walk is `order by <the index column> limit K` and nothing else, which
+ * SQLite answers straight off the index: it reads `K` index rows and stops. (Ordering
+ * the walk by the full sort key would make it read and sort the whole leading tie
+ * group, which for a boolean or a handful of categories is every story that has the
+ * field.) The cut is the value of the `K`-th row (`b1` / `b2`): every row strictly before
+ * it is certainly in the walk, tied rows at it may not all be, so only the rows
+ * strictly before it are used, and each arm is then a true prefix of its group's order.
+ * When that prefix cannot fill the page, `ok` is 0 and `runQuery` runs the old
+ * statement instead: the worst case is the old cost plus about `2K` rows, and the
+ * common case (one type or site owns the field, values mostly distinct) never gets
+ * there.
  *
  * `cross join` is the load-bearing word. SQLite never reorders one, so the index walk
  * stays the outer loop; a plain join is re-planned `stories`-first as soon as the
@@ -506,10 +508,12 @@ export function contentSql(
  * needs a row, so group 3 cannot.
  */
 export interface IndexedOrder {
-  /** The listing statement for `limit` rows from `offset`, or null when it is not worth it. */
+  /**
+   * The listing statement for `limit` rows from `offset`, or null when it is not worth
+   * it. It always answers one row at least: an empty page is one row whose `id` is
+   * null, because `ok` rides on it.
+   */
   page: (limit: number, offset: number) => Sql | null;
-  /** For an empty answer, which carries no `ok`: true when every capped walk ended before its cap. */
-  exhausted: (limit: number, offset: number) => Sql;
 }
 
 /** The deepest `offset + limit` the capped walk is used for; past it the old statement runs. */
@@ -542,6 +546,8 @@ export function indexedOrderSql(
   );
   const where = clauses.join(" and ");
   const dir = n.order.dir === "asc" ? "asc" : "desc";
+  // "Strictly before" in sort order: the rows a walk cut at its K-th value surely holds.
+  const before = dir === "asc" ? "<" : ">";
   const cols = `${STORY_COLS}, ${rowProjection(n.withDoc)}`;
   const field = n.order.field;
 
@@ -558,96 +564,87 @@ export function indexedOrderSql(
   const numeric = "ci.num_value is not null";
   const textual = "ci.num_value is null and ci.text_value is not null";
 
-  /** A capped walk of one group's index rows, in the group's sort order. */
-  const walk = (valued: string, order: string) =>
+  /**
+   * A group's capped walk: index order on one column, `limit K`, nothing else, so it
+   * reads K index rows. Tied rows come back in no particular order, which is why the
+   * rows at the K-th value are not used (`cut`).
+   */
+  const walk = (valued: string, column: string) =>
     `(select ci.story_id, ci.num_value, ci.text_value from content_index ci
        where ci.field = ? and ci.locale = ? and ${valued}${foldText}
-       order by ${order} limit ?) co cross join stories on stories.id = co.story_id`;
+       order by ci.${column} ${dir} limit ?) co cross join stories on stories.id = co.story_id`;
   const walkBinds = (k: number) => [field, locale, ...foldBinds, k];
-  /** How many index rows a group's walk would see, capped: it is exhausted when under the cap. */
-  const seen = (valued: string) =>
-    `(select count(*) from (select 1 from content_index ci
-       where ci.field = ? and ci.locale = ? and ${valued}${foldText} limit ?))`;
+  /** The K-th row's value of the column, or null when the group has fewer than K rows (not cut short). */
+  const kth = (name: string, valued: string, column: string) =>
+    `${name} as (select (select ci.${column} from content_index ci
+       where ci.field = ? and ci.locale = ? and ${valued}${foldText}
+       order by ci.${column} ${dir} limit 1 offset ?) as v)`;
+  const kthBinds = (k: number) => [field, locale, ...foldBinds, k - 1];
+  const keep = (name: string, column: string) =>
+    `((select v from ${name}) is null or co.${column} ${before} (select v from ${name}))`;
 
-  const order1 = `ci.num_value ${dir}, ci.text_value ${dir} nulls last, ci.story_id asc`;
-  const order2 = `ci.text_value ${dir}, ci.story_id asc`;
-  const outer1 = `co.num_value ${dir}, co.text_value ${dir} nulls last, stories.id asc`;
-  const outer2 = `co.text_value ${dir}, stories.id asc`;
+  const order1 = `co.num_value ${dir}, co.text_value ${dir} nulls last, stories.id asc`;
+  const order2 = `co.text_value ${dir}, stories.id asc`;
 
   const build = (limit: number, offset: number): Sql | null => {
     const window = offset + limit;
     if (window > ORDERED_WINDOW_MAX) return null;
     const k = WALK_FACTOR * window + WALK_SLACK;
-    const arms: string[] = [];
-    const armBinds: unknown[] = [];
     const ctes: string[] = [];
     const cteBinds: unknown[] = [];
-    // `have` is the SQL for "rows the earlier arms produced", `open` the tests that
-    // every earlier walk ended before its cap, which is what lets a later arm run.
-    let have = "";
-    let open = "";
-    let openBinds: unknown[] = [];
 
+    ctes.push(kth("b1", numeric, "num_value"));
+    cteBinds.push(...kthBinds(k));
     ctes.push(`a1 as (select ${cols}, 1 as g, co.num_value as k1, co.text_value as k2
-          from ${walk(numeric, order1)} where ${where} order by ${outer1} limit ?)`);
+          from ${walk(numeric, "num_value")}
+          where ${keep("b1", "num_value")} and ${where} order by ${order1} limit ?)`);
     cteBinds.push(...walkBinds(k), ...binds, window);
-    arms.push("select * from a1");
-    have = "(select count(*) from a1)";
+    const arms = ["select * from a1"];
+    let have = "(select count(*) from a1)";
+    let done = "(select v from b1) is null";
 
     if (withText) {
-      const test = `${have} < ? and ${seen(numeric)} < ?`;
-      const testBinds = [window, field, locale, ...foldBinds, k, k];
       // The test is the one row a leading `select` yields or does not: with it as the
       // outer loop, a failed test means the walk below never starts, which a `where`
       // term would not do (SQLite would read every row and test each).
+      const test = `${have} < ? and (select v from b1) is null`;
+      ctes.push(kth("b2", textual, "text_value"));
+      cteBinds.push(...kthBinds(k));
       ctes.push(`a2 as (select ${cols}, 2 as g, co.num_value as k1, co.text_value as k2
-          from (select 1 as go where ${test}) gate cross join ${walk(textual, order2)}
-          where ${where} order by ${outer2} limit ?)`);
-      cteBinds.push(...testBinds, ...walkBinds(k), ...binds, window);
+          from (select 1 as go where ${test}) gate cross join ${walk(textual, "text_value")}
+          where ${keep("b2", "text_value")} and ${where} order by ${order2} limit ?)`);
+      cteBinds.push(window, ...walkBinds(k), ...binds, window);
       arms.push("select * from a2");
-      open = `${seen(numeric)} < ?`;
-      openBinds = [field, locale, ...foldBinds, k, k];
       have = `((select count(*) from a1) + (select count(*) from a2))`;
+      done = `${done} and (select v from b2) is null`;
       if (withAbsent) {
         // A story with no index row, or one holding neither value: no value at all.
         const absent = `not exists (select 1 from content_index cx
                       where cx.story_id = stories.id and cx.locale = ? and cx.field = ?
                         and (cx.num_value is not null or cx.text_value is not null))`;
-        const test3 = `${have} < ? and ${open} and ${seen(textual)} < ?`;
-        const test3Binds = [window, ...openBinds, field, locale, ...foldBinds, k, k];
-        arms.push(`select * from (select ${cols}, 3 as g, null as k1, null as k2
-          from (select 1 as go where ${test3}) gate cross join stories
+        ctes.push(`a3 as (select ${cols}, 3 as g, null as k1, null as k2
+          from (select 1 as go where ${have} < ? and ${done}) gate cross join stories
           where ${where} and ${absent}
           order by stories.id asc limit ?)`);
-        armBinds.push(...test3Binds, ...binds, locale, field, window);
+        cteBinds.push(window, ...binds, locale, field, window);
+        arms.push("select * from a3");
+        have = `((select count(*) from a1) + (select count(*) from a2) + (select count(*) from a3))`;
       }
     }
 
-    // `ok` rides on every row: 1 when the page is full (whatever the walks saw, every
-    // arm yields a prefix of its group's order) and otherwise whether every walk ended
-    // before its cap, evaluated only for a short answer so a full page never pays for it.
-    const tests = [numeric, ...(withText ? [textual] : [])];
-    const done = tests.map((t) => `${seen(t)} < ?`).join(" and ");
-    const doneBinds = tests.flatMap(() => [field, locale, ...foldBinds, k, k]);
+    // `ok` rides on the page's rows, and on a row of its own when the page is empty
+    // (the left join): 1 when the arms produced a full page (each is a prefix of its
+    // group's order, whatever the walks saw), otherwise whether no walk was cut short.
     const sql = `with ${ctes.join(",\n")}
-      select *, case when count(*) over () >= ? then 1 else (${done}) end as ok
-        from (${arms.join("\n union all\n ")})
-      order by g, k1 ${dir}, k2 ${dir} nulls last, id asc limit ? offset ?`;
-    const bound = [...cteBinds, window, ...doneBinds, ...armBinds, limit, offset];
+      select u.*, fl.ok as ok
+        from (select case when ${have} >= ? then 1 else (${done}) end as ok) fl
+        left join (select * from (${arms.join("\n union all\n ")})
+                    order by g, k1 ${dir}, k2 ${dir} nulls last, id asc limit ? offset ?) u on 1`;
+    const bound = [...cteBinds, window, limit, offset];
     return bound.length > D1_BIND_CAP ? null : { text: sql, binds: bound };
   };
 
-  return {
-    page: build,
-    exhausted: (limit, offset) => {
-      const k = WALK_FACTOR * (offset + limit) + WALK_SLACK;
-      const tests = [numeric, ...(withText ? [textual] : [])];
-      return {
-        text: `select ${tests.map((t) => `${seen(t)} < ?`).join(" and ")} as done`,
-        binds: tests.flatMap(() => [field, locale, ...foldBinds, k, k]),
-      };
-    },
-  };
+  return { page: build };
 }
 
 function unknownField(field: string, indexed: ReadonlySet<string>): FolioError {
@@ -743,15 +740,6 @@ async function execute(
         .bind(...stmt.binds)
         .all<Raw>()
     ).results;
-  const exhausted = async (stmt: Sql) =>
-    Boolean(
-      (
-        await deps.db
-          .prepare(stmt.text)
-          .bind(...stmt.binds)
-          .first<{ done: number }>()
-      )?.done,
-    );
   const countOf = async (stmt: Sql) =>
     (
       await deps.db
@@ -775,19 +763,19 @@ async function execute(
   counting?.catch(() => {});
   let fetched: Raw[];
   if (plan && ordered) {
-    fetched = await all(ordered);
+    const rows = await all(ordered);
+    // An empty page is one row with no `id`, carrying `ok` all the same.
+    fetched = rows.filter((r) => r.id != null);
     // A full page is right whatever the walks saw. A short one is right only if it is
-    // known to be complete: the statement says so (`ok`: no walk hit its cap), or it
-    // accounts for every row the count found. An empty one has no row to carry `ok`.
+    // known to be complete: the statement says so (`ok`: no walk was cut short), or it
+    // accounts for every row the count found.
     const complete =
       fetched.length >= need ||
-      (fetched.length > 0 && Boolean(fetched[0]?.ok)) ||
-      (counting !== null && offset + fetched.length === (await counting)) ||
-      (counting === null &&
-        fetched.length === 0 &&
-        (await exhausted(plan.exhausted(need, offset))));
+      Boolean(rows[0]?.ok) ||
+      (counting !== null && offset + fetched.length === (await counting));
     // Otherwise a capped walk may have missed rows (the field is shared with other types
-    // or sites): the old statement answers, at the old cost.
+    // or sites, or many rows tie on the value): the old statement answers, at the old
+    // cost. One statement at most, whatever the page.
     if (!complete) fetched = await all(oldPage());
   } else {
     fetched = await all(oldPage());

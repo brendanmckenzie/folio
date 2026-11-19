@@ -26,12 +26,14 @@ from 516 rows read to 28 and a post page's lookups from 1,418 to 14. Read
   rows and order the old statement did, including the stories with no value for the field, which still sort
   last in both directions. A `where` on the sort field is folded into the index range, so "the post before this
   date" seeks instead of probing every story.
-- **The walk is capped, so it cannot cost more than the statement it replaced by more than a small fixed
-  amount.** `content_index` has no type or site column, so the walk sees every story that has the field. It
-  reads at most a few times the page, and if that is not enough to fill the page (the field is shared with a
-  larger type or site, or a filter is selective) the old statement answers, at the old cost plus a couple of hundred
-  rows. A page deeper than 150 rows uses the old statement outright. Queries ordered by `ord`, `publishedAt`,
-  `title` or `relevance`, and every search, compile to byte-identical SQL.
+- **The walk is capped in rows read, so a listing costs at most the statement it replaced plus a small fixed
+  amount.** `content_index` has no type or site column, so the walk sees every story that has the field, and
+  values that many stories share (a boolean, a handful of categories) make big ties. The walk reads at most a few
+  times the page straight off the index and uses only the rows strictly before the last one it read, so a tie
+  group is never read or sorted whole. If that cannot fill the page (the field is shared with a larger type or
+  site, many rows tie, or a filter is selective) one old statement answers at the old cost plus a couple of
+  hundred rows. A page deeper than 150 rows uses the old statement outright. Queries ordered by `ord`,
+  `publishedAt`, `title` or `relevance`, and every search, compile to byte-identical SQL.
 - **`recordBy` is driven from `content_index_lookup`.** It was `id in (select …)` beside an equality on the
   type, which with no planner statistics read every story of the type; it now reads the one or two index rows
   that hold the value.
