@@ -314,6 +314,13 @@
       "rollback": "safe",
       "migrations": [],
       "headings": ["Singleton preview without a host page (v1.8.1)"]
+    },
+    {
+      "version": "1.8.2",
+      "date": "2026-11-19",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": ["Cheaper listings and record lookups (v1.8.2)"]
     }
   ]
 }

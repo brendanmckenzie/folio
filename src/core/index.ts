@@ -88,6 +88,7 @@ export type {
   ContentOrderSpec,
   ContentPage,
   ContentQuery,
+  ContentSlice,
   ContentWhere,
   RangeOp,
   ResolvedCollection,

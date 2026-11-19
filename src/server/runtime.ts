@@ -31,6 +31,7 @@ import {
   collectionQueries,
   type ContentPage,
   type ContentQuery,
+  type ContentSlice,
   type ResolvedCollection,
 } from "../core/query";
 import { assetKeys, formIds, linkedIds, referencedIdsAllLocales } from "../core/refs";
@@ -103,7 +104,7 @@ import {
   validateHooks,
 } from "./hooks";
 import type { PublishDeps } from "./publish";
-import { type QueryDeps, runQuery } from "./query";
+import { type QueryDeps, runQuery, runQuerySlice } from "./query";
 import { spaceBroadcastHooks, spaceNameFor } from "./space-events";
 import { redirectsAtPaths } from "./redirects";
 import { draftSeedSource } from "./versions";
@@ -353,6 +354,13 @@ export interface BrandRuntime {
     chain?: readonly string[],
     site?: SiteRef,
   ) => Promise<ContentPage>;
+  /** `query` without the count: `runQuerySlice` over the same brand, scope and locale. */
+  querySlice: (
+    bindings: ReadBindings,
+    q: ContentQuery,
+    chain?: readonly string[],
+    site?: SiteRef,
+  ) => Promise<ContentSlice>;
   publishDeps: (
     bindings: ReadBindings,
     hookCtx: HookRunnerCtx,
@@ -1957,6 +1965,24 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       return runQuery(queryDeps(bindings.db, chain, site), q, { locale: localeOf(q.locale) });
     };
 
+    const querySlice = (
+      bindings: ReadBindings,
+      q: ContentQuery,
+      chain: readonly string[] = SINGLE_SITE_CHAIN,
+      site?: SiteRef,
+    ): Promise<ContentSlice> => {
+      if (branded) {
+        try {
+          assertOwnSite(site, "query");
+        } catch (err) {
+          return Promise.reject(err);
+        }
+      }
+      return runQuerySlice(queryDeps(bindings.db, chain, site), q, {
+        locale: localeOf(q.locale),
+      });
+    };
+
     const optionLists: BrandRuntime["optionLists"] = async (bindings, formList, ctx) => {
       const out = new Map<string, Map<string, OptionListAnswer>>();
       const sourced = formList.flatMap((form) =>
@@ -2272,6 +2298,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       projection,
       resolve,
       query,
+      querySlice,
       publishDeps,
       optionLists,
       auditContext,

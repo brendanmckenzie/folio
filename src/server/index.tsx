@@ -186,6 +186,7 @@ export type {
   ContentOrder,
   ContentPage,
   ContentQuery,
+  ContentSlice,
   ContentWhere,
   ResolvedCollection,
 } from "../core/query";
@@ -1784,6 +1785,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         const within = await scopeOnce();
         return brand.query(bindings, q, within.chain, within.render?.site);
       },
+      querySlice: async (q) => {
+        const brand = await requireBrand();
+        const within = await scopeOnce();
+        return brand.querySlice(bindings, q, within.chain, within.render?.site);
+      },
       global: async (name) => {
         // No site on a deployment with `brands` is no brand, and so no singleton.
         const brand = await brandNow();
@@ -2071,6 +2077,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     },
     resolve: (env, doc, opts) => reader(env).resolve(doc, opts),
     query: (env, q) => reader(env).query(q),
+    querySlice: (env, q) => reader(env).querySlice(q),
     /**
      * `alarmHookCtx(env, rt.logger)` for the hook context, here and in `migrate` below.
      * Neither method takes an `ExecutionContext` — a deploy script has none to

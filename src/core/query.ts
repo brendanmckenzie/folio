@@ -164,6 +164,21 @@ export interface ContentPage {
   pages: number;
 }
 
+/**
+ * The answer to `querySlice`: the page, and whether another follows, without the
+ * `count(*)` that `total` and `pages` cost. `total` and `pages` are `null` rather than
+ * absent, so a host that reads them gets a value it can test and not a quiet
+ * `undefined` that compares as zero.
+ */
+export interface ContentSlice {
+  items: ContentItem[];
+  total: null;
+  page: number;
+  perPage: number;
+  pages: null;
+  hasMore: boolean;
+}
+
 /** What a `collection` field hands to `render`. */
 export interface ResolvedCollection extends ContentPage {
   /**
