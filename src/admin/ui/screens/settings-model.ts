@@ -46,7 +46,7 @@ import {
 
 /* ---------------------------------------------------------------- sections --- */
 
-export type SectionId = "types" | "blocks" | "globals" | "locales" | "signin" | "hooks" | "caching";
+export type SectionId = "types" | "blocks" | "locales" | "signin" | "hooks" | "caching";
 
 export interface Section {
   id: SectionId;
@@ -64,14 +64,13 @@ export interface Section {
  * types, auth providers, cache configuration"). That sentence is an enumeration
  * rather than a ranking, and the two questions this screen exists to answer —
  * *why can't I put an Insight at the top level*, *why won't a collection filter
- * on this field* — are both answered in the first two sections. Locales and
- * globals are short and read like reference; they are better beneath the thing
+ * on this field* — are both answered in the first two sections. Locales
+ * is short and reads like reference; they are better beneath the thing
  * somebody came here for than above it.
  */
 export const SECTIONS: readonly Section[] = [
   { id: "types", label: "Document types", anchor: "settings-types" },
   { id: "blocks", label: "Block types", anchor: "settings-blocks" },
-  { id: "globals", label: "Globals", anchor: "settings-globals" },
   { id: "locales", label: "Locales", anchor: "settings-locales" },
   { id: "signin", label: "Sign-in", anchor: "settings-signin" },
   { id: "hooks", label: "Publish hooks", anchor: "settings-hooks" },
@@ -211,8 +210,10 @@ export function typeRows(manifest: Manifest, schema: Record<string, BlockSchema>
 function whereClause(type: DocumentType, labelOf: (name: string) => string): string {
   if (type.kind === "singleton") return "Not in the tree — exactly one, created on first open";
   if (type.kind === "record") return "Not in the tree — edited as a table";
-  if (!type.under || type.under.length === 0) return "Anywhere in the tree";
-  return `Only under ${type.under.map(labelOf).join(", ")}`;
+  // The top level is folded in: a page with `under` can never sit there, and
+  // saying so beside the parents is what the old "Top level" column was for.
+  if (!type.under || type.under.length === 0) return "Anywhere, top level included";
+  return `Only under ${type.under.map(labelOf).join(", ")}, never top level`;
 }
 
 function previewClause(type: DocumentType, schema: Record<string, BlockSchema> = {}): string {
@@ -228,6 +229,26 @@ function previewClause(type: DocumentType, schema: Record<string, BlockSchema> =
   }
   if (type.previewPath === undefined) return "No host page configured";
   return type.previewPath === "" ? "The site root" : `/${type.previewPath}`;
+}
+
+/**
+ * The document types split by kind, because the three kinds answer different
+ * questions and an eight-column table with most cells empty answered none of them.
+ * A kind with no types is an empty array, which the screen draws as nothing.
+ * Singletons carry the `global` badge, so the old Globals table is not a fourth group.
+ */
+export interface TypeGroups {
+  pages: TypeRow[];
+  records: TypeRow[];
+  singletons: TypeRow[];
+}
+
+export function groupTypes(rows: readonly TypeRow[]): TypeGroups {
+  return {
+    pages: rows.filter((r) => r.kind === "page"),
+    records: rows.filter((r) => r.kind === "record"),
+    singletons: rows.filter((r) => r.kind === "singleton"),
+  };
 }
 
 /* -------------------------------------------------------------- block types --- */
@@ -495,6 +516,22 @@ export function filterBlocks(cards: readonly BlockCard[], q: string): BlockCard[
 }
 
 /**
+ * Block cards split into document roots (a type's root block, where `indexed`
+ * means something) and every other block, the modules an editor places in a slot.
+ */
+export interface BlockGroups {
+  roots: BlockCard[];
+  modules: BlockCard[];
+}
+
+export function groupBlocks(cards: readonly BlockCard[]): BlockGroups {
+  return {
+    roots: cards.filter((c) => c.rootFor.length > 0),
+    modules: cards.filter((c) => c.rootFor.length === 0),
+  };
+}
+
+/**
  * Which filtered cards are drawn open, by name.
  *
  * Two rules, and the second is the one worth arguing:
@@ -517,38 +554,6 @@ export function openCards(cards: readonly BlockCard[], q: string): Set<string> {
   if (!q.trim()) return new Set();
   if (cards.length === 1) return new Set([cards[0]!.name]);
   return new Set(cards.filter((c) => !matchesQuery(q, c.name, c.label)).map((c) => c.name));
-}
-
-/* ------------------------------------------------------------------ globals --- */
-
-export interface GlobalRow {
-  name: string;
-  label: string;
-  root: string;
-  /** Where the admin previews it, since it has no URL of its own. */
-  preview: string;
-}
-
-/**
- * `FolioConfig.globals`, joined back to the types they name.
- *
- * A name with no matching type cannot happen — `validateGlobals` throws at
- * construction for it — so this drops rather than reports: a row saying "unknown"
- * would be a row for a state the server refuses to boot in.
- */
-export function globalRows(manifest: Manifest): GlobalRow[] {
-  const rows: GlobalRow[] = [];
-  for (const name of manifest.globals) {
-    const type = manifest.types.find((t) => t.name === name);
-    if (!type) continue;
-    rows.push({
-      name,
-      label: type.label,
-      root: type.root,
-      preview: previewClause(type),
-    });
-  }
-  return rows;
 }
 
 /* ------------------------------------------------------------------ sign-in --- */
@@ -710,7 +715,6 @@ export function hookRows(manifest: Manifest): HookRow[] {
 export interface SettingsView {
   types: TypeRow[];
   blocks: BlockCard[];
-  globals: GlobalRow[];
   locales: LocaleRow[];
   providers: ProviderRow[];
   session: Fact[];
@@ -735,7 +739,6 @@ export function settingsView(
 ): SettingsView {
   const allTypes = typeRows(manifest, schema);
   const allBlocks = blockCards(manifest);
-  const allGlobals = globalRows(manifest);
   const allLocales = localeRows(manifest.locales);
   const allProviders = providerRows(policy);
   const allSession = sessionFacts(policy);
@@ -744,10 +747,19 @@ export function settingsView(
 
   return {
     types: allTypes.filter((t) =>
-      matchesQuery(q, t.name, t.label, t.kind, t.root, t.group, t.where, t.titleField),
+      matchesQuery(
+        q,
+        t.name,
+        t.label,
+        t.kind,
+        t.root,
+        t.group,
+        t.where,
+        t.titleField,
+        t.isGlobal ? "global" : undefined,
+      ),
     ),
     blocks: filterBlocks(allBlocks, q),
-    globals: allGlobals.filter((g) => matchesQuery(q, g.name, g.label, g.root)),
     locales: allLocales.filter((l) => matchesQuery(q, l.code, l.label)),
     providers: allProviders.filter((p) => matchesQuery(q, p.id, p.label, p.flow)),
     session: allSession.filter((f) => matchesQuery(q, f.label, f.value)),
@@ -756,9 +768,10 @@ export function settingsView(
     totals: {
       types: allTypes.length,
       blocks: allBlocks.length,
-      globals: allGlobals.length,
       locales: allLocales.length,
-      signin: allProviders.length + allSession.length,
+      // Providers only: the session policy is two settings under them, not two more
+      // things to sign in with, and counting them made two providers read as four.
+      signin: allProviders.length,
       hooks: allHooks.length,
       caching: allCache.length,
     },
@@ -772,12 +785,10 @@ export function shownIn(view: SettingsView, id: SectionId): number {
       return view.types.length;
     case "blocks":
       return view.blocks.length;
-    case "globals":
-      return view.globals.length;
     case "locales":
       return view.locales.length;
     case "signin":
-      return view.providers.length + view.session.length;
+      return view.providers.length;
     case "hooks":
       return view.hooks.length;
     case "caching":
@@ -796,7 +807,11 @@ export function shownIn(view: SettingsView, id: SectionId): number {
  */
 export function visibleSections(view: SettingsView, q: string): Section[] {
   if (!q.trim()) return [...SECTIONS];
-  return SECTIONS.filter((section) => shownIn(view, section.id) > 0);
+  return SECTIONS.filter((section) =>
+    section.id === "signin"
+      ? view.providers.length + view.session.length > 0
+      : shownIn(view, section.id) > 0,
+  );
 }
 
 /** True when the filter matched nothing anywhere — one empty state for the whole
