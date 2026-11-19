@@ -8,6 +8,31 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.8.3
+
+A patch release: nothing to run or edit on an existing host. No migration, no wire
+change (`PROTOCOL_VERSION` stays at 5), no change to the `exports` surface or to any
+`createFolio()` key. It touches the admin's Settings screen only.
+
+### Changed
+
+- **The Settings screen is quieter on a large site.** Document types are three tables
+  (Pages, Records, Singletons), each with only the columns that apply, and an empty
+  one is left out. Block types are grouped into document roots and blocks, without
+  the zero slot and preset counts. An empty Locales or Publish hooks section is one
+  muted line, and the Sign-in and Caching explanations are one clamped line with the
+  full text as a tooltip. The Sign-in count is providers only.
+
+### Removed
+
+- **The Globals section of Settings.** It repeated the singletons; a global is marked
+  with a `global` badge in the Singletons table, which carries the `Open` link Globals
+  had. This also removes a stray horizontal scrollbar.
+
+### Breaking changes
+
+None.
+
 ## 1.8.2
 
 A patch with no migration, no wire change (`PROTOCOL_VERSION` stays at 5) and no change to any answer: the
