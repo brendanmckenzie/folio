@@ -165,10 +165,10 @@ export interface ContentPage {
 }
 
 /**
- * The answer to a query that passed `total: false`: the page, and whether another
- * follows, without the `count(*)` that `total` and `pages` cost. `total` and `pages`
- * are `null` rather than absent, so a host that reads them gets a value it can test
- * and not a quiet `undefined` that compares as zero.
+ * The answer to `querySlice`: the page, and whether another follows, without the
+ * `count(*)` that `total` and `pages` cost. `total` and `pages` are `null` rather than
+ * absent, so a host that reads them gets a value it can test and not a quiet
+ * `undefined` that compares as zero.
  */
 export interface ContentSlice {
   items: ContentItem[];
@@ -178,13 +178,6 @@ export interface ContentSlice {
   pages: null;
   hasMore: boolean;
 }
-
-/**
- * `ContentQuery` plus the one option that is the *caller's* and not a collection
- * field's: `total: false` skips the `count(*)`. Not on `ContentQuery` itself, so a
- * variable a host already types as `ContentQuery` keeps answering a `ContentPage`.
- */
-export type ContentQueryOptions = ContentQuery & { total?: boolean };
 
 /** What a `collection` field hands to `render`. */
 export interface ResolvedCollection extends ContentPage {
@@ -241,7 +234,7 @@ const clampSearch = (raw: unknown): string | undefined => {
  * the same query and must cost one D1 read, not two.
  */
 export function normaliseQuery(
-  q: ContentQueryOptions,
+  q: ContentQuery,
   perPageMax = MAX_PER_PAGE,
 ): Required<Pick<ContentQuery, "page" | "perPage">> & {
   type: readonly string[];
@@ -251,8 +244,6 @@ export function normaliseQuery(
   where: readonly ContentWhere[];
   order: ContentOrderSpec;
   withDoc: boolean;
-  /** False only when the caller passed `total: false`; every other value counts. */
-  total: boolean;
 } {
   const type = q.type === undefined ? [] : typeof q.type === "string" ? [q.type] : [...q.type];
   const search = clampSearch(q.search);
@@ -297,7 +288,6 @@ export function normaliseQuery(
     page: clampPage(q.page),
     perPage: clampPerPage(q.perPage, perPageMax),
     withDoc: q.withDoc === true,
-    total: q.total !== false,
   };
 }
 
@@ -311,7 +301,7 @@ export function normaliseQuery(
  * that silently serves one block another block's list. A page carries a handful of
  * collections, so the bytes are not worth the risk.
  */
-export function queryKey(q: ContentQueryOptions, perPageMax = MAX_PER_PAGE): string {
+export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
   const n = normaliseQuery(q, perPageMax);
   // Explicit key order rather than JSON.stringify over the object, so the key is
   // stable against a future field being added in the middle of the interface.
@@ -333,9 +323,6 @@ export function queryKey(q: ContentQueryOptions, perPageMax = MAX_PER_PAGE): str
     // a query and differ here — without it one answer serves both and whichever
     // asked for documents silently renders without them.
     ...(n.withDoc ? [1] : []),
-    // Likewise only when false (`total: false` answers a slice with no `total`, not a
-    // page), and as an object so it cannot be read as `withDoc`'s `1`.
-    ...(n.total ? [] : [{ total: false }]),
   ]);
 }
 

@@ -734,14 +734,17 @@ hydrated, so the frame is told nothing). `previewBranch` answers it after the re
 page lookup; a singleton without `previewRoot` takes the unchanged path. A singleton that is not one of
 `globals` may not declare it.
 
-**An ordered listing by an `indexed` field is three statements, and `contentSql` is the oracle (v1.8.2).**
-`runQuery` runs `indexedOrderSql`'s groups (numeric value, text-only value, no value; `cross join` from
-`content_index` so the index walk stays the outer loop) in place of `contentSql`'s one `left join` statement,
-which stays exactly as it was and is what `test/workers/query-order.test.ts` compares every page against. Change
-either and that test is the guard: the offset arithmetic across groups and `nulls last` in both directions are
-where a subtle ordering bug hides. `ord`, `publishedAt`, `title` and search never take the new path. `total:
-false` is on `ContentQueryOptions`, **not** on `ContentQuery`, so a host's variable typed `ContentQuery` keeps
-answering a `ContentPage`.
+**An ordered listing by an `indexed` field is one capped index walk, and `contentSql` is the oracle (v1.8.2).**
+`runQuery` runs `indexedOrderSql`'s statement (three `union all` arms: numeric value, text-only value, no value;
+`cross join` from `content_index` so the walk stays the outer loop; a later arm gated behind a leading
+`select 1 where …` row, because a `where` term would not stop the scan) in place of `contentSql`'s `left join`
+statement, which stays exactly as it was, is the fallback, and is what `test/workers/query-order.test.ts`
+compares every page against. **`content_index` has no type or site column**, so the walk is capped
+(`WALK_FACTOR`, `WALK_SLACK`) and a page it cannot fill falls back to the old statement; `query-order-cost.test.ts`
+asserts rows read at thousands of rows for the shapes that go wrong (a field shared with a larger type, a small
+site beside a large one, a selective filter). Change either test's subject and both are the guard. `ord`,
+`publishedAt`, `title` and search never take the new path. `querySlice` is its own method, **not** an option on
+`query`, so `query`'s type (and `Awaited<ReturnType<…>>` of it) is what it was; `query-types.test.ts` pins that.
 
 Spec 44 (admin extensions, `platform/admin-extensions.md`) was built 2026-11-17 and ships as v1.7.0, with no migration and
 no wire change (`PROTOCOL_VERSION` stays at 5; the host-page frames are their own public protocol). It adds

@@ -10,7 +10,6 @@ import {
   type LocaleContext,
   localeContext,
 } from "../core/locales";
-import type { ContentQueryOptions } from "../core/query";
 import type { Resolution } from "../core/resolve";
 import { type SchemaIndex, uniqueFieldsOf } from "../core/schema";
 import { buildTree, type StoryMeta } from "../core/story";
@@ -187,7 +186,6 @@ export type {
   ContentOrder,
   ContentPage,
   ContentQuery,
-  ContentQueryOptions,
   ContentSlice,
   ContentWhere,
   ResolvedCollection,
@@ -1782,11 +1780,16 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           within.render?.site,
         );
       },
-      query: (async (q: ContentQueryOptions) => {
+      query: async (q) => {
         const brand = await requireBrand();
         const within = await scopeOnce();
         return brand.query(bindings, q, within.chain, within.render?.site);
-      }) as FolioReader["query"],
+      },
+      querySlice: async (q) => {
+        const brand = await requireBrand();
+        const within = await scopeOnce();
+        return brand.querySlice(bindings, q, within.chain, within.render?.site);
+      },
       global: async (name) => {
         // No site on a deployment with `brands` is no brand, and so no singleton.
         const brand = await brandNow();
@@ -2073,7 +2076,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       return brand.registry;
     },
     resolve: (env, doc, opts) => reader(env).resolve(doc, opts),
-    query: ((env: Env, q: ContentQueryOptions) => reader(env).query(q)) as Folio<Env>["query"],
+    query: (env, q) => reader(env).query(q),
+    querySlice: (env, q) => reader(env).querySlice(q),
     /**
      * `alarmHookCtx(env, rt.logger)` for the hook context, here and in `migrate` below.
      * Neither method takes an `ExecutionContext` — a deploy script has none to

@@ -26,7 +26,6 @@ import {
   type ContentItem,
   type ContentPage,
   type ContentQuery,
-  type ContentQueryOptions,
   type ContentSlice,
   type ContentWhere,
   isRangeOp,
@@ -175,9 +174,10 @@ function gatePredicate(gate: SearchGate, locale: string): Sql {
  *
  * `fold` is the one place the indexed-order path differs: a `where` on the **sort
  * field** tests the very `content_index` row the ordered statement already walks
- * (`co`, the primary key `(story_id, locale, field)`), so `foldPredicate` states it
- * on `co` and the clause stops being a probe per story. `null` for every other
- * statement, which is why `contentSql`'s text is not one character different.
+ * (the primary key `(story_id, locale, field)`), so it is returned in `folded` for
+ * `foldPredicate` to state on that row, and the clause stops being a probe per story.
+ * `null` for every other statement, which is why `contentSql`'s text is not one
+ * character different.
  */
 function filterClauses(
   n: ReturnType<typeof normaliseQuery>,
@@ -203,9 +203,13 @@ function filterClauses(
   }
   const folded: ContentWhere[] = [];
   n.where.forEach((w, i) => {
-    const lifted = fold === w.field ? foldPredicate(w) : null;
-    if (lifted) folded.push(w);
-    const pred = lifted ?? wherePredicate(w, locale, i);
+    // Left out of the clauses, not replaced in them: the caller states it on the
+    // index row's own alias, inside the walk (`foldPredicate`).
+    if (fold === w.field && foldPredicate(w, "co") !== null) {
+      folded.push(w);
+      return;
+    }
+    const pred = wherePredicate(w, locale, i);
     clauses.push(pred.text);
     binds.push(...pred.binds);
   });
@@ -251,13 +255,13 @@ function rowProjection(withDoc: boolean): string {
  * and operator are exactly `wherePredicate`'s, so the rows that match are the same
  * ones. `ne`, `in`, `startsWith` and `contains` keep their `exists` form.
  */
-function foldPredicate(w: ContentWhere): Sql | null {
+function foldPredicate(w: ContentWhere, alias: string): Sql | null {
   if (isRangeOp(w.op)) {
     const op = w.op === "gt" ? ">" : w.op === "gte" ? ">=" : w.op === "lt" ? "<" : "<=";
     const column = typeof w.value === "number" ? "num_value" : "text_value";
-    return { text: `co.${column} ${op} ?`, binds: [w.value] };
+    return { text: `${alias}.${column} ${op} ?`, binds: [w.value] };
   }
-  if (w.op === "eq") return { text: "co.text_value = ?", binds: [scalar(w.value)] };
+  if (w.op === "eq") return { text: `${alias}.text_value = ?`, binds: [scalar(w.value)] };
   return null;
 }
 
@@ -457,32 +461,44 @@ export function contentSql(
   };
 }
 
-/** One statement of an indexed-order listing: a page of it, and how many rows it holds. */
-export interface OrderSegment {
-  page: (limit: number, offset: number) => Sql;
-  count: Sql;
-}
-
 /**
- * An ordered listing sorted by an indexed field, as up to three statements that
- * together return exactly the rows, in exactly the order, of `contentSql`'s single
- * `left join` statement (which stays the reference: `test/workers/query-order.test.ts`
- * runs both and compares).
+ * An ordered listing sorted by an indexed field, as **one statement** that returns
+ * exactly the rows, in exactly the order, of `contentSql`'s `left join` statement
+ * (which stays the reference: `test/workers/query-order.test.ts` runs both and
+ * compares).
  *
- * **Why three.** That statement drives from `stories` through a `left join`, so
- * SQLite visits and sorts every post of the type before it can take twelve: rows
- * read are three times the posts, however small the page. No index can fix it while
- * the statement has that shape. Here the statement drives from `content_index_num`
- * or `content_index_lookup`, in sort order, and stops at the limit. The old order was
- * `num_value, text_value, id`, each `nulls last`, so the rows fall into three groups
- * that never interleave, and each group is one statement:
+ * **Why not that statement.** It drives from `stories` through a `left join`, so
+ * SQLite visits and sorts every story of the type before it can take twelve: three
+ * rows read per post, however small the page. This one drives from `content_index` in
+ * sort order and stops at the limit. The old order was `num_value, text_value, id`,
+ * each `nulls last`, so the rows fall into three groups that never interleave, and
+ * each group is one arm of a `union all`:
  *
  *  1. a numeric value (a date, a number, a boolean), by `num_value` then `text_value`;
  *  2. a text value only, by `text_value`;
  *  3. no value for the field at all, by `id`.
  *
- * `cross join` is the load-bearing word. SQLite never reorders one, so the index
- * walk stays the outer loop; a plain join is re-planned `stories`-first as soon as the
+ * Each arm keeps at most `L = offset + limit` rows, which is all the page can use, and
+ * the outer query orders the (at most 3L) rows and applies the offset. An arm is only
+ * *run* when the arms before it did not fill `L`, which the arm tests against a
+ * materialised copy of them (`a1`, `a2`), so a full first page never touches arm 2 or 3.
+ * One statement means one round trip and one consistent read, however many groups a
+ * page spans.
+ *
+ * **The walk is capped, because the index is not per type.** `content_index` has no
+ * type or site column, so walking `(field, locale, num_value)` visits every story in
+ * the database that has the field, other types and other sites included, and a small
+ * listing in a shared field would read all of them to find its few rows. The walk is
+ * therefore a derived table with `limit K` (`K` a few times the page), so it reads at
+ * most `K` index rows and `K` primary-key probes however the data is shaped. When the
+ * cap is what stopped an arm short of `L` the answer is not known to be complete, and
+ * `runQuery` runs the old statement instead: the worst case is the old cost plus
+ * about `2K` rows, and the common case (one type or site owns the field) never gets
+ * there. `exhausted` is the one question that settles an under-full answer: did every
+ * walk end before its cap.
+ *
+ * `cross join` is the load-bearing word. SQLite never reorders one, so the index walk
+ * stays the outer loop; a plain join is re-planned `stories`-first as soon as the
  * database has statistics, and the saving silently disappears.
  *
  * A group a filter has already emptied is not compiled: a numeric range on the sort
@@ -490,8 +506,17 @@ export interface OrderSegment {
  * needs a row, so group 3 cannot.
  */
 export interface IndexedOrder {
-  segments: OrderSegment[];
+  /** The listing statement for `limit` rows from `offset`, or null when it is not worth it. */
+  page: (limit: number, offset: number) => Sql | null;
+  /** For an empty answer, which carries no `ok`: true when every capped walk ended before its cap. */
+  exhausted: (limit: number, offset: number) => Sql;
 }
+
+/** The deepest `offset + limit` the capped walk is used for; past it the old statement runs. */
+const ORDERED_WINDOW_MAX = 150;
+/** A walk reads at most `WALK_FACTOR * window + WALK_SLACK` index rows. */
+const WALK_FACTOR = 2;
+const WALK_SLACK = 4;
 
 /**
  * Null when the query is not an indexed-field ordering (a built-in order, a search),
@@ -499,7 +524,7 @@ export interface IndexedOrder {
  * is malformed, so this only compiles.
  */
 export function indexedOrderSql(
-  q: ContentQueryOptions,
+  q: ContentQuery,
   locale: string,
   perPageMax = MAX_PER_PAGE,
   chain?: readonly string[],
@@ -518,57 +543,111 @@ export function indexedOrderSql(
   const where = clauses.join(" and ");
   const dir = n.order.dir === "asc" ? "asc" : "desc";
   const cols = `${STORY_COLS}, ${rowProjection(n.withDoc)}`;
-  const from = "from content_index co cross join stories on stories.id = co.story_id";
-  const head = "co.field = ? and co.locale = ?";
-  const headBinds = [n.order.field, locale];
+  const field = n.order.field;
 
-  const walked = (valued: string, order: string): OrderSegment => ({
-    page: (limit, offset) => ({
-      text: `select ${cols} ${from} where ${head} and ${valued} and ${where}
-             order by ${order} limit ? offset ?`,
-      binds: [...headBinds, ...binds, limit, offset],
-    }),
-    count: {
-      text: `select count(*) as n ${from} where ${head} and ${valued} and ${where}`,
-      binds: [...headBinds, ...binds],
-    },
-  });
+  // The folded filters, stated on the index row inside each walk.
+  const foldSql = folded.map((w) => foldPredicate(w, "ci")!);
+  const foldText = foldSql.map((f) => ` and ${f.text}`).join("");
+  const foldBinds = foldSql.flatMap((f) => f.binds);
 
-  const sortFieldFilters = n.where.filter((w) => w.field === n.order.field);
   const numericRange = folded.some((w) => isRangeOp(w.op) && typeof w.value === "number");
-  const needsRow = sortFieldFilters.some((w) => w.op !== "ne");
+  const needsRow = n.where.some((w) => w.field === field && w.op !== "ne");
+  const withText = !numericRange;
+  const withAbsent = !needsRow;
 
-  const segments = [
-    walked(
-      "co.num_value is not null",
-      `co.num_value ${dir}, co.text_value ${dir} nulls last, stories.id asc`,
-    ),
-  ];
-  if (!numericRange) {
-    segments.push(
-      walked(
-        "co.num_value is null and co.text_value is not null",
-        `co.text_value ${dir}, stories.id asc`,
-      ),
-    );
-  }
-  if (!needsRow) {
-    // A row with an index row holding neither value sorts here too, so "no value" is
-    // stated as that and not as "no row".
-    const absent = `not exists (select 1 from content_index cx
+  const numeric = "ci.num_value is not null";
+  const textual = "ci.num_value is null and ci.text_value is not null";
+
+  /** A capped walk of one group's index rows, in the group's sort order. */
+  const walk = (valued: string, order: string) =>
+    `(select ci.story_id, ci.num_value, ci.text_value from content_index ci
+       where ci.field = ? and ci.locale = ? and ${valued}${foldText}
+       order by ${order} limit ?) co cross join stories on stories.id = co.story_id`;
+  const walkBinds = (k: number) => [field, locale, ...foldBinds, k];
+  /** How many index rows a group's walk would see, capped: it is exhausted when under the cap. */
+  const seen = (valued: string) =>
+    `(select count(*) from (select 1 from content_index ci
+       where ci.field = ? and ci.locale = ? and ${valued}${foldText} limit ?))`;
+
+  const order1 = `ci.num_value ${dir}, ci.text_value ${dir} nulls last, ci.story_id asc`;
+  const order2 = `ci.text_value ${dir}, ci.story_id asc`;
+  const outer1 = `co.num_value ${dir}, co.text_value ${dir} nulls last, stories.id asc`;
+  const outer2 = `co.text_value ${dir}, stories.id asc`;
+
+  const build = (limit: number, offset: number): Sql | null => {
+    const window = offset + limit;
+    if (window > ORDERED_WINDOW_MAX) return null;
+    const k = WALK_FACTOR * window + WALK_SLACK;
+    const arms: string[] = [];
+    const armBinds: unknown[] = [];
+    const ctes: string[] = [];
+    const cteBinds: unknown[] = [];
+    // `have` is the SQL for "rows the earlier arms produced", `open` the tests that
+    // every earlier walk ended before its cap, which is what lets a later arm run.
+    let have = "";
+    let open = "";
+    let openBinds: unknown[] = [];
+
+    ctes.push(`a1 as (select ${cols}, 1 as g, co.num_value as k1, co.text_value as k2
+          from ${walk(numeric, order1)} where ${where} order by ${outer1} limit ?)`);
+    cteBinds.push(...walkBinds(k), ...binds, window);
+    arms.push("select * from a1");
+    have = "(select count(*) from a1)";
+
+    if (withText) {
+      const test = `${have} < ? and ${seen(numeric)} < ?`;
+      const testBinds = [window, field, locale, ...foldBinds, k, k];
+      // The test is the one row a leading `select` yields or does not: with it as the
+      // outer loop, a failed test means the walk below never starts, which a `where`
+      // term would not do (SQLite would read every row and test each).
+      ctes.push(`a2 as (select ${cols}, 2 as g, co.num_value as k1, co.text_value as k2
+          from (select 1 as go where ${test}) gate cross join ${walk(textual, order2)}
+          where ${where} order by ${outer2} limit ?)`);
+      cteBinds.push(...testBinds, ...walkBinds(k), ...binds, window);
+      arms.push("select * from a2");
+      open = `${seen(numeric)} < ?`;
+      openBinds = [field, locale, ...foldBinds, k, k];
+      have = `((select count(*) from a1) + (select count(*) from a2))`;
+      if (withAbsent) {
+        // A story with no index row, or one holding neither value: no value at all.
+        const absent = `not exists (select 1 from content_index cx
                       where cx.story_id = stories.id and cx.locale = ? and cx.field = ?
                         and (cx.num_value is not null or cx.text_value is not null))`;
-    segments.push({
-      page: (limit, offset) => ({
-        text: `select ${cols} from stories where ${where} and ${absent}
-               order by stories.id asc limit ? offset ?`,
-        binds: [...binds, locale, n.order.field, limit, offset],
-      }),
-      // Never read: nothing follows the last group.
-      count: { text: "", binds: [] },
-    });
-  }
-  return { segments };
+        const test3 = `${have} < ? and ${open} and ${seen(textual)} < ?`;
+        const test3Binds = [window, ...openBinds, field, locale, ...foldBinds, k, k];
+        arms.push(`select * from (select ${cols}, 3 as g, null as k1, null as k2
+          from (select 1 as go where ${test3}) gate cross join stories
+          where ${where} and ${absent}
+          order by stories.id asc limit ?)`);
+        armBinds.push(...test3Binds, ...binds, locale, field, window);
+      }
+    }
+
+    // `ok` rides on every row: 1 when the page is full (whatever the walks saw, every
+    // arm yields a prefix of its group's order) and otherwise whether every walk ended
+    // before its cap, evaluated only for a short answer so a full page never pays for it.
+    const tests = [numeric, ...(withText ? [textual] : [])];
+    const done = tests.map((t) => `${seen(t)} < ?`).join(" and ");
+    const doneBinds = tests.flatMap(() => [field, locale, ...foldBinds, k, k]);
+    const sql = `with ${ctes.join(",\n")}
+      select *, case when count(*) over () >= ? then 1 else (${done}) end as ok
+        from (${arms.join("\n union all\n ")})
+      order by g, k1 ${dir}, k2 ${dir} nulls last, id asc limit ? offset ?`;
+    const bound = [...cteBinds, window, ...doneBinds, ...armBinds, limit, offset];
+    return bound.length > D1_BIND_CAP ? null : { text: sql, binds: bound };
+  };
+
+  return {
+    page: build,
+    exhausted: (limit, offset) => {
+      const k = WALK_FACTOR * (offset + limit) + WALK_SLACK;
+      const tests = [numeric, ...(withText ? [textual] : [])];
+      return {
+        text: `select ${tests.map((t) => `${seen(t)} < ?`).join(" and ")} as done`,
+        binds: tests.flatMap(() => [field, locale, ...foldBinds, k, k]),
+      };
+    },
+  };
 }
 
 function unknownField(field: string, indexed: ReadonlySet<string>): FolioError {
@@ -610,23 +689,29 @@ export interface QueryDeps {
  */
 export async function runQuery(
   deps: QueryDeps,
-  q: ContentQuery & { total: false },
-  opts?: { locale?: LocaleContext; perPageMax?: number },
-): Promise<ContentSlice>;
-export async function runQuery(
-  deps: QueryDeps,
-  q: ContentQuery & { total?: true },
-  opts?: { locale?: LocaleContext; perPageMax?: number },
-): Promise<ContentPage>;
-export async function runQuery(
-  deps: QueryDeps,
-  q: ContentQueryOptions,
-  opts?: { locale?: LocaleContext; perPageMax?: number },
-): Promise<ContentPage | ContentSlice>;
-export async function runQuery(
-  deps: QueryDeps,
-  q: ContentQueryOptions,
+  q: ContentQuery,
   opts: { locale?: LocaleContext; perPageMax?: number } = {},
+): Promise<ContentPage> {
+  return (await execute(deps, q, opts, true)) as ContentPage;
+}
+
+/**
+ * `runQuery` without the `count(*)`: reads one row past the page and answers
+ * `hasMore` in place of `total` and `pages`. For a caller that never reads them.
+ */
+export async function runQuerySlice(
+  deps: QueryDeps,
+  q: ContentQuery,
+  opts: { locale?: LocaleContext; perPageMax?: number } = {},
+): Promise<ContentSlice> {
+  return (await execute(deps, q, opts, false)) as ContentSlice;
+}
+
+async function execute(
+  deps: QueryDeps,
+  q: ContentQuery,
+  opts: { locale?: LocaleContext; perPageMax?: number },
+  counted: boolean,
 ): Promise<ContentPage | ContentSlice> {
   // `opts.locale` wins over `q.locale`: a render's locale rides on the
   // `Resolution`, deliberately *outside* the query — so `queryKey` is the same
@@ -649,6 +734,7 @@ export async function runQuery(
       published_doc?: string | null;
       has_doc?: number | null;
       root_blok?: string | null;
+      ok?: number | null;
     };
   const all = async (stmt: Sql) =>
     (
@@ -657,6 +743,15 @@ export async function runQuery(
         .bind(...stmt.binds)
         .all<Raw>()
     ).results;
+  const exhausted = async (stmt: Sql) =>
+    Boolean(
+      (
+        await deps.db
+          .prepare(stmt.text)
+          .bind(...stmt.binds)
+          .first<{ done: number }>()
+      )?.done,
+    );
   const countOf = async (stmt: Sql) =>
     (
       await deps.db
@@ -665,56 +760,45 @@ export async function runQuery(
         .first<{ n: number }>()
     )?.n ?? 0;
 
-  // `total: false` reads one row past the page instead of counting: that row is
-  // `hasMore`, and it is the whole of what a "next page" link needed the count for.
-  const counted = normalised.total;
+  // Without a count, one row past the page is `hasMore`, which is the whole of what a
+  // "next page" link needed the count for.
   const need = normalised.perPage + (counted ? 0 : 1);
   const offset = (normalised.page - 1) * normalised.perPage;
+  // `contentSql`'s page, for `need` rows: its own for a counted query, the same text
+  // with the extra row's limit otherwise.
+  const oldPage = (): Sql =>
+    counted ? page : { text: page.text, binds: [...page.binds.slice(0, -2), need, offset] };
 
-  const ordered = indexedOrderSql(q, localeKey, opts.perPageMax, chain);
+  const plan = indexedOrderSql(q, localeKey, opts.perPageMax, chain);
+  const ordered = plan?.page(need, offset) ?? null;
+  const counting = counted ? countOf(count) : null;
+  counting?.catch(() => {});
   let fetched: Raw[];
-  let total: number | null = null;
-  if (ordered) {
-    // Concurrent with the first group, as the count always was with the page.
-    const counting = counted ? countOf(count) : null;
-    counting?.catch(() => {});
-    fetched = [];
-    // `before` is how many rows the earlier groups hold: a page that starts past
-    // them reads this group from `offset - before`, and one that starts inside them
-    // never reaches a later group with an offset at all.
-    let before = 0;
-    const last = ordered.segments.length - 1;
-    for (const [i, seg] of ordered.segments.entries()) {
-      const skip = Math.max(0, offset - before);
-      const got = await all(seg.page(need - fetched.length, skip));
-      fetched.push(...got);
-      if (fetched.length >= need || i === last) break;
-      // The group ran out inside this page, so it holds `skip + got` rows, unless it
-      // gave nothing past a non-zero offset, where only a count says how far past.
-      before += got.length > 0 || skip === 0 ? skip + got.length : await countOf(seg.count);
-      // Every row the query counts is already behind this page: no later group has one.
-      if (counting && before >= (await counting)) break;
-    }
-    if (counting) total = await counting;
+  if (plan && ordered) {
+    fetched = await all(ordered);
+    // A full page is right whatever the walks saw. A short one is right only if it is
+    // known to be complete: the statement says so (`ok`: no walk hit its cap), or it
+    // accounts for every row the count found. An empty one has no row to carry `ok`.
+    const complete =
+      fetched.length >= need ||
+      (fetched.length > 0 && Boolean(fetched[0]?.ok)) ||
+      (counting !== null && offset + fetched.length === (await counting)) ||
+      (counting === null &&
+        fetched.length === 0 &&
+        (await exhausted(plan.exhausted(need, offset))));
+    // Otherwise a capped walk may have missed rows (the field is shared with other types
+    // or sites): the old statement answers, at the old cost.
+    if (!complete) fetched = await all(oldPage());
   } else {
-    const [totalRow, rows] = await Promise.all([
-      counted
-        ? deps.db
-            .prepare(count.text)
-            .bind(...count.binds)
-            .first<{ n: number }>()
-        : null,
-      all(counted ? page : { text: page.text, binds: [...page.binds.slice(0, -2), need, offset] }),
-    ]);
-    fetched = rows;
-    if (counted) total = totalRow?.n ?? 0;
+    fetched = await all(oldPage());
   }
+  const total = counting ? await counting : null;
 
   const hasMore = fetched.length > normalised.perPage;
   const shown = counted ? fetched : fetched.slice(0, normalised.perPage);
   const items: ContentItem[] = [];
   for (const raw of shown) {
-    const { published_doc, has_doc, root_blok, score, snippet, fts_rowid, ...row } = raw;
+    const { published_doc, has_doc, root_blok, score, snippet, fts_rowid, ok: _ok, ...row } = raw;
     // `contentSql` selects one shape or the other, never both: the whole
     // document when the query asked for it, otherwise `has_doc` plus the root
     // block SQLite projected out of it. The published-or-not test is the same

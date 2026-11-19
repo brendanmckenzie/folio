@@ -19,7 +19,7 @@ import type { PageAccess } from "../core/gate";
 import type { LocaleConfig } from "../core/locales";
 import type { Migration } from "../core/migrate";
 import type { Mutation } from "../core/mutations";
-import type { ContentPage, ContentQuery, ContentQueryOptions, ContentSlice } from "../core/query";
+import type { ContentPage, ContentQuery, ContentSlice } from "../core/query";
 import type { ResolvedAsset, Resolution } from "../core/resolve";
 import type { NestedValue } from "../core/nested";
 import type { DocumentType } from "../core/schema";
@@ -628,14 +628,14 @@ export interface FolioReader {
    */
   stories: (opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>;
   tree: () => Promise<StoryNode[]>;
+  query: (q: ContentQuery) => Promise<ContentPage>;
   /**
-   * Overloaded on `total` (`../../docs/specs/content-model/collections.md`): a
-   * query that passes `total: false` skips the `count(*)` and answers a `ContentSlice`
-   * (`hasMore`, no `total` or `pages`). Every other query answers a `ContentPage`.
+   * `query` without the `count(*)`: the page and `hasMore`, for a caller that never
+   * reads `total` or `pages` (a home rail, an older/newer neighbour). Reads one row past
+   * the page to answer `hasMore`. A separate method, not an option on `query`, so the
+   * type of `query` is exactly what it was.
    */
-  query(q: ContentQuery & { total: false }): Promise<ContentSlice>;
-  query(q: ContentQuery & { total?: true }): Promise<ContentPage>;
-  query(q: ContentQueryOptions): Promise<ContentPage | ContentSlice>;
+  querySlice: (q: ContentQuery) => Promise<ContentSlice>;
   /**
    * A global's published layers, merged over the site's chain. For a request a
    * share admitted to a `draft` site, still the gated site's whole chain — its one
@@ -1340,9 +1340,9 @@ export interface Folio<Env> {
    * Two D1 statements: a `count(*)` for `total`, and the page itself with its
    * documents. Offset pagination, so a page can render "page 4 of 9".
    */
-  query(env: Env, q: ContentQuery & { total: false }): Promise<ContentSlice>;
-  query(env: Env, q: ContentQuery & { total?: true }): Promise<ContentPage>;
-  query(env: Env, q: ContentQueryOptions): Promise<ContentPage | ContentSlice>;
+  query: (env: Env, q: ContentQuery) => Promise<ContentPage>;
+  /** `FolioReader.querySlice`: `query` without the `count(*)`, answering `hasMore`. */
+  querySlice: (env: Env, q: ContentQuery) => Promise<ContentSlice>;
   /**
    * Rebuilds `content_index` and `content_refs` from `published_doc`
    * (`collections.md` architecture decision 3).

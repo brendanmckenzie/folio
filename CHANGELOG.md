@@ -10,36 +10,43 @@ config key. D1 migrations arrive in minor versions and are listed in
 
 ## 1.8.2
 
-A patch with no migration and no wire change (`PROTOCOL_VERSION` stays at 5), and no change to any answer: the
+A patch with no migration, no wire change (`PROTOCOL_VERSION` stays at 5) and no change to any answer: the
 same rows come back in the same order. It makes a listing sorted by an `indexed` field, and `recordBy`, read a
 handful of D1 rows instead of every story of the type. Measured on a 129-post site, the home page's listing went
 from 516 rows read to 28 and a post page's lookups from 1,418 to 14. Read
-[Cheaper listings and record lookups](UPGRADING.md#cheaper-listings-and-record-lookups-v182) before you opt in to
-`total: false`.
+[Cheaper listings and record lookups](UPGRADING.md#cheaper-listings-and-record-lookups-v182) before you use
+`querySlice`.
 
 ### Changed
 
 - **A query ordered by an `indexed` field drives from `content_index`.** It was one `left join` from `stories`,
-  which makes SQLite visit and sort every story of the type before taking a page. It is now up to three
-  statements (a numeric value, a text-only value, no value), each walking the index in sort order and stopping
-  at the limit, which together return exactly the rows and order the one statement did, including the stories
-  with no value for the field, which still sort last in both directions. A `where` on the sort field is folded
-  into the index range, so "the post before this date" seeks instead of probing every story. Queries ordered by
-  `ord`, `publishedAt`, `title` or `relevance`, and every search, compile to byte-identical SQL.
-- **`recordBy` is driven from `content_index_lookup`.** It was `id in (select … )` beside an equality on the
+  which makes SQLite visit and sort every story of the type before taking a page. It is now one statement that
+  walks the field's index in sort order and stops at the page (a numeric value, then a text-only value, then no
+  value, as three arms of a `union all` that run only while the page is short), and it returns exactly the
+  rows and order the old statement did, including the stories with no value for the field, which still sort
+  last in both directions. A `where` on the sort field is folded into the index range, so "the post before this
+  date" seeks instead of probing every story.
+- **The walk is capped, so it cannot cost more than the statement it replaced by more than a small fixed
+  amount.** `content_index` has no type or site column, so the walk sees every story that has the field. It
+  reads at most a few times the page, and if that is not enough to fill the page (the field is shared with a
+  larger type or site, or a filter is selective) the old statement answers, at the old cost plus a couple of hundred
+  rows. A page deeper than 150 rows uses the old statement outright. Queries ordered by `ord`, `publishedAt`,
+  `title` or `relevance`, and every search, compile to byte-identical SQL.
+- **`recordBy` is driven from `content_index_lookup`.** It was `id in (select …)` beside an equality on the
   type, which with no planner statistics read every story of the type; it now reads the one or two index rows
   that hold the value.
 
 ### Added
 
-- **`total: false` on `folio.query` and `reader.query`.** Skips the `count(*)`, reads one row past the page and
-  answers a `ContentSlice` (`items`, `page`, `perPage`, `hasMore`, `total: null`, `pages: null`). Omitted, or
-  `true`, nothing changes. Not accepted on a `collection` field or the HTTP content API, which keep counting.
-  New exported types `ContentSlice` and `ContentQueryOptions`.
+- **`folio.querySlice(env, q)` and `reader.querySlice(q)`.** `query` without the `count(*)`: reads one row
+  past the page and answers a `ContentSlice` (`items`, `page`, `perPage`, `hasMore`, `total: null`,
+  `pages: null`). A separate method, so the type of `query` is exactly what it was. New exported type
+  `ContentSlice`. Not available on a `collection` field or the HTTP content API, which keep counting.
 
 ### Breaking changes
 
-None.
+None. `querySlice` is a new member of the `FolioReader` and `Folio` interfaces, which Folio constructs; a host
+that calls them is unaffected.
 
 ## 1.8.1
 

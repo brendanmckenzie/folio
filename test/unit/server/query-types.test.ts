@@ -1,40 +1,56 @@
 import { expect, expectTypeOf, it } from "vitest";
-import type {
-  ContentPage,
-  ContentQuery,
-  ContentQueryOptions,
-  ContentSlice,
-} from "../../../src/core/query";
+import type { ContentPage, ContentQuery, ContentSlice } from "../../../src/core/query";
 import type { Folio, FolioReader } from "../../../src/server";
 
 /**
- * `total: false` is additive: a caller that never mentions `total` compiles and is
- * typed exactly as before, and only a query that says `total: false` is typed a slice.
- * The assertions live in a function that is never called, so they cost nothing at run
- * time and are checked by `pnpm typecheck`, which is where a broken overload shows.
+ * `querySlice` is additive: the type of `query` is exactly what it was, so nothing a host
+ * wrote against it changes. The assertions live in a function that is never called, so
+ * they cost nothing at run time and are checked by `pnpm typecheck`, where a broken
+ * signature shows. The first three are the shapes a host actually writes.
  */
 declare const reader: FolioReader;
 declare const folio: Folio<Cloudflare.Env>;
 declare const env: Cloudflare.Env;
 declare const typed: ContentQuery;
-declare const wide: ContentQueryOptions;
+declare const wrapped: ContentQuery & { total?: boolean };
 
-export function overloads() {
-  // Every query that does not say `total: false` still answers a page.
-  expectTypeOf(reader.query({ type: "post" })).toEqualTypeOf<Promise<ContentPage>>();
+export function shapes() {
+  // 1. Naming the page type through the method.
+  type P = Awaited<ReturnType<FolioReader["query"]>>;
+  expectTypeOf<P>().toEqualTypeOf<ContentPage>();
+  expectTypeOf<Awaited<ReturnType<Folio<Cloudflare.Env>["query"]>>>().toEqualTypeOf<ContentPage>();
+
+  // 2. A hand-written double of the old shape still satisfies the interface.
+  const stub: Pick<FolioReader, "query"> = {
+    query: async (_q: ContentQuery): Promise<ContentPage> => ({
+      items: [],
+      total: 0,
+      page: 1,
+      perPage: 1,
+      pages: 0,
+    }),
+  };
+  const stubFolio: Pick<Folio<Cloudflare.Env>, "query"> = {
+    query: async (_env: Cloudflare.Env, _q: ContentQuery): Promise<ContentPage> => ({
+      items: [],
+      total: 0,
+      page: 1,
+      perPage: 1,
+      pages: 0,
+    }),
+  };
+
+  // 3. A wrapper that forwards a query carrying extra fields still gets a page.
+  expectTypeOf(reader.query(wrapped)).toEqualTypeOf<Promise<ContentPage>>();
   expectTypeOf(reader.query(typed)).toEqualTypeOf<Promise<ContentPage>>();
-  expectTypeOf(reader.query({ type: "post", total: true })).toEqualTypeOf<Promise<ContentPage>>();
-  expectTypeOf(folio.query(env, { type: "post" })).toEqualTypeOf<Promise<ContentPage>>();
   expectTypeOf(folio.query(env, typed)).toEqualTypeOf<Promise<ContentPage>>();
 
-  // `total: false` is a slice; a plain boolean cannot say which, so it is the union.
-  expectTypeOf(reader.query({ type: "post", total: false })).toEqualTypeOf<Promise<ContentSlice>>();
-  expectTypeOf(folio.query(env, { type: "post", total: false })).toEqualTypeOf<
-    Promise<ContentSlice>
-  >();
-  expectTypeOf(reader.query(wide)).toEqualTypeOf<Promise<ContentPage | ContentSlice>>();
+  // The slice form is its own entry point.
+  expectTypeOf(reader.querySlice(typed)).toEqualTypeOf<Promise<ContentSlice>>();
+  expectTypeOf(folio.querySlice(env, typed)).toEqualTypeOf<Promise<ContentSlice>>();
+  return [stub, stubFolio];
 }
 
-it("types the query overloads (checked by tsc)", () => {
-  expect(typeof overloads).toBe("function");
+it("types the query entry points (checked by tsc)", () => {
+  expect(typeof shapes).toBe("function");
 });

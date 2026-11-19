@@ -2061,25 +2061,25 @@ scope chain, search and paging together would bind more than 100 values is a
 something else can narrow first; full-text search is FTS5's job and spec 30's
 ([`docs/specs/content-model/full-text-search.md`](https://github.com/brendanmckenzie/folio/blob/v1.5.0/docs/specs/content-model/full-text-search.md)) — see "Search" below.
 
-**Skip the count with `total: false`** when you do not read `total` or `pages` (a home-page rail, the
+**Skip the count with `querySlice`** when you do not read `total` or `pages` (a home-page rail, the
 "older" and "newer" neighbours of a post):
 
 ```ts
-const { items, hasMore } = await folio.query(env, {
+const { items, hasMore } = await folio.querySlice(env, {
   type: 'post',
   order: { field: 'date', dir: 'desc' },
   perPage: 12,
-  total: false,
 })
 ```
 
-It reads one row past the page for `hasMore` and answers a `ContentSlice` (`total` and `pages` are `null`).
-Omitted, nothing changes. It is for `folio.query` and `reader.query` only: a `collection` field and the HTTP
-content API keep counting. **Ordering by an `indexed` field reads about a page of rows, not the whole type**:
-Folio walks the field's index in sort order (as up to three statements, which together equal the old single one
-row for row), and a `where` on the sort field narrows that walk, most cheaply with a number rather than a
-string (`Date.parse(date)` for a date field; both are stored). Orders by `ord`, `publishedAt` and `title` are
-unchanged.
+It takes the same query as `query`, reads one row past the page for `hasMore` and answers a `ContentSlice`
+(`total` and `pages` are `null`). It is for `folio.querySlice` and `reader.querySlice` only: a `collection`
+field and the HTTP content API keep counting. **Ordering by an `indexed` field reads about a page of rows, not
+the whole type**: Folio walks the field's index in sort order, in one statement that returns what the old one
+did row for row, and a `where` on the sort field narrows that walk, most cheaply with a number rather than a
+string (`Date.parse(date)` for a date field; both are stored). The index is not per type, so a field shared
+with a much larger type, or a selective filter, can exhaust the (capped) walk, and the old statement answers
+instead at about its old cost. Orders by `ord`, `publishedAt` and `title` are unchanged.
 
 **A `where` or `order` on a field nobody marked `indexed` is a 400 naming the
 field**, and listing the ones that work. Never a silent empty result: that is the

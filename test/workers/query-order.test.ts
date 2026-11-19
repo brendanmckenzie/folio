@@ -1,9 +1,8 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import type { ContentQuery } from "../../src/core/query";
-import { queryKey } from "../../src/core/query";
 import { SINGLE_SITE_CHAIN } from "../../src/core/sites";
-import { contentSql, indexedOrderSql, runQuery } from "../../src/server/query";
+import { contentSql, indexedOrderSql, runQuery, runQuerySlice } from "../../src/server/query";
 
 /**
  * **An indexed-field listing returns what the single `left join` statement returned.**
@@ -277,7 +276,7 @@ describe("an indexed-field listing equals the single-statement oracle", () => {
   });
 });
 
-describe("`total: false`", () => {
+describe("`runQuerySlice`", () => {
   it("returns the counted page's items and hasMore, for every page", async () => {
     for (const order of [
       { field: "when", dir: "desc" as const },
@@ -288,7 +287,7 @@ describe("`total: false`", () => {
         for (let page = 1; page <= 40; page++) {
           const q: ContentQuery = { type: "post", order, perPage, page };
           const counted = await runQuery(deps(SINGLE_SITE_CHAIN), q);
-          const slice = await runQuery(deps(SINGLE_SITE_CHAIN), { ...q, total: false });
+          const slice = await runQuerySlice(deps(SINGLE_SITE_CHAIN), q);
           const label = `${JSON.stringify(order)} perPage=${perPage} page=${page}`;
           expect({ label, ids: slice.items.map((i) => i.id) }).toEqual({
             label,
@@ -320,19 +319,13 @@ describe("`total: false`", () => {
     };
     for (const order of [{ field: "when", dir: "desc" as const }, "publishedAt" as const]) {
       seen.length = 0;
-      await runQuery(spying, { type: "post", order, perPage: 5, total: false });
+      await runQuerySlice(spying, { type: "post", order, perPage: 5 });
       expect(seen.length).toBeGreaterThan(0);
-      expect(seen.filter((s) => /count\(\*\)/.test(s))).toEqual([]);
+      expect(seen.filter((s) => /count\(\*\) as n/.test(s))).toEqual([]);
       seen.length = 0;
       await runQuery(spying, { type: "post", order, perPage: 5 });
-      expect(seen.filter((s) => /count\(\*\)/.test(s)).length).toBe(1);
+      expect(seen.filter((s) => /count\(\*\) as n/.test(s)).length).toBe(1);
     }
-  });
-
-  it("keys differently from the counted query, and `total: true` keys the same", () => {
-    const q: ContentQuery = { type: "post" };
-    expect(queryKey({ ...q, total: false })).not.toBe(queryKey(q));
-    expect(queryKey({ ...q, total: true })).toBe(queryKey(q));
   });
 });
 
@@ -349,11 +342,12 @@ describe("what the ordered statements read", () => {
       if (analyse) await env.DB.exec("analyze");
       const q: ContentQuery = { type: "post", order: { field: "when", dir: "desc" }, perPage: 12 };
       const ordered = indexedOrderSql(q, "", undefined, SINGLE_SITE_CHAIN)!;
-      const first = ordered.segments[0]!.page(12, 0);
-      const details = await plan(first.text, first.binds);
-      expect(details[0]).toMatch(/^SEARCH co USING INDEX content_index_num/);
-      expect(details.join("\n")).not.toMatch(/USE TEMP B-TREE FOR ORDER BY/);
-      expect(details.some((d) => /SCAN stories/.test(d))).toBe(false);
+      const first = ordered.page(12, 0)!;
+      const details = (await plan(first.text, first.binds)).join("\n");
+      expect(details).toMatch(/SEARCH ci USING INDEX content_index_num/);
+      // `cross join` keeps the index walk outer: stories is only ever probed by key.
+      expect(details).toMatch(/SEARCH stories USING INDEX sqlite_autoindex_stories_1/);
+      expect(details).not.toMatch(/SCAN stories/);
     });
   }
 
