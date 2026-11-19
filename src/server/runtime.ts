@@ -31,6 +31,8 @@ import {
   collectionQueries,
   type ContentPage,
   type ContentQuery,
+  type ContentQueryOptions,
+  type ContentSlice,
   type ResolvedCollection,
 } from "../core/query";
 import { assetKeys, formIds, linkedIds, referencedIdsAllLocales } from "../core/refs";
@@ -347,12 +349,20 @@ export interface BrandRuntime {
   /** `FolioRuntime.resolve`, with this brand's schema. On a branded runtime `opts.site` is required and must be this brand's. */
   resolve: (bindings: ReadBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>;
   /** `FolioRuntime.query`, with this brand's indexed fields and gate. Branded: `site` is required and must be this brand's. */
-  query: (
-    bindings: ReadBindings,
-    q: ContentQuery,
-    chain?: readonly string[],
-    site?: SiteRef,
-  ) => Promise<ContentPage>;
+  query: {
+    (
+      bindings: ReadBindings,
+      q: ContentQuery & { total?: true },
+      chain?: readonly string[],
+      site?: SiteRef,
+    ): Promise<ContentPage>;
+    (
+      bindings: ReadBindings,
+      q: ContentQueryOptions,
+      chain?: readonly string[],
+      site?: SiteRef,
+    ): Promise<ContentPage | ContentSlice>;
+  };
   publishDeps: (
     bindings: ReadBindings,
     hookCtx: HookRunnerCtx,
@@ -1939,12 +1949,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         : {}),
     });
 
-    const query = (
+    const query = ((
       bindings: ReadBindings,
-      q: ContentQuery,
+      q: ContentQueryOptions,
       chain: readonly string[] = SINGLE_SITE_CHAIN,
       site?: SiteRef,
-    ): Promise<ContentPage> => {
+    ): Promise<ContentPage | ContentSlice> => {
       // As `resolve`: with `brands` a query is for one of this brand's sites. A
       // rejection rather than a throw, so a caller sees what `runQuery` would give.
       if (branded) {
@@ -1955,7 +1965,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         }
       }
       return runQuery(queryDeps(bindings.db, chain, site), q, { locale: localeOf(q.locale) });
-    };
+    }) as BrandRuntime["query"];
 
     const optionLists: BrandRuntime["optionLists"] = async (bindings, formList, ctx) => {
       const out = new Map<string, Map<string, OptionListAnswer>>();

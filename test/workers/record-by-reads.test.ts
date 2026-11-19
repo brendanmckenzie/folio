@@ -167,6 +167,11 @@ describe("the record lookups plan an index, never a scan", () => {
       const steps = await plan(seen[0]!);
       expect(steps.join("\n")).toContain("content_index_lookup");
       expect(steps.filter((s) => /^SCAN /.test(s))).toEqual([]);
+      // Driven from the index row, and `stories` reached by its primary key, so the
+      // lookup does not read every story of the type (it did, with no statistics).
+      expect(steps[0]).toMatch(/^SEARCH ci USING INDEX content_index_lookup/);
+      expect(steps.join("\n")).toMatch(/SEARCH stories USING INDEX sqlite_autoindex_stories_1/);
+      expect(steps.join("\n")).not.toMatch(/USING INDEX stories_type/);
     });
 
     it(`recordDraftCandidates does not scan stories (${label})`, async () => {

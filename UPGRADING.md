@@ -1376,6 +1376,45 @@ integration does; the path in it is ignored. The bare `{base}/preview/global/:na
 and there is no wire change. v1.8.0 refuses `previewRoot` on a singleton at construction, so a config that
 keeps it will not start on the older release.
 
+### Cheaper listings and record lookups (v1.8.2)
+
+**No action.** Two reads got cheaper and neither changes an answer, so there is nothing to edit and no
+migration. A query ordered by an `indexed` field (`order: { field: 'date', dir: 'desc' }`) used to read every
+story of its type to return one page, three rows per story; it now reads about the page. It runs as up to
+three statements instead of one (stories with a numeric value, then a text-only value, then none), returns the
+same rows in the same order, and a story with no value for the field still sorts last in either direction. A
+`where` on that same field narrows the index range rather than probing each story. `reader.recordBy` now reads
+`content_index` first, so a lookup by slug no longer reads the whole type. Queries ordered by `ord`,
+`publishedAt` or `title`, and searches, are unchanged down to the SQL.
+
+**Opt in to `total: false` where you do not read `total` or `pages`.** A home-page rail, a "next" link, an
+older/newer neighbour: pass `total: false` and the `count(*)` is skipped. The answer is a `ContentSlice` rather
+than a `ContentPage`, with `hasMore` in place of `total` and `pages` (both `null`):
+
+```ts
+const { items, hasMore } = await folio.query(env, {
+  type: 'post',
+  order: { field: 'date', dir: 'desc' },
+  perPage: 12,
+  total: false,
+})
+```
+
+The types follow the argument: an object that says `total: false` is typed `ContentSlice`, one that does not
+mention `total` is still `ContentPage`, and a query typed as `ContentQueryOptions` (where `total` is a plain
+`boolean`) answers the union. If you wrap `folio.query` or `reader.query` in a test double, give it the same
+overloads. For the cheapest "the post before this one", filter the sort field with a **number**
+(`Date.parse(date)`), which `content_index` stores beside the text: a numeric bound is an index seek, a string
+bound is a filter. Results are the same either way for `YYYY-MM-DD` dates.
+
+**Upgrading from v1.5.3.** Nothing in 1.8.2 needs you to touch your queries. The one schema change between 1.5.3
+and here is `0019_asset_access.sql` in v1.6.0, which is roll-forward only and is applied before you deploy (see
+[Visitor access for files (v1.6.0)](#visitor-access-for-files-v160)); every other release in between is safe to
+roll back, and each one's entry above says what, if anything, it asks of you.
+
+**Rolling back from v1.8.2** is safe: there is no stored change. Remove `total: false` first, since 1.8.1 does
+not read it and would count anyway, answering a `ContentPage` your code no longer expects.
+
 ## Rolling back
 
 Move the pin back and redeploy. A SHA keeps resolving as long as it is reachable

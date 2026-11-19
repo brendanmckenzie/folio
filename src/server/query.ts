@@ -26,6 +26,8 @@ import {
   type ContentItem,
   type ContentPage,
   type ContentQuery,
+  type ContentQueryOptions,
+  type ContentSlice,
   type ContentWhere,
   isRangeOp,
   MAX_PER_PAGE,
@@ -168,6 +170,98 @@ function gatePredicate(gate: SearchGate, locale: string): Sql {
 }
 
 /**
+ * The `where` clauses a query shares across every statement it can compile to, and
+ * their binds, in the order they sit in the text.
+ *
+ * `fold` is the one place the indexed-order path differs: a `where` on the **sort
+ * field** tests the very `content_index` row the ordered statement already walks
+ * (`co`, the primary key `(story_id, locale, field)`), so `foldPredicate` states it
+ * on `co` and the clause stops being a probe per story. `null` for every other
+ * statement, which is why `contentSql`'s text is not one character different.
+ */
+function filterClauses(
+  n: ReturnType<typeof normaliseQuery>,
+  locale: string,
+  gate: SearchGate | undefined,
+  chain: readonly string[] | undefined,
+  searching: boolean,
+  fold: string | null,
+): { clauses: string[]; binds: unknown[]; folded: ContentWhere[] } {
+  const clauses: string[] = ["stories.published_doc is not null"];
+  const binds: unknown[] = [];
+
+  if (n.type.length > 0) {
+    clauses.push(`stories.type in (${n.type.map(() => "?").join(", ")})`);
+    binds.push(...n.type);
+  }
+  if (n.parent !== undefined) {
+    if (n.parent === null) clauses.push("stories.parent_id is null");
+    else {
+      clauses.push("stories.parent_id = ?");
+      binds.push(n.parent);
+    }
+  }
+  const folded: ContentWhere[] = [];
+  n.where.forEach((w, i) => {
+    const lifted = fold === w.field ? foldPredicate(w) : null;
+    if (lifted) folded.push(w);
+    const pred = lifted ?? wherePredicate(w, locale, i);
+    clauses.push(pred.text);
+    binds.push(...pred.binds);
+  });
+
+  // Decision 11, and its opt-out. A caller who names the gate field in a `where`
+  // has taken the scoping on itself — `where: [{ field: 'access', op: 'in',
+  // value: ['public', 'members'] }]` is how a host builds a members' search over
+  // members' content — and the same double enforcement `filterable` uses says
+  // the caller wins. Emitted last, so its binds land last among the where binds.
+  if (gate && n.search !== undefined && gate.types.size > 0) {
+    if (!n.where.some((w) => w.field === gate.field)) {
+      const pred = gatePredicate(gate, locale);
+      clauses.push(pred.text);
+      binds.push(...pred.binds);
+    }
+  }
+
+  // Decision 5's empty token set. The clause rather than an early return so
+  // every other refusal above has already had its say.
+  if (n.search !== undefined && !searching) clauses.push("0 = 1");
+
+  // Last, so every bind above keeps the position it had before scopes existed.
+  if (chain) {
+    const served = servedClause(chain);
+    clauses.push(served.sql);
+    binds.push(...served.binds);
+  }
+
+  return { clauses, binds, folded };
+}
+
+/** What a row carries back besides its story columns; see the note in `contentSql`. */
+function rowProjection(withDoc: boolean): string {
+  return withDoc
+    ? "published_doc"
+    : `(published_doc is not null) as has_doc,
+       json_extract(published_doc, '$.bloks."' || json_extract(published_doc, '$.root') || '"') as root_blok`;
+}
+
+/**
+ * A `where` on the sort field, stated on the ordered statement's own `content_index`
+ * row (`co`) instead of as an `exists` probe. Range and `eq` only, and the column
+ * and operator are exactly `wherePredicate`'s, so the rows that match are the same
+ * ones. `ne`, `in`, `startsWith` and `contains` keep their `exists` form.
+ */
+function foldPredicate(w: ContentWhere): Sql | null {
+  if (isRangeOp(w.op)) {
+    const op = w.op === "gt" ? ">" : w.op === "gte" ? ">=" : w.op === "lt" ? "<" : "<=";
+    const column = typeof w.value === "number" ? "num_value" : "text_value";
+    return { text: `co.${column} ${op} ?`, binds: [w.value] };
+  }
+  if (w.op === "eq") return { text: "co.text_value = ?", binds: [scalar(w.value)] };
+  return null;
+}
+
+/**
  * The two statements a query runs: a `count(*)` for `total`, and the page itself.
  *
  * The page reads the document alongside the story columns rather than taking a
@@ -241,49 +335,7 @@ export function contentSql(
   const match = n.search === undefined ? null : ftsQuery(n.search);
   const searching = match !== null;
 
-  const clauses: string[] = ["stories.published_doc is not null"];
-  const binds: unknown[] = [];
-
-  if (n.type.length > 0) {
-    clauses.push(`stories.type in (${n.type.map(() => "?").join(", ")})`);
-    binds.push(...n.type);
-  }
-  if (n.parent !== undefined) {
-    if (n.parent === null) clauses.push("stories.parent_id is null");
-    else {
-      clauses.push("stories.parent_id = ?");
-      binds.push(n.parent);
-    }
-  }
-  n.where.forEach((w, i) => {
-    const pred = wherePredicate(w, locale, i);
-    clauses.push(pred.text);
-    binds.push(...pred.binds);
-  });
-
-  // Decision 11, and its opt-out. A caller who names the gate field in a `where`
-  // has taken the scoping on itself — `where: [{ field: 'access', op: 'in',
-  // value: ['public', 'members'] }]` is how a host builds a members' search over
-  // members' content — and the same double enforcement `filterable` uses says
-  // the caller wins. Emitted last, so its binds land last among the where binds.
-  if (gate && n.search !== undefined && gate.types.size > 0) {
-    if (!n.where.some((w) => w.field === gate.field)) {
-      const pred = gatePredicate(gate, locale);
-      clauses.push(pred.text);
-      binds.push(...pred.binds);
-    }
-  }
-
-  // Decision 5's empty token set. The clause rather than an early return so
-  // every other refusal above has already had its say.
-  if (n.search !== undefined && !searching) clauses.push("0 = 1");
-
-  // Last, so every bind above keeps the position it had before scopes existed.
-  if (chain) {
-    const served = servedClause(chain);
-    clauses.push(served.sql);
-    binds.push(...served.binds);
-  }
+  const { clauses, binds } = filterClauses(n, locale, gate, chain, searching, null);
 
   const where = clauses.join(" and ");
   const dir = n.order.dir === "asc" ? "asc" : "desc";
@@ -334,10 +386,7 @@ export function contentSql(
    * somehow answered null must *not* silently drop a published page from a
    * list. The two cases are indistinguishable without it.
    */
-  const projection = n.withDoc
-    ? "published_doc"
-    : `(published_doc is not null) as has_doc,
-       json_extract(published_doc, '$.bloks."' || json_extract(published_doc, '$.root') || '"') as root_blok`;
+  const projection = rowProjection(n.withDoc);
 
   // An `in` list cannot be chunked, so the only honest limit is D1's own: refuse a
   // statement exactly when it would carry more binds than D1 accepts, counted from
@@ -408,6 +457,120 @@ export function contentSql(
   };
 }
 
+/** One statement of an indexed-order listing: a page of it, and how many rows it holds. */
+export interface OrderSegment {
+  page: (limit: number, offset: number) => Sql;
+  count: Sql;
+}
+
+/**
+ * An ordered listing sorted by an indexed field, as up to three statements that
+ * together return exactly the rows, in exactly the order, of `contentSql`'s single
+ * `left join` statement (which stays the reference: `test/workers/query-order.test.ts`
+ * runs both and compares).
+ *
+ * **Why three.** That statement drives from `stories` through a `left join`, so
+ * SQLite visits and sorts every post of the type before it can take twelve: rows
+ * read are three times the posts, however small the page. No index can fix it while
+ * the statement has that shape. Here the statement drives from `content_index_num`
+ * or `content_index_lookup`, in sort order, and stops at the limit. The old order was
+ * `num_value, text_value, id`, each `nulls last`, so the rows fall into three groups
+ * that never interleave, and each group is one statement:
+ *
+ *  1. a numeric value (a date, a number, a boolean), by `num_value` then `text_value`;
+ *  2. a text value only, by `text_value`;
+ *  3. no value for the field at all, by `id`.
+ *
+ * `cross join` is the load-bearing word. SQLite never reorders one, so the index
+ * walk stays the outer loop; a plain join is re-planned `stories`-first as soon as the
+ * database has statistics, and the saving silently disappears.
+ *
+ * A group a filter has already emptied is not compiled: a numeric range on the sort
+ * field needs a numeric value, so only group 1 can match; any non-`ne` filter on it
+ * needs a row, so group 3 cannot.
+ */
+export interface IndexedOrder {
+  segments: OrderSegment[];
+}
+
+/**
+ * Null when the query is not an indexed-field ordering (a built-in order, a search),
+ * which keeps `contentSql`'s statement. `contentSql` has already refused whatever
+ * is malformed, so this only compiles.
+ */
+export function indexedOrderSql(
+  q: ContentQueryOptions,
+  locale: string,
+  perPageMax = MAX_PER_PAGE,
+  chain?: readonly string[],
+): IndexedOrder | null {
+  const n = normaliseQuery(q, perPageMax);
+  if (n.search !== undefined || n.order.field in BUILT_IN_ORDERS) return null;
+
+  const { clauses, binds, folded } = filterClauses(
+    n,
+    locale,
+    undefined,
+    chain,
+    false,
+    n.order.field,
+  );
+  const where = clauses.join(" and ");
+  const dir = n.order.dir === "asc" ? "asc" : "desc";
+  const cols = `${STORY_COLS}, ${rowProjection(n.withDoc)}`;
+  const from = "from content_index co cross join stories on stories.id = co.story_id";
+  const head = "co.field = ? and co.locale = ?";
+  const headBinds = [n.order.field, locale];
+
+  const walked = (valued: string, order: string): OrderSegment => ({
+    page: (limit, offset) => ({
+      text: `select ${cols} ${from} where ${head} and ${valued} and ${where}
+             order by ${order} limit ? offset ?`,
+      binds: [...headBinds, ...binds, limit, offset],
+    }),
+    count: {
+      text: `select count(*) as n ${from} where ${head} and ${valued} and ${where}`,
+      binds: [...headBinds, ...binds],
+    },
+  });
+
+  const sortFieldFilters = n.where.filter((w) => w.field === n.order.field);
+  const numericRange = folded.some((w) => isRangeOp(w.op) && typeof w.value === "number");
+  const needsRow = sortFieldFilters.some((w) => w.op !== "ne");
+
+  const segments = [
+    walked(
+      "co.num_value is not null",
+      `co.num_value ${dir}, co.text_value ${dir} nulls last, stories.id asc`,
+    ),
+  ];
+  if (!numericRange) {
+    segments.push(
+      walked(
+        "co.num_value is null and co.text_value is not null",
+        `co.text_value ${dir}, stories.id asc`,
+      ),
+    );
+  }
+  if (!needsRow) {
+    // A row with an index row holding neither value sorts here too, so "no value" is
+    // stated as that and not as "no row".
+    const absent = `not exists (select 1 from content_index cx
+                      where cx.story_id = stories.id and cx.locale = ? and cx.field = ?
+                        and (cx.num_value is not null or cx.text_value is not null))`;
+    segments.push({
+      page: (limit, offset) => ({
+        text: `select ${cols} from stories where ${where} and ${absent}
+               order by stories.id asc limit ? offset ?`,
+        binds: [...binds, locale, n.order.field, limit, offset],
+      }),
+      // Never read: nothing follows the last group.
+      count: { text: "", binds: [] },
+    });
+  }
+  return { segments };
+}
+
 function unknownField(field: string, indexed: ReadonlySet<string>): FolioError {
   const known = [...indexed].sort().join(", ");
   return new FolioError(
@@ -447,45 +610,110 @@ export interface QueryDeps {
  */
 export async function runQuery(
   deps: QueryDeps,
-  q: ContentQuery,
+  q: ContentQuery & { total: false },
+  opts?: { locale?: LocaleContext; perPageMax?: number },
+): Promise<ContentSlice>;
+export async function runQuery(
+  deps: QueryDeps,
+  q: ContentQuery & { total?: true },
+  opts?: { locale?: LocaleContext; perPageMax?: number },
+): Promise<ContentPage>;
+export async function runQuery(
+  deps: QueryDeps,
+  q: ContentQueryOptions,
+  opts?: { locale?: LocaleContext; perPageMax?: number },
+): Promise<ContentPage | ContentSlice>;
+export async function runQuery(
+  deps: QueryDeps,
+  q: ContentQueryOptions,
   opts: { locale?: LocaleContext; perPageMax?: number } = {},
-): Promise<ContentPage> {
+): Promise<ContentPage | ContentSlice> {
   // `opts.locale` wins over `q.locale`: a render's locale rides on the
   // `Resolution`, deliberately *outside* the query — so `queryKey` is the same
   // string in every language and a French page and an English one share one
   // canonical form. An HTTP caller has no resolution and names the locale in the
   // query instead.
   const localeKey = opts.locale ? opts.locale.code : deps.localeKey(q.locale);
+  const chain = deps.chain ?? SINGLE_SITE_CHAIN;
   const { count, page, normalised } = contentSql(
     q,
     deps.indexed,
     localeKey,
     opts.perPageMax,
     deps.gate,
-    deps.chain ?? SINGLE_SITE_CHAIN,
+    chain,
   );
 
-  const [totalRow, rows] = await Promise.all([
-    deps.db
-      .prepare(count.text)
-      .bind(...count.binds)
-      .first<{ n: number }>(),
-    deps.db
-      .prepare(page.text)
-      .bind(...page.binds)
-      .all<
-        StoryRow &
-          SearchRow & {
-            published_doc?: string | null;
-            has_doc?: number | null;
-            root_blok?: string | null;
-          }
-      >(),
-  ]);
+  type Raw = StoryRow &
+    SearchRow & {
+      published_doc?: string | null;
+      has_doc?: number | null;
+      root_blok?: string | null;
+    };
+  const all = async (stmt: Sql) =>
+    (
+      await deps.db
+        .prepare(stmt.text)
+        .bind(...stmt.binds)
+        .all<Raw>()
+    ).results;
+  const countOf = async (stmt: Sql) =>
+    (
+      await deps.db
+        .prepare(stmt.text)
+        .bind(...stmt.binds)
+        .first<{ n: number }>()
+    )?.n ?? 0;
 
-  const total = totalRow?.n ?? 0;
+  // `total: false` reads one row past the page instead of counting: that row is
+  // `hasMore`, and it is the whole of what a "next page" link needed the count for.
+  const counted = normalised.total;
+  const need = normalised.perPage + (counted ? 0 : 1);
+  const offset = (normalised.page - 1) * normalised.perPage;
+
+  const ordered = indexedOrderSql(q, localeKey, opts.perPageMax, chain);
+  let fetched: Raw[];
+  let total: number | null = null;
+  if (ordered) {
+    // Concurrent with the first group, as the count always was with the page.
+    const counting = counted ? countOf(count) : null;
+    counting?.catch(() => {});
+    fetched = [];
+    // `before` is how many rows the earlier groups hold: a page that starts past
+    // them reads this group from `offset - before`, and one that starts inside them
+    // never reaches a later group with an offset at all.
+    let before = 0;
+    const last = ordered.segments.length - 1;
+    for (const [i, seg] of ordered.segments.entries()) {
+      const skip = Math.max(0, offset - before);
+      const got = await all(seg.page(need - fetched.length, skip));
+      fetched.push(...got);
+      if (fetched.length >= need || i === last) break;
+      // The group ran out inside this page, so it holds `skip + got` rows, unless it
+      // gave nothing past a non-zero offset, where only a count says how far past.
+      before += got.length > 0 || skip === 0 ? skip + got.length : await countOf(seg.count);
+      // Every row the query counts is already behind this page: no later group has one.
+      if (counting && before >= (await counting)) break;
+    }
+    if (counting) total = await counting;
+  } else {
+    const [totalRow, rows] = await Promise.all([
+      counted
+        ? deps.db
+            .prepare(count.text)
+            .bind(...count.binds)
+            .first<{ n: number }>()
+        : null,
+      all(counted ? page : { text: page.text, binds: [...page.binds.slice(0, -2), need, offset] }),
+    ]);
+    fetched = rows;
+    if (counted) total = totalRow?.n ?? 0;
+  }
+
+  const hasMore = fetched.length > normalised.perPage;
+  const shown = counted ? fetched : fetched.slice(0, normalised.perPage);
   const items: ContentItem[] = [];
-  for (const raw of rows.results) {
+  for (const raw of shown) {
     const { published_doc, has_doc, root_blok, score, snippet, fts_rowid, ...row } = raw;
     // `contentSql` selects one shape or the other, never both: the whole
     // document when the query asked for it, otherwise `has_doc` plus the root
@@ -522,6 +750,16 @@ export async function runQuery(
     });
   }
 
+  if (total === null) {
+    return {
+      items,
+      total: null,
+      page: normalised.page,
+      perPage: normalised.perPage,
+      pages: null,
+      hasMore,
+    };
+  }
   return {
     items,
     total,

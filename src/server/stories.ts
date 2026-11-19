@@ -1703,15 +1703,19 @@ export async function recordByField(
   q: RecordLookup,
 ): Promise<{ story: StoryMeta; doc: Doc | null } | null> {
   if (chain.length === 0) return null;
-  const scope = chainClause(chain);
+  const scope = chainClause(chain, "stories.site_id");
+  // Driven from the index row, not from the type: `cross join` pins `content_index`
+  // as the outer loop, so the lookup reads the one or two rows that hold the value and
+  // probes `stories` by primary key. The `id in (…)` form this replaced let SQLite
+  // choose, and with no statistics it chose to read every story of the type.
   const { results } = await db
     .prepare(
-      `select ${COLS}, published_doc from stories
-        where type = ? and ${scope.sql} and published_at is not null
-          and id in (select story_id from content_index
-                      where field = ? and locale = ? and text_value = ?)`,
+      `select ${COLS}, published_doc
+         from content_index ci cross join stories on stories.id = ci.story_id
+        where ci.field = ? and ci.locale = ? and ci.text_value = ?
+          and stories.type = ? and ${scope.sql} and stories.published_at is not null`,
     )
-    .bind(q.type, ...scope.binds, q.field, q.locale, q.value)
+    .bind(q.field, q.locale, q.value, q.type, ...scope.binds)
     .all<PathRow>();
   const row = inChainOrder(chain, results)[0];
   if (!row) return null;

@@ -734,6 +734,15 @@ hydrated, so the frame is told nothing). `previewBranch` answers it after the re
 page lookup; a singleton without `previewRoot` takes the unchanged path. A singleton that is not one of
 `globals` may not declare it.
 
+**An ordered listing by an `indexed` field is three statements, and `contentSql` is the oracle (v1.8.2).**
+`runQuery` runs `indexedOrderSql`'s groups (numeric value, text-only value, no value; `cross join` from
+`content_index` so the index walk stays the outer loop) in place of `contentSql`'s one `left join` statement,
+which stays exactly as it was and is what `test/workers/query-order.test.ts` compares every page against. Change
+either and that test is the guard: the offset arithmetic across groups and `nulls last` in both directions are
+where a subtle ordering bug hides. `ord`, `publishedAt`, `title` and search never take the new path. `total:
+false` is on `ContentQueryOptions`, **not** on `ContentQuery`, so a host's variable typed `ContentQuery` keeps
+answering a `ContentPage`.
+
 Spec 44 (admin extensions, `platform/admin-extensions.md`) was built 2026-11-17 and ships as v1.7.0, with no migration and
 no wire change (`PROTOCOL_VERSION` stays at 5; the host-page frames are their own public protocol). It adds
 `folio.editor`, `folio.requireEditor`, `folio.signInUrl` and `folio.originAllowed`, `admin.pages` and the
