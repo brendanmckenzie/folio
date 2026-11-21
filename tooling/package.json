@@ -5,8 +5,8 @@
   "type": "module",
   "description": "The repo's dev toolchain (lint, test, hooks), kept out of the root so an npm git install of folio does not download it",
   "devDependencies": {
-    "@biomejs/biome": "^2.6.5",
-    "@cloudflare/vitest-plugin": "^1.6.0",
+    "@biomejs/biome": "^2.6.8",
+    "@cloudflare/vitest-plugin": "^1.8.4",
     "@commitlint/cli": "^21.2.4",
     "@commitlint/config-conventional": "^21.2.4",
     "@testing-library/dom": "^10.4.2",
