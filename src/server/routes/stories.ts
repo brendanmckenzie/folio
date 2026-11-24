@@ -38,6 +38,7 @@ import {
   requestUrls,
   requireAccess,
 } from "../middleware";
+import { liveUrlFor } from "../live-url";
 import { publish, unpublish } from "../publish";
 import type { BrandRuntime, FolioRuntime, SiteRender } from "../runtime";
 import {
@@ -774,6 +775,41 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     requireAccess<Env>(rt, READ_DRAFT),
     loadStory<Env>(rt, "read"),
     async (c) => c.json({ doc: await draftOf(c, rt)(c.var.story) }),
+  );
+
+  /**
+   * Where a live record is seen on the host's public site: `{ url }`, a same-site path
+   * or null (`../../../docs/specs/content-model/record-live-url.md`).
+   *
+   * The host's `liveUrls` entry is a function, so it runs here and never in the admin, and it
+   * is handed the **published** document, so a slug edited in the draft does not make a
+   * dead link. A separate answer rather than `StoryMeta.url`: that field says "this is a
+   * page" to the sitemap, cache purge, query items and link checks, and a record is
+   * not one. `READ`, like the story it describes; it reveals published content only.
+   *
+   * Null on a deployment with `sites`: a record there belongs to a scope and the host's
+   * path function is not told which site's domain it is on, so there is no honest
+   * same-site answer. Null for everything `liveUrlFor` refuses, a throw included.
+   */
+  app.get(
+    "/story/:id/live-url",
+    requireAccess<Env>(rt, READ),
+    loadStory<Env>(rt, "read"),
+    async (c) => {
+      const story = c.var.story;
+      const brand = brandOf(c);
+      const type = brand.typeOf(story.type);
+      const liveUrl = type?.kind === "record" ? brand.liveUrls.get(type.name) : undefined;
+      if (rt.sites || !liveUrl) {
+        return c.json({ url: null }, 200, { "cache-control": NO_STORE });
+      }
+      const doc = (
+        await publishedDocsByIds(c.var.bindings().db, [story.id], await requestChain(c, rt))
+      )[story.id];
+      return c.json({ url: liveUrlFor(liveUrl, story, doc) }, 200, {
+        "cache-control": NO_STORE,
+      });
+    },
   );
 
   /**

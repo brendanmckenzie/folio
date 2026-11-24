@@ -177,6 +177,12 @@ export interface Manifest {
    */
   globals: string[];
   /**
+   * The `record` types with a `liveUrls` entry in the server config, so the editor knows
+   * to ask `GET {base}/api/story/:id/live-url` for one. Names only; the function lives in
+   * `createFolio` config and never reaches the browser. Absent when there is none.
+   */
+  liveUrlTypes?: string[];
+  /**
    * `FolioConfig.locales` (`localisation.md`), so the admin draws its locale
    * switcher from the same request it draws the block schema from. Absent for a
    * single-locale site, which is the admin's cue that there is no switcher to

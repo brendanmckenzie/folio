@@ -752,6 +752,9 @@ export interface BrandRef {
  * per-brand policies the owner named, `forms` and `describe`. Each key means
  * exactly what the same key means on `FolioSingleConfig`, for this brand's sites.
  */
+/** A record's public path from its published root-block fields (`FolioSingleConfig.liveUrls`). */
+export type FolioLiveUrl = (data: Readonly<Record<string, Json>>) => string | null | undefined;
+
 export interface FolioBrand<Env> {
   /** Shown to people and to models: the switcher, the tab title, the sign-in
    * mail, MCP's instructions. */
@@ -770,6 +773,8 @@ export interface FolioBrand<Env> {
   optionSources?: Readonly<Record<string, FolioOptionSource<Env>>>;
   /** As `FolioSingleConfig.panels`, for this brand's document types. */
   panels?: Readonly<Record<string, FolioPanel<Env>>>;
+  /** As `FolioSingleConfig.liveUrls`, for this brand's record types. */
+  liveUrls?: Readonly<Record<string, FolioLiveUrl>>;
   describe?: FolioDescribe<Env>;
   /** This brand's voice and avoided terms, served to agents on the gated v1 `/schema` only. */
   writing?: WritingGuide;
@@ -826,6 +831,7 @@ export interface FolioBrandedConfig<Env>
   forms?: never;
   optionSources?: never;
   panels?: never;
+  liveUrls?: never;
   describe?: never;
   writing?: never;
   migrations?: never;
@@ -1051,6 +1057,23 @@ export interface FolioSingleConfig<Env> {
    * view to another): cache inside `load` if your own data is expensive.
    */
   panels?: Readonly<Record<string, FolioPanel<Env>>>;
+  /**
+   * Where a `record` is seen on the host's public site, by record type name
+   * (`../../docs/specs/content-model/record-live-url.md`). The editor's "View live" points
+   * at it. Each function is handed the record's **published** root-block fields (raw JSON, as
+   * `reference.data` gives them), never the draft, so an unpublished slug edit makes no dead
+   * link, and answers a same-site path or null/undefined for none. A throw, or an answer that
+   * is not a plain same-site path (absolute, `//host`, `javascript:`, a backslash, whitespace
+   * or a `.`/`..` segment, encoded or not), is no link. It runs on the server only and is
+   * never in the browser bundle: unlike a block definition, `createFolio` config is not
+   * imported by the preview entry. It does not give the record a path: `story.url` stays
+   * absent. No link on a deployment with `sites`. Per brand with `brands`.
+   *
+   * ```ts
+   * liveUrls: { post: ({ slug, date }) => `/posts/${String(date).slice(0, 4)}/${slug}` }
+   * ```
+   */
+  liveUrls?: Readonly<Record<string, FolioLiveUrl>>;
   /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An

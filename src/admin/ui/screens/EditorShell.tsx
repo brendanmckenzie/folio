@@ -53,6 +53,7 @@ import {
   layerOf,
   scopesBelow,
 } from "./inspector-model";
+import { useLiveUrl } from "./useLiveUrl";
 import { useForkStatus, useLayerDocs, useOverride } from "./useSiteContext";
 
 /**
@@ -171,6 +172,11 @@ interface Props {
   schema: SchemaIndex;
   types: readonly DocumentType[];
   globals: readonly string[];
+  /**
+   * Record types with a `liveUrls` config entry (`Manifest.liveUrlTypes`), so
+   * "View live" asks the server only for a record that can have one.
+   */
+  liveUrlTypes?: readonly string[];
   locales?: LocaleConfig;
   me: Me;
   onNotice: (message: string) => void;
@@ -318,6 +324,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   });
 
   const routed = story.path !== null;
+  const isRecord = props.types.find((t) => t.name === story.type)?.kind === "record";
   const layout = editorLayout({
     routed,
     preview: editor.src,
@@ -381,6 +388,13 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
     multi && story.site !== undefined && story.site !== props.me.scope,
   );
   const fork = useForkStatus(props.apiBase, story, multi);
+  // A record has no Folio path, so no `story.url`; its link comes from the host's
+  // `liveUrls`, computed server-side from the published document (`record-live-url.md`).
+  const liveUrl = useLiveUrl(
+    props.apiBase,
+    story,
+    !multi && props.liveUrlTypes?.includes(story.type) === true,
+  );
   const notices = inheritNotices(props.me, story, { override, fork });
   const [forking, setForking] = useState(false);
   const forkIntoScope = async () => {
@@ -653,9 +667,25 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             Redo
           </Button>
 
+          {/* A page's own URL hides in form mode, where the page is not what is being
+              edited. A record's link is the opposite: form mode is its normal layout, so
+              it shows in both (`record-live-url.md`). */}
           {story.url && !layout.form ? (
             <a className={css.live} href={story.url} target="_blank" rel="noreferrer">
               View live
+            </a>
+          ) : liveUrl ? (
+            <a className={css.live} href={liveUrl} target="_blank" rel="noreferrer">
+              View live
+            </a>
+          ) : null}
+          {/* The draft preview in its own tab, for a record that has one. It is the pane's
+              own source, so it is the same editor-only, session-gated request: opened
+              top level, a signed-out browser gets the host's ordinary page, and there is
+              no token in it to share (`record-live-url.md` decision 4). */}
+          {isRecord && editor.src ? (
+            <a className={css.live} href={editor.src} target="_blank" rel="noreferrer">
+              Open preview
             </a>
           ) : null}
 

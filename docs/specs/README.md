@@ -90,6 +90,7 @@ sequence because the dependency graph is the same one.
 | 44 | [Admin extensions: the editor session, host pages, sourced selects and linked-data panels](platform/admin-extensions.md) | platform | L | — | none | owner, 2026-11-17 |
 | 45 | [Record preview without a host page (`previewRoot`)](content-model/record-preview-root.md) | content model | S | 14, #74 | none | issue #182 |
 | 46 | [Singleton preview without a host page (`previewRoot` on globals)](content-model/singleton-preview-root.md) | content model | S | 45 | none | owner, 2026-11-18 |
+| 47 | [A record's live URL and "Open preview" (`liveUrl`)](content-model/record-live-url.md) | content model | S | 45 | none | owner, 2026-11-24 |
 
 **46 is done** (built 2026-11-18, v1.8.1, branch `feat/singleton-preview-root`): `previewRoot` on a global
 previews it with `&as=` above a synthetic block instead of a stored page, with no migration and no wire change.

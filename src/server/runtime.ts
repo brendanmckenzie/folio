@@ -74,6 +74,7 @@ import { validateWriting } from "./writing";
 import { logActionWarnings } from "./form-actions";
 import { type ResolvedHostPage, validateAdmin } from "./admin-config";
 import { mergeFieldSources, validateFieldSources } from "./field-sources";
+import { validateLiveUrls } from "./live-url";
 import { type ResolvedPanel, validatePanels } from "./panels-config";
 import {
   type ResolvedForms,
@@ -124,6 +125,7 @@ import type {
   FolioBrandedConfig,
   FolioAssetSigning,
   FolioConfig,
+  FolioLiveUrl,
   FolioLogger,
   FolioSingleConfig,
   PreviewMode,
@@ -318,6 +320,8 @@ export interface BrandRuntime {
   fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
   /** `panels`, validated, by document type name (`platform/admin-extensions.md` decision 21). */
   panels: ReadonlyMap<string, ResolvedPanel>;
+  /** `liveUrls`, validated, by record type name (`content-model/record-live-url.md`). */
+  liveUrls: ReadonlyMap<string, FolioLiveUrl>;
   describe: ResolvedDescribe | null;
   /**
    * This brand's writing guide (`authoring-guidance.md` decision 6), or null. Read
@@ -745,6 +749,7 @@ const BRAND_KEYS = [
   "forms",
   "optionSources",
   "panels",
+  "liveUrls",
   "describe",
   "writing",
   "migrations",
@@ -840,6 +845,7 @@ interface PreparedBrand {
   optionSources: ReadonlyMap<string, ResolvedOptionSource>;
   fieldSources: ReadonlyMap<string, ResolvedOptionSource>;
   panels: ReadonlyMap<string, ResolvedPanel>;
+  liveUrls: ReadonlyMap<string, FolioLiveUrl>;
   previewCss: readonly string[];
   previewWrap: PreviewWrap | undefined;
 }
@@ -913,6 +919,9 @@ function prepareBrand<Env>(
       brand.panels,
       types.map((t) => t.name),
     );
+    // Same timing, same reason: a `liveUrls` key that names no record type is a link that
+    // would never appear (`../../docs/specs/content-model/record-live-url.md`).
+    const liveUrls = validateLiveUrls(brand.liveUrls, types);
     // Same timing, same reason: `globals` naming an unknown type or a non-
     // singleton one is a config mistake, not a runtime surprise the first page
     // render discovers (`../../docs/specs/content-model/globals.md`).
@@ -974,6 +983,7 @@ function prepareBrand<Env>(
       optionSources,
       fieldSources,
       panels,
+      liveUrls,
       previewCss: brand.previewCss ?? [],
       previewWrap: brand.previewWrap,
     };
@@ -2261,6 +2271,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       manifest: {
         ...toManifest(registry, types, globals, locales),
         ...manifestHooks(config.hooks),
+        // Names only; absent with none declared, so a host without `liveUrls` gets the
+        // manifest it always did.
+        ...(b.liveUrls.size > 0 ? { liveUrlTypes: [...b.liveUrls.keys()] } : {}),
         // Absent with none declared, so a host without panels gets the manifest it always did.
         ...(b.panels.size > 0
           ? {
@@ -2284,6 +2297,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       optionSources: b.optionSources,
       fieldSources: b.fieldSources,
       panels: b.panels,
+      liveUrls: b.liveUrls,
       describe,
       writing,
       previewWrap: b.previewWrap,
