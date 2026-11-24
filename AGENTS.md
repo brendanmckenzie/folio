@@ -203,6 +203,14 @@ render: ({ heading }, resolution) => {
 }
 ```
 
+**A record's "View live" comes from `liveUrls` in the `createFolio` config** (`liveUrls: { post:
+({ slug, date }) => `/posts/${String(date).slice(0, 4)}/${slug}` }`, keyed by record type name; never on
+the block, whose source is in the public preview bundle): a function of the
+*published* fields returning a same-site path or null. It runs on the server, shows in form mode
+too, and an unsafe or throwing answer is no link. It does not give the record a `url`. A record
+with a working preview also gets an "Open preview" button that opens the draft preview in a tab
+(editor session only; there is still no share link for a record).
+
 This is editor-only: there is no share link for a record, and the frame renders
 with no edit markers, so the form is the editing surface. Nothing in your route
 changes, and `resolution.record` is never set outside the editor.

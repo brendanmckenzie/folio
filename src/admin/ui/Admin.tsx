@@ -939,6 +939,7 @@ function screenFor(a: ScreenArgs) {
           schema={a.schema}
           types={a.types}
           globals={a.globals}
+          {...(a.manifest?.liveUrlTypes ? { liveUrlTypes: a.manifest.liveUrlTypes } : {})}
           {...(a.manifest?.locales ? { locales: a.manifest.locales } : {})}
           me={a.me}
           onNotice={a.notify}

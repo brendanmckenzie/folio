@@ -1812,7 +1812,7 @@ per-record path: giving a record a URL of its own makes it a page and brings bac
 the tree this type kind exists to leave.
 
 **With neither**, the record opens in **form mode**: full width, no preview
-iframe, no viewport switcher, no "View live". There is no page to draw it on, and
+iframe and no viewport switcher. There is no page to draw it on, and
 previewing it inside whichever page references it is ambiguous the moment two pages
 reference it differently. A singleton is previewed through its own `previewPath`
 or `previewRoot` with `&as=` (Globals, above), and its own block renders it, so it
@@ -1821,6 +1821,39 @@ Publish, History, undo, presence and multiplayer are unchanged either way; none 
 them ever depended on there being a preview. A record whose root has a `blocks` field still
 shows the block tree, so "a person with a list of accreditations" works exactly
 like a page's body.
+
+**"View live" and "Open preview" for a record.** A record has no Folio path, so it has no
+`url`, and unlike a page's, the editor shows no "View live" for it unless the host asks.
+Two controls fill the gap, in form mode and with a preview pane alike:
+
+- **View live** appears when the `createFolio` config has a `liveUrls` entry for its type, a function of the
+  record's **published** fields that answers a same-site path, or null for none:
+
+  ```ts
+  createFolio({
+    // ...
+    liveUrls: {
+      post: ({ slug, date }) => `/posts/${String(date).slice(0, 4)}/${slug}`,
+    },
+  })
+  ```
+
+  It runs on the server (`GET {base}/api/story/:id/live-url`), because a function is not
+  in the manifest and it is config, not part of the block (a block definition is bundled into the public preview script, so a function on one would be public), and it reads the published document, never the draft, so a slug edited
+  but not yet published does not produce a dead link. The link is absent while the record
+  is unpublished or has never been published, and it follows a publish or an unpublish. A
+  function that throws, or answers anything but a plain path (an absolute URL, `//host`,
+  `javascript:`, a path with a backslash, whitespace or a `.`/`..` segment), is treated as no link. The path
+  is used as written, so the host's trailing-slash choice stands. On a deployment with
+  `sites` there is no link, because the function is not told which site's domain a
+  record is on. `liveUrls` does not give the record a path: `story.url` stays absent, so
+  the sitemap, cache purge, query `url` and link checks never treat it as a page.
+- **Open preview** appears when the record has a working editor preview (`previewRoot`, or
+  a `previewPath` page that exists), whether or not it has ever been published. It opens
+  the pane's own request, the **draft** preview, in a new tab. That is the same
+  session-gated request the pane makes, so it adds no way in: a browser with no editor
+  session gets the host's ordinary public page, and the URL carries only the record's id,
+  never a token. It is not a share link, and there is still none for a record.
 
 ### Reading a record by a unique field
 

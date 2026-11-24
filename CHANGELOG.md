@@ -8,6 +8,26 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.8.4
+
+Additive: no migration, no `PROTOCOL_VERSION` change, nothing to run or edit on an existing host. A
+record type with no `liveUrls` entry behaves exactly as before.
+
+### Added
+
+- **`liveUrls` in the `createFolio` config.** `liveUrls: { post: ({ slug, date }) => `/posts/${...}` }`, keyed by
+  record type name (an unknown or non-record name throws at construction), gives a published record a "View live" link in the editor, in form mode and beside a preview pane. It is
+  evaluated on the server from the **published** fields (`GET {base}/api/story/:id/live-url`), so an unpublished
+  slug edit makes no dead link. A throw, or an answer that is not a plain same-site path, is no link. The record
+  still has no `url`, so the sitemap, cache purge, query items and link checks do not see a page. `Manifest`
+  gains `liveUrlTypes`, names only. On a deployment with `sites` there is no link.
+- **"Open preview" on a record.** A record with a `previewRoot` or a `previewPath` page opens its draft preview in
+  a new tab, published or not. It is the pane's own session-gated request; there is still no share link.
+
+### Breaking changes
+
+None.
+
 ## 1.8.3
 
 A patch release: nothing to run or edit on an existing host. No migration, no wire

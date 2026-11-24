@@ -787,6 +787,7 @@ describe("every id loader is a fence", () => {
     ["GET", "/api/story/:id/document", "read", "story"],
     ["GET", "/api/story/:id/resolution", "read", "story"],
     ["GET", "/api/story/:id/translation?locale=fr", "read", "story"],
+    ["GET", "/api/story/:id/live-url", "read", "story"],
     ["GET", "/api/story/:id/activity", "read", "story"],
     ["GET", "/api/story/:id/versions", "read", "story"],
     ["GET", "/api/documents/:id/usage", "read", "story"],

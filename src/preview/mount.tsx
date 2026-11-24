@@ -285,5 +285,7 @@ export function mountPreview(
         : {})}
     />,
   );
-  attachBridge();
+  // Opened top level (the editor's "Open preview" tab) there is no admin to answer, so
+  // the bridge would only swallow clicks on links; leave the page a plain read-only render.
+  if (window.parent !== window) attachBridge();
 }
