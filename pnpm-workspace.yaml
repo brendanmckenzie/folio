@@ -7,6 +7,14 @@ packages:
 # minimumReleaseAge. A compromised release is usually caught within that window.
 minimumReleaseAge: 4320
 
+# Transitive pins for Dependabot alerts: each range lifts only the vulnerable
+# versions to the first patched release in the same major.
+overrides:
+  "undici@<7.30.1": "7.30.1"
+  "sharp@<0.35.5": "0.35.5"
+  "prosemirror-view@<1.42.3": "1.42.7"
+  "fast-uri@<3.1.9": "3.1.9"
+
 allowBuilds:
   esbuild: true
   lefthook: true

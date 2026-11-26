@@ -1021,13 +1021,27 @@ export function parseTransform(
 const IMMUTABLE = "public, max-age=31536000, immutable";
 /**
  * Cache-control for a response that is *not* the variant a transform query
- * asked for — no Images binding, a non-GET request, or a transform that threw.
+ * asked for — no Images binding or a non-GET request.
  * `immutable` on one of these pins the wrong bytes (wrong content-type, wrong
  * dimensions) in every downstream cache for a year with revalidation
  * suppressed; a short, revalidatable max-age lets the next request try again
  * instead of being stuck.
  */
 const DEGRADED = "public, max-age=60";
+
+/** Cloudflare Images' limit on a source's area (width x height), in pixels. */
+const IMAGES_MAX_AREA = 100_000_000;
+/**
+ * How much of an object is read to learn its dimensions. A JPEG's frame header comes
+ * after every APP segment before it (EXIF, ICC and XMP can run to tens of kilobytes);
+ * the other formats put theirs in the first few hundred bytes.
+ */
+const SIZE_HEADER_BYTES = 64 * 1024;
+
+/** Images reports a source over its area limit as `IMAGES_TRANSFORM_ERROR 9413`. */
+const isSourceTooLarge = (err: unknown): boolean =>
+  (err as { code?: unknown } | null)?.code === 9413 ||
+  /\b9413\b/.test(err instanceof Error ? err.message : String(err));
 
 /**
  * `sandbox` forbids scripts, forms, and origin-privileged execution outright,
@@ -1188,51 +1202,91 @@ export async function serveAsset(
   const cached = await cache.match(canonical);
   if (cached) return mode === "private" ? privately(cached) : cached;
 
-  let bytes: ArrayBuffer;
-  let outContentType: string;
-  try {
-    const op: ImageTransform = {
-      ...(transform.width ? { width: transform.width } : {}),
-      ...(transform.height ? { height: transform.height } : {}),
-      ...(transform.fit ? { fit: transform.fit } : {}),
-      // Only meaningful when cropping, and `remainder` is the behaviour the
-      // documented `XxY` gravity has: put the focal point of the output where it
-      // sits in the original. `parseTransform` has already clamped both
-      // coordinates into `[0, 1]`, which is what keeps an out-of-range `fp`
-      // from throwing here and falling through to the degraded branch below.
-      ...(transform.focal && transform.fit === "cover"
-        ? { gravity: { x: transform.focal.x, y: transform.focal.y, mode: "remainder" as const } }
-        : {}),
-    };
+  // Images refuses a source over 100 megapixels, and for some it fails with a lost
+  // connection rather than an error code, even from its own size probe, so the size is
+  // read here from a ranged prefix of the object. A header that cannot be parsed is
+  // "unknown" and the transform goes ahead.
+  const tooLarge = async (): Promise<boolean> => {
+    const head = await bucket.get(key, { range: { offset: 0, length: SIZE_HEADER_BYTES } });
+    if (!head) return false;
+    const dims = imageSize(new Uint8Array(await new Response(head.body).arrayBuffer()));
+    if (!dims || dims.width * dims.height <= IMAGES_MAX_AREA) return false;
+    logger.warn(`folio: asset ${key} is over the Images size limit (${dims.width}x${dims.height})`);
+    return true;
+  };
+  // Permanent for this key, so a short-lived 404 that is neither retried nor an alert,
+  // and never the original: the source is the one thing that cannot be sent.
+  const sourceTooLarge = () =>
+    new Response(null, {
+      status: 404,
+      headers: { "cache-control": mode === "private" ? NO_STORE : DEGRADED },
+    });
+
+  const op: ImageTransform = {
+    ...(transform.width ? { width: transform.width } : {}),
+    ...(transform.height ? { height: transform.height } : {}),
+    ...(transform.fit ? { fit: transform.fit } : {}),
+    // Only meaningful when cropping, and `remainder` is the behaviour the
+    // documented `XxY` gravity has: put the focal point of the output where it
+    // sits in the original. `parseTransform` has already clamped both
+    // coordinates into `[0, 1]`, which is what keeps an out-of-range `fp`
+    // from throwing here.
+    ...(transform.focal && transform.fit === "cover"
+      ? { gravity: { x: transform.focal.x, y: transform.focal.y, mode: "remainder" as const } }
+      : {}),
+  };
+  const runTransform = async (body: ReadableStream<Uint8Array>) => {
     const result = await images!
-      .input(object.body)
+      .input(body)
       .transform(op)
       .output({
         format: `image/${transform.format ?? "webp"}` as ImageOutputOptions["format"],
         ...(transform.quality ? { quality: transform.quality } : {}),
       });
-
     // Buffered rather than streamed so an empty result can be caught. A
     // transform that yields nothing still comes back as a 200, and streaming it
     // through would put a silently broken image on the page — the worst
     // available failure mode. Transformed variants are small and cached
     // immutably, so this is paid once per variant.
-    bytes = await result.response().arrayBuffer();
-    if (bytes.byteLength === 0) throw new Error("Transform produced no output");
-    outContentType = result.contentType();
+    const out = await result.response().arrayBuffer();
+    if (out.byteLength === 0) throw new Error("Transform produced no output");
+    return { bytes: out, contentType: result.contentType() };
+  };
+
+  // The untransformed original is never served for a transform that was asked for: a
+  // source can be many times the size of a variant, so a failure is a status with no
+  // image. Images answers an occasional internal error on an image that transforms
+  // fine next time, so a failure gets one retry with the object re-read, and only a
+  // retry that also fails is an error, which keeps a sustained outage alerting.
+  let bytes: ArrayBuffer;
+  let outContentType: string;
+  try {
+    if (await tooLarge()) {
+      await object.body.cancel();
+      return sourceTooLarge();
+    }
+    ({ bytes, contentType: outContentType } = await runTransform(object.body));
   } catch (e) {
-    // Never silent: a transform failure that goes unlogged is indistinguishable
-    // from "nobody ever requested this variant".
-    logger.error(`folio: asset transform failed for ${key}`, e);
-    // A transform failing is not a reason to show a broken image. Re-fetch,
-    // because `object.body` was consumed by the attempt. Short-lived rather
-    // than immutable: this is the original standing in for a variant that
-    // failed, not the variant itself, and the failure may well be transient.
-    const original = await bucket.get(key);
-    if (!original) throw new FolioError("not_found", "No such asset");
-    return new Response(original.body, {
-      headers: serveHeaders(mode === "private" ? NO_STORE : DEGRADED, contentType),
-    });
+    if (isSourceTooLarge(e)) {
+      logger.warn(`folio: asset ${key} is over the Images size limit`, e);
+      return sourceTooLarge();
+    }
+    try {
+      const again = await bucket.get(key);
+      if (!again) throw new FolioError("not_found", "No such asset");
+      ({ bytes, contentType: outContentType } = await runTransform(again.body));
+      logger.warn(`folio: asset transform retried for ${key}`, e);
+    } catch (retryErr) {
+      if (retryErr instanceof FolioError) throw retryErr;
+      if (isSourceTooLarge(retryErr)) {
+        logger.warn(`folio: asset ${key} is over the Images size limit`, retryErr);
+        return sourceTooLarge();
+      }
+      // Never silent: a transform failure that goes unlogged is indistinguishable
+      // from "nobody ever requested this variant". Nothing caches a no-store.
+      logger.error(`folio: asset transform failed for ${key}`, retryErr);
+      return new Response(null, { status: 503, headers: { "cache-control": "no-store" } });
+    }
   }
 
   const response = new Response(bytes, { headers: serveHeaders(IMMUTABLE, outContentType) });
@@ -1457,6 +1511,21 @@ export function imageSize(bytes: Uint8Array): { width: number; height: number } 
   }
 
   if (bytes.length >= 4 && u16(0) === 0xffd8) return jpegSize(bytes, view);
+
+  // AVIF and HEIC: the `ispe` (image spatial extents) property, version/flags then
+  // width and height. A file can carry several (thumbnails, tiles); the largest wins.
+  if (bytes.length >= 12 && ascii(4, 4) === "ftyp") {
+    let best: { width: number; height: number } | null = null;
+    for (let o = 4; o + 16 <= bytes.length; o++) {
+      if (ascii(o, 4) !== "ispe") continue;
+      const width = u32(o + 8);
+      const height = u32(o + 12);
+      if (width > 0 && height > 0 && (!best || width * height > best.width * best.height)) {
+        best = { width, height };
+      }
+    }
+    return best;
+  }
 
   return null;
 }

@@ -382,15 +382,21 @@ describe("transform responses are wrapped in the Cache API, keyed on the full UR
     expect(res.headers.get("cache-control")).toBe("public, max-age=60");
   });
 
-  it("logs rather than swallows a transform failure, and still serves the original", async () => {
-    const key = "ast_cachetest3-photo.png";
-    await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: "image/png" } });
-
+  // A transformer whose `output` runs the given behaviours in turn, then repeats the last.
+  function scriptedImages(...steps: Array<"throw" | "ok" | Error>) {
+    let calls = 0;
     const transformer: ImageTransformer = {
       transform: () => transformer,
       draw: () => transformer,
       output: async () => {
-        throw new Error("boom");
+        const step = steps[Math.min(calls++, steps.length - 1)]!;
+        if (step === "throw") throw new Error("boom");
+        if (step instanceof Error) throw step;
+        return {
+          response: () => new Response(new Uint8Array([7, 7, 7])),
+          contentType: () => "image/webp",
+          image: () => new ReadableStream(),
+        } as unknown as ImageTransformationResult;
       },
     };
     const images = {
@@ -400,23 +406,101 @@ describe("transform responses are wrapped in the Cache API, keyed on the full UR
       },
       hosted: {},
     } as unknown as ImagesBinding;
+    return { images, calls: () => calls };
+  }
 
+  const spyLogger = () => ({ error: vi.fn(), warn: vi.fn() });
+
+  it("retries a failed transform once, and logs a warning rather than an error when it recovers", async () => {
+    const key = "ast_retryok-photo.png";
+    await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: "image/png" } });
+    const { images, calls } = scriptedImages("throw", "ok");
+    const logger = spyLogger();
     const request = new Request(`${BASE}/asset/${key}?w=100`);
     const transform = parseTransform(new URL(request.url).searchParams);
 
-    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const res = await serveAsset(env.MEDIA, images, key, transform, request);
-      expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")).toBe("image/png");
-      // Never immutable: this is the original standing in for a variant that
-      // failed, and the failure may well be transient.
-      expect(res.headers.get("cache-control")).toBe("public, max-age=60");
-      expect(logged).toHaveBeenCalled();
-      expect(String(logged.mock.calls[0]?.[0])).toContain(key);
-    } finally {
-      logged.mockRestore();
-    }
+    const res = await serveAsset(env.MEDIA, images, key, transform, request, logger);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/webp");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([7, 7, 7]));
+    expect(calls()).toBe(2);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(logger.warn.mock.calls[0]?.[0])).toContain(key);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 no-store with no body, never the original, when the retry fails too", async () => {
+    const key = "ast_retryfail-photo.png";
+    await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: "image/png" } });
+    const { images, calls } = scriptedImages("throw");
+    const logger = spyLogger();
+    const request = new Request(`${BASE}/asset/${key}?w=100`);
+    const transform = parseTransform(new URL(request.url).searchParams);
+
+    const res = await serveAsset(env.MEDIA, images, key, transform, request, logger);
+    expect(res.status).toBe(503);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.text()).toBe("");
+    expect(calls()).toBe(2);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(String(logger.error.mock.calls[0]?.[0])).toContain(key);
+
+    // Nothing was cached, so the next request tries again.
+    await serveAsset(env.MEDIA, images, key, transform, request, spyLogger());
+    expect(calls()).toBe(4);
+  });
+
+  it("answers 404 with no Images call for a source over the 100 MP limit", async () => {
+    const key = "ast_huge-photo.png";
+    // A PNG header declaring 20000x10000 (200 MP); the body past it is irrelevant.
+    const png = new Uint8Array(PNG_1X1);
+    const view = new DataView(png.buffer);
+    view.setUint32(16, 20000);
+    view.setUint32(20, 10000);
+    await env.MEDIA.put(key, png, { httpMetadata: { contentType: "image/png" } });
+    const { images, calls } = scriptedImages("ok");
+    const logger = spyLogger();
+    const request = new Request(`${BASE}/asset/${key}?w=100`);
+    const transform = parseTransform(new URL(request.url).searchParams);
+
+    const res = await serveAsset(env.MEDIA, images, key, transform, request, logger);
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe("");
+    expect(res.headers.get("cache-control")).toBe("public, max-age=60");
+    expect(calls()).toBe(0);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(logger.warn.mock.calls[0]?.[0])).toContain("20000x10000");
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("answers the same 404, without a retry, when Images itself reports error 9413", async () => {
+    const key = "ast_9413-photo.png";
+    await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: "image/png" } });
+    const { images, calls } = scriptedImages(
+      new Error("IMAGES_TRANSFORM_ERROR 9413: image too large"),
+    );
+    const logger = spyLogger();
+    const request = new Request(`${BASE}/asset/${key}?w=100`);
+    const transform = parseTransform(new URL(request.url).searchParams);
+
+    const res = await serveAsset(env.MEDIA, images, key, transform, request, logger);
+    expect(res.status).toBe(404);
+    expect(calls()).toBe(1);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("goes on to the transform when the header cannot be parsed", async () => {
+    const key = "ast_noheader-photo.png";
+    // Valid content type, but no readable dimensions in the first bytes.
+    await env.MEDIA.put(key, new Uint8Array(64), { httpMetadata: { contentType: "image/png" } });
+    const { images, calls } = scriptedImages("ok");
+    const request = new Request(`${BASE}/asset/${key}?w=100`);
+    const transform = parseTransform(new URL(request.url).searchParams);
+
+    const res = await serveAsset(env.MEDIA, images, key, transform, request, spyLogger());
+    expect(res.status).toBe(200);
+    expect(calls()).toBe(1);
   });
 });
 

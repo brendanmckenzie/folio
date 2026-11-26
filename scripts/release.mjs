@@ -605,6 +605,7 @@ function consumerBoots(dir, spec) {
   const sh = (label, command, commandArgs, cwd) => {
     const r = spawnSync(command, commandArgs, { cwd, stdio: "pipe", encoding: "utf8" });
     if (r.status !== 0) fail(`${label} failed (exit ${r.status})`, `${r.stdout}${r.stderr}`);
+    return `${r.stdout}${r.stderr}`;
   };
 
   sh("folio init", "node", ["node_modules/folio/bin/folio.mjs", "init", "app"], dir);
@@ -764,7 +765,12 @@ function consumerBoots(dir, spec) {
     } catch {}
     closeSync(logFd);
   }
-  sh("the starter's build", "npm", ["run", "build"], app);
+  const build = sh("the starter's build", "npm", ["run", "build"], app);
+  // The generated preview module reads the host's optional `wrap` export, and a
+  // host that has none must not see a build warning that reads like its own bug.
+  if (build.includes("IMPORT_IS_UNDEFINED")) {
+    fail("the starter's build warned IMPORT_IS_UNDEFINED", build);
+  }
   for (const file of ["folio-admin.js", "folio-admin.css"]) {
     if (!existsSync(join(app, "dist", "client", file))) {
       fail(`the starter's build did not emit ${file} into dist/client`);
