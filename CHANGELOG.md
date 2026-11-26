@@ -8,6 +8,17 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.8.6
+
+A patch release with nothing to run or edit. The `v1.8.5` tag was pushed but its release gates failed
+on two end-to-end scripts (they assumed the old fall-back-to-the-original behaviour, and one read a
+column too early), so no GitHub Release was made for it. 1.8.6 carries exactly the 1.8.5 changes
+below, with those scripts corrected. Install `v1.8.6`, not `v1.8.5`.
+
+### Breaking changes
+
+None.
+
 ## 1.8.5
 
 A patch release: no migration, no wire change, nothing to run or edit on an existing host.

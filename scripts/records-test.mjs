@@ -415,9 +415,17 @@ check(
   page4.includes("First programmer"),
 );
 
-const adaIndexed = (await json(`${API}/documents?type=person`)).rows.find(
-  (d) => d.id === ada.id,
-)?.indexed;
+// On a loaded CI runner this read the previous publish's value (twice in the v1.8.5
+// release run, never locally). Give the column a few seconds to catch up before
+// calling it wrong.
+let adaIndexed;
+for (let i = 0; i < 20; i++) {
+  adaIndexed = (await json(`${API}/documents?type=person`)).rows.find(
+    (d) => d.id === ada.id,
+  )?.indexed;
+  if (adaIndexed?.role?.text === "First programmer") break;
+  await wait(250);
+}
 check(
   "and the Documents list column follows the same publish",
   adaIndexed?.role?.text === "First programmer",
