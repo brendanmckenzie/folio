@@ -348,7 +348,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       return [
         `import { mountPreview } from 'folio/preview'`,
         `import * as m from ${JSON.stringify(resolveModule(blocks))}`,
-        `mountPreview(m.blocks, { wrap: m.wrap })`,
+        `mountPreview(m.blocks, { wrap: Reflect.get(m, "wrap") })`,
       ].join("\n");
     },
   };
