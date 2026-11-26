@@ -27,6 +27,21 @@ import { alarmHookCtx, validateAssets } from "../../../src/server/runtime";
 // ---------------------------------------------------------------------------
 
 describe("imageSize", () => {
+  it("reads the largest ispe extents from an AVIF or HEIC header", () => {
+    const b = new Uint8Array(64);
+    const v = new DataView(b.buffer);
+    b.set([0x66, 0x74, 0x79, 0x70], 4); // ftyp
+    for (const [o, w, h] of [
+      [20, 160, 120],
+      [40, 8000, 6000],
+    ] as const) {
+      b.set([0x69, 0x73, 0x70, 0x65], o); // ispe
+      v.setUint32(o + 8, w);
+      v.setUint32(o + 12, h);
+    }
+    expect(imageSize(b)).toEqual({ width: 8000, height: 6000 });
+  });
+
   describe("PNG", () => {
     it("parses valid PNG header", () => {
       // Minimal valid PNG: 8-byte signature + IHDR chunk with width/height
