@@ -8,6 +8,27 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## 1.8.5
+
+A patch release: no migration, no wire change, nothing to run or edit on an existing host.
+
+### Fixed
+
+- **A failed image transform no longer serves the original.** `serveAsset` retries a failed
+  Images transform once, with the object re-read, and logs a `warn` when the retry recovers. If the
+  retry fails too it answers `503` with `cache-control: no-store` and no body, logged at `error`. A
+  source over Images' 100 MP limit (read from a ranged 64 KiB header, AVIF and HEIC included) or an
+  Images error 9413 answers a short-lived `404` with no Images call. A request with no transform
+  parameters, and SVG, are served as before.
+- **No `IMPORT_IS_UNDEFINED` build warning** from the generated preview module when the blocks
+  module exports no `wrap`. The consumer smoke test now fails if `vite build` prints it.
+- **Dependabot alerts**: `undici`, `sharp`, `prosemirror-view` and `fast-uri` are pinned to patched
+  releases through `pnpm-workspace.yaml` overrides.
+
+### Breaking changes
+
+None.
+
 ## 1.8.4
 
 Additive: no migration, no `PROTOCOL_VERSION` change, nothing to run or edit on an existing host. A

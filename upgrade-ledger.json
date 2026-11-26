@@ -335,6 +335,13 @@
       "rollback": "safe",
       "migrations": [],
       "headings": []
+    },
+    {
+      "version": "1.8.5",
+      "date": "2026-11-27",
+      "rollback": "safe",
+      "migrations": [],
+      "headings": []
     }
   ]
 }
